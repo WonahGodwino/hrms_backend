@@ -14,7 +14,6 @@
     "setup": "powershell -File scripts/setup-windows.ps1",
     "verify": "tsx scripts/verify-env.ts"
   },
-  
   "dependencies": {
     "@prisma/adapter-pg": "^7.0.0",
     "@prisma/client": "^7.0.0",
@@ -37,6 +36,7 @@
     "@types/node": "^20.19.25",
     "@types/nodemailer": "^6.4.21",
     "@types/pdfkit": "^0.12.12",
+    "@types/pg": "^8.15.6",
     "@types/react": "^18.3.27",
     "@types/react-dom": "^18.3.7",
     "prisma": "^7.0.0",
