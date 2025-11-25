@@ -27,8 +27,18 @@ function monthNameToNumber(month: string): number {
   if (!month) return 0
   const normalized = month.toString().trim().toLowerCase()
   const months = [
-    'january','february','march','april','may','june',
-    'july','august','september','october','november','december',
+    'january',
+    'february',
+    'march',
+    'april',
+    'may',
+    'june',
+    'july',
+    'august',
+    'september',
+    'october',
+    'november',
+    'december',
   ]
   const idx = months.indexOf(normalized)
   if (idx >= 0) return idx + 1
@@ -110,7 +120,16 @@ function getCell(row: any, canonical: string) {
 // Detect percentage row (row 2 in your Excel template)
 function looksLikePercentageRow(rowObj: any) {
   // If any required numeric header contains % as string, assume it's percentage line
-  for (const col of ['Basic','Housing','Transport','Dressing','Leave Allowance','Entertainment','Utility','Medical Contribution']) {
+  for (const col of [
+    'Basic',
+    'Housing',
+    'Transport',
+    'Dressing',
+    'Leave Allowance',
+    'Entertainment',
+    'Utility',
+    'Medical Contribution',
+  ]) {
     const v = getCell(rowObj, col)
     if (typeof v === 'string' && v.includes('%')) return true
   }
@@ -150,8 +169,14 @@ function splitCsvLine(line: string) {
 // -----------------------------
 export async function POST(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '')
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader) {
+      return ApiResponse.error('Authorization header missing', 401)
+    }
+
+    const token = authHeader.replace('Bearer ', '')
     const user = requireRole(token, ['HR', 'SUPER_ADMIN'])
+    const companyId = user.companyId
 
     const formData = await request.formData()
     const file = formData.get('file') as File
@@ -187,7 +212,9 @@ export async function POST(request: NextRequest) {
         if (!lines.length) throw new Error('Empty CSV file')
 
         const rawHeaders = splitCsvLine(lines[0])
-        const headers = rawHeaders.map((h) => canonicalMap[normalizeHeader(h)] || h)
+        const headers = rawHeaders.map(
+          (h) => canonicalMap[normalizeHeader(h)] || h
+        )
 
         // Build row objects from line 2 onward
         for (let i = 1; i < lines.length; i++) {
@@ -235,7 +262,9 @@ export async function POST(request: NextRequest) {
           })
 
           // ignore fully empty rows
-          const hasAny = Object.values(rowData).some((v) => v !== null && v !== '')
+          const hasAny = Object.values(rowData).some(
+            (v) => v !== null && v !== ''
+          )
           if (hasAny) data.push(rowData)
         })
       }
@@ -291,19 +320,26 @@ export async function POST(request: NextRequest) {
         })
 
         if (missingCols.length) {
-          const message = `Missing required column values: ${missingCols.join(', ')}`
+          const message = `Missing required column values: ${missingCols.join(
+            ', '
+          )}`
           results.failed++
           results.errors.push(`Row ${displayRowNumber}: ${message}`)
           results.failedRecords.push({ ...rowData, error: message })
           continue
         }
 
-        // Find staff record (email first, then fuzzy name)
+        // Find staff record (email first, then fuzzy name), scoped by companyId
         let staffRecord = null
 
         if (email) {
           staffRecord = await prisma.staffRecord.findUnique({
-            where: { email },
+            where: {
+              email_companyId: {
+                email,
+                companyId,
+              },
+            },
           })
         }
 
@@ -314,18 +350,39 @@ export async function POST(request: NextRequest) {
 
           staffRecord = await prisma.staffRecord.findFirst({
             where: {
+              companyId,
               isActive: true,
               OR: [
                 {
                   AND: [
-                    { firstName: { contains: firstName, mode: 'insensitive' } },
-                    { lastName: { contains: lastName, mode: 'insensitive' } },
+                    {
+                      firstName: {
+                        contains: firstName,
+                        mode: 'insensitive',
+                      },
+                    },
+                    {
+                      lastName: {
+                        contains: lastName,
+                        mode: 'insensitive',
+                      },
+                    },
                   ],
                 },
                 {
                   AND: [
-                    { lastName: { contains: firstName, mode: 'insensitive' } },
-                    { firstName: { contains: lastName, mode: 'insensitive' } },
+                    {
+                      lastName: {
+                        contains: firstName,
+                        mode: 'insensitive',
+                      },
+                    },
+                    {
+                      firstName: {
+                        contains: lastName,
+                        mode: 'insensitive',
+                      },
+                    },
                   ],
                 },
               ],
@@ -374,9 +431,13 @@ export async function POST(request: NextRequest) {
         const bonusKPI = num(getCell(rowData, 'Bonus KPI'))
         const netSalary = num(getCell(rowData, 'Net Salary'))
         const finalGross = num(getCell(rowData, 'FINAL GROSS'))
-        const medicalContribution = num(getCell(rowData, 'Medical Contribution'))
+        const medicalContribution = num(
+          getCell(rowData, 'Medical Contribution')
+        )
 
-        const daysInMonth = num(getCell(rowData, 'No of Working Days in the Month'))
+        const daysInMonth = num(
+          getCell(rowData, 'No of Working Days in the Month')
+        )
         const daysWorked = num(getCell(rowData, 'No of days Worked'))
 
         // Basic sanity: net salary must not be negative
@@ -388,16 +449,18 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // Upsert payroll
+        // Upsert payroll (scoped by companyId)
         const payroll = await prisma.payroll.upsert({
           where: {
-            staffRecordId_month_year: {
+            staffRecordId_month_year_companyId: {
               staffRecordId: staffRecord.id,
               month: monthName,
               year,
+              companyId,
             },
           },
           update: {
+            companyId,
             month: monthName,
             year,
             grossPay,
@@ -420,6 +483,7 @@ export async function POST(request: NextRequest) {
             uploadedBy: user.userId,
           },
           create: {
+            companyId,
             staffRecordId: staffRecord.id,
             month: monthName,
             year,
@@ -450,6 +514,7 @@ export async function POST(request: NextRequest) {
             staffRecordId: staffRecord.id,
             month: monthName,
             year,
+            companyId,
           },
         })
 
@@ -489,7 +554,7 @@ export async function POST(request: NextRequest) {
                 lastName: staffRecord.lastName,
                 email: staffRecord.email,
                 department: staffRecord.department || undefined,
-                designation: staffRecord.designation || undefined,
+                designation: staffRecord.position || undefined,
               },
               payroll: parsedRow,
             })
@@ -510,6 +575,7 @@ export async function POST(request: NextRequest) {
               data: {
                 payrollId: payroll.id,
                 staffRecordId: staffRecord.id,
+                companyId,
                 filePath: pdfPath,
                 fileName: payslipFileName,
                 month: monthName,
@@ -605,9 +671,10 @@ export async function POST(request: NextRequest) {
       processedFilePath = failedFilePath
     }
 
-    // Create upload record
+    // Create upload record (with companyId)
     const uploadRecord = await prisma.payrollUpload.create({
       data: {
+        companyId,
         fileName: file.name,
         filePath: path.join(uploadDir, file.name),
         processedFilePath,
@@ -657,7 +724,12 @@ export async function POST(request: NextRequest) {
 // -----------------------------
 export async function GET(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '')
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader) {
+      return ApiResponse.error('Authorization header missing', 401)
+    }
+
+    const token = authHeader.replace('Bearer ', '')
     requireRole(token, ['HR', 'SUPER_ADMIN'])
 
     const workbook = new ExcelJS.Workbook()
@@ -747,7 +819,8 @@ export async function GET(request: NextRequest) {
       headers: {
         'Content-Type':
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': 'attachment; filename="payroll-template.xlsx"',
+        'Content-Disposition':
+          'attachment; filename="payroll-template.xlsx"',
         'Cache-Control': 'no-cache',
       },
     })
