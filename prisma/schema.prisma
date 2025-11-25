@@ -1,0 +1,189 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Company {
+  id           String   @id @default(cuid())
+  companyName  String
+  address      String?
+  phone        String?
+  email        String?
+  archived     Int      @default(0)
+
+  createdBy    String              // super admin user ID
+  createdAt    DateTime @default(now())
+
+  // Relations
+  staff         StaffRecord[]
+  payrolls      Payroll[]
+  payslips      Payslip[]
+  staffUploads  StaffUpload[]
+  payrollUploads PayrollUpload[]
+
+  @@map("companies")
+}
+
+model StaffRecord {
+  id            String   @id @default(cuid())
+  staffId       String
+  email         String
+  firstName     String
+  lastName      String
+  department    String
+  position      String
+  phone         String?
+  bankName      String?
+  accountNumber String?
+  bvn           String?
+  
+  // AUTH FIELDS (needed for login + registration)
+  password      String?          // hashed password for login
+  isRegistered  Boolean @default(false)
+  role          String  @default("STAFF")   // SUPER_ADMIN | HR | STAFF
+
+  isActive      Boolean  @default(true)
+
+  companyId     String
+  company       Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  payrolls      Payroll[]
+  payslips      Payslip[]
+
+  @@unique([staffId, companyId])
+  @@unique([email, companyId])
+  @@map("staff_records")
+}
+
+model Payroll {
+  id             String   @id @default(cuid())
+  month          String
+  year           Int
+  staffRecordId  String
+  companyId      String
+
+  company        Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Basic salary components
+  grossPay             Decimal @db.Decimal(18, 2)
+  proratedGrossPay     Decimal @db.Decimal(18, 2)
+  basicSalary          Decimal @db.Decimal(18, 2)
+  housing              Decimal @db.Decimal(18, 2)
+  transport            Decimal @db.Decimal(18, 2)
+  dressing             Decimal @db.Decimal(18, 2)
+  leaveAllowance       Decimal @db.Decimal(18, 2)
+  entertainment        Decimal @db.Decimal(18, 2)
+  utility              Decimal @db.Decimal(18, 2)
+
+  // Calculations
+  proratedGrossWithExtra Decimal @db.Decimal(18, 2)
+  annualPension           Decimal @db.Decimal(18, 2)
+  annualGrossPay          Decimal @db.Decimal(18, 2)
+  consolidatedRelief      Decimal @db.Decimal(18, 2)
+  taxableIncome           Decimal @db.Decimal(18, 2)
+
+  // Deductions
+  deductions          Decimal @db.Decimal(18, 2)
+  payee               Decimal @db.Decimal(18, 2)
+  pensionDeduction    Decimal @db.Decimal(18, 2)
+  bonusKPI            Decimal @db.Decimal(18, 2)
+  netSalary           Decimal @db.Decimal(18, 2)
+  finalGross          Decimal @db.Decimal(18, 2)
+  medicalContribution Decimal @db.Decimal(18, 2)
+
+  // Employer contributions
+  employerPension     Decimal @db.Decimal(18, 2)
+  nsitf               Decimal @db.Decimal(18, 2)
+  proratedSubTotal    Decimal @db.Decimal(18, 2)
+  managementFee       Decimal @db.Decimal(18, 2)
+  vatOnManagementFee  Decimal @db.Decimal(18, 2)
+  totalInvoiceValue   Decimal @db.Decimal(18, 2)
+
+  status      PayrollStatus @default(PROCESSED)
+  uploadedBy  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  staffRecord StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+  payslips    Payslip[]
+
+  @@unique([staffRecordId, month, year, companyId])
+  @@index([companyId, year, month])
+  @@map("payrolls")
+}
+
+model Payslip {
+  id            String   @id @default(cuid())
+  payrollId     String
+  staffRecordId String
+  companyId     String
+
+  company       Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  filePath      String
+  fileName      String
+  month         String
+  year          Int
+  grossPay      Decimal? @db.Decimal(18, 2)
+  netPay        Decimal? @db.Decimal(18, 2)
+
+  createdAt     DateTime @default(now())
+
+  payroll       Payroll     @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+  staffRecord   StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+
+  @@index([staffRecordId, year, month])
+  @@map("payslips")
+}
+
+model StaffUpload {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  fileName     String
+  filePath     String
+  totalRecords Int
+  successful   Int
+  failed       Int
+  errors       String[]
+  uploadedBy   String
+  createdAt    DateTime @default(now())
+
+  @@map("staff_uploads")
+}
+
+model PayrollUpload {
+  id              String   @id @default(cuid())
+  companyId       String
+  company         Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  fileName        String
+  filePath        String
+  processedFilePath String?
+  processedFileName String?
+
+  totalRecords    Int
+  successful      Int
+  failed          Int
+  errors          String[]
+
+  uploadedBy      String
+  createdAt       DateTime @default(now())
+
+  @@map("payroll_uploads")
+}
+
+enum PayrollStatus {
+  DRAFT
+  PROCESSED
+  PAID
+  FAILED
+}
