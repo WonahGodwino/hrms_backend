@@ -1,114 +1,93 @@
 // scripts/seed.ts
-// FINAL VERSION (Prisma 7 + Multi-Company + No User model)
-
 import 'dotenv/config'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { Pool } from 'pg'
-import { PrismaClient } from 'prisma/prisma-client'
+import { PrismaClient } from '@prisma/client'
 
-// Prisma 7 SAFE CLIENT + allow Aiven self-signed TLS
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl:
+    process.env.DATABASE_SSL === 'true'
+      ? { rejectUnauthorized: false }
+      : undefined,
 })
 
 const adapter = new PrismaPg(pool)
 const prisma = new PrismaClient({ adapter })
 
 async function main() {
-  console.log('Seeding...')
+  console.log('🌱 Seeding HRMS multi-company database...')
 
-  // 1) CREATE DEFAULT COMPANY (fixed ID)
-  const DEFAULT_COMPANY_ID = 'COMPANY_DEFAULT_001'
-
-  const company = await prisma.company.upsert({
-    where: { id: DEFAULT_COMPANY_ID },
+  const master = await prisma.company.upsert({
+    where: { slug: 'master' },
     update: {},
     create: {
-      id: DEFAULT_COMPANY_ID,
-      companyName: 'Company Name Ltd',
-      address: 'Default Address',
-      phone: '000-000-0000',
-      email: 'admin@company.com',
-      createdBy: 'SUPER_ADMIN_SYSTEM',
+      name: 'Master Company',
+      slug: 'master',
     },
   })
 
-  // 2) SUPER ADMIN STAFF RECORD
-  const superAdmin = await prisma.staffRecord.upsert({
-    where: {
-      email_companyId: {
-        email: 'admin@company.com',
-        companyId: company.id,
-      },
-    },
+  const acme = await prisma.company.upsert({
+    where: { slug: 'acme' },
     update: {},
     create: {
-      staffId: 'SA-0001',
-      email: 'admin@company.com',
-      firstName: 'System',
-      lastName: 'Administrator',
-      department: 'IT',
-      position: 'SUPER_ADMIN',
-      companyId: company.id,
-      isActive: true,
+      name: 'Acme HR Solutions',
+      slug: 'acme',
     },
   })
 
-  // 3) HR STAFF RECORD
-  const hr = await prisma.staffRecord.upsert({
-    where: {
-      email_companyId: {
-        email: 'hr@company.com',
-        companyId: company.id,
-      },
-    },
+  const beta = await prisma.company.upsert({
+    where: { slug: 'beta' },
     update: {},
     create: {
-      staffId: 'HR-0001',
-      email: 'hr@company.com',
-      firstName: 'HR',
-      lastName: 'Manager',
-      department: 'Human Resources',
-      position: 'HR',
-      companyId: company.id,
-      isActive: true,
+      name: 'Beta Logistics',
+      slug: 'beta',
     },
   })
 
-  // 4) BACKFILL EXISTING DATA (RAW SQL ONLY, for old NULL companyId rows)
-  await prisma.$executeRawUnsafe(
-    `UPDATE staff_records SET "companyId" = $1 WHERE "companyId" IS NULL`,
-    company.id
-  )
-  await prisma.$executeRawUnsafe(
-    `UPDATE payrolls SET "companyId" = $1 WHERE "companyId" IS NULL`,
-    company.id
-  )
-  await prisma.$executeRawUnsafe(
-    `UPDATE payslips SET "companyId" = $1 WHERE "companyId" IS NULL`,
-    company.id
-  )
-  await prisma.$executeRawUnsafe(
-    `UPDATE staff_uploads SET "companyId" = $1 WHERE "companyId" IS NULL`,
-    company.id
-  )
-  await prisma.$executeRawUnsafe(
-    `UPDATE payroll_uploads SET "companyId" = $1 WHERE "companyId" IS NULL`,
-    company.id
-  )
-
-  console.log('Seed completed successfully.')
-  console.log({
-    companyId: company.id,
-    superAdminStaffId: superAdmin.id,
-    hrStaffId: hr.id,
+  await prisma.staffRecord.upsert({
+    where: { email: 'master.admin@example.com' },
+    update: {},
+    create: {
+      email: 'master.admin@example.com',
+      fullName: 'Master Admin',
+      role: 'admin',
+      companyId: master.id,
+      isCompleted: false,
+    },
   })
+
+  await prisma.staffRecord.upsert({
+    where: { email: 'acme.admin@example.com' },
+    update: {},
+    create: {
+      email: 'acme.admin@example.com',
+      fullName: 'Acme Admin',
+      role: 'admin',
+      companyId: acme.id,
+      isCompleted: false,
+    },
+  })
+
+  await prisma.staffRecord.upsert({
+    where: { email: 'beta.admin@example.com' },
+    update: {},
+    create: {
+      email: 'beta.admin@example.com',
+      fullName: 'Beta Admin',
+      role: 'admin',
+      companyId: beta.id,
+      isCompleted: false,
+    },
+  })
+
+  console.log('✅ Seeding completed.')
 }
 
 main()
-  .catch((e) => {
-    console.error('Seeding error:', e)
+  .catch((err) => {
+    console.error('❌ Seeding failed:')
+    console.error(err)
     process.exit(1)
   })
   .finally(async () => {
