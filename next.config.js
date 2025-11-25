@@ -1,14 +1,16 @@
 ﻿/** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Remove experimental and api sections as they're deprecated in Next.js 14
   typescript: {
     ignoreBuildErrors: false,
   },
   eslint: {
     ignoreDuringBuilds: false,
   },
-  // Enable if you need larger file uploads
-  serverExternalPackages: ['pdfkit'],
+
+  // Allow heavy server-only packages like pdfkit / Prisma adapter / pg
+  experimental: {
+    serverComponentsExternalPackages: ['pdfkit', '@prisma/adapter-pg', 'pg'],
+  },
 }
 
 module.exports = nextConfig

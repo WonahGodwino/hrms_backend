@@ -58,7 +58,6 @@ export default function Home() {
       const url = pathOverride || selectedApi.path
       const headers: Record<string, string> = {}
 
-      // Only set JSON header for POST with body
       if (selectedApi.method === 'POST') {
         headers['Content-Type'] = 'application/json'
       }
@@ -73,13 +72,12 @@ export default function Home() {
       }
 
       if (selectedApi.method === 'POST' && requestBody.trim().length > 0) {
-        // Keep it simple: send whatever user types as body
         options.body = requestBody
       }
 
       const res = await fetch(url, options)
-
       const contentType = res.headers.get('content-type') || ''
+
       if (contentType.includes('application/json')) {
         const json = await res.json()
         setResponseText(JSON.stringify(json, null, 2))
@@ -101,7 +99,10 @@ export default function Home() {
   return (
     <div style={{ padding: '2rem', fontFamily: 'Arial, sans-serif' }}>
       <h1>🚀 HRMS Backend System</h1>
-      <p>Your HR Management System backend is running successfully.</p>
+      <p>
+        Your HR Management System backend is running. APIs are company-aware and use
+        <code> companyId</code> from the JWT for scoping.
+      </p>
 
       {/* API LIST (STATIC VIEW – DRIVEN BY apiDocs) */}
       <div
@@ -112,7 +113,7 @@ export default function Home() {
           borderRadius: '8px',
         }}
       >
-        <h2>📋 Available API Endpoints (from /api/docs)</h2>
+        <h2>📋 Available API Endpoints (from apiDocs.ts)</h2>
 
         {groups.map(([groupName, endpoints]) => (
           <div
@@ -180,7 +181,9 @@ export default function Home() {
         <h2>🧪 Try It – Test an API</h2>
         <p style={{ fontSize: '0.9rem', opacity: 0.9 }}>
           Pick an endpoint, enter a token (if needed), edit the path or body,
-          and send a live request.
+          and send a live request. On localhost this hits{' '}
+          <code>http://localhost:3000</code>. On Render it uses whatever host
+          this page is deployed on (e.g. <code>https://hrms-backend.onrender.com</code>).
         </p>
 
         {/* Endpoint selector */}
@@ -268,8 +271,15 @@ export default function Home() {
               color: 'white',
             }}
           />
-          <div style={{ fontSize: '0.8rem', opacity: 0.7, marginTop: '0.25rem' }}>
-            If provided, request will send: Authorization: Bearer &lt;token&gt;
+          <div
+            style={{
+              fontSize: '0.8rem',
+              opacity: 0.7,
+              marginTop: '0.25rem',
+            }}
+          >
+            If provided, request will send:{' '}
+            <code>Authorization: Bearer &lt;token&gt;</code>
           </div>
         </div>
 
@@ -293,8 +303,15 @@ export default function Home() {
                 fontFamily: 'monospace',
               }}
             />
-            <div style={{ fontSize: '0.8rem', opacity: 0.7, marginTop: '0.25rem' }}>
-              This is sent as raw JSON. Make sure it’s valid JSON for your endpoint.
+            <div
+              style={{
+                fontSize: '0.8rem',
+                opacity: 0.7,
+                marginTop: '0.25rem',
+              }}
+            >
+              This is sent as raw JSON. Make sure it’s valid JSON for your
+              endpoint.
             </div>
           </div>
         )}
@@ -366,8 +383,14 @@ export default function Home() {
         }}
       >
         <h2>✅ System Status: Running</h2>
-        <p>All core API endpoints are available and ready to use.</p>
-        <p>Use this page, Postman, Thunder Client, or curl to test the APIs.</p>
+        <p>
+          All core API endpoints are available, multi-company aware, and ready
+          to use.
+        </p>
+        <p>
+          Use this page, Postman, Thunder Client, or curl to test locally or on
+          Render.
+        </p>
       </div>
 
       <div style={{ marginTop: '2rem' }}>
@@ -381,20 +404,35 @@ export default function Home() {
             overflowX: 'auto',
           }}
         >
-{`# Test registration
-curl -X POST http://localhost:3000/api/auth/register \\
-  -H "Content-Type: application/json" \\
-  -d '{"email": "test@company.com", "password": "test123", "firstName": "Test", "lastName": "User"}'
-
-# Test login
+{`# ============================
+# AUTH LOGIN (LOCALHOST)
+# ============================
 curl -X POST http://localhost:3000/api/auth/login \\
   -H "Content-Type: application/json" \\
-  -d '{"email": "test@company.com", "password": "test123"}'
+  -d '{"email": "admin@company.com", "password": "admin123"}'
 
-# Test payroll upload (HR)
+# ============================
+# AUTH LOGIN (RENDER)
+# ============================
+curl -X POST https://hrms-backend.onrender.com/api/auth/login \\
+  -H "Content-Type: application/json" \\
+  -d '{"email": "admin@company.com", "password": "admin123"}'
+
+
+# ============================
+# PAYROLL UPLOAD (LOCALHOST)
+# ============================
 curl -X POST http://localhost:3000/api/payroll/upload \\
-  -H "Authorization: Bearer <HR_TOKEN>" \\
-  -F "file=@LATEEF_AND_HIS_TEAM.xlsx" \\
+  -H "Authorization: Bearer <HR_OR_ADMIN_TOKEN>" \\
+  -F "file=@PAYROLL_FILE.xlsx" \\
+  -F "sendEmails=true"
+
+# ============================
+# PAYROLL UPLOAD (RENDER)
+# ============================
+curl -X POST https://hrms-backend.onrender.com/api/payroll/upload \\
+  -H "Authorization: Bearer <HR_OR_ADMIN_TOKEN>" \\
+  -F "file=@PAYROLL_FILE.xlsx" \\
   -F "sendEmails=true"`}
         </pre>
       </div>

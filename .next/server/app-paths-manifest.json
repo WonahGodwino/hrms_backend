@@ -1,5 +1,1 @@
-{
-  "/page": "app/page.js",
-  "/api/auth/register/route": "app/api/auth/register/route.js",
-  "/api/payroll/upload/route": "app/api/payroll/upload/route.js"
-}
+{}
