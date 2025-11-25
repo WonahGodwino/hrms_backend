@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.0.0",
-    "@prisma/client": "^7.0.0",
+    "@prisma/client": "^7.0.1",
     "bcryptjs": "^2.4.3",
     "exceljs": "^4.4.0",
     "iconv-lite": "^0.7.0",
@@ -39,7 +39,7 @@
     "@types/pg": "^8.15.6",
     "@types/react": "^18.3.27",
     "@types/react-dom": "^18.3.7",
-    "prisma": "^7.0.0",
+    "prisma": "^7.0.1",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }
