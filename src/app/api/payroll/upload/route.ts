@@ -287,11 +287,12 @@ export async function POST(request: NextRequest) {
     const defaultMonthName = now.toLocaleString('en-US', { month: 'long' })
     const defaultYear = now.getFullYear()
 
-    for (const [index, row] of data.entries()) {
-      const displayRowNumber = index + 3
+      for (let index = 0; index < data.length; index++) {
+        const row = data[index]
+        const displayRowNumber = index + 3
 
-      try {
-        const rowData = row as any
+        try {
+          const rowData = row as any
 
         const rawName = getCell(rowData, 'Name') || ''
         const name = rawName.toString().trim()
