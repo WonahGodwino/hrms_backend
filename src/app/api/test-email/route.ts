@@ -5,7 +5,13 @@ import { sendPayrollNotificationEmail } from '@/app/lib/email'
 
 export async function POST(req: NextRequest) {
   try {
-    const token = req.headers.get('authorization')?.replace('Bearer ', '')
+    // Fix: ensure we always pass a string to requireRole
+    const authHeader = req.headers.get('authorization')
+    if (!authHeader) {
+      return ApiResponse.error('Authorization header missing', 401)
+    }
+
+    const token = authHeader.replace('Bearer ', '')
     const user = requireRole(token, ['HR', 'SUPER_ADMIN'])
 
     const body = await req.json()
@@ -37,6 +43,7 @@ export async function POST(req: NextRequest) {
     return ApiResponse.success(
       {
         emailSentTo: testEmail,
+        requestedBy: user.userId,
         message: 'SMTP configuration is correct',
       },
       'Test email sent successfully'
