@@ -4,7 +4,6 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireAuth } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import type { Payslip } from '@prisma/client'
 
 export async function GET(request: NextRequest) {
   try {
@@ -45,7 +44,7 @@ export async function GET(request: NextRequest) {
       ],
     })
 
-    const items = payslips.map((p: Payslip) => ({
+    const items = payslips.map((p: any) => ({
       id: p.id,
       month: p.month,
       year: p.year,
