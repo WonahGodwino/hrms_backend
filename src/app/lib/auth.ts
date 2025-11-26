@@ -2,7 +2,7 @@
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
 
-type JwtPayload = {
+export type JwtPayload = {
   userId: string
   email: string
   role: string
@@ -24,8 +24,9 @@ export async function comparePassword(password: string, hashed: string) {
   return bcrypt.compare(password, hashed)
 }
 
+// type cast to avoid jsonwebtoken overload issues
 export function signToken(payload: JwtPayload, expiresIn: string = '7d') {
-  return jwt.sign(payload, getJwtSecret(), { expiresIn })
+  return (jwt as any).sign(payload, getJwtSecret(), { expiresIn }) as string
 }
 
 export const verifyToken = (token: string): JwtPayload | null => {
