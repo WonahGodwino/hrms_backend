@@ -733,7 +733,7 @@ export async function GET(request: NextRequest) {
       'Leave Allowance',
       'Entertainment',
       'Utility',
-      '出勤薪资 Salary Of Attendance ',
+      'Salary Of Attendance ',
       "PRORATED GROSS PAY WITH EXTRA ALL'WCE",
       'TAXABLE INCOME',
       'Payee',
