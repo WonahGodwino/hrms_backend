@@ -650,9 +650,11 @@ export async function POST(request: NextRequest) {
       const failedFilePath = path.join(uploadDir, failedFileName)
 
       const failedBuffer = await failedWorkbook.xlsx.writeBuffer()
-      await writeFile(failedFilePath, failedBuffer)
+      // ExcelJS returns a buffer-like object; normalize for Node's writeFile
+      await writeFile(failedFilePath, Buffer.from(failedBuffer as any))
 
-      processedFilePath = failedFilePath
+    processedFilePath = failedFilePath
+
     }
 
     const uploadRecord = await prisma.payrollUpload.create({
