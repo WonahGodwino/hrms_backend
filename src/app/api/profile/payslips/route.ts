@@ -1,9 +1,10 @@
 // src/app/api/profile/payslips/route.ts
-// Use this from your staff profile page (e.g., /profile) to show a table or list of payslips.
+// Using this from staff profile page (e.g., /profile) to show a table or list of payslips.
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireAuth } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import type { Payslip } from '@prisma/client'
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,15 +15,14 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireAuth(token) // { userId, email, role, companyId }
+    // This is actually your StaffRecord-based auth payload
+    const user = requireAuth(token) // { userId, email, role, companyId, ... }
 
-    // Find the staff record linked to this user by email + company
-    const staffRecord = await prisma.staffRecord.findUnique({
+    // Find the staff record linked to this auth payload (no separate User model)
+    const staffRecord = await prisma.staffRecord.findFirst({
       where: {
-        email_companyId: {
-          email: user.email,
-          companyId: user.companyId,
-        },
+        id: user.userId, // StaffRecord.id stored in the token
+        companyId: user.companyId,
       },
     })
 
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     const payslips = await prisma.payslip.findMany({
       where: {
         staffRecordId: staffRecord.id,
-        companyId: user.companyId,
+        companyId: staffRecord.companyId,
       },
       orderBy: [
         { year: 'desc' },
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
       ],
     })
 
-    const items = payslips.map((p) => ({
+    const items = payslips.map((p: Payslip) => ({
       id: p.id,
       month: p.month,
       year: p.year,
