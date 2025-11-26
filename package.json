@@ -4,7 +4,7 @@
   "description": "Human Resource Management System Backend",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
     "db:push": "prisma db push",
@@ -12,7 +12,8 @@
     "db:generate": "prisma generate",
     "db:seed": "tsx scripts/seed.ts",
     "setup": "powershell -File scripts/setup-windows.ps1",
-    "verify": "tsx scripts/verify-env.ts"
+    "verify": "tsx scripts/verify-env.ts",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.0.0",
