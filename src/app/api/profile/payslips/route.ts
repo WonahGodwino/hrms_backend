@@ -1,5 +1,5 @@
 // src/app/api/profile/payslips/route.ts
-//Use this from your staff profile page (e.g., /profile) to show a table or list of payslips.
+// Use this from your staff profile page (e.g., /profile) to show a table or list of payslips.
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireAuth } from '@/app/lib/auth'
@@ -7,12 +7,23 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 
 export async function GET(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '')
-    const user = requireAuth(token) // { userId, email, role }
+    // Ensure we always pass a string to requireAuth
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader) {
+      return ApiResponse.error('Authorization header missing', 401)
+    }
 
-    // Find the staff record linked to this user by email
+    const token = authHeader.replace('Bearer ', '')
+    const user = requireAuth(token) // { userId, email, role, companyId }
+
+    // Find the staff record linked to this user by email + company
     const staffRecord = await prisma.staffRecord.findUnique({
-      where: { email: user.email },
+      where: {
+        email_companyId: {
+          email: user.email,
+          companyId: user.companyId,
+        },
+      },
     })
 
     if (!staffRecord) {
@@ -23,7 +34,10 @@ export async function GET(request: NextRequest) {
     }
 
     const payslips = await prisma.payslip.findMany({
-      where: { staffRecordId: staffRecord.id },
+      where: {
+        staffRecordId: staffRecord.id,
+        companyId: user.companyId,
+      },
       orderBy: [
         { year: 'desc' },
         { month: 'desc' },
@@ -39,7 +53,6 @@ export async function GET(request: NextRequest) {
       netPay: p.netPay ? p.netPay.toString() : null,
       createdAt: p.createdAt,
       fileName: p.fileName,
-      // route we’ll create below
       downloadUrl: `/api/payslips/${p.id}/download`,
     }))
 
