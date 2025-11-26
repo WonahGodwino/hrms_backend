@@ -119,7 +119,6 @@ function getCell(row: any, canonical: string) {
 
 // Detect percentage row (row 2 in your Excel template)
 function looksLikePercentageRow(rowObj: any) {
-  // If any required numeric header contains % as string, assume it's percentage line
   for (const col of [
     'Basic',
     'Housing',
@@ -216,7 +215,6 @@ export async function POST(request: NextRequest) {
           (h) => canonicalMap[normalizeHeader(h)] || h
         )
 
-        // Build row objects from line 2 onward
         for (let i = 1; i < lines.length; i++) {
           const values = splitCsvLine(lines[i])
           const rowData: any = {}
@@ -226,12 +224,12 @@ export async function POST(request: NextRequest) {
           data.push(rowData)
         }
 
-        // If line 2 looks like percentage row, drop it
         if (data[0] && looksLikePercentageRow(data[0])) {
           data = data.slice(1)
         }
       } else {
-        await workbook.xlsx.load(buffer)
+        // use ArrayBuffer for ExcelJS to avoid Buffer type mismatch
+        await workbook.xlsx.load(bytes as ArrayBuffer)
         const worksheet = workbook.worksheets[0]
         if (!worksheet) throw new Error('No worksheet found in Excel file')
 
@@ -242,7 +240,6 @@ export async function POST(request: NextRequest) {
           headers[col - 1] = canonicalMap[normalizeHeader(h)] || h
         })
 
-        // Grab row2 to decide if it's a percentage row
         const row2 = worksheet.getRow(2)
         const row2Obj: any = {}
         row2.eachCell((cell, col) => {
@@ -261,7 +258,6 @@ export async function POST(request: NextRequest) {
             rowData[header] = cell.value
           })
 
-          // ignore fully empty rows
           const hasAny = Object.values(rowData).some(
             (v) => v !== null && v !== ''
           )
@@ -292,13 +288,11 @@ export async function POST(request: NextRequest) {
     const defaultYear = now.getFullYear()
 
     for (const [index, row] of data.entries()) {
-      // if row2 was skipped, first real data row is displayed as row3 in Excel
       const displayRowNumber = index + 3
 
       try {
         const rowData = row as any
 
-        // Identify staff
         const rawName = getCell(rowData, 'Name') || ''
         const name = rawName.toString().trim()
 
@@ -313,7 +307,6 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // Column validation at row level (A2)
         const missingCols = REQUIRED_COLS.filter((c) => {
           const v = getCell(rowData, c)
           return v === undefined || v === null || v === ''
@@ -329,7 +322,6 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // Find staff record (email first, then fuzzy name), scoped by companyId
         let staffRecord = null
 
         if (email) {
@@ -391,14 +383,15 @@ export async function POST(request: NextRequest) {
         }
 
         if (!staffRecord) {
-          const message = `Staff record not found for ${name || email}. Staff must be pre-registered.`
+          const message = `Staff record not found for ${
+            name || email
+          }. Staff must be pre-registered.`
           results.failed++
           results.errors.push(`Row ${displayRowNumber}: ${message}`)
           results.failedRecords.push({ ...rowData, error: message })
           continue
         }
 
-        // Period fields (your sheet doesn’t have Month/Year; default if absent)
         const monthName =
           rowData['Month']?.toString() ||
           rowData['MONTH']?.toString() ||
@@ -413,7 +406,6 @@ export async function POST(request: NextRequest) {
 
         const periodMonth = monthNameToNumber(monthName)
 
-        // Extract STRICTLY from your template headings
         const grossPay = num(getCell(rowData, 'Gross Pay'))
         const proratedGrossPay = num(getCell(rowData, 'Prorated Gross Pay'))
 
@@ -440,7 +432,6 @@ export async function POST(request: NextRequest) {
         )
         const daysWorked = num(getCell(rowData, 'No of days Worked'))
 
-        // Basic sanity: net salary must not be negative
         if (netSalary < 0) {
           const message = 'Net Salary cannot be negative. Check payroll values.'
           results.failed++
@@ -449,7 +440,6 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // Upsert payroll (scoped by companyId)
         const payroll = await prisma.payroll.upsert({
           where: {
             staffRecordId_month_year_companyId: {
@@ -508,7 +498,6 @@ export async function POST(request: NextRequest) {
           },
         })
 
-        // If payslip already exists for that period, skip regenerating
         const existingPayslip = await prisma.payslip.findFirst({
           where: {
             staffRecordId: staffRecord.id,
@@ -521,7 +510,6 @@ export async function POST(request: NextRequest) {
         let pdfPath: string | null = null
 
         if (!existingPayslip) {
-          // Build ParsedPayrollRow for HTML-based generator
           const parsedRow: ParsedPayrollRow = {
             rowNumber: displayRowNumber,
             staffId: staffRecord.staffId,
@@ -568,7 +556,6 @@ export async function POST(request: NextRequest) {
             continue
           }
 
-          // Create Payslip DB record
           try {
             const payslipFileName = path.basename(pdfPath)
             await prisma.payslip.create({
@@ -593,7 +580,6 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Email notification (kept from old + new)
         if (sendEmails) {
           try {
             await sendPayrollNotificationEmail(staffRecord, {
@@ -605,7 +591,6 @@ export async function POST(request: NextRequest) {
           } catch (err: any) {
             const msg = `Email sending failed - ${err.message}`
             results.errors.push(`Row ${displayRowNumber}: ${msg}`)
-            // not failing the row because payslip was generated
           }
         }
 
@@ -625,7 +610,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 3) Create /uploads/payroll and failed records Excel (if needed)
     const uploadDir = path.join(process.cwd(), 'uploads', 'payroll')
     await mkdir(uploadDir, { recursive: true })
 
@@ -635,7 +619,6 @@ export async function POST(request: NextRequest) {
       const failedWorkbook = new ExcelJS.Workbook()
       const failedWorksheet = failedWorkbook.addWorksheet('Failed Records')
 
-      // Collect all keys across failed records to avoid missing columns
       const headersSet = new Set<string>()
       results.failedRecords.forEach((r) =>
         Object.keys(r).forEach((k) => headersSet.add(k))
@@ -671,7 +654,6 @@ export async function POST(request: NextRequest) {
       processedFilePath = failedFilePath
     }
 
-    // Create upload record (with companyId)
     const uploadRecord = await prisma.payrollUpload.create({
       data: {
         companyId,
@@ -689,7 +671,6 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Save original file to uploads folder
     await writeFile(path.join(uploadDir, file.name), buffer)
 
     const responseData: any = {
@@ -735,7 +716,6 @@ export async function GET(request: NextRequest) {
     const workbook = new ExcelJS.Workbook()
     const worksheet = workbook.addWorksheet('Payroll Template')
 
-    // Row 1: headers matching your real payroll sheet
     worksheet.addRow([
       'Name',
       'Resumption Date',
@@ -769,7 +749,6 @@ export async function GET(request: NextRequest) {
       'EMAIL',
     ])
 
-    // Row 2: percentage row exactly like your file
     worksheet.addRow([
       '',
       '',
@@ -819,8 +798,7 @@ export async function GET(request: NextRequest) {
       headers: {
         'Content-Type':
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition':
-          'attachment; filename="payroll-template.xlsx"',
+        'Content-Disposition': 'attachment; filename="payroll-template.xlsx"',
         'Cache-Control': 'no-cache',
       },
     })
