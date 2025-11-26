@@ -1,7 +1,13 @@
 // src/app/lib/db.ts (Prisma 7 + Aiven SSL safe)
-import { PrismaClient } from 'prisma/prisma-client'   // ✅ use generated client path
 import { PrismaPg } from '@prisma/adapter-pg'
 import { Pool } from 'pg'
+import PrismaPkg from '@prisma/client'
+
+// Relax Prisma typing to dodge the TS "no exported member" issue
+type PrismaClient = any
+
+// Grab the runtime PrismaClient constructor safely
+const { PrismaClient: PrismaClientCtor } = PrismaPkg as any
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
@@ -14,16 +20,17 @@ const pool =
   new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: {
-      // Aiven/self-signed friendly; set DATABASE_SSL=false if you ever want it off
+      // For Aiven/self-signed certs; if you ever switch, you can gate this
       rejectUnauthorized: false,
     },
   })
 
 const adapter = new PrismaPg(pool)
 
-export const prisma =
+// Single Prisma instance (dev reuse, prod fresh)
+export const prisma: PrismaClient =
   globalForPrisma.prisma ??
-  new PrismaClient({
+  new PrismaClientCtor({
     adapter,
     log: ['query', 'error', 'warn'],
   })
