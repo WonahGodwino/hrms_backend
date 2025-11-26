@@ -1,4 +1,3 @@
-
 // src/app/api/payslips/[id]/download/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
@@ -13,13 +12,22 @@ interface RouteContext {
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '')
-    const user = requireAuth(token) // { userId, email, role }
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader) {
+      return new Response('Authorization header missing', { status: 401 })
+    }
+
+    const token = authHeader.replace('Bearer ', '')
+    const user = requireAuth(token) // { userId, email, role, companyId }
 
     const { id } = context.params
 
-    const payslip = await prisma.payslip.findUnique({
-      where: { id },
+    // Scope by companyId to respect multi-company boundaries
+    const payslip = await prisma.payslip.findFirst({
+      where: {
+        id,
+        companyId: user.companyId,
+      },
       include: {
         staffRecord: true,
       },
@@ -31,11 +39,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     // Access control:
     // - STAFF: can only download their own payslips (match email)
-    // - HR / SUPER_ADMIN: can download any
-    if (
-      user.role === 'STAFF' &&
-      payslip.staffRecord.email !== user.email
-    ) {
+    // - HR / SUPER_ADMIN: can download any within their company
+    if (user.role === 'STAFF' && payslip.staffRecord.email !== user.email) {
       return new Response('Forbidden', { status: 403 })
     }
 
