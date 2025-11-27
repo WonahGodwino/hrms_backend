@@ -1,1 +1,16 @@
-{}
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/auth/complete-registration/route": "app/api/auth/complete-registration/route.js",
+  "/api/auth/register/route": "app/api/auth/register/route.js",
+  "/api/auth/me/route": "app/api/auth/me/route.js",
+  "/api/docs/route": "app/api/docs/route.js",
+  "/api/auth/login/route": "app/api/auth/login/route.js",
+  "/api/payroll/download-failed/[id]/route": "app/api/payroll/download-failed/[id]/route.js",
+  "/api/payroll/upload/route": "app/api/payroll/upload/route.js",
+  "/api/payslips/[id]/download/route": "app/api/payslips/[id]/download/route.js",
+  "/api/profile/payslips/route": "app/api/profile/payslips/route.js",
+  "/api/staff/records/route": "app/api/staff/records/route.js",
+  "/api/staff/upload/route": "app/api/staff/upload/route.js",
+  "/api/test-email/route": "app/api/test-email/route.js",
+  "/page": "app/page.js"
+}

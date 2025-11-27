@@ -18,6 +18,12 @@ export async function POST(request: NextRequest) {
     // Decoded JWT payload (NOT a Prisma model)
     const authUser = requireRole(token, ['HR', 'SUPER_ADMIN']) // { userId, companyId, role, email, ... }
 
+    // Ensure companyId exists and narrow its type to string
+    if (!authUser.companyId) {
+      return ApiResponse.error('Company context missing for this user', 400)
+    }
+    const companyId = authUser.companyId as string
+
     const formData = await request.formData()
     const file = formData.get('file') as File
 
@@ -75,7 +81,7 @@ export async function POST(request: NextRequest) {
         }
       } else {
         // Excel
-        await workbook.xlsx.load(buffer as any)
+        await workbook.xlsx.load(bytes as ArrayBuffer)
         const worksheet = workbook.worksheets[0]
         if (!worksheet) {
           return ApiResponse.error('No worksheet found in Excel file', 400)
@@ -203,7 +209,7 @@ export async function POST(request: NextRequest) {
         // Check for duplicate staffId or email within this company
         const existingStaff = await prisma.staffRecord.findFirst({
           where: {
-            companyId: authUser.companyId,
+            companyId: companyId,
             OR: [
               { staffId },
               { email: email.toLowerCase() },
@@ -232,7 +238,7 @@ export async function POST(request: NextRequest) {
             bankName: bankName?.toString().trim(),
             accountNumber: accountNumber?.toString().trim(),
             bvn: bvn?.toString().trim(),
-            companyId: authUser.companyId,
+            companyId: companyId,
           },
         })
 
@@ -252,7 +258,7 @@ export async function POST(request: NextRequest) {
 
     const uploadRecord = await prisma.staffUpload.create({
       data: {
-        companyId: authUser.companyId,
+        companyId: companyId,
         fileName: file.name,
         filePath: path.join(uploadDir, file.name),
         totalRecords: data.length,

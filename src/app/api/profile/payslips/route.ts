@@ -17,11 +17,17 @@ export async function GET(request: NextRequest) {
     // This is actually your StaffRecord-based auth payload
     const user = requireAuth(token) // { userId, email, role, companyId, ... }
 
+    if (!user.companyId) {
+      return ApiResponse.error('Company context missing for current user', 400)
+    }
+
+    const companyId = user.companyId as string
+
     // Find the staff record linked to this auth payload (no separate User model)
     const staffRecord = await prisma.staffRecord.findFirst({
       where: {
-        id: user.userId, // StaffRecord.id stored in the token
-        companyId: user.companyId,
+        id: user.userId,      // StaffRecord.id stored in the token
+        companyId: companyId, // guaranteed string here
       },
     })
 
@@ -35,7 +41,7 @@ export async function GET(request: NextRequest) {
     const payslips = await prisma.payslip.findMany({
       where: {
         staffRecordId: staffRecord.id,
-        companyId: staffRecord.companyId,
+        companyId: companyId,
       },
       orderBy: [
         { year: 'desc' },

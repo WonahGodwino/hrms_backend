@@ -11,14 +11,12 @@ export async function POST(request: NextRequest) {
     const { email, password, companyId } = body || {}
 
     if (!email || !password) {
-      return ApiResponse.error('email and password are required', 400)
+      return ApiResponse.error('Email and password are required', 400)
     }
 
     const cleanEmail = email.toLowerCase().trim()
 
-    // multi-company safe lookup:
-    // - if companyId is provided, use composite unique
-    // - if not provided, try to resolve. if multiple companies share same email, force companyId.
+    // Multi-company safe lookup
     let staff = null
 
     if (companyId) {
@@ -29,12 +27,10 @@ export async function POST(request: NextRequest) {
             companyId: companyId.toString(),
           },
         },
-        include: { company: true },
       })
     } else {
       const matches = await prisma.staffRecord.findMany({
         where: { email: cleanEmail },
-        include: { company: true },
       })
 
       if (matches.length === 0) {
@@ -51,46 +47,69 @@ export async function POST(request: NextRequest) {
       staff = matches[0]
     }
 
-    if (!staff) return ApiResponse.error('Invalid credentials', 401)
-    if (!staff.isActive) return ApiResponse.error('Account is deactivated', 403)
+    if (!staff) {
+      return ApiResponse.error('Invalid credentials', 401)
+    }
+
+    if (!staff.isActive) {
+      return ApiResponse.error('Account is deactivated', 403)
+    }
+
     if (!staff.isRegistered) {
       return ApiResponse.error('Complete registration before login', 403)
     }
 
-    // NOTE: field assumed as staff.password (hashed)
+    // Guard nullable password (String? in schema)
+    if (!staff.password) {
+      return ApiResponse.error(
+        'Account is not fully set up. Please complete registration.',
+        400
+      )
+    }
+
     const ok = await bcrypt.compare(password, staff.password)
-    if (!ok) return ApiResponse.error('Invalid credentials', 401)
+    if (!ok) {
+      return ApiResponse.error('Invalid credentials', 401)
+    }
 
     const token = signToken({
       userId: staff.id,
       email: staff.email,
-      role: staff.role, // or staff.role if you added a role field
+      role: staff.role,
       companyId: staff.companyId,
     })
 
-    return ApiResponse.success({
-      token,
-      user: {
-        id: staff.id,
-        email: staff.email,
-        firstName: staff.firstName,
-        lastName: staff.lastName,
-        role: staff.role, // or staff.role
-        companyId: staff.companyId,
-        department: staff.department,
-        position: staff.position,
-        staffId: staff.staffId,
-      },
-      company: staff.company
-        ? {
-            id: staff.company.id,
-            companyName: staff.company.companyName,
-            email: staff.company.email,
-            phone: staff.company.phone,
-            address: staff.company.address,
-          }
-        : null,
+    // Fetch company separately using companyId (avoids TS issues with include)
+    const company = await prisma.company.findUnique({
+      where: { id: staff.companyId },
     })
+
+    return ApiResponse.success(
+      {
+        token,
+        user: {
+          id: staff.id,
+          email: staff.email,
+          firstName: staff.firstName,
+          lastName: staff.lastName,
+          role: staff.role,
+          companyId: staff.companyId,
+          department: staff.department,
+          position: staff.position,
+          staffId: staff.staffId,
+        },
+        company: company
+          ? {
+              id: company.id,
+              companyName: company.companyName,
+              email: company.email,
+              phone: company.phone,
+              address: company.address,
+            }
+          : null,
+      },
+      'Login successful'
+    )
   } catch (error) {
     return handleApiError(error)
   }

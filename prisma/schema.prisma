@@ -1,13 +1,13 @@
 // prisma/schema.prisma
 generator client {
+  // You can keep this for now; Prisma will eventually prefer "prisma-client"
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")  // ✅ added this line
+ // url      = env("DATABASE_URL")
 }
-
 model Company {
   id           String   @id @default(cuid())
   companyName  String

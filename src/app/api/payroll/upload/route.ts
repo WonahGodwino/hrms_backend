@@ -67,6 +67,7 @@ const CANONICAL_HEADERS = [
   '出勤薪资 Salary Of Attendance',
   "PRORATED GROSS PAY WITH EXTRA ALL'WCE",
   'TAXABLE INCOME',
+  'Consolidated Relief',
   'Payee',
   'Pension',
   'Deduction',
@@ -175,7 +176,10 @@ export async function POST(request: NextRequest) {
 
     const token = authHeader.replace('Bearer ', '')
     const user = requireRole(token, ['HR', 'SUPER_ADMIN'])
-    const companyId = user.companyId
+    if (!user.companyId) {
+      return ApiResponse.error('Company context missing for this user', 400)
+    }
+    const companyId: string = user.companyId
 
     const formData = await request.formData()
     const file = formData.get('file') as File
@@ -224,11 +228,12 @@ export async function POST(request: NextRequest) {
           data.push(rowData)
         }
 
+        // Check if second row is the "percentage row" and skip it
         if (data[0] && looksLikePercentageRow(data[0])) {
           data = data.slice(1)
         }
       } else {
-        // use ArrayBuffer for ExcelJS to avoid Buffer type mismatch
+        // use ArrayBuffer for ExcelJS
         await workbook.xlsx.load(bytes as ArrayBuffer)
         const worksheet = workbook.worksheets[0]
         if (!worksheet) throw new Error('No worksheet found in Excel file')
@@ -287,12 +292,12 @@ export async function POST(request: NextRequest) {
     const defaultMonthName = now.toLocaleString('en-US', { month: 'long' })
     const defaultYear = now.getFullYear()
 
-      for (let index = 0; index < data.length; index++) {
-        const row = data[index]
-        const displayRowNumber = index + 3
+    for (let index = 0; index < data.length; index++) {
+      const row = data[index]
+      const displayRowNumber = index + 3 // because row 1 = headers, row 2 = % row
 
-        try {
-          const rowData = row as any
+      try {
+        const rowData = row as any
 
         const rawName = getCell(rowData, 'Name') || ''
         const name = rawName.toString().trim()
@@ -323,6 +328,7 @@ export async function POST(request: NextRequest) {
           continue
         }
 
+        // locate staff record
         let staffRecord = null
 
         if (email) {
@@ -384,9 +390,7 @@ export async function POST(request: NextRequest) {
         }
 
         if (!staffRecord) {
-          const message = `Staff record not found for ${
-            name || email
-          }. Staff must be pre-registered.`
+          const message = `Staff record not found for ${name || email}. Staff must be pre-registered.`
           results.failed++
           results.errors.push(`Row ${displayRowNumber}: ${message}`)
           results.failedRecords.push({ ...rowData, error: message })
@@ -428,6 +432,28 @@ export async function POST(request: NextRequest) {
           getCell(rowData, 'Medical Contribution')
         )
 
+        const proratedGrossWithExtra = num(
+          getCell(rowData, "PRORATED GROSS PAY WITH EXTRA ALL'WCE")
+        )
+        const taxableIncome = num(getCell(rowData, 'TAXABLE INCOME'))
+        const consolidatedRelief = num(getCell(rowData, 'Consolidated Relief'))
+
+        const annualPension = pension * 12
+        const annualGrossPay = grossPay * 12
+
+        const employerPension = num(getCell(rowData, 'Employer Pension'))
+        const nsitf = num(getCell(rowData, 'NSITF'))
+        const proratedSubTotal = num(
+          getCell(rowData, 'Prorated Sub Total Invoice')
+        )
+        const managementFee = num(getCell(rowData, 'Mgt Fee'))
+        const vatOnManagementFee = num(
+          getCell(rowData, 'Vat on Management Fee @7.5%')
+        )
+        const totalInvoiceValue = num(
+          getCell(rowData, 'Total Invoice Value')
+        )
+
         const daysInMonth = num(
           getCell(rowData, 'No of Working Days in the Month')
         )
@@ -454,6 +480,7 @@ export async function POST(request: NextRequest) {
             companyId,
             month: monthName,
             year,
+
             grossPay,
             proratedGrossPay,
             basicSalary,
@@ -463,13 +490,28 @@ export async function POST(request: NextRequest) {
             leaveAllowance,
             entertainment,
             utility,
-            bonusKPI,
+
+            proratedGrossWithExtra,
+            annualPension,
+            annualGrossPay,
+            consolidatedRelief,
+            taxableIncome,
+
             deductions: deduction,
             payee,
             pensionDeduction: pension,
-            medicalContribution,
+            bonusKPI,
             netSalary,
             finalGross,
+            medicalContribution,
+
+            employerPension,
+            nsitf,
+            proratedSubTotal,
+            managementFee,
+            vatOnManagementFee,
+            totalInvoiceValue,
+
             status: 'PROCESSED',
             uploadedBy: user.userId,
           },
@@ -478,6 +520,7 @@ export async function POST(request: NextRequest) {
             staffRecordId: staffRecord.id,
             month: monthName,
             year,
+
             grossPay,
             proratedGrossPay,
             basicSalary,
@@ -487,18 +530,34 @@ export async function POST(request: NextRequest) {
             leaveAllowance,
             entertainment,
             utility,
-            bonusKPI,
+
+            proratedGrossWithExtra,
+            annualPension,
+            annualGrossPay,
+            consolidatedRelief,
+            taxableIncome,
+
             deductions: deduction,
             payee,
             pensionDeduction: pension,
-            medicalContribution,
+            bonusKPI,
             netSalary,
             finalGross,
+            medicalContribution,
+
+            employerPension,
+            nsitf,
+            proratedSubTotal,
+            managementFee,
+            vatOnManagementFee,
+            totalInvoiceValue,
+
             status: 'PROCESSED',
             uploadedBy: user.userId,
           },
         })
 
+        // Payslip check
         const existingPayslip = await prisma.payslip.findFirst({
           where: {
             staffRecordId: staffRecord.id,
@@ -650,11 +709,9 @@ export async function POST(request: NextRequest) {
       const failedFilePath = path.join(uploadDir, failedFileName)
 
       const failedBuffer = await failedWorkbook.xlsx.writeBuffer()
-      // ExcelJS returns a buffer-like object; normalize for Node's writeFile
       await writeFile(failedFilePath, Buffer.from(failedBuffer as any))
 
-    processedFilePath = failedFilePath
-
+      processedFilePath = failedFilePath
     }
 
     const uploadRecord = await prisma.payrollUpload.create({

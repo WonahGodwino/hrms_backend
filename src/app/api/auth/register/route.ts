@@ -7,7 +7,13 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 
 export async function POST(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '') || null
+    // Only SUPER_ADMIN can create/activate login accounts
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader) {
+      return ApiResponse.error('Authorization header missing', 401)
+    }
+
+    const token = authHeader.replace('Bearer ', '')
     const admin = requireRole(token, ['SUPER_ADMIN'])
 
     const body = await request.json()
@@ -19,64 +25,115 @@ export async function POST(request: NextRequest) {
       role = 'HR',
       department = '',
       position = '',
-      companyId, // optional; defaults to admin.companyId
+      companyId,  // optional; defaults to admin.companyId
+      staffId,    // optional; we'll auto-generate if missing
     } = body || {}
 
     if (!email || !firstName || !lastName) {
-      return ApiResponse.error('email, firstName, and lastName are required', 400)
+      return ApiResponse.error(
+        'email, firstName, and lastName are required',
+        400
+      )
+    }
+
+    if (!password) {
+      return ApiResponse.error(
+        'password is required for admin/HR creation',
+        400
+      )
     }
 
     const targetCompanyId = companyId || admin.companyId
     if (!targetCompanyId) {
-      return ApiResponse.error('No company assigned for this user', 400)
+      return ApiResponse.error(
+        'No company assigned for this user',
+        400
+      )
     }
 
-    const existing = await prisma.user.findFirst({
-      where: { email: email.toLowerCase().trim(), companyId: targetCompanyId },
+    const cleanEmail = email.toLowerCase().trim()
+
+    // 1) Check if a StaffRecord already exists for this email + company
+    const existing = await prisma.staffRecord.findFirst({
+      where: {
+        email: cleanEmail,
+        companyId: targetCompanyId,
+      },
     })
-    if (existing) {
-      return ApiResponse.error('User already exists in this company', 409)
-    }
-
-    if (!password) {
-      return ApiResponse.error('password is required for admin/HR creation', 400)
-    }
 
     const hashed = await bcrypt.hash(password, 10)
 
-    const user = await prisma.user.create({
-      data: {
-        email: email.toLowerCase().trim(),
-        password: hashed,
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        role,
-        department,
-        position,
-        isActive: true,
-        isRegistered: true,
-        companyId: targetCompanyId,
-        createdBy: admin.userId, // if your model has it
-      } as any,
-    })
+    let staffRecord
+
+    if (existing) {
+      // If already fully registered with a password, block duplicate creation
+      if (existing.isRegistered && existing.password) {
+        return ApiResponse.error(
+          'User already exists in this company',
+          409
+        )
+      }
+
+      // Otherwise, "activate" this existing staff record with login credentials
+      staffRecord = await prisma.staffRecord.update({
+        where: {
+          id: existing.id,
+        },
+        data: {
+          password: hashed,
+          isRegistered: true,
+          isActive: true,
+          role,
+          // optionally refresh profile details
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          department: department || existing.department,
+          position: position || existing.position,
+        },
+      })
+    } else {
+      // 2) No existing staff record: create a new one
+      const generatedStaffId =
+        staffId ||
+        `ADM-${Date.now().toString(36).toUpperCase()}`
+
+      staffRecord = await prisma.staffRecord.create({
+        data: {
+          staffId: generatedStaffId,
+          email: cleanEmail,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          department: (department || 'Administration').trim(),
+          position: (position || role).trim(),
+          password: hashed,
+          isRegistered: true,
+          isActive: true,
+          role,
+          companyId: targetCompanyId,
+        },
+      })
+    }
 
     const jwtToken = signToken({
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-      companyId: user.companyId,
+      userId: staffRecord.id,
+      email: staffRecord.email,
+      role: staffRecord.role,
+      companyId: staffRecord.companyId,
     })
 
     return ApiResponse.success(
       {
         token: jwtToken,
         user: {
-          id: user.id,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          role: user.role,
-          companyId: user.companyId,
+          id: staffRecord.id,
+          email: staffRecord.email,
+          firstName: staffRecord.firstName,
+          lastName: staffRecord.lastName,
+          role: staffRecord.role,
+          companyId: staffRecord.companyId,
+          staffId: staffRecord.staffId,
+          department: staffRecord.department,
+          position: staffRecord.position,
         },
       },
       'User registered successfully',
