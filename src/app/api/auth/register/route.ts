@@ -1,16 +1,26 @@
 // src/app/api/auth/register/route.ts
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/app/lib/db'
 import { requireRole, signToken } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import { handleCorsOptions, withCors } from '@/app/lib/cors'
+
+export async function OPTIONS(request: NextRequest) {
+  return handleCorsOptions(request)
+}
 
 export async function POST(request: NextRequest) {
+  const origin = request.headers.get('origin')
+
   try {
     // Only SUPER_ADMIN can create/activate login accounts
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
-      return ApiResponse.error('Authorization header missing', 401)
+      return withCors(
+        ApiResponse.error('Authorization header missing', 401),
+        origin
+      )
     }
 
     const token = authHeader.replace('Bearer ', '')
@@ -30,24 +40,33 @@ export async function POST(request: NextRequest) {
     } = body || {}
 
     if (!email || !firstName || !lastName) {
-      return ApiResponse.error(
-        'email, firstName, and lastName are required',
-        400
+      return withCors(
+        ApiResponse.error(
+          'email, firstName, and lastName are required',
+          400
+        ),
+        origin
       )
     }
 
     if (!password) {
-      return ApiResponse.error(
-        'password is required for admin/HR creation',
-        400
+      return withCors(
+        ApiResponse.error(
+          'password is required for admin/HR creation',
+          400
+        ),
+        origin
       )
     }
 
     const targetCompanyId = companyId || admin.companyId
     if (!targetCompanyId) {
-      return ApiResponse.error(
-        'No company assigned for this user',
-        400
+      return withCors(
+        ApiResponse.error(
+          'No company assigned for this user',
+          400
+        ),
+        origin
       )
     }
 
@@ -68,9 +87,12 @@ export async function POST(request: NextRequest) {
     if (existing) {
       // If already fully registered with a password, block duplicate creation
       if (existing.isRegistered && existing.password) {
-        return ApiResponse.error(
-          'User already exists in this company',
-          409
+        return withCors(
+          ApiResponse.error(
+            'User already exists in this company',
+            409
+          ),
+          origin
         )
       }
 
@@ -121,25 +143,31 @@ export async function POST(request: NextRequest) {
       companyId: staffRecord.companyId,
     })
 
-    return ApiResponse.success(
-      {
-        token: jwtToken,
-        user: {
-          id: staffRecord.id,
-          email: staffRecord.email,
-          firstName: staffRecord.firstName,
-          lastName: staffRecord.lastName,
-          role: staffRecord.role,
-          companyId: staffRecord.companyId,
-          staffId: staffRecord.staffId,
-          department: staffRecord.department,
-          position: staffRecord.position,
+    return withCors(
+      ApiResponse.success(
+        {
+          token: jwtToken,
+          user: {
+            id: staffRecord.id,
+            email: staffRecord.email,
+            firstName: staffRecord.firstName,
+            lastName: staffRecord.lastName,
+            role: staffRecord.role,
+            companyId: staffRecord.companyId,
+            staffId: staffRecord.staffId,
+            department: staffRecord.department,
+            position: staffRecord.position,
+          },
         },
-      },
-      'User registered successfully',
-      201
+        'User registered successfully',
+        201
+      ),
+      origin
     )
   } catch (error) {
-    return handleApiError(error)
+    return withCors(
+      handleApiError(error),
+      origin
+    )
   }
 }

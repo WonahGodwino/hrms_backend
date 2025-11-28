@@ -3,15 +3,10 @@ import 'dotenv/config'
 import { defineConfig, env } from 'prisma/config'
 
 export default defineConfig({
-  // path to your Prisma schema
-  schema: './prisma/schema.prisma',
-
-  // where migrations should be stored
+  schema: 'prisma/schema.prisma',
   migrations: {
-    path: './prisma/migrations',
+    path: 'prisma/migrations',
   },
-
-  // Prisma 7: connection URL now lives here, not in schema.prisma
   datasource: {
     url: env('DATABASE_URL'),
   },

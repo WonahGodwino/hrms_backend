@@ -20,6 +20,7 @@ export async function POST(request: NextRequest) {
     let staff = null
 
     if (companyId) {
+      // If frontend passes companyId, we use it directly
       staff = await prisma.staffRecord.findUnique({
         where: {
           email_companyId: {
@@ -29,19 +30,20 @@ export async function POST(request: NextRequest) {
         },
       })
     } else {
+      // No companyId: find by email only
       const matches = await prisma.staffRecord.findMany({
         where: { email: cleanEmail },
       })
 
       if (matches.length === 0) {
+        // Email not found anywhere → generic invalid credentials
         return ApiResponse.error('Invalid credentials', 401)
       }
 
       if (matches.length > 1) {
-        return ApiResponse.error(
-          'This email exists in multiple companies. Please include companyId to login.',
-          400
-        )
+        // Same email in multiple companies: do NOT reveal that
+        // Just treat it as invalid credentials
+        return ApiResponse.error('Invalid credentials', 401)
       }
 
       staff = matches[0]
@@ -55,16 +57,15 @@ export async function POST(request: NextRequest) {
       return ApiResponse.error('Account is deactivated', 403)
     }
 
-    if (!staff.isRegistered) {
+    // Enforce registration only for STAFF, not for SUPER_ADMIN / HR
+    if (staff.role === 'STAFF' && !staff.isRegistered) {
       return ApiResponse.error('Complete registration before login', 403)
     }
 
     // Guard nullable password (String? in schema)
     if (!staff.password) {
-      return ApiResponse.error(
-        'Account is not fully set up. Please complete registration.',
-        400
-      )
+      // For safety, don’t leak that the account exists but has no password
+      return ApiResponse.error('Invalid credentials', 401)
     }
 
     const ok = await bcrypt.compare(password, staff.password)
@@ -79,7 +80,7 @@ export async function POST(request: NextRequest) {
       companyId: staff.companyId,
     })
 
-    // Fetch company separately using companyId (avoids TS issues with include)
+    // Fetch company using companyId
     const company = await prisma.company.findUnique({
       where: { id: staff.companyId },
     })
