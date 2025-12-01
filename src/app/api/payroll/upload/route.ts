@@ -9,6 +9,7 @@ import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import { generatePayslipPdf } from '@/app/lib/payroll/generatePayslipPdf'
 import type { ParsedPayrollRow } from '@/app/lib/payroll/types'
+import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 // -----------------------------
 // Helpers
@@ -764,10 +765,15 @@ export async function POST(request: NextRequest) {
 // Payroll template download
 // -----------------------------
 export async function GET(request: NextRequest) {
+  const origin = request.headers.get('origin')
+
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
-      return ApiResponse.error('Authorization header missing', 401)
+      return withCors(
+        ApiResponse.error('Authorization header missing', 401),
+        origin
+      )
     }
 
     const token = authHeader.replace('Bearer ', '')
@@ -854,15 +860,21 @@ export async function GET(request: NextRequest) {
 
     const buffer = await workbook.xlsx.writeBuffer()
 
-    return new Response(buffer, {
+    const res = new NextResponse(buffer as any, {
       headers: {
         'Content-Type':
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': 'attachment; filename="payroll-template.xlsx"',
+        'Content-Disposition':
+          'attachment; filename="payroll-template.xlsx"',
         'Cache-Control': 'no-cache',
       },
     })
+
+    return withCors(res, origin)
   } catch (error) {
-    return handleApiError(error)
+    return withCors(
+      handleApiError(error),
+      origin
+    )
   }
 }
