@@ -21,14 +21,19 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState(apiDocs[0]?.id ?? '')
   const selectedApi = apiDocs.find((a) => a.id === selectedId) ?? apiDocs[0]
 
+  // Helper to derive default request body, allowing optional `sample` on docs
+  const getDefaultBody = (api: (typeof apiDocs)[number] | undefined) => {
+    if (!api || api.method !== 'POST') return ''
+    const maybeSample = (api as any).sample
+    return maybeSample
+      ? JSON.stringify(maybeSample, null, 2)
+      : '{ "example": "value" }'
+  }
+
   const [pathOverride, setPathOverride] = useState(selectedApi?.path ?? '')
   const [token, setToken] = useState('')
-  const [requestBody, setRequestBody] = useState(
-    selectedApi?.method === 'POST' && selectedApi?.sample
-      ? JSON.stringify(selectedApi.sample, null, 2)
-      : selectedApi?.method === 'POST'
-      ? '{ "example": "value" }'
-      : ''
+  const [requestBody, setRequestBody] = useState<string>(() =>
+    getDefaultBody(selectedApi)
   )
   const [responseText, setResponseText] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -51,15 +56,13 @@ export default function Home() {
     setSelectedId(id)
     if (api) {
       setPathOverride(api.path)
+
       if (api.method === 'POST') {
-        setRequestBody(
-          api.sample
-            ? JSON.stringify(api.sample, null, 2)
-            : '{ "example": "value" }'
-        )
+        setRequestBody(getDefaultBody(api))
       } else {
         setRequestBody('')
       }
+
       setResponseText('')
       setError(null)
     }
@@ -75,7 +78,8 @@ export default function Home() {
       const url = pathOverride
       const headers: Record<string, string> = {}
 
-      if (selectedApi.method === 'POST') headers['Content-Type'] = 'application/json'
+      if (selectedApi.method === 'POST')
+        headers['Content-Type'] = 'application/json'
       if (token.trim()) headers['Authorization'] = `Bearer ${token.trim()}`
 
       const options: RequestInit = { method: selectedApi.method, headers }
@@ -201,7 +205,9 @@ export default function Home() {
                   onClick={() => handleSelectChange(api.id)}
                 >
                   <strong>{api.method}</strong>{' '}
-                  <code style={{ background: '#eee', padding: '2px 4px' }}>{api.path}</code>{' '}
+                  <code style={{ background: '#eee', padding: '2px 4px' }}>
+                    {api.path}
+                  </code>{' '}
                   – {api.title}
                 </li>
               ))}
