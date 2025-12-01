@@ -1,5 +1,5 @@
 // src/app/api/auth/register/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/app/lib/db'
 import { requireRole, signToken } from '@/app/lib/auth'
@@ -24,6 +24,7 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
+    // Decoded payload: { userId, email, role, companyId? }
     const admin = requireRole(token, ['SUPER_ADMIN'])
 
     const body = await request.json()
@@ -96,7 +97,9 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // Otherwise, "activate" this existing staff record with login credentials
+      // Otherwise, "activate" this existing staff record with login credentials.
+      // NOTE: we intentionally DO NOT change createdBy here
+      // so we preserve who originally onboarded this staff (e.g. via staff upload).
       staffRecord = await prisma.staffRecord.update({
         where: {
           id: existing.id,
@@ -106,7 +109,6 @@ export async function POST(request: NextRequest) {
           isRegistered: true,
           isActive: true,
           role,
-          // optionally refresh profile details
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           department: department || existing.department,
@@ -132,6 +134,8 @@ export async function POST(request: NextRequest) {
           isActive: true,
           role,
           companyId: targetCompanyId,
+          // SUPER_ADMIN who created this account
+          createdBy: admin.userId,
         },
       })
     }
@@ -157,6 +161,7 @@ export async function POST(request: NextRequest) {
             staffId: staffRecord.staffId,
             department: staffRecord.department,
             position: staffRecord.position,
+            createdBy: staffRecord.createdBy,
           },
         },
         'User registered successfully',

@@ -6,12 +6,23 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import ExcelJS from 'exceljs'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
+import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
+export async function OPTIONS(request: NextRequest) {
+  return handleCorsOptions(request)
+}
+
+// POST – upload staff Excel/CSV and create StaffRecord rows
 export async function POST(request: NextRequest) {
+  const origin = request.headers.get('origin')
+
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
-      return ApiResponse.error('Authorization header missing', 401)
+      return withCors(
+        ApiResponse.error('Authorization header missing', 401),
+        origin
+      )
     }
 
     const token = authHeader.replace('Bearer ', '')
@@ -20,7 +31,10 @@ export async function POST(request: NextRequest) {
 
     // Ensure companyId exists and narrow its type to string
     if (!authUser.companyId) {
-      return ApiResponse.error('Company context missing for this user', 400)
+      return withCors(
+        ApiResponse.error('Company context missing for this user', 400),
+        origin
+      )
     }
     const companyId = authUser.companyId as string
 
@@ -28,7 +42,10 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file') as File
 
     if (!file) {
-      return ApiResponse.error('No file uploaded', 400)
+      return withCors(
+        ApiResponse.error('No file uploaded', 400),
+        origin
+      )
     }
 
     // Validate file type
@@ -43,9 +60,12 @@ export async function POST(request: NextRequest) {
       !allowedTypes.includes(file.type) &&
       !['xlsx', 'xls', 'csv'].includes(fileExtension || '')
     ) {
-      return ApiResponse.error(
-        'Invalid file type. Please upload Excel or CSV files.',
-        400
+      return withCors(
+        ApiResponse.error(
+          'Invalid file type. Please upload Excel or CSV files.',
+          400
+        ),
+        origin
       )
     }
 
@@ -63,7 +83,10 @@ export async function POST(request: NextRequest) {
         const csvText = buffer.toString()
         const lines = csvText.split(/\r?\n/).filter((l) => l.trim())
         if (!lines.length) {
-          return ApiResponse.error('Empty CSV file', 400)
+          return withCors(
+            ApiResponse.error('Empty CSV file', 400),
+            origin
+          )
         }
 
         const headers = lines[0].split(',').map((header) => header.trim())
@@ -84,7 +107,10 @@ export async function POST(request: NextRequest) {
         await workbook.xlsx.load(bytes as ArrayBuffer)
         const worksheet = workbook.worksheets[0]
         if (!worksheet) {
-          return ApiResponse.error('No worksheet found in Excel file', 400)
+          return withCors(
+            ApiResponse.error('No worksheet found in Excel file', 400),
+            origin
+          )
         }
 
         // Get headers from first row
@@ -115,14 +141,20 @@ export async function POST(request: NextRequest) {
       }
     } catch (parseError) {
       console.error('File parsing error:', parseError)
-      return ApiResponse.error(
-        'Failed to parse file. Please check the file format.',
-        400
+      return withCors(
+        ApiResponse.error(
+          'Failed to parse file. Please check the file format.',
+          400
+        ),
+        origin
       )
     }
 
     if (!data.length) {
-      return ApiResponse.error('No data found in the file', 400)
+      return withCors(
+        ApiResponse.error('No data found in the file', 400),
+        origin
+      )
     }
 
     // Validate required columns
@@ -141,11 +173,14 @@ export async function POST(request: NextRequest) {
     )
 
     if (missingColumns.length > 0) {
-      return ApiResponse.error(
-        `Missing required columns: ${missingColumns.join(
-          ', '
-        )}. Found columns: ${actualColumns.join(', ')}`,
-        400
+      return withCors(
+        ApiResponse.error(
+          `Missing required columns: ${missingColumns.join(
+            ', '
+          )}. Found columns: ${actualColumns.join(', ')}`,
+          400
+        ),
+        origin
       )
     }
 
@@ -239,6 +274,8 @@ export async function POST(request: NextRequest) {
             accountNumber: accountNumber?.toString().trim(),
             bvn: bvn?.toString().trim(),
             companyId: companyId,
+            // track who uploaded/onboarded this staff
+            createdBy: authUser.userId,
           },
         })
 
@@ -272,32 +309,43 @@ export async function POST(request: NextRequest) {
     // Save the original file
     await writeFile(path.join(uploadDir, file.name), buffer)
 
-    return ApiResponse.success(
-      {
-        results,
-        uploadId: uploadRecord.id,
-        summary: {
-          totalProcessed: data.length,
-          successful: results.successful,
-          failed: results.failed,
+    return withCors(
+      ApiResponse.success(
+        {
+          results,
+          uploadId: uploadRecord.id,
+          summary: {
+            totalProcessed: data.length,
+            successful: results.successful,
+            failed: results.failed,
+          },
+          ...(results.failed > 0 && {
+            failedRecordsInfo: `${results.failed} records failed. Check errors array for details.`,
+          }),
         },
-        ...(results.failed > 0 && {
-          failedRecordsInfo: `${results.failed} records failed. Check errors array for details.`,
-        }),
-      },
-      `Staff records processing completed. Successful: ${results.successful}, Failed: ${results.failed}`
+        `Staff records processing completed. Successful: ${results.successful}, Failed: ${results.failed}`
+      ),
+      origin
     )
   } catch (error) {
-    return handleApiError(error)
+    return withCors(
+      handleApiError(error),
+      origin
+    )
   }
 }
 
-// GET endpoint to download staff template using ExcelJS
+// GET – download staff template using ExcelJS
 export async function GET(request: NextRequest) {
+  const origin = request.headers.get('origin')
+
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
-      return ApiResponse.error('Authorization header missing', 401)
+      return withCors(
+        ApiResponse.error('Authorization header missing', 401),
+        origin
+      )
     }
 
     const token = authHeader.replace('Bearer ', '')
@@ -409,7 +457,7 @@ export async function GET(request: NextRequest) {
 
       const buffer = await workbook.xlsx.writeBuffer()
 
-      return new Response(buffer, {
+      const excelResponse = new Response(buffer, {
         headers: {
           'Content-Type':
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -418,10 +466,18 @@ export async function GET(request: NextRequest) {
           'Cache-Control': 'no-cache',
         },
       })
+
+      return withCors(excelResponse, origin)
     }
 
-    return ApiResponse.error('Invalid action')
+    return withCors(
+      ApiResponse.error('Invalid action'),
+      origin
+    )
   } catch (error) {
-    return handleApiError(error)
+    return withCors(
+      handleApiError(error),
+      origin
+    )
   }
 }

@@ -1,10 +1,9 @@
 // src/app/lib/cors.ts
 import { NextRequest, NextResponse } from 'next/server'
 
-// Allow multiple frontends (dev + prod)
 const allowedOrigins = [
-  'http://localhost:5173',                       // Vite dev
-  process.env.NEXT_PUBLIC_FRONTEND_URL || '',    // your hosted frontend
+  'http://localhost:5173',
+  process.env.NEXT_PUBLIC_FRONTEND_URL || '',
 ].filter(Boolean)
 
 function resolveOrigin(origin: string | null): string | undefined {

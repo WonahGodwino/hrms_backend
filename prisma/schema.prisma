@@ -1,29 +1,29 @@
 // prisma/schema.prisma
 generator client {
-  // You can keep this for now; Prisma will eventually prefer "prisma-client"
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
- // url      = env("DATABASE_URL")
+  // url      = env("DATABASE_URL")
 }
-model Company {
-  id           String   @id @default(cuid())
-  companyName  String
-  address      String?
-  phone        String?
-  email        String?
-  archived     Int      @default(0)
 
-  createdBy    String              // super admin user ID
-  createdAt    DateTime @default(now())
+model Company {
+  id            String   @id @default(cuid())
+  companyName   String
+  address       String?
+  phone         String?
+  email         String?
+  archived      Int      @default(0)
+
+  createdBy     String              // super admin user ID
+  createdAt     DateTime @default(now())
 
   // Relations
-  staff         StaffRecord[]
-  payrolls      Payroll[]
-  payslips      Payslip[]
-  staffUploads  StaffUpload[]
+  staff          StaffRecord[]
+  payrolls       Payroll[]
+  payslips       Payslip[]
+  staffUploads   StaffUpload[]
   payrollUploads PayrollUpload[]
 
   @@map("companies")
@@ -51,6 +51,9 @@ model StaffRecord {
 
   companyId     String
   company       Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // NEW: who created this staff (HR / SUPER_ADMIN / uploader userId)
+  createdBy     String?
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -162,22 +165,22 @@ model StaffUpload {
 }
 
 model PayrollUpload {
-  id              String   @id @default(cuid())
-  companyId       String
-  company         Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  id                String   @id @default(cuid())
+  companyId         String
+  company           Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  fileName        String
-  filePath        String
+  fileName          String
+  filePath          String
   processedFilePath String?
   processedFileName String?
 
-  totalRecords    Int
-  successful      Int
-  failed          Int
-  errors          String[]
+  totalRecords      Int
+  successful        Int
+  failed            Int
+  errors            String[]
 
-  uploadedBy      String
-  createdAt       DateTime @default(now())
+  uploadedBy        String
+  createdAt         DateTime @default(now())
 
   @@map("payroll_uploads")
 }

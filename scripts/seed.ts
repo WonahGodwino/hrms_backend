@@ -6,26 +6,25 @@ import { Pool } from 'pg'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 
-// Basic PG pool – you can mirror whatever SSL config you use in db.ts
+// Aiven-compatible PG pool with SSL
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl:
-    process.env.DATABASE_SSL === 'true'
-      ? { rejectUnauthorized: false }
-      : undefined,
+  ssl: {
+    rejectUnauthorized: false,
+  },
 })
 
 const adapter = new PrismaPg(pool)
 const prisma = new PrismaClient({ adapter })
 
 async function main() {
-  console.log('🌱 Seeding HRMS multi-company database...')
+  console.log('\n🌱 Starting HRMS seed...\n')
 
-  const createdBy = 'SYSTEM_SEED' // just a marker; string in your schema
+  const createdBySeed = 'SYSTEM_SEED'
 
-  // ─────────────────────────────────────
-  // 1. Seed companies (ids are fixed so upsert is stable)
-  // ─────────────────────────────────────
+  // ────────────────────────────────────────────
+  // 1. CREATE COMPANIES (Stable IDs)
+  // ────────────────────────────────────────────
   const master = await prisma.company.upsert({
     where: { id: 'master-company' },
     update: {},
@@ -35,7 +34,7 @@ async function main() {
       address: 'Head Office',
       phone: '+2348000000000',
       email: 'master@company.com',
-      createdBy,
+      createdBy: createdBySeed,
     },
   })
 
@@ -48,7 +47,7 @@ async function main() {
       address: 'Lagos',
       phone: '+2348012345678',
       email: 'info@acme.com',
-      createdBy,
+      createdBy: createdBySeed,
     },
   })
 
@@ -61,20 +60,27 @@ async function main() {
       address: 'Abuja',
       phone: '+2348098765432',
       email: 'info@beta.com',
-      createdBy,
+      createdBy: createdBySeed,
     },
   })
 
-  // ─────────────────────────────────────
-  // 2. Hash passwords for seeded users
-  // ─────────────────────────────────────
-  const superAdminPasswordHash = await bcrypt.hash('SuperAdmin123!', 10)
-  const hrPasswordHash = await bcrypt.hash('0001A', 10)
+  // ────────────────────────────────────────────
+  // 2. HASH PASSWORDS
+  // ────────────────────────────────────────────
+  const masterAdminRaw = 'SuperAdmin123!'
+  const hrRaw = '0001A'
+  const staffRaw = 'Staff123!'
 
-  // ─────────────────────────────────────
-  // 3. Seed MASTER SUPER_ADMIN
-  //    Login: email = superadmin@master.com, password = SuperAdmin123!
-  // ─────────────────────────────────────
+  const masterAdminHash = await bcrypt.hash(masterAdminRaw, 10)
+  const hrHash = await bcrypt.hash(hrRaw, 10)
+  const staffHash = await bcrypt.hash(staffRaw, 10)
+
+  // ────────────────────────────────────────────
+  // 3. MASTER SUPER_ADMIN
+  // Login:
+  //    email: superadmin@master.com
+  //    password: SuperAdmin123!
+  // ────────────────────────────────────────────
   await prisma.staffRecord.upsert({
     where: {
       email_companyId: {
@@ -83,11 +89,11 @@ async function main() {
       },
     },
     update: {
-      // if already exists, ensure it stays a valid SUPER_ADMIN
       role: 'SUPER_ADMIN',
-      password: superAdminPasswordHash,
+      password: masterAdminHash,
       isRegistered: true,
       isActive: true,
+      createdBy: createdBySeed,
     },
     create: {
       staffId: 'MASTER-SUPER-001',
@@ -95,20 +101,23 @@ async function main() {
       firstName: 'Master',
       lastName: 'Admin',
       department: 'Administration',
-      position: 'Super Admin',
+      position: 'Super Administrator',
       phone: '+2348011111111',
       companyId: master.id,
       role: 'SUPER_ADMIN',
-      password: superAdminPasswordHash,
+      password: masterAdminHash,
       isRegistered: true,
       isActive: true,
+      createdBy: createdBySeed,
     },
   })
 
-  // ─────────────────────────────────────
-  // 4. Seed ACME HR
-  //    Login: email = hr@company.com, password = 0001A
-  // ─────────────────────────────────────
+  // ────────────────────────────────────────────
+  // 4. ACME HR (HR LOGIN)
+  // Login:
+  //    email: hr@company.com
+  //    password: 0001A
+  // ────────────────────────────────────────────
   await prisma.staffRecord.upsert({
     where: {
       email_companyId: {
@@ -118,11 +127,12 @@ async function main() {
     },
     update: {
       role: 'HR',
-      password: hrPasswordHash,
+      password: hrHash,
       isRegistered: true,
       isActive: true,
       department: 'Human Resources',
       position: 'HR Manager',
+      createdBy: createdBySeed,
     },
     create: {
       staffId: 'ACME-HR-001',
@@ -134,16 +144,92 @@ async function main() {
       phone: '+2348022222222',
       companyId: acme.id,
       role: 'HR',
-      password: hrPasswordHash,
+      password: hrHash,
       isRegistered: true,
       isActive: true,
+      createdBy: createdBySeed,
     },
   })
 
-  // ─────────────────────────────────────
-  // 5. Seed BETA HR (optional extra admin)
-  //    Login: email = hr@beta.com, password = 0001A
-  // ─────────────────────────────────────
+  // ────────────────────────────────────────────
+  // 5. ACME STAFF (EMPLOYEE LOGIN)
+  // Login:
+  //    email: staff1@acme.com
+  //    password: Staff123!
+  // ────────────────────────────────────────────
+  await prisma.staffRecord.upsert({
+    where: {
+      email_companyId: {
+        email: 'staff1@acme.com',
+        companyId: acme.id,
+      },
+    },
+    update: {
+      role: 'STAFF',
+      password: staffHash,
+      isRegistered: true,
+      isActive: true,
+      department: 'Engineering',
+      position: 'Software Engineer',
+      createdBy: createdBySeed,
+    },
+    create: {
+      staffId: 'ACME-STAFF-001',
+      email: 'staff1@acme.com',
+      firstName: 'John',
+      lastName: 'Okafor',
+      department: 'Engineering',
+      position: 'Software Engineer',
+      phone: '+2348044444444',
+      companyId: acme.id,
+      role: 'STAFF',
+      password: staffHash,
+      isRegistered: true,
+      isActive: true,
+      createdBy: createdBySeed,
+    },
+  })
+
+  // ACME staff without login
+  await prisma.staffRecord.upsert({
+    where: {
+      email_companyId: {
+        email: 'staff2@acme.com',
+        companyId: acme.id,
+      },
+    },
+    update: {
+      role: 'STAFF',
+      isRegistered: false,
+      isActive: true,
+      department: 'Finance',
+      position: 'Accountant',
+      password: null,
+      createdBy: createdBySeed,
+    },
+    create: {
+      staffId: 'ACME-STAFF-002',
+      email: 'staff2@acme.com',
+      firstName: 'Sarah',
+      lastName: 'Adebayo',
+      department: 'Finance',
+      position: 'Accountant',
+      phone: '+2348055555555',
+      companyId: acme.id,
+      role: 'STAFF',
+      password: null,
+      isRegistered: false,
+      isActive: true,
+      createdBy: createdBySeed,
+    },
+  })
+
+  // ────────────────────────────────────────────
+  // 6. BETA HR (HR LOGIN)
+  // Login:
+  //    email: hr@beta.com
+  //    password: 0001A
+  // ────────────────────────────────────────────
   await prisma.staffRecord.upsert({
     where: {
       email_companyId: {
@@ -153,11 +239,12 @@ async function main() {
     },
     update: {
       role: 'HR',
-      password: hrPasswordHash,
+      password: hrHash,
       isRegistered: true,
       isActive: true,
       department: 'Human Resources',
       position: 'HR Manager',
+      createdBy: createdBySeed,
     },
     create: {
       staffId: 'BETA-HR-001',
@@ -169,18 +256,114 @@ async function main() {
       phone: '+2348033333333',
       companyId: beta.id,
       role: 'HR',
-      password: hrPasswordHash,
+      password: hrHash,
       isRegistered: true,
       isActive: true,
+      createdBy: createdBySeed,
     },
   })
 
-  console.log('✅ Seeding completed.')
+  // ────────────────────────────────────────────
+  // 7. BETA STAFF (EMPLOYEE LOGIN)
+  // Login:
+  //    email: staff1@beta.com
+  //    password: Staff123!
+  // ────────────────────────────────────────────
+  await prisma.staffRecord.upsert({
+    where: {
+      email_companyId: {
+        email: 'staff1@beta.com',
+        companyId: beta.id,
+      },
+    },
+    update: {
+      role: 'STAFF',
+      password: staffHash,
+      isRegistered: true,
+      isActive: true,
+      department: 'Operations',
+      position: 'Logistics Officer',
+      createdBy: createdBySeed,
+    },
+    create: {
+      staffId: 'BETA-STAFF-001',
+      email: 'staff1@beta.com',
+      firstName: 'Michael',
+      lastName: 'Idris',
+      department: 'Operations',
+      position: 'Logistics Officer',
+      phone: '+2348066666666',
+      companyId: beta.id,
+      role: 'STAFF',
+      password: staffHash,
+      isRegistered: true,
+      isActive: true,
+      createdBy: createdBySeed,
+    },
+  })
+
+  // BETA staff without login
+  await prisma.staffRecord.upsert({
+    where: {
+      email_companyId: {
+        email: 'staff2@beta.com',
+        companyId: beta.id,
+      },
+    },
+    update: {
+      role: 'STAFF',
+      isRegistered: false,
+      isActive: true,
+      department: 'Warehouse',
+      position: 'Store Keeper',
+      password: null,
+      createdBy: createdBySeed,
+    },
+    create: {
+      staffId: 'BETA-STAFF-002',
+      email: 'staff2@beta.com',
+      firstName: 'Grace',
+      lastName: 'Nwosu',
+      department: 'Warehouse',
+      position: 'Store Keeper',
+      phone: '+2348077777777',
+      companyId: beta.id,
+      role: 'STAFF',
+      password: null,
+      isRegistered: false,
+      isActive: true,
+      createdBy: createdBySeed,
+    },
+  })
+
+  console.log('✅ SEED COMPLETE!')
+  console.log('\n🔐 Login Accounts:')
+  console.log('---------------------------------------------')
+  console.log('MASTER SUPER ADMIN:')
+  console.log('  Email:    superadmin@master.com')
+  console.log('  Password: SuperAdmin123!')
+  console.log('---------------------------------------------')
+  console.log('ACME HR:')
+  console.log('  Email:    hr@company.com')
+  console.log('  Password: 0001A')
+  console.log('---------------------------------------------')
+  console.log('ACME STAFF (login-enabled):')
+  console.log('  Email:    staff1@acme.com')
+  console.log('  Password: Staff123!')
+  console.log('---------------------------------------------')
+  console.log('BETA HR:')
+  console.log('  Email:    hr@beta.com')
+  console.log('  Password: 0001A')
+  console.log('---------------------------------------------')
+  console.log('BETA STAFF (login-enabled):')
+  console.log('  Email:    staff1@beta.com')
+  console.log('  Password: Staff123!')
+  console.log('---------------------------------------------\n')
 }
 
 main()
   .catch((err) => {
-    console.error('❌ Seeding failed:')
+    console.error('❌ Seed failed:')
     console.error(err)
     process.exit(1)
   })
