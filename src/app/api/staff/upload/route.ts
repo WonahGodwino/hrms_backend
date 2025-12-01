@@ -26,10 +26,8 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    // Decoded JWT payload (NOT a Prisma model)
     const authUser = requireRole(token, ['HR', 'SUPER_ADMIN']) // { userId, companyId, role, email, ... }
 
-    // Ensure companyId exists and narrow its type to string
     if (!authUser.companyId) {
       return withCors(
         ApiResponse.error('Company context missing for this user', 400),
@@ -213,7 +211,14 @@ export async function POST(request: NextRequest) {
         const displayRow = index + 2 // because row 1 is header
 
         // Validate required fields
-        if (!staffId || !email || !firstName || !lastName || !department || !position) {
+        if (
+          !staffId ||
+          !email ||
+          !firstName ||
+          !lastName ||
+          !department ||
+          !position
+        ) {
           results.failed++
           results.errors.push(
             `Row ${displayRow}: Missing required fields`
@@ -245,10 +250,7 @@ export async function POST(request: NextRequest) {
         const existingStaff = await prisma.staffRecord.findFirst({
           where: {
             companyId: companyId,
-            OR: [
-              { staffId },
-              { email: email.toLowerCase() },
-            ],
+            OR: [{ staffId }, { email: email.toLowerCase() }],
           },
         })
 
@@ -274,7 +276,6 @@ export async function POST(request: NextRequest) {
             accountNumber: accountNumber?.toString().trim(),
             bvn: bvn?.toString().trim(),
             companyId: companyId,
-            // track who uploaded/onboarded this staff
             createdBy: authUser.userId,
           },
         })
@@ -457,7 +458,7 @@ export async function GET(request: NextRequest) {
 
       const buffer = await workbook.xlsx.writeBuffer()
 
-      const excelResponse = new Response(buffer, {
+      const excelResponse = new NextResponse(buffer as any, {
         headers: {
           'Content-Type':
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
