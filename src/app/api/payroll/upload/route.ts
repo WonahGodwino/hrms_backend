@@ -1,5 +1,5 @@
 // src/app/api/payroll/upload/route.ts
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
@@ -9,7 +9,6 @@ import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import { generatePayslipPdf } from '@/app/lib/payroll/generatePayslipPdf'
 import type { ParsedPayrollRow } from '@/app/lib/payroll/types'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 // -----------------------------
 // Helpers
@@ -50,7 +49,7 @@ function monthNameToNumber(month: string): number {
 const num = (v: any) =>
   v === null || v === undefined || v === '' ? 0 : Number(v) || 0
 
-// Authoritative payroll headers (normalized -> canonical)
+// Your authoritative payroll headers (normalized -> canonical)
 const CANONICAL_HEADERS = [
   'Name',
   'Resumption Date',
@@ -85,13 +84,13 @@ const CANONICAL_HEADERS = [
   'EMAIL',
 ]
 
-// Build a normalized map for lookup
+// build a normalized map for lookup
 const canonicalMap: Record<string, string> = {}
 for (const h of CANONICAL_HEADERS) {
   canonicalMap[normalizeHeader(h)] = h
 }
 
-// Required per-row columns for payslip generation
+// required per-row columns for payslip generation
 const REQUIRED_COLS = [
   'Gross Pay',
   'Basic',
@@ -145,63 +144,41 @@ function splitCsvLine(line: string) {
 
   for (let i = 0; i < line.length; i++) {
     const ch = line[i]
-
     if (ch === '"' && line[i + 1] === '"') {
       cur += '"'
       i++
       continue
     }
-
     if (ch === '"') {
       inQuotes = !inQuotes
       continue
     }
-
     if (ch === ',' && !inQuotes) {
       result.push(cur.trim())
       cur = ''
       continue
     }
-
     cur += ch
   }
-
   result.push(cur.trim())
   return result
-}
-
-// -----------------------------
-// CORS preflight
-// -----------------------------
-export async function OPTIONS(request: NextRequest) {
-  return handleCorsOptions(request)
 }
 
 // -----------------------------
 // POST /api/payroll/upload
 // -----------------------------
 export async function POST(request: NextRequest) {
-  const origin = request.headers.get('origin')
-
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
-      return withCors(
-        ApiResponse.error('Authorization header missing', 401),
-        origin
-      )
+      return ApiResponse.error('Authorization header missing', 401)
     }
 
     const token = authHeader.replace('Bearer ', '')
     const user = requireRole(token, ['HR', 'SUPER_ADMIN'])
-
     if (!user.companyId) {
-      return withCors(
-        ApiResponse.error('Company context missing for this user', 400),
-        origin
-      )
+      return ApiResponse.error('Company context missing for this user', 400)
     }
-
     const companyId: string = user.companyId
 
     const formData = await request.formData()
@@ -209,10 +186,7 @@ export async function POST(request: NextRequest) {
     const sendEmails = formData.get('sendEmails') === 'true'
 
     if (!file) {
-      return withCors(
-        ApiResponse.error('File is required', 400),
-        origin
-      )
+      return ApiResponse.error('File is required', 400)
     }
 
     const bytes = await file.arrayBuffer()
@@ -223,12 +197,9 @@ export async function POST(request: NextRequest) {
     const isCsv = fileExtension === 'csv' || file.type === 'text/csv'
 
     if (!isExcel && !isCsv) {
-      return withCors(
-        ApiResponse.error(
-          'Invalid file format. Please upload an Excel (.xlsx) or CSV (.csv) file.',
-          400
-        ),
-        origin
+      return ApiResponse.error(
+        'Invalid file format. Please upload an Excel (.xlsx) or CSV (.csv) file.',
+        400
       )
     }
 
@@ -251,11 +222,9 @@ export async function POST(request: NextRequest) {
         for (let i = 1; i < lines.length; i++) {
           const values = splitCsvLine(lines[i])
           const rowData: any = {}
-
           headers.forEach((h, idx) => {
             rowData[h] = values[idx] ?? ''
           })
-
           data.push(rowData)
         }
 
@@ -264,13 +233,13 @@ export async function POST(request: NextRequest) {
           data = data.slice(1)
         }
       } else {
+        // use ArrayBuffer for ExcelJS
         await workbook.xlsx.load(bytes as ArrayBuffer)
         const worksheet = workbook.worksheets[0]
         if (!worksheet) throw new Error('No worksheet found in Excel file')
 
         const headerRow = worksheet.getRow(1)
         const headers: string[] = []
-
         headerRow.eachCell((cell, col) => {
           const h = String(cell.value || '').trim()
           headers[col - 1] = canonicalMap[normalizeHeader(h)] || h
@@ -278,12 +247,10 @@ export async function POST(request: NextRequest) {
 
         const row2 = worksheet.getRow(2)
         const row2Obj: any = {}
-
         row2.eachCell((cell, col) => {
           const header = headers[col - 1]
           row2Obj[header] = cell.value
         })
-
         const skipRow2 = looksLikePercentageRow(row2Obj)
 
         worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
@@ -291,7 +258,6 @@ export async function POST(request: NextRequest) {
           if (skipRow2 && rowNumber === 2) return
 
           const rowData: any = {}
-
           row.eachCell((cell, colNumber) => {
             const header = headers[colNumber - 1]
             rowData[header] = cell.value
@@ -300,24 +266,15 @@ export async function POST(request: NextRequest) {
           const hasAny = Object.values(rowData).some(
             (v) => v !== null && v !== ''
           )
-
-          if (hasAny) {
-            data.push(rowData)
-          }
+          if (hasAny) data.push(rowData)
         })
       }
     } catch (err: any) {
-      return withCors(
-        ApiResponse.error(`Error parsing file: ${err.message}`, 400),
-        origin
-      )
+      return ApiResponse.error(`Error parsing file: ${err.message}`, 400)
     }
 
     if (!data.length) {
-      return withCors(
-        ApiResponse.error('No payroll data found in the file', 400),
-        origin
-      )
+      return ApiResponse.error('No payroll data found in the file', 400)
     }
 
     // 2) Process rows
@@ -337,7 +294,7 @@ export async function POST(request: NextRequest) {
 
     for (let index = 0; index < data.length; index++) {
       const row = data[index]
-      const displayRowNumber = index + 3 // row 1 = headers, row 2 = % row
+      const displayRowNumber = index + 3 // because row 1 = headers, row 2 = % row
 
       try {
         const rowData = row as any
@@ -371,8 +328,8 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // Locate staff record
-        let staffRecord = null as any
+        // locate staff record
+        let staffRecord = null
 
         if (email) {
           staffRecord = await prisma.staffRecord.findUnique({
@@ -433,9 +390,7 @@ export async function POST(request: NextRequest) {
         }
 
         if (!staffRecord) {
-          const message = `Staff record not found for ${
-            name || email
-          }. Staff must be pre-registered.`
+          const message = `Staff record not found for ${name || email}. Staff must be pre-registered.`
           results.failed++
           results.errors.push(`Row ${displayRowNumber}: ${message}`)
           results.failedRecords.push({ ...rowData, error: message })
@@ -481,9 +436,7 @@ export async function POST(request: NextRequest) {
           getCell(rowData, "PRORATED GROSS PAY WITH EXTRA ALL'WCE")
         )
         const taxableIncome = num(getCell(rowData, 'TAXABLE INCOME'))
-        const consolidatedRelief = num(
-          getCell(rowData, 'Consolidated Relief')
-        )
+        const consolidatedRelief = num(getCell(rowData, 'Consolidated Relief'))
 
         const annualPension = pension * 12
         const annualGrossPay = grossPay * 12
@@ -653,7 +606,6 @@ export async function POST(request: NextRequest) {
               },
               payroll: parsedRow,
             })
-
             pdfPath = generatedPath
             results.payslipsGenerated++
           } catch (err: any) {
@@ -728,9 +680,9 @@ export async function POST(request: NextRequest) {
       const failedWorksheet = failedWorkbook.addWorksheet('Failed Records')
 
       const headersSet = new Set<string>()
-      results.failedRecords.forEach((r) => {
+      results.failedRecords.forEach((r) =>
         Object.keys(r).forEach((k) => headersSet.add(k))
-      })
+      )
       headersSet.add('error')
 
       const headers = Array.from(headersSet)
@@ -798,18 +750,12 @@ export async function POST(request: NextRequest) {
         `/api/payroll/download-failed/${uploadRecord.id}`
     }
 
-    return withCors(
-      ApiResponse.success(
-        responseData,
-        'Payroll processing completed successfully'
-      ),
-      origin
+    return ApiResponse.success(
+      responseData,
+      'Payroll processing completed successfully'
     )
   } catch (error) {
-    return withCors(
-      handleApiError(error),
-      origin
-    )
+    return handleApiError(error)
   }
 }
 
@@ -818,15 +764,10 @@ export async function POST(request: NextRequest) {
 // Payroll template download
 // -----------------------------
 export async function GET(request: NextRequest) {
-  const origin = request.headers.get('origin')
-
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
-      return withCors(
-        ApiResponse.error('Authorization header missing', 401),
-        origin
-      )
+      return ApiResponse.error('Authorization header missing', 401)
     }
 
     const token = authHeader.replace('Bearer ', '')
@@ -913,22 +854,15 @@ export async function GET(request: NextRequest) {
 
     const buffer = await workbook.xlsx.writeBuffer()
 
-    return withCors(
-      new Response(buffer, {
-        headers: {
-          'Content-Type':
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition':
-            'attachment; filename="payroll-template.xlsx"',
-          'Cache-Control': 'no-cache',
-        },
-      }),
-      origin
-    )
+    return new Response(buffer, {
+      headers: {
+        'Content-Type':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename="payroll-template.xlsx"',
+        'Cache-Control': 'no-cache',
+      },
+    })
   } catch (error) {
-    return withCors(
-      handleApiError(error),
-      origin
-    )
+    return handleApiError(error)
   }
 }
