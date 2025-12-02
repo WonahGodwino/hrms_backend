@@ -1,8 +1,8 @@
-// File: C:\hrms-project\src\app\api\auth\login\route.ts
-import * as entry from '../../../../../../src/app/api/auth/login/route.js'
+// File: C:\hrms-project\src\app\api\auth\me\route.ts
+import * as entry from '../../../../../../src/app/api/auth/me/route.js'
 import type { NextRequest } from 'next/server.js'
 
-type TEntry = typeof import('../../../../../../src/app/api/auth/login/route.js')
+type TEntry = typeof import('../../../../../../src/app/api/auth/me/route.js')
 
 // Check that the entry is a valid entry
 checkFields<Diff<{

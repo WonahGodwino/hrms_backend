@@ -10,6 +10,7 @@ export type ApiDoc = {
   auth?: string
   input?: string
   output?: string
+  sample?: any   // make this optional
 }
 
 export const apiDocs: ApiDoc[] = [
