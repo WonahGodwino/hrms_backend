@@ -1,4 +1,4 @@
 {
   "/page": "app/page.js",
-  "/api/payroll/download-failed/[id]/route": "app/api/payroll/download-failed/[id]/route.js"
+  "/api/staff/records/route": "app/api/staff/records/route.js"
 }
