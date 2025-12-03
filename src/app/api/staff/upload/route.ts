@@ -4,7 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import ExcelJS from 'exceljs'
-import { writeFile, mkdir } from 'fs/promises'
+import { writeFile, mkdir, readFile } from 'fs/promises'
 import path from 'path'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -72,6 +72,7 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(bytes)
 
     let data: any[] = []
+    let failedRecords: any[] = []
 
     try {
       const workbook = new ExcelJS.Workbook()
@@ -134,6 +135,11 @@ export async function POST(request: NextRequest) {
           )
           if (hasAny) {
             data.push(rowData)
+          } else {
+            failedRecords.push({
+              ...rowData,
+              error: 'Missing required fields or invalid data',
+            })
           }
         })
       }
@@ -150,7 +156,7 @@ export async function POST(request: NextRequest) {
 
     if (!data.length) {
       return withCors(
-        ApiResponse.error('No data found in the file', 400),
+        ApiResponse.error('No valid data found in the file', 400),
         origin
       )
     }
