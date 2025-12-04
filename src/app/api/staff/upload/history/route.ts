@@ -1,3 +1,4 @@
+//api/staff/upload/history
 import { NextRequest } from 'next/server';
 import { prisma } from '@/app/lib/db';
 import { requireRole } from '@/app/lib/auth';

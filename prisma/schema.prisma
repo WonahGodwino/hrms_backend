@@ -9,25 +9,27 @@ datasource db {
 }
 
 model Company {
-  id            String   @id @default(cuid())
-  companyName   String
-  address       String?
-  phone         String?
-  email         String?
-  archived      Int      @default(0)
-
-  createdBy     String              // super admin user ID
-  createdAt     DateTime @default(now())
+  id            String   @id @default(cuid()) // Primary key
+  companyName   String   // Name of the company
+  address       String?  // Company address
+  phone         String?  // Company phone number
+  email         String?  // Company email address
+  archived      Int      @default(0) // Archive status
+  createdBy     String   // Super admin user ID who created the company
+  createdAt     DateTime @default(now())    // Company created timestamp
 
   // Relations
-  staff          StaffRecord[]
-  payrolls       Payroll[]
-  payslips       Payslip[]
-  staffUploads   StaffUpload[]
-  payrollUploads PayrollUpload[]
+  staff          StaffRecord[]  // One-to-many relation with StaffRecord
+  payrolls       Payroll[]      // One-to-many relation with Payroll
+  payslips       Payslip[]      // One-to-many relation with Payslip
+  staffUploads   StaffUpload[]  // One-to-many relation with StaffUpload
+  payrollUploads PayrollUpload[] // One-to-many relation with PayrollUpload
+  jobs           Job[]          // One-to-many relation with Job (this is the reverse relation)
 
-  @@map("companies")
+  @@map("companies") // Maps the model to the "companies" table in the database
 }
+
+
 
 model StaffRecord {
   id            String   @id @default(cuid())
@@ -190,4 +192,55 @@ enum PayrollStatus {
   PROCESSED
   PAID
   FAILED
+}
+
+//model for recruitment module
+model JobApplication {
+  id             String   @id @default(cuid()) // Primary key
+  firstName      String   // Applicant's first name
+  lastName       String   // Applicant's last name
+  email          String   @unique // Applicant's email (must be unique)
+  cv             String   // Path to the CV file
+  status         String   @default("PENDING") // PENDING, SELECTED, REJECTED
+  jobId          String   // Foreign key referencing Job
+  job            Job      @relation(fields: [jobId], references: [id], onDelete: Cascade) // Relation to Job
+  createdAt      DateTime @default(now())  // Timestamp when the application was created
+  updatedAt      DateTime @updatedAt        // Timestamp when the application was last updated
+
+  @@map("job_applications") // Maps the model to the "job_applications" table in the database
+}
+
+
+model Keyword {
+  id          String   @id @default(cuid()) // Primary key
+  name        String   @unique // Unique keyword name
+  description String   // Description of the keyword
+  jobId       String   // Foreign key referencing Job
+  job         Job      @relation(fields: [jobId], references: [id], onDelete: Cascade) // Relation to Job
+
+  @@map("keywords") // Maps the model to the "keywords" table in the database
+}
+
+
+model Job {
+  id            String          @id @default(cuid()) // Primary key
+  title         String          // Job title
+  description   String          // Job description
+  department    String
+  position      String
+  companyId     String          // Foreign key referencing Company
+  company       Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)  // Relation to Company
+  status        String          @default("ACTIVE") // ACTIVE, CLOSED, EXPIRED
+  expirationDate DateTime       // Date when the job posting expires
+  createdBy     String          // User who created the job
+  createdAt     DateTime        @default(now())    // Job created timestamp
+  updatedBy     String?         // User who last updated the job
+  updatedAt     DateTime        @updatedAt          // Job last updated timestamp
+
+  // Relations
+  applications  JobApplication[] // One-to-many relation with JobApplication
+  keywords      Keyword[]        // One-to-many relation with Keyword
+
+  @@map("jobs") // Maps the model to the "jobs" table in the database
+  @@index([companyId]) // Indexing companyId for optimized queries
 }
