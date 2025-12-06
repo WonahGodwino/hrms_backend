@@ -1,1 +1,25 @@
-{}
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/jobs/[id]/route": "app/api/jobs/[id]/route.js",
+  "/api/auth/complete-registration/route": "app/api/auth/complete-registration/route.js",
+  "/api/auth/me/route": "app/api/auth/me/route.js",
+  "/api/auth/login/route": "app/api/auth/login/route.js",
+  "/api/jobs/route": "app/api/jobs/route.js",
+  "/api/docs/route": "app/api/docs/route.js",
+  "/api/jobs/view/route": "app/api/jobs/view/route.js",
+  "/api/jobs/upload/route": "app/api/jobs/upload/route.js",
+  "/api/auth/register/route": "app/api/auth/register/route.js",
+  "/api/jobs/template/route": "app/api/jobs/template/route.js",
+  "/api/payroll/download-failed/[id]/route": "app/api/payroll/download-failed/[id]/route.js",
+  "/api/payslips/[id]/download/route": "app/api/payslips/[id]/download/route.js",
+  "/api/payroll/upload/route": "app/api/payroll/upload/route.js",
+  "/api/recruitment/apply/route": "app/api/recruitment/apply/route.js",
+  "/api/recruitment/selection/route": "app/api/recruitment/selection/route.js",
+  "/api/test-email/route": "app/api/test-email/route.js",
+  "/api/staff/download-failed/route": "app/api/staff/download-failed/route.js",
+  "/api/staff/upload/route": "app/api/staff/upload/route.js",
+  "/api/staff/records/route": "app/api/staff/records/route.js",
+  "/api/staff/upload/history/route": "app/api/staff/upload/history/route.js",
+  "/api/profile/payslips/route": "app/api/profile/payslips/route.js",
+  "/page": "app/page.js"
+}
