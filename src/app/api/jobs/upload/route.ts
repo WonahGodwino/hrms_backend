@@ -87,11 +87,11 @@ function validateRow(row: RawRow, rowIndex: number) {
   }
 
   const cleaned: ValidatedJobRow = {
-    title,
-    description,
-    department,
-    position,
-    expirationDate: expirationDate!, // already checked
+    title: title!,        // `title!` asserts it will never be null (after validation)
+    description: description!,  // Same for description
+    department: department!,    // Same for department
+    position: position!,        // Same for position
+    expirationDate: expirationDate!, // Already validated
   }
 
   return {
