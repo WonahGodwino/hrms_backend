@@ -28,8 +28,7 @@ export async function POST(request: NextRequest) {
 
     // Parse the incoming request data
     const parsedData = await new Promise((resolve, reject) => {
-      form.parse(request, (npm i --save-dev @types/formidable
-err, fields, files) => {
+      form.parse(request, (err, fields, files) => {
         if (err) reject(err)
         resolve({ fields, files })
       })
