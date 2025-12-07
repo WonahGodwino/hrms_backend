@@ -1,4 +1,5 @@
-// src/app/api/jobs/route.ts
+// src/app/api/jobs/view/route.ts
+//admin or HR view only
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'

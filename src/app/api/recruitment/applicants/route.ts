@@ -1,0 +1,1 @@
+//api/recruitment/applicants
