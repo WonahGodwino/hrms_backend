@@ -4,7 +4,7 @@ import { NextRequest } from 'next/server';
 import { prisma } from '@/app/lib/db';
 import { ApiResponse, formatError } from '@/app/lib/utils';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
-import formidable from 'formidable';
+import { IncomingForm } from 'formidable';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
 
   try {
     // Parse form data with formidable (including files)
-    const form = formidable({
+    const form = new IncomingForm({
       maxFileSize: 5 * 1024 * 1024, // 5 MB size limit
       uploadDir: path.join(process.cwd(), 'uploads'),
       keepExtensions: true,
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
     const firstName = fields.firstName as string;
     const lastName = fields.lastName as string;
     const email = fields.email as string;
-    const cv = files.cv[0] as formidable.File | null;
+    const cv = files.cv[0] as any; // The uploaded CV file
 
     // Validate required fields
     if (!jobId || !firstName || !lastName || !email) {
@@ -152,6 +152,15 @@ export async function POST(request: NextRequest) {
         status: 'PENDING',
       },
     });
+
+    // Clean up temporary file
+    try {
+      if (fs.existsSync(cv.filepath)) {
+        fs.unlinkSync(cv.filepath);
+      }
+    } catch (cleanupError) {
+      console.error('Error cleaning up temporary file:', cleanupError);
+    }
 
     return withCors(
       ApiResponse.success(application, 'Application submitted successfully'),
