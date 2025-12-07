@@ -1,4 +1,4 @@
-// src/app/api/public/apply/route.ts
+// src/app/api/jobs/public/apply/route.ts
 
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
@@ -9,7 +9,7 @@ import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import { fileTypeFromBuffer } from 'file-type'
-import pdfParse from 'pdf-parse'
+import { pdf } from 'pdf-parse' // Changed from default import to named import
 import mammoth from 'mammoth'
 
 export async function OPTIONS(request: NextRequest) {
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     // Parse the content of the file to check for malicious code (for PDFs and DOCX)
     let parsedContent = ''
     if (fileType.mime === 'application/pdf') {
-      const pdfData = await pdfParse(fileBuffer)
+      const pdfData = await pdf(fileBuffer) // Changed from pdfParse() to pdf()
       parsedContent = pdfData.text
     } else if (fileType.mime === 'application/msword' || fileType.mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
       const docxData = await mammoth.extractRawText({ buffer: fileBuffer })
@@ -97,8 +97,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate a unique filename for the CV
-    const fileName = uuidv4() + path.extname(cv.name)
-    const filePath = path.join(process.cwd(), 'uploads', 'cv', fileName)
+    const fileName = uuidv4() + path.extname(cv.originalFilename || cv.name || 'cv')
+    const uploadDir = path.join(process.cwd(), 'uploads', 'cv')
+    
+    // Ensure the directory exists
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true })
+    }
+    
+    const filePath = path.join(uploadDir, fileName)
 
     // Save the file
     fs.renameSync(cv.filepath, filePath)
@@ -110,7 +117,7 @@ export async function POST(request: NextRequest) {
         firstName,
         lastName,
         email,
-        cv: filePath, // Save the path to the uploaded CV
+        cv: `/uploads/cv/${fileName}`, // Store relative path
         status: 'PENDING',
       },
     })
