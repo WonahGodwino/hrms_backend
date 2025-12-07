@@ -4,7 +4,7 @@ import { NextRequest } from 'next/server';
 import { prisma } from '@/app/lib/db';
 import { ApiResponse, formatError } from '@/app/lib/utils';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
-import formidable from 'formidable'; // CORRECT IMPORT - no curly braces
+import formidable from 'formidable';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -25,8 +25,8 @@ export async function POST(request: NextRequest) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
 
-    // Parse form data with formidable v2/v3 syntax
-    const form = formidable({
+    // Parse form data with formidable - using 'new' keyword
+    const form = new formidable.IncomingForm({
       maxFileSize: 5 * 1024 * 1024, // 5 MB size limit
       uploadDir: uploadDir,
       keepExtensions: true,
@@ -45,13 +45,13 @@ export async function POST(request: NextRequest) {
 
     const { fields, files } = parsedData;
     
-    // Extract form fields - formidable v2/v3 returns arrays for fields
+    // Extract form fields - formidable returns arrays for fields
     const jobId = Array.isArray(fields.jobId) ? fields.jobId[0] : fields.jobId;
     const firstName = Array.isArray(fields.firstName) ? fields.firstName[0] : fields.firstName;
     const lastName = Array.isArray(fields.lastName) ? fields.lastName[0] : fields.lastName;
     const email = Array.isArray(fields.email) ? fields.email[0] : fields.email;
     
-    // Get the CV file - formidable v2/v3 returns arrays for files
+    // Get the CV file - formidable returns arrays for files
     const cvFiles = files.cv;
     const cv = Array.isArray(cvFiles) ? cvFiles[0] : cvFiles;
 
