@@ -9,9 +9,8 @@ import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import { fileTypeFromBuffer } from 'file-type'
-import pdfParse from 'pdf-parse'
+import { PDFParse } from 'pdf-parse' // Corrected import
 import mammoth from 'mammoth'
-
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
@@ -29,7 +28,8 @@ export async function POST(request: NextRequest) {
 
     // Parse the incoming request data
     const parsedData = await new Promise((resolve, reject) => {
-      form.parse(request, (err, fields, files) => {
+      form.parse(request, (npm i --save-dev @types/formidable
+err, fields, files) => {
         if (err) reject(err)
         resolve({ fields, files })
       })
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     // Parse the content of the file to check for malicious code (for PDFs and DOCX)
     let parsedContent = ''
     if (fileType.mime === 'application/pdf') {
-      const pdfData = await pdfParse(fileBuffer)
+      const pdfData = await new PDFParse(fileBuffer)
       parsedContent = pdfData.text
     } else if (fileType.mime === 'application/msword' || fileType.mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
       const docxData = await mammoth.extractRawText({ buffer: fileBuffer })
