@@ -4,7 +4,7 @@ import { NextRequest } from 'next/server';
 import { prisma } from '@/app/lib/db';
 import { ApiResponse, formatError } from '@/app/lib/utils';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
-import formidable from 'formidable';
+import formidable from 'formidable'; // CORRECT IMPORT - no curly braces
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
