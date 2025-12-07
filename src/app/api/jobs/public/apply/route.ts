@@ -4,7 +4,7 @@ import { NextRequest } from 'next/server';
 import { prisma } from '@/app/lib/db';
 import { ApiResponse, formatError } from '@/app/lib/utils';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
-import { IncomingForm } from 'formidable';
+import formidable from 'formidable';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -19,27 +19,41 @@ export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin');
 
   try {
-    // Parse form data with formidable (including files)
-    const form = new IncomingForm({
+    // Create uploads directory if it doesn't exist
+    const uploadDir = path.join(process.cwd(), 'uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    // Parse form data with formidable v2/v3 syntax
+    const form = formidable({
       maxFileSize: 5 * 1024 * 1024, // 5 MB size limit
-      uploadDir: path.join(process.cwd(), 'uploads'),
+      uploadDir: uploadDir,
       keepExtensions: true,
+      multiples: true, // Allow multiple files
     });
 
     // Parse the incoming request data
-    const parsedData = await new Promise((resolve, reject) => {
-      form.parse(request, (err, fields, files) => {
-        if (err) reject(err);
-        resolve({ fields, files });
-      });
-    });
+    const parsedData = await new Promise<{ fields: formidable.Fields; files: formidable.Files }>(
+      (resolve, reject) => {
+        form.parse(request as any, (err, fields, files) => {
+          if (err) reject(err);
+          resolve({ fields, files });
+        });
+      }
+    );
 
-    const { fields, files } = parsedData as any;
-    const jobId = fields.jobId as string;
-    const firstName = fields.firstName as string;
-    const lastName = fields.lastName as string;
-    const email = fields.email as string;
-    const cv = files.cv[0] as any; // The uploaded CV file
+    const { fields, files } = parsedData;
+    
+    // Extract form fields - formidable v2/v3 returns arrays for fields
+    const jobId = Array.isArray(fields.jobId) ? fields.jobId[0] : fields.jobId;
+    const firstName = Array.isArray(fields.firstName) ? fields.firstName[0] : fields.firstName;
+    const lastName = Array.isArray(fields.lastName) ? fields.lastName[0] : fields.lastName;
+    const email = Array.isArray(fields.email) ? fields.email[0] : fields.email;
+    
+    // Get the CV file - formidable v2/v3 returns arrays for files
+    const cvFiles = files.cv;
+    const cv = Array.isArray(cvFiles) ? cvFiles[0] : cvFiles;
 
     // Validate required fields
     if (!jobId || !firstName || !lastName || !email) {
@@ -103,40 +117,45 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Parse the content of the file to check for malicious code
-    // Skip PDF content parsing for now, only parse DOC/DOCX files
-    let parsedContent = '';
-    
+    // Basic PDF validation - check if it starts with PDF header
     if (fileType.mime === 'application/pdf') {
-      // PDF content parsing is disabled for now
-      parsedContent = 'PDF content - parsing disabled';
-    } else if (
+      // Check if file starts with PDF header (first 4 bytes should be "%PDF")
+      const pdfHeader = fileBuffer.slice(0, 4).toString();
+      if (pdfHeader !== '%PDF') {
+        return withCors(
+          ApiResponse.error('Invalid PDF file format', 400),
+          origin
+        );
+      }
+    }
+
+    // Parse the content of the file to check for malicious code (DOC/DOCX only)
+    let parsedContent = '';
+    if (
       fileType.mime === 'application/msword' ||
       fileType.mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     ) {
       const docxData = await mammoth.extractRawText({ buffer: fileBuffer });
       parsedContent = docxData.value;
-    }
-
-    // Simple content validation to avoid executable scripts or malicious content
-    if (parsedContent.includes('<script>') || parsedContent.includes('eval(')) {
-      return withCors(
-        ApiResponse.error('File contains potentially harmful content', 400),
-        origin
-      );
+      
+      // Simple content validation to avoid executable scripts or malicious content
+      if (parsedContent.includes('<script>') || parsedContent.includes('eval(')) {
+        return withCors(
+          ApiResponse.error('File contains potentially harmful content', 400),
+          origin
+        );
+      }
     }
 
     // Generate a unique filename for the CV
-    const fileExtension = path.extname(cv.originalFilename || cv.name || 'cv');
-    const fileName = uuidv4() + fileExtension;
-    const uploadDir = path.join(process.cwd(), 'uploads', 'cv');
-
-    // Ensure the directory exists
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+    const cvUploadDir = path.join(process.cwd(), 'uploads', 'cv');
+    if (!fs.existsSync(cvUploadDir)) {
+      fs.mkdirSync(cvUploadDir, { recursive: true });
     }
 
-    const filePath = path.join(uploadDir, fileName);
+    const fileExtension = path.extname(cv.originalFilename || cv.name || 'cv');
+    const fileName = uuidv4() + fileExtension;
+    const filePath = path.join(cvUploadDir, fileName);
 
     // Save the file
     fs.renameSync(cv.filepath, filePath);
@@ -153,7 +172,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Clean up temporary file
+    // Clean up temporary file if it still exists
     try {
       if (fs.existsSync(cv.filepath)) {
         fs.unlinkSync(cv.filepath);
