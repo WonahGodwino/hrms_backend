@@ -4,12 +4,14 @@ import { NextRequest } from 'next/server';
 import { prisma } from '@/app/lib/db';
 import { ApiResponse, formatError } from '@/app/lib/utils';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
-import formidable from 'formidable';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { fileTypeFromBuffer } from 'file-type';
 import mammoth from 'mammoth';
+
+// Use require syntax to avoid TypeScript issues with formidable
+const formidable = require('formidable');
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -25,8 +27,8 @@ export async function POST(request: NextRequest) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
 
-    // Parse form data with formidable - using 'new' keyword
-    const form = new formidable.IncomingForm({
+    // Parse form data with formidable - use the correct syntax for your version
+    const form = formidable({
       maxFileSize: 5 * 1024 * 1024, // 5 MB size limit
       uploadDir: uploadDir,
       keepExtensions: true,
@@ -34,9 +36,9 @@ export async function POST(request: NextRequest) {
     });
 
     // Parse the incoming request data
-    const parsedData = await new Promise<{ fields: formidable.Fields; files: formidable.Files }>(
+    const parsedData = await new Promise<{ fields: any; files: any }>(
       (resolve, reject) => {
-        form.parse(request as any, (err, fields, files) => {
+        form.parse(request as any, (err: any, fields: any, files: any) => {
           if (err) reject(err);
           resolve({ fields, files });
         });
