@@ -9,8 +9,9 @@ import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import { fileTypeFromBuffer } from 'file-type'
-import { PDFParse } from 'pdf-parse' // Corrected import
+import pdfParse from 'pdf-parse'
 import mammoth from 'mammoth'
+
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
@@ -20,7 +21,7 @@ export async function POST(request: NextRequest) {
 
   try {
     // Parse form data with formidable (including files)
-    const form = new formidable.Formidable({
+    const form = formidable({
       maxFileSize: 5 * 1024 * 1024, // 5 MB size limit
       uploadDir: path.join(process.cwd(), 'uploads'),
       keepExtensions: true, // Retain file extensions
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest) {
     const firstName = fields.firstName as string
     const lastName = fields.lastName as string
     const email = fields.email as string
-    const cv = files.cv[0] as formidable.File | null // Uploaded CV file
+    const cv = files.cv[0] as formidable.File | null // The uploaded CV file
 
     // Validate required fields
     if (!jobId || !firstName || !lastName || !email) {
@@ -83,7 +84,7 @@ export async function POST(request: NextRequest) {
     // Parse the content of the file to check for malicious code (for PDFs and DOCX)
     let parsedContent = ''
     if (fileType.mime === 'application/pdf') {
-      const pdfData = await new PDFParse(fileBuffer)
+      const pdfData = await pdfParse(fileBuffer)
       parsedContent = pdfData.text
     } else if (fileType.mime === 'application/msword' || fileType.mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
       const docxData = await mammoth.extractRawText({ buffer: fileBuffer })
