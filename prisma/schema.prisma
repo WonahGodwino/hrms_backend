@@ -201,6 +201,7 @@ model JobApplication {
   lastName       String   // Applicant's last name
   email          String   @unique // Applicant's email (must be unique)
   cv             String   // Path to the CV file
+  parsedCvContent String?
   status         String   @default("PENDING") // PENDING, SELECTED, REJECTED
   jobId          String   // Foreign key referencing Job
   job            Job      @relation(fields: [jobId], references: [id], onDelete: Cascade) // Relation to Job
