@@ -1,4 +1,3 @@
-// src/app/lib/formidable.d.ts
 declare module 'formidable' {
   import { IncomingMessage } from 'http'
 
@@ -15,6 +14,5 @@ declare module 'formidable' {
 
   export default class Formidable {
     parse(req: IncomingMessage, callback: (err: any, fields: Fields, files: Files) => void): void
-    // Add other methods as needed, such as file handling, etc.
   }
 }
