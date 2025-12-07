@@ -11,11 +11,20 @@ import { v4 as uuidv4 } from 'uuid';
 import { fileTypeFromBuffer } from 'file-type';
 import mammoth from 'mammoth';
 
-// Dynamic import for pdf-parse to avoid TypeScript issues
-const pdfParse = async (buffer: Buffer): Promise<{ text: string }> => {
-  const pdfModule = await import('pdf-parse');
-  return pdfModule.default(buffer);
-};
+// Try different ways to import pdf-parse
+let pdfParseFn: (buffer: Buffer) => Promise<{ text: string }>;
+
+try {
+  // Method 1: Try to import as CommonJS module
+  const pdfParseModule = require('pdf-parse');
+  pdfParseFn = pdfParseModule.default || pdfParseModule;
+} catch {
+  // Method 2: Dynamic import with fallback
+  pdfParseFn = async (buffer: Buffer) => {
+    const module = await import('pdf-parse');
+    return (module.default || module)(buffer);
+  };
+}
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -113,7 +122,7 @@ export async function POST(request: NextRequest) {
     let parsedContent = '';
     
     if (fileType.mime === 'application/pdf') {
-      const pdfData = await pdfParse(fileBuffer);
+      const pdfData = await pdfParseFn(fileBuffer);
       parsedContent = pdfData.text;
     } else if (
       fileType.mime === 'application/msword' ||
