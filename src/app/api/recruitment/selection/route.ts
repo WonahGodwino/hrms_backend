@@ -3,7 +3,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { extractKeywords } from '@/app/lib/keywordExtractor'
 
@@ -34,14 +34,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { jobId } = await request.json()
+    const body = await request.json().catch(() => null)
 
-    if (!jobId) {
+    if (!body || !body.jobId) {
       return withCors(
         ApiResponse.error('jobId is required', 400),
         origin
       )
     }
+
+    const { jobId } = body
 
     // 🔎 Fetch job *scoped by companyId*
     const job = await prisma.job.findFirst({
@@ -50,7 +52,7 @@ export async function POST(request: NextRequest) {
         companyId: user.companyId as string,
       },
       include: {
-        applications: true, // relation name from your Prisma model
+        applications: true, // relation name from your Prisma schema
       },
     })
 
@@ -64,40 +66,83 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const applicants = job.applications
+    const applicants = job.applications as any[]
 
     if (!applicants.length) {
       return withCors(
-        ApiResponse.success([], 'No applications found for this job'),
+        ApiResponse.success(
+          {
+            job: {
+              id: job.id,
+              title: job.title,
+            },
+            applicants: [],
+          },
+          'No applications found for this job'
+        ),
         origin
       )
     }
 
-    // 🧠 Extract keywords from job description
-    const jobKeywords = extractKeywords(job.description || '')
+    // 🧠 Extract keywords from job description (and title to make it richer)
+    const jobText = [
+      job.title || '',
+      job.description || '',
+      (job as any).requirements || '',
+      (job as any).responsibilities || '',
+    ]
+      .join(' ')
+      .trim()
+
+    let jobKeywords = extractKeywords(jobText)
+      .map((k) => k.toLowerCase().trim())
+      .filter(Boolean)
+
+    // De-duplicate keywords
+    jobKeywords = Array.from(new Set(jobKeywords))
 
     // 🧮 Rank applicants based on keyword matching in parsedCvContent
     const rankedApplicants = applicants.map((applicant) => {
       const cvText =
-        (applicant as any).parsedCvContent?.toLowerCase?.() || ''
+        (applicant.parsedCvContent as string | undefined)?.toLowerCase?.() || ''
 
       let matchCount = 0
+      const matchedKeywords: string[] = []
 
-      jobKeywords.forEach((keyword) => {
-        if (!keyword) return
-        const k = keyword.toLowerCase()
-        if (cvText.includes(k)) {
+      for (const keyword of jobKeywords) {
+        if (!keyword) continue
+        if (cvText.includes(keyword)) {
           matchCount++
+          matchedKeywords.push(keyword)
         }
-      })
+      }
 
-      return { ...applicant, matchCount }
+      const score =
+        jobKeywords.length > 0 ? matchCount / jobKeywords.length : 0
+
+      return {
+        ...applicant,
+        matchCount,
+        score, // 0–1 ratio of matched keywords
+        matchedKeywords: Array.from(new Set(matchedKeywords)),
+      }
     })
 
-    // ⬇️ Sort by matchCount (desc)
-    const sortedApplicants = rankedApplicants.sort(
-      (a, b) => b.matchCount - a.matchCount
-    )
+    // ⬇️ Sort by matchCount (desc), then by createdAt (oldest first if same score)
+    const sortedApplicants = rankedApplicants.sort((a, b) => {
+      if (b.matchCount !== a.matchCount) {
+        return b.matchCount - a.matchCount
+      }
+      const aDate = new Date(a.createdAt || 0).getTime()
+      const bDate = new Date(b.createdAt || 0).getTime()
+      return aDate - bDate
+    })
+
+    // Add explicit rank for UI (1 = most qualified)
+    const applicantsWithRank = sortedApplicants.map((app, index) => ({
+      ...app,
+      rank: index + 1,
+    }))
 
     return withCors(
       ApiResponse.success(
@@ -106,14 +151,16 @@ export async function POST(request: NextRequest) {
             id: job.id,
             title: job.title,
           },
-          applicants: sortedApplicants,
+          applicants: applicantsWithRank,
         },
         'Applicants ranked based on keyword match'
       ),
       origin
     )
   } catch (error: unknown) {
-    const message = formatError(error)
-    return withCors(ApiResponse.error(message, 500), origin)
+    return withCors(
+      handleApiError(error),
+      origin
+    )
   }
 }
