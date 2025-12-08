@@ -1,35 +1,41 @@
-//api/staff/upload/history
-import { NextRequest } from 'next/server';
-import { prisma } from '@/app/lib/db';
-import { requireRole } from '@/app/lib/auth';
-import { ApiResponse, handleApiError } from '@/app/lib/utils';
-import { withCors } from '@/app/lib/cors';
+// src/app/api/staff/upload/history/route.ts
+
+import { NextRequest } from 'next/server'
+import { prisma } from '@/app/lib/db'
+import { requireRole } from '@/app/lib/auth'
+import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import { handleCorsOptions, withCors } from '@/app/lib/cors'
+
+// Handle preflight CORS
+export async function OPTIONS(request: NextRequest) {
+  return handleCorsOptions(request)
+}
 
 export async function GET(request: NextRequest) {
-  const origin = request.headers.get('origin');
+  const origin = request.headers.get('origin')
 
   try {
     // 1) Ensure we have an Authorization header and a clean token string
-    const authHeader = request.headers.get('authorization');
+    const authHeader = request.headers.get('authorization')
     if (!authHeader) {
       return withCors(
         ApiResponse.error('Authorization header missing', 401),
         origin
-      );
+      )
     }
 
-    const token = authHeader.replace('Bearer ', '');
+    const token = authHeader.replace('Bearer ', '')
     // Only HR, SUPER_ADMIN can use this endpoint
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN']);
+    const user = requireRole(token, ['HR', 'SUPER_ADMIN'])
 
     if (!user.companyId) {
       return withCors(
         ApiResponse.error('No company context for this user', 400),
         origin
-      );
+      )
     }
 
-    const companyId = user.companyId as string;
+    const companyId = user.companyId as string
 
     // 2) Fetch staff upload data for the company
     const staffUploads = await prisma.staffUpload.findMany({
@@ -45,7 +51,7 @@ export async function GET(request: NextRequest) {
         failed: true,
         successful: true,
       },
-    });
+    })
 
     // 3) Return the response
     return withCors(
@@ -64,8 +70,11 @@ export async function GET(request: NextRequest) {
         'Staff upload records fetched successfully'
       ),
       origin
-    );
+    )
   } catch (error) {
-    return withCors(handleApiError(error), origin);
+    return withCors(
+      handleApiError(error),
+      origin
+    )
   }
 }
