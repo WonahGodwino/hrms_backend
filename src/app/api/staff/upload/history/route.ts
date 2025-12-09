@@ -6,7 +6,7 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
-// Handle preflight CORS
+// CORS preflight
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
 
   try {
-    // 1) Ensure we have an Authorization header and a clean token string
+    // 1) Auth
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
       return withCors(
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    // Only HR, SUPER_ADMIN can use this endpoint
+    // HR & SUPER_ADMIN can view staff upload history
     const user = requireRole(token, ['HR', 'SUPER_ADMIN'])
 
     if (!user.companyId) {
@@ -37,35 +37,96 @@ export async function GET(request: NextRequest) {
 
     const companyId = user.companyId as string
 
-    // 2) Fetch staff upload data for the company
-    const staffUploads = await prisma.staffUpload.findMany({
-      where: { companyId },
-      orderBy: {
-        createdAt: 'desc', // Sort by date in descending order
-      },
-      select: {
-        id: true,
-        fileName: true,
-        createdAt: true,
-        uploadedBy: true,
-        failed: true,
-        successful: true,
-      },
+    // 2) Pagination
+    const { searchParams } = new URL(request.url)
+    const page = parseInt(searchParams.get('page') || '1', 10)
+    const limit = parseInt(searchParams.get('limit') || '10', 10)
+    const skip = (page - 1) * limit
+
+    // 3) Fetch uploads + total count (company-scoped)
+    const [uploads, totalUploads] = await Promise.all([
+      prisma.staffUpload.findMany({
+        where: { companyId },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          fileName: true,
+          createdAt: true,
+          uploadedBy: true,   // this should hold StaffRecord.id
+          successful: true,
+          failed: true,
+          totalRecords: true,
+        },
+      }),
+      prisma.staffUpload.count({ where: { companyId } }),
+    ])
+
+    // 4) Load uploader StaffRecord details (name + email)
+    const uploaderIds = Array.from(
+      new Set(
+        uploads
+          .map((u) => u.uploadedBy)
+          .filter((id): id is string => Boolean(id))
+      )
+    )
+
+    const uploaders = uploaderIds.length
+      ? await prisma.staffRecord.findMany({
+          where: { id: { in: uploaderIds } },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        })
+      : []
+
+    const uploaderMap = new Map(
+      uploaders.map((u) => [u.id, u])
+    )
+
+    // 5) Shape response DTO for UI
+    const rows = uploads.map((upload) => {
+      const uploader = uploaderMap.get(upload.uploadedBy || '')
+
+      const fullName = uploader
+        ? `${uploader.firstName} ${uploader.lastName}`.trim()
+        : 'Unknown Staff'
+
+      const email = uploader?.email || null
+
+      // Short reference like #U-10524 (last 5 chars)
+      const shortRef = `#U-${upload.id.slice(-5).toUpperCase()}`
+
+      const totalRecords =
+        upload.totalRecords ?? upload.successful + upload.failed
+
+      return {
+        uploadId: upload.id,
+        reference: shortRef,
+        fileName: upload.fileName,
+        uploadedOn: upload.createdAt,
+        uploaderName: fullName,
+        uploaderEmail: email,
+        successful: upload.successful,
+        failed: upload.failed,
+        totalRecords,
+      }
     })
 
-    // 3) Return the response
     return withCors(
       ApiResponse.success(
         {
-          uploads: staffUploads.map((upload) => ({
-            uploadId: upload.id,
-            fileName: upload.fileName,
-            uploadedOn: upload.createdAt,
-            uploadedBy: upload.uploadedBy,
-            failed: upload.failed,
-            successful: upload.successful,
-            totalRecords: upload.successful + upload.failed,
-          })),
+          uploads: rows,
+          meta: {
+            page,
+            limit,
+            totalUploads,
+            totalPages: Math.ceil(totalUploads / limit),
+          },
         },
         'Staff upload records fetched successfully'
       ),
