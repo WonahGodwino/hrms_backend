@@ -311,6 +311,12 @@ export async function POST(request: NextRequest) {
       failed: 0,
       payslipsGenerated: 0,
       emailsSent: 0,
+      emailAttempts: 0,
+      emailFailures: [] as {
+        rowNumber: number
+        email: string
+        error: string
+      }[],
       processedRecords: [] as any[],
       failedRecords: [] as any[],
       errors: [] as string[],
@@ -322,7 +328,7 @@ export async function POST(request: NextRequest) {
 
     for (let index = 0; index < data.length; index++) {
       const row = data[index]
-      const displayRowNumber = index + 3 // row 1 = headers, row 2 = % row
+      const displayRowNumber = index + 3 // row 1 = headers, row 2 = % row (usually)
 
       try {
         const rowData = row as any
@@ -496,6 +502,7 @@ export async function POST(request: NextRequest) {
           continue
         }
 
+        // Upsert payroll
         const payroll = await prisma.payroll.upsert({
           where: {
             staffRecordId_month_year_companyId: {
@@ -669,7 +676,9 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        // 🔔 EMAIL NOTIFICATION (separate from processing success)
         if (sendEmails) {
+          results.emailAttempts++
           try {
             await sendPayrollNotificationEmail(staffRecord, {
               month: monthName,
@@ -679,7 +688,13 @@ export async function POST(request: NextRequest) {
             results.emailsSent++
           } catch (err: any) {
             const msg = `Email sending failed - ${err.message}`
+            // Do NOT increment results.failed here; processing is successful
             results.errors.push(`Row ${displayRowNumber}: ${msg}`)
+            results.emailFailures.push({
+              rowNumber: displayRowNumber,
+              email: staffRecord.email,
+              error: msg,
+            })
           }
         }
 
@@ -771,6 +786,8 @@ export async function POST(request: NextRequest) {
         failed: results.failed,
         payslipsGenerated: results.payslipsGenerated,
         emailsSent: results.emailsSent,
+        emailAttempts: results.emailAttempts,
+        emailFailures: results.emailFailures.length,
       },
     }
 
