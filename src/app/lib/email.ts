@@ -2,47 +2,38 @@
 import nodemailer from 'nodemailer'
 import { prisma } from '@/app/lib/db'
 
-const host = process.env.SMTP_HOST
-const port = Number(process.env.SMTP_PORT || 587)
-const user = process.env.SMTP_USER
-const pass = process.env.SMTP_PASS
-const from = process.env.SMTP_FROM || user
-
-if (!host || !port || !user || !pass) {
-  console.warn(
-    '[EMAIL] SMTP env vars missing. Emails will fail until you set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS.'
-  )
+type PayrollEmailPayload = {
+  month: string
+  year: number
+  netSalary: number
 }
 
-export const transporter = nodemailer.createTransport({
-  host,
-  port,
-  secure: port === 465, // 465 = SSL, 587 = STARTTLS
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: parseInt(process.env.SMTP_PORT || '587', 10),
+  secure: false, // STARTTLS
   auth: {
-    user,
-    pass,
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
   },
-  // Turn on debug in Render logs if needed
-  // logger: true,
-  // debug: true,
 })
 
 export async function sendPayrollNotificationEmail(
   staffRecord: any,
-  payroll: { month: string; year: number; netSalary: number }
+  payroll: PayrollEmailPayload
 ) {
-  // Optional: verify connection (you can comment this out after confirming things work)
-  // await transporter.verify()
-
+  // Fetch company details
   const company = await prisma.company.findUnique({
     where: { id: staffRecord.companyId },
   })
 
-  const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
+  const baseUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || ''
   const loginLink = `${baseUrl}/profile`
 
+  const netAmount = Number(payroll.netSalary || 0)
+
   const mailOptions = {
-    from: from || company?.email || 'no-reply@hrms.com',
+    from: company?.email || process.env.SMTP_FROM || 'no-reply@hrms.com',
     to: staffRecord.email,
     subject: `Your Payslip for ${payroll.month} ${payroll.year}`,
     html: `
@@ -58,9 +49,7 @@ export async function sendPayrollNotificationEmail(
             <p>Hello ${staffRecord.firstName} ${staffRecord.lastName},</p>
             <p>Your payslip for <strong>${payroll.month} ${payroll.year}</strong> is ready.</p>
 
-            <p><strong>Net Salary:</strong> ₦${Number(
-              payroll.netSalary ?? payroll['netPay'] ?? 0
-            ).toLocaleString('en-NG', { minimumFractionDigits: 2 })}</p>
+            <p><strong>Net Salary:</strong> ₦${netAmount.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</p>
 
             <p>Department: ${staffRecord.department || '-'}</p>
 
