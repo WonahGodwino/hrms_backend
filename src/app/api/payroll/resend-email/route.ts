@@ -4,8 +4,8 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { sendPayrollNotificationEmail } from '@/app/lib/email'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { sendPayrollNotificationEmail } from '@/app/lib/email'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -16,16 +16,19 @@ export async function OPTIONS(request: NextRequest) {
  *
  * Body:
  * {
- *   payrollId: string;              // required
- *   overrideEmail?: string;         // optional corrected email
- *   updateStaffEmail?: boolean;     // if true, also update StaffRecord.email
+ *   staffEmail: string;   // email used during payroll
+ *   newEmail?: string;    // optional corrected email
+ *   month?: string;       // optional: filter specific month (e.g. "January")
+ *   year?: number;        // optional: filter specific year
  * }
  *
- * - Only HR / SUPER_ADMIN can use this endpoint.
- * - Scoped by companyId (multi-company safe).
- * - Resends the payroll notification email for an already processed payroll.
- * - If overrideEmail is provided, email is sent to that address.
- * - If updateStaffEmail = true and overrideEmail is provided, StaffRecord.email is updated.
+ * Behaviour:
+ * - HR / SUPER_ADMIN only.
+ * - Scoped by companyId.
+ * - Finds staffRecord by staffEmail (in that company).
+ * - If newEmail is provided, validates it and updates staffRecord.email.
+ * - Finds latest PROCESSED payroll (or specific month/year if provided).
+ * - Resends payroll notification email.
  */
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin')
@@ -52,145 +55,141 @@ export async function POST(request: NextRequest) {
     const companyId = user.companyId as string
 
     // 2) Parse body
-    const body = await request.json().catch(() => null)
+    const body = await request.json()
+    const {
+      staffEmail,
+      newEmail,
+      month,
+      year,
+    }: {
+      staffEmail: string
+      newEmail?: string
+      month?: string
+      year?: number
+    } = body
 
-    if (!body || !body.payrollId) {
+    if (!staffEmail) {
       return withCors(
-        ApiResponse.error('payrollId is required in the request body', 400),
+        ApiResponse.error('staffEmail is required', 400),
         origin
       )
     }
 
-    const payrollId: string = body.payrollId
-    const overrideEmail: string | undefined =
-      typeof body.overrideEmail === 'string'
-        ? body.overrideEmail.trim()
-        : undefined
-    const updateStaffEmail: boolean = Boolean(body.updateStaffEmail)
-
-    // 3) Fetch payroll (scoped by company)
-    const payroll = await prisma.payroll.findFirst({
+    // 3) Find staff by current email
+    let staff = await prisma.staffRecord.findFirst({
       where: {
-        id: payrollId,
-        companyId,
-      },
-    })
-
-    if (!payroll) {
-      return withCors(
-        ApiResponse.error(
-          'Payroll not found for this company or you do not have access',
-          404
-        ),
-        origin
-      )
-    }
-
-    // 4) Fetch staff record tied to this payroll
-    const staffRecord = await prisma.staffRecord.findFirst({
-      where: {
-        id: payroll.staffRecordId,
+        email: staffEmail,
         companyId,
         isActive: true,
       },
     })
 
-    if (!staffRecord) {
+    if (!staff) {
       return withCors(
         ApiResponse.error(
-          'Staff record linked to this payroll could not be found or is inactive',
+          'Staff not found for the provided email in this company',
           404
         ),
         origin
       )
     }
 
-    // 5) Determine email to send to
-    let emailToUse = overrideEmail || staffRecord.email
+    // 4) If newEmail is provided, validate and update
+    if (newEmail && newEmail !== staff.email) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+      if (!emailRegex.test(newEmail)) {
+        return withCors(
+          ApiResponse.error('Invalid newEmail format', 400),
+          origin
+        )
+      }
 
-    if (!emailToUse) {
-      return withCors(
-        ApiResponse.error(
-          'No email address available. Provide overrideEmail or ensure staff has a valid email.',
-          400
-        ),
-        origin
-      )
-    }
+      const existingWithNewEmail = await prisma.staffRecord.findFirst({
+        where: {
+          companyId,
+          email: newEmail.toLowerCase(),
+          NOT: { id: staff.id },
+        },
+      })
 
-    emailToUse = emailToUse.trim().toLowerCase()
-
-    // Simple email format validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailRegex.test(emailToUse)) {
-      return withCors(
-        ApiResponse.error('overrideEmail is not a valid email address', 400),
-        origin
-      )
-    }
-
-    // 6) Optionally update StaffRecord.email if requested
-    if (overrideEmail && updateStaffEmail) {
-      try {
-        // NOTE: this may fail if another staff in same company already uses that email (unique constraint)
-        await prisma.staffRecord.update({
-          where: { id: staffRecord.id },
-          data: {
-            email: emailToUse,
-          },
-        })
-      } catch (err: any) {
-        // Unique constraint / DB error
-        const msg =
-          err?.code === 'P2002'
-            ? 'Email already exists for another staff in this company'
-            : err?.message || 'Failed to update staff email'
-
+      if (existingWithNewEmail) {
         return withCors(
           ApiResponse.error(
-            `Could not update staff email: ${msg}`,
+            'Another staff already uses this new email in this company',
             400
           ),
           origin
         )
       }
-    }
 
-    // 7) Send the email (using possibly updated staff + emailToUse)
-    const staffForEmail = {
-      ...staffRecord,
-      email: emailToUse,
-    }
-
-    try {
-      await sendPayrollNotificationEmail(staffForEmail, {
-        month: payroll.month,
-        year: payroll.year,
-        netSalary: payroll.netSalary ?? payroll.netPay ?? 0,
+      staff = await prisma.staffRecord.update({
+        where: { id: staff.id },
+        data: {
+          email: newEmail.toLowerCase(),
+        },
       })
+    }
 
-      return withCors(
-        ApiResponse.success(
-          {
-            payrollId: payroll.id,
-            staffId: staffRecord.staffId,
-            emailSentTo: emailToUse,
-            updatedStaffEmail: overrideEmail && updateStaffEmail ? true : false,
-          },
-          'Payroll notification email resent successfully'
-        ),
-        origin
-      )
-    } catch (err: any) {
-      const message = err?.message || 'Failed to send email'
+    // 5) Find latest processed payroll (optionally filtered by month/year)
+    const payrollWhere: any = {
+      staffRecordId: staff.id,
+      companyId,
+      status: 'PROCESSED',
+    }
+
+    if (month) {
+      payrollWhere.month = month
+    }
+    if (year) {
+      payrollWhere.year = year
+    }
+
+    const payroll = await prisma.payroll.findFirst({
+      where: payrollWhere,
+      orderBy: { createdAt: 'desc' },
+    })
+
+    if (!payroll) {
       return withCors(
         ApiResponse.error(
-          `Failed to resend payroll email: ${message}`,
-          500
+          'No processed payroll found for this staff with the given criteria',
+          404
         ),
         origin
       )
     }
+
+    // 6) Safely convert Decimal → number
+    const rawNet =
+      (payroll as any).netSalary ??
+      (payroll as any).netPay ??
+      0
+
+    const netSalaryNumber = Number(rawNet || 0)
+
+    // 7) Send payroll notification email
+    await sendPayrollNotificationEmail(
+      staff,
+      {
+        month: payroll.month,
+        year: payroll.year,
+        netSalary: netSalaryNumber,
+      }
+    )
+
+    return withCors(
+      ApiResponse.success(
+        {
+          staffId: staff.staffId,
+          emailSentTo: staff.email,
+          payrollMonth: payroll.month,
+          payrollYear: payroll.year,
+          netSalary: netSalaryNumber,
+        },
+        'Payroll notification email resent successfully'
+      ),
+      origin
+    )
   } catch (error) {
     return withCors(
       handleApiError(error),
