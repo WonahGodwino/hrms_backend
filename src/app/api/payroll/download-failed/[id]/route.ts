@@ -1,6 +1,6 @@
 // src/app/api/payroll/download-failed/[id]/route.ts
 
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
@@ -100,13 +100,13 @@ export async function GET(
       )
     }
 
-    // 6) Stream the file to the client
+    // 6) Stream the file to the client (NextResponse instead of Response)
     const fileStream = createReadStream(uploadRecord.processedFilePath)
     const fileName = `failed-records-${uploadRecord.fileName || uploadRecord.id}.xlsx`
 
     console.log(`Streaming file: ${fileName}`)
 
-    const fileResponse = new Response(fileStream as any, {
+    const fileResponse = new NextResponse(fileStream as any, {
       headers: {
         'Content-Type':
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
