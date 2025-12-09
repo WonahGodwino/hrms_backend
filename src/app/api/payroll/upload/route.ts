@@ -199,8 +199,23 @@ export async function POST(request: NextRequest) {
     const companyId: string = user.companyId
 
     const formData = await request.formData()
-    const file = formData.get('file') as File
-    const sendEmails = formData.get('sendEmails') === 'true'
+    const file = formData.get('file') as File | null
+
+    // 🔔 NEW: sendEmails defaults to true if not provided
+    const rawSendEmails = formData.get('sendEmails')
+    const sendEmails =
+      rawSendEmails === null
+        ? true
+        : String(rawSendEmails).toLowerCase() === 'true'
+
+    console.log(
+      '[PAYROLL_UPLOAD] Incoming upload:',
+      JSON.stringify({
+        companyId,
+        fileName: file?.name,
+        sendEmails,
+      })
+    )
 
     if (!file) {
       return withCors(
@@ -233,6 +248,7 @@ export async function POST(request: NextRequest) {
       const workbook = new ExcelJS.Workbook()
 
       if (isCsv) {
+        console.log('[PAYROLL_UPLOAD] Parsing CSV file')
         const csvText = buffer.toString()
         const lines = csvText.split(/\r?\n/).filter((l) => l.trim())
         if (!lines.length) throw new Error('Empty CSV file')
@@ -256,6 +272,7 @@ export async function POST(request: NextRequest) {
           data = data.slice(1)
         }
       } else {
+        console.log('[PAYROLL_UPLOAD] Parsing Excel file')
         await workbook.xlsx.load(bytes as ArrayBuffer)
         const worksheet = workbook.worksheets[0]
         if (!worksheet) throw new Error('No worksheet found in Excel file')
@@ -291,7 +308,12 @@ export async function POST(request: NextRequest) {
           if (hasAny) data.push(rowData)
         })
       }
+
+      console.log(
+        `[PAYROLL_UPLOAD] Parsed rows: ${data.length}, isExcel=${isExcel}, isCsv=${isCsv}`
+      )
     } catch (err: any) {
+      console.error('[PAYROLL_UPLOAD] Error parsing file:', err)
       return withCors(
         ApiResponse.error(`Error parsing file: ${err.message}`, 400),
         origin
@@ -325,6 +347,8 @@ export async function POST(request: NextRequest) {
     const now = new Date()
     const defaultMonthName = now.toLocaleString('en-US', { month: 'long' })
     const defaultYear = now.getFullYear()
+
+    console.log('[PAYROLL_UPLOAD] Starting row processing')
 
     for (let index = 0; index < data.length; index++) {
       const row = data[index]
@@ -502,6 +526,10 @@ export async function POST(request: NextRequest) {
           continue
         }
 
+        console.log(
+          `[PAYROLL_UPLOAD] Upserting payroll for staffId=${staffRecord.staffId}, month=${monthName}, year=${year}`
+        )
+
         // Upsert payroll
         const payroll = await prisma.payroll.upsert({
           where: {
@@ -593,6 +621,10 @@ export async function POST(request: NextRequest) {
           },
         })
 
+        console.log(
+          `[PAYROLL_UPLOAD] Payroll upserted. PayrollId=${payroll.id}`
+        )
+
         // Payslip check
         const existingPayslip = await prisma.payslip.findFirst({
           where: {
@@ -606,6 +638,10 @@ export async function POST(request: NextRequest) {
         let pdfPath: string | null = null
 
         if (!existingPayslip) {
+          console.log(
+            `[PAYROLL_UPLOAD] Generating payslip PDF for staffId=${staffRecord.staffId}`
+          )
+
           const parsedRow: ParsedPayrollRow = {
             rowNumber: displayRowNumber,
             staffId: staffRecord.staffId,
@@ -644,8 +680,15 @@ export async function POST(request: NextRequest) {
             })
             pdfPath = generatedPath
             results.payslipsGenerated++
+            console.log(
+              `[PAYROLL_UPLOAD] Payslip PDF generated: ${pdfPath}`
+            )
           } catch (err: any) {
             const message = `Failed to generate payslip PDF - ${err.message}`
+            console.error(
+              `[PAYROLL_UPLOAD] Error generating payslip PDF (row ${displayRowNumber}):`,
+              err
+            )
             results.failed++
             results.errors.push(`Row ${displayRowNumber}: ${message}`)
             results.failedRecords.push({ ...rowData, error: message })
@@ -667,19 +710,33 @@ export async function POST(request: NextRequest) {
                 netPay: netSalary,
               },
             })
+            console.log(
+              `[PAYROLL_UPLOAD] Payslip DB record created for staffId=${staffRecord.staffId}`
+            )
           } catch (err: any) {
             const message = `Payslip DB record error - ${err.message}`
+            console.error(
+              `[PAYROLL_UPLOAD] Error creating payslip record (row ${displayRowNumber}):`,
+              err
+            )
             results.failed++
             results.errors.push(`Row ${displayRowNumber}: ${message}`)
             results.failedRecords.push({ ...rowData, error: message })
             continue
           }
+        } else {
+          console.log(
+            `[PAYROLL_UPLOAD] Payslip already exists for staffId=${staffRecord.staffId}, skipping PDF generation`
+          )
         }
 
         // 🔔 EMAIL NOTIFICATION (separate from processing success)
         if (sendEmails) {
           results.emailAttempts++
           try {
+            console.log(
+              `[PAYROLL_UPLOAD] Sending email to ${staffRecord.email} for month=${monthName}, year=${year}`
+            )
             await sendPayrollNotificationEmail(staffRecord, {
               month: monthName,
               year,
@@ -688,6 +745,10 @@ export async function POST(request: NextRequest) {
             results.emailsSent++
           } catch (err: any) {
             const msg = `Email sending failed - ${err.message}`
+            console.error(
+              `[PAYROLL_UPLOAD] Email sending failed (row ${displayRowNumber}):`,
+              err
+            )
             // Do NOT increment results.failed here; processing is successful
             results.errors.push(`Row ${displayRowNumber}: ${msg}`)
             results.emailFailures.push({
@@ -707,12 +768,25 @@ export async function POST(request: NextRequest) {
           status: 'PROCESSED',
         })
       } catch (err: any) {
+        console.error(
+          `[PAYROLL_UPLOAD] Unexpected error processing row ${displayRowNumber}:`,
+          err
+        )
         const message = err?.message || 'Unknown error'
         results.failed++
         results.errors.push(`Row ${displayRowNumber}: ${message}`)
         results.failedRecords.push({ ...(row as any), error: message })
       }
     }
+
+    console.log('[PAYROLL_UPLOAD] Finished row processing', {
+      successful: results.successful,
+      failed: results.failed,
+      payslipsGenerated: results.payslipsGenerated,
+      emailsSent: results.emailsSent,
+      emailAttempts: results.emailAttempts,
+      emailFailures: results.emailFailures.length,
+    })
 
     const uploadDir = path.join(process.cwd(), 'uploads', 'payroll')
     await mkdir(uploadDir, { recursive: true })
@@ -756,6 +830,10 @@ export async function POST(request: NextRequest) {
       await writeFile(failedFilePath, Buffer.from(failedBuffer as any))
 
       processedFilePath = failedFilePath
+
+      console.log(
+        `[PAYROLL_UPLOAD] Failed-records file written at: ${processedFilePath}`
+      )
     }
 
     const uploadRecord = await prisma.payrollUpload.create({
@@ -796,6 +874,8 @@ export async function POST(request: NextRequest) {
         `/api/payroll/download-failed/${uploadRecord.id}`
     }
 
+    console.log('[PAYROLL_UPLOAD] Completed successfully for uploadId', uploadRecord.id)
+
     return withCors(
       ApiResponse.success(
         responseData,
@@ -804,6 +884,7 @@ export async function POST(request: NextRequest) {
       origin
     )
   } catch (error) {
+    console.error('[PAYROLL_UPLOAD] Top-level error:', error)
     return withCors(
       handleApiError(error),
       origin
