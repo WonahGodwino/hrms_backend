@@ -11,8 +11,8 @@ export async function POST(req: NextRequest) {
       return ApiResponse.error('Authorization header missing', 401)
     }
 
-    const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN'])
+    //const token = authHeader.replace('Bearer ', '')
+    //const user = requireRole(token, ['HR', 'SUPER_ADMIN'])
 
     const body = await req.json()
     const testEmail = body.email
