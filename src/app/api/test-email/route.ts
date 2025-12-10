@@ -4,7 +4,6 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
-// CORS preflight
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
@@ -27,26 +26,22 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Dummy staff record (companyId is optional – email helper will fall back to SMTP_FROM)
+    // No companyId here – that's fine now
     const mockStaff = {
-      id: 'TEST_STAFF_ID',           // not used in email, but harmless
-      companyId: undefined,          // or some real companyId if you want company lookup to work
       firstName: 'Test',
       lastName: 'User',
       email: testEmail,
       staffId: 'TEST001',
       department: 'IT',
-      position: 'Test Role',
+      position: 'Tester',
     }
 
-    // Dummy payroll payload
     const mockPayroll = {
       month,
       year,
       netSalary,
     }
 
-    // Send using your real function
     await sendPayrollNotificationEmail(mockStaff, mockPayroll)
 
     return withCors(
