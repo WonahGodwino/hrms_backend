@@ -6,10 +6,10 @@ import { sendPayrollNotificationEmail } from '@/app/lib/email'
 export async function POST(req: NextRequest) {
   try {
     // Fix: ensure we always pass a string to requireRole
-    const authHeader = req.headers.get('authorization')
-    if (!authHeader) {
-      return ApiResponse.error('Authorization header missing', 401)
-    }
+    //const authHeader = req.headers.get('authorization')
+    //if (!authHeader) {
+     // return ApiResponse.error('Authorization header missing', 401)
+    //}
 
     //const token = authHeader.replace('Bearer ', '')
     //const user = requireRole(token, ['HR', 'SUPER_ADMIN'])
