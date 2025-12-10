@@ -1,5 +1,4 @@
-// src/app/api/payroll/upload/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
@@ -50,7 +49,6 @@ function monthNameToNumber(month: string): number {
 const num = (v: any) =>
   v === null || v === undefined || v === '' ? 0 : Number(v) || 0
 
-// Your authoritative payroll headers (normalized -> canonical)
 const CANONICAL_HEADERS = [
   'Name',
   'Resumption Date',
@@ -65,8 +63,8 @@ const CANONICAL_HEADERS = [
   'Leave Allowance',
   'Entertainment',
   'Utility',
-  '出勤薪资 Salary Of Attendance',
-  "PRORATED GROSS PAY WITH EXTRA ALL'WCE",
+  'Salary Of Attendance',
+  'PRORATED GROSS PAY WITH EXTRA ALL\'WCE',
   'TAXABLE INCOME',
   'Consolidated Relief',
   'Payee',
@@ -85,7 +83,6 @@ const CANONICAL_HEADERS = [
   'EMAIL',
 ]
 
-// build a normalized map for lookup
 const canonicalMap: Record<string, string> = {}
 for (const h of CANONICAL_HEADERS) {
   canonicalMap[normalizeHeader(h)] = h
@@ -112,14 +109,12 @@ const REQUIRED_COLS = [
   'No of days Worked',
 ]
 
-// Try to read a cell by canonical name (strict to your template)
 function getCell(row: any, canonical: string) {
   const normalized = normalizeHeader(canonical)
   const actualKey = canonicalMap[normalized] || canonical
   return row[actualKey]
 }
 
-// Detect percentage row (row 2 in your Excel template)
 function looksLikePercentageRow(rowObj: any) {
   for (const col of [
     'Basic',
@@ -137,7 +132,6 @@ function looksLikePercentageRow(rowObj: any) {
   return false
 }
 
-// CSV split respecting quoted commas
 function splitCsvLine(line: string) {
   const result: string[] = []
   let cur = ''
@@ -201,21 +195,12 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData()
     const file = formData.get('file') as File | null
 
-    // 🔔 NEW: sendEmails defaults to true if not provided
+    // Send email flag
     const rawSendEmails = formData.get('sendEmails')
     const sendEmails =
       rawSendEmails === null
         ? true
         : String(rawSendEmails).toLowerCase() === 'true'
-
-    console.log(
-      '[PAYROLL_UPLOAD] Incoming upload:',
-      JSON.stringify({
-        companyId,
-        fileName: file?.name,
-        sendEmails,
-      })
-    )
 
     if (!file) {
       return withCors(
@@ -248,7 +233,6 @@ export async function POST(request: NextRequest) {
       const workbook = new ExcelJS.Workbook()
 
       if (isCsv) {
-        console.log('[PAYROLL_UPLOAD] Parsing CSV file')
         const csvText = buffer.toString()
         const lines = csvText.split(/\r?\n/).filter((l) => l.trim())
         if (!lines.length) throw new Error('Empty CSV file')
@@ -266,13 +250,10 @@ export async function POST(request: NextRequest) {
           })
           data.push(rowData)
         }
-
-        // Check if second row is the "percentage row" and skip it
         if (data[0] && looksLikePercentageRow(data[0])) {
           data = data.slice(1)
         }
       } else {
-        console.log('[PAYROLL_UPLOAD] Parsing Excel file')
         await workbook.xlsx.load(bytes as ArrayBuffer)
         const worksheet = workbook.worksheets[0]
         if (!worksheet) throw new Error('No worksheet found in Excel file')
@@ -308,12 +289,7 @@ export async function POST(request: NextRequest) {
           if (hasAny) data.push(rowData)
         })
       }
-
-      console.log(
-        `[PAYROLL_UPLOAD] Parsed rows: ${data.length}, isExcel=${isExcel}, isCsv=${isCsv}`
-      )
     } catch (err: any) {
-      console.error('[PAYROLL_UPLOAD] Error parsing file:', err)
       return withCors(
         ApiResponse.error(`Error parsing file: ${err.message}`, 400),
         origin
@@ -348,15 +324,12 @@ export async function POST(request: NextRequest) {
     const defaultMonthName = now.toLocaleString('en-US', { month: 'long' })
     const defaultYear = now.getFullYear()
 
-    console.log('[PAYROLL_UPLOAD] Starting row processing')
-
     for (let index = 0; index < data.length; index++) {
       const row = data[index]
-      const displayRowNumber = index + 3 // row 1 = headers, row 2 = % row (usually)
+      const displayRowNumber = index + 3
 
       try {
         const rowData = row as any
-
         const rawName = getCell(rowData, 'Name') || ''
         const name = rawName.toString().trim()
 
@@ -386,7 +359,6 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // locate staff record
         let staffRecord = null
 
         if (email) {
@@ -526,10 +498,6 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        console.log(
-          `[PAYROLL_UPLOAD] Upserting payroll for staffId=${staffRecord.staffId}, month=${monthName}, year=${year}`
-        )
-
         // Upsert payroll
         const payroll = await prisma.payroll.upsert({
           where: {
@@ -621,10 +589,6 @@ export async function POST(request: NextRequest) {
           },
         })
 
-        console.log(
-          `[PAYROLL_UPLOAD] Payroll upserted. PayrollId=${payroll.id}`
-        )
-
         // Payslip check
         const existingPayslip = await prisma.payslip.findFirst({
           where: {
@@ -638,10 +602,6 @@ export async function POST(request: NextRequest) {
         let pdfPath: string | null = null
 
         if (!existingPayslip) {
-          console.log(
-            `[PAYROLL_UPLOAD] Generating payslip PDF for staffId=${staffRecord.staffId}`
-          )
-
           const parsedRow: ParsedPayrollRow = {
             rowNumber: displayRowNumber,
             staffId: staffRecord.staffId,
@@ -680,15 +640,8 @@ export async function POST(request: NextRequest) {
             })
             pdfPath = generatedPath
             results.payslipsGenerated++
-            console.log(
-              `[PAYROLL_UPLOAD] Payslip PDF generated: ${pdfPath}`
-            )
           } catch (err: any) {
             const message = `Failed to generate payslip PDF - ${err.message}`
-            console.error(
-              `[PAYROLL_UPLOAD] Error generating payslip PDF (row ${displayRowNumber}):`,
-              err
-            )
             results.failed++
             results.errors.push(`Row ${displayRowNumber}: ${message}`)
             results.failedRecords.push({ ...rowData, error: message })
@@ -710,33 +663,19 @@ export async function POST(request: NextRequest) {
                 netPay: netSalary,
               },
             })
-            console.log(
-              `[PAYROLL_UPLOAD] Payslip DB record created for staffId=${staffRecord.staffId}`
-            )
           } catch (err: any) {
             const message = `Payslip DB record error - ${err.message}`
-            console.error(
-              `[PAYROLL_UPLOAD] Error creating payslip record (row ${displayRowNumber}):`,
-              err
-            )
             results.failed++
             results.errors.push(`Row ${displayRowNumber}: ${message}`)
             results.failedRecords.push({ ...rowData, error: message })
             continue
           }
-        } else {
-          console.log(
-            `[PAYROLL_UPLOAD] Payslip already exists for staffId=${staffRecord.staffId}, skipping PDF generation`
-          )
         }
 
         // 🔔 EMAIL NOTIFICATION (separate from processing success)
         if (sendEmails) {
           results.emailAttempts++
           try {
-            console.log(
-              `[PAYROLL_UPLOAD] Sending email to ${staffRecord.email} for month=${monthName}, year=${year}`
-            )
             await sendPayrollNotificationEmail(staffRecord, {
               month: monthName,
               year,
@@ -745,11 +684,6 @@ export async function POST(request: NextRequest) {
             results.emailsSent++
           } catch (err: any) {
             const msg = `Email sending failed - ${err.message}`
-            console.error(
-              `[PAYROLL_UPLOAD] Email sending failed (row ${displayRowNumber}):`,
-              err
-            )
-            // Do NOT increment results.failed here; processing is successful
             results.errors.push(`Row ${displayRowNumber}: ${msg}`)
             results.emailFailures.push({
               rowNumber: displayRowNumber,
@@ -768,10 +702,6 @@ export async function POST(request: NextRequest) {
           status: 'PROCESSED',
         })
       } catch (err: any) {
-        console.error(
-          `[PAYROLL_UPLOAD] Unexpected error processing row ${displayRowNumber}:`,
-          err
-        )
         const message = err?.message || 'Unknown error'
         results.failed++
         results.errors.push(`Row ${displayRowNumber}: ${message}`)
@@ -885,125 +815,6 @@ export async function POST(request: NextRequest) {
     )
   } catch (error) {
     console.error('[PAYROLL_UPLOAD] Top-level error:', error)
-    return withCors(
-      handleApiError(error),
-      origin
-    )
-  }
-}
-
-// -----------------------------
-// GET /api/payroll/upload
-// Payroll template download
-// -----------------------------
-export async function GET(request: NextRequest) {
-  const origin = request.headers.get('origin')
-
-  try {
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader) {
-      return withCors(
-        ApiResponse.error('Authorization header missing', 401),
-        origin
-      )
-    }
-
-    const token = authHeader.replace('Bearer ', '')
-    requireRole(token, ['HR', 'SUPER_ADMIN'])
-
-    const workbook = new ExcelJS.Workbook()
-    const worksheet = workbook.addWorksheet('Payroll Template')
-
-    worksheet.addRow([
-      'Name',
-      'Resumption Date',
-      'No of Working Days in the Month',
-      ' No of days Worked ',
-      'Gross Pay',
-      'Prorated Gross Pay',
-      'Basic',
-      'Housing',
-      'Transport',
-      'Dressing',
-      'Leave Allowance',
-      'Entertainment',
-      'Utility',
-      'Salary Of Attendance ',
-      "PRORATED GROSS PAY WITH EXTRA ALL'WCE",
-      'TAXABLE INCOME',
-      'Payee',
-      'Pension',
-      'Deduction ',
-      'Bonus KPI ',
-      'Net Salary',
-      'FINAL GROSS',
-      'Medical Contribution',
-      'Employer Pension',
-      'NSITF',
-      'Prorated Sub Total\nInvoice',
-      'Mgt Fee',
-      'Vat on Management Fee @7.5%',
-      'Total Invoice\nValue',
-      'EMAIL',
-    ])
-
-    worksheet.addRow([
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '50%',
-      '25%',
-      '25%',
-      '10%',
-      '8.33%',
-      '5%',
-      '5%',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '1%',
-      '10%',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-    ])
-
-    worksheet.addRow(['IMPORTANT:'])
-    worksheet.addRow(['- All amounts should be in Naira'])
-    worksheet.addRow(['- Staff must be pre-registered in the system'])
-    worksheet.addRow([
-      '- Name or EMAIL must match exactly with registered staff record',
-    ])
-    worksheet.addRow([
-      '- If a required column is missing in a row, that row will fail and be included in failed-records download.',
-    ])
-
-    const buffer = await workbook.xlsx.writeBuffer()
-
-    const excelResponse = new NextResponse(buffer as any, {
-      headers: {
-        'Content-Type':
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition':
-          'attachment; filename="payroll-template.xlsx"',
-        'Cache-Control': 'no-cache',
-      },
-    })
-
-    return withCors(excelResponse, origin)
-  } catch (error) {
     return withCors(
       handleApiError(error),
       origin

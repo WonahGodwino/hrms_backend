@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     // This is actually your StaffRecord-based auth payload
     const user = requireAuth(token) // { userId, email, role, companyId, ... }
-
+/* 
     // SUPER_ADMIN is a system admin, not a staff of a specific company → block here
     if (user.role === 'SUPER_ADMIN') {
       return withCors(
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
         origin
       )
     }
-
+*/
     if (!user.companyId) {
       return withCors(
         ApiResponse.error('Company context missing for current user', 400),

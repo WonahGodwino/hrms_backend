@@ -1,0 +1,6 @@
+{
+  "/api/auth/me/route": "app/api/auth/me/route.js",
+  "/page": "app/page.js",
+  "/api/profile/payslips/route": "app/api/profile/payslips/route.js",
+  "/api/payslips/[id]/download/route": "app/api/payslips/[id]/download/route.js"
+}
