@@ -141,6 +141,9 @@ model Payslip {
   netPay        Decimal? @db.Decimal(18, 2)
 
   createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt  // Add @default(now())
+  updatedBy     String?  // Stores the user ID who updated the payslip
+  createdBy     String?  // Add this line
 
   payroll       Payroll     @relation(fields: [payrollId], references: [id], onDelete: Cascade)
   staffRecord   StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
@@ -148,6 +151,7 @@ model Payslip {
   @@index([staffRecordId, year, month])
   @@map("payslips")
 }
+
 
 model StaffUpload {
   id          String   @id @default(cuid())
