@@ -183,6 +183,10 @@ model PayrollUpload {
   totalRecords      Int
   successful        Int
   failed            Int
+  payslipsGenerated Int?     // Add this - optional field
+  payslipsUpdated   Int?     // Add this - optional field
+  emailsSent        Int?     // Add this - optional field
+  emailAttempts     Int?     // Add this if you also want to track attempts
   errors            String[]
 
   uploadedBy        String
@@ -191,12 +195,6 @@ model PayrollUpload {
   @@map("payroll_uploads")
 }
 
-enum PayrollStatus {
-  DRAFT
-  PROCESSED
-  PAID
-  FAILED
-}
 
 //model for recruitment module
 model JobApplication {
