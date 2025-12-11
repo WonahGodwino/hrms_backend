@@ -194,7 +194,12 @@ model PayrollUpload {
 
   @@map("payroll_uploads")
 }
-
+enum PayrollStatus {
+  DRAFT
+  PROCESSED
+  PAID
+  FAILED
+}
 
 //model for recruitment module
 model JobApplication {
