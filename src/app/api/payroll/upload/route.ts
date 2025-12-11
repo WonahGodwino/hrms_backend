@@ -81,6 +81,10 @@ const CANONICAL_HEADERS = [
   'Vat on Management Fee @7.5%',
   'Total Invoice Value',
   'EMAIL',
+  'Month',
+  'MONTH',
+  'Year',
+  'YEAR',
 ]
 
 const canonicalMap: Record<string, string> = {}
@@ -195,12 +199,8 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData()
     const file = formData.get('file') as File | null
 
-    // Send email flag
-    const rawSendEmails = formData.get('sendEmails')
-    const sendEmails =
-      rawSendEmails === null
-        ? true
-        : String(rawSendEmails).toLowerCase() === 'true'
+    // Send email flag is set to true by default (always send emails)
+    const sendEmails = true
 
     if (!file) {
       return withCors(
@@ -308,6 +308,7 @@ export async function POST(request: NextRequest) {
       successful: 0,
       failed: 0,
       payslipsGenerated: 0,
+      payslipsUpdated: 0,
       emailsSent: 0,
       emailAttempts: 0,
       emailFailures: [] as {
@@ -326,7 +327,7 @@ export async function POST(request: NextRequest) {
 
     for (let index = 0; index < data.length; index++) {
       const row = data[index]
-      const displayRowNumber = index + 3
+      const displayRowNumber = index + 3 // row 1 = headers, row 2 = % row (usually)
 
       try {
         const rowData = row as any
@@ -359,6 +360,7 @@ export async function POST(request: NextRequest) {
           continue
         }
 
+        // locate staff record
         let staffRecord = null
 
         if (email) {
@@ -498,7 +500,7 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // Upsert payroll
+        // Upsert payroll record first (always update payroll data)
         const payroll = await prisma.payroll.upsert({
           where: {
             staffRecordId_month_year_companyId: {
@@ -546,6 +548,7 @@ export async function POST(request: NextRequest) {
 
             status: 'PROCESSED',
             uploadedBy: user.userId,
+            updatedAt: new Date(),
           },
           create: {
             companyId,
@@ -589,7 +592,7 @@ export async function POST(request: NextRequest) {
           },
         })
 
-        // Payslip check
+        // Check if payslip already exists for this month, year, and staff
         const existingPayslip = await prisma.payslip.findFirst({
           where: {
             staffRecordId: staffRecord.id,
@@ -600,32 +603,37 @@ export async function POST(request: NextRequest) {
         })
 
         let pdfPath: string | null = null
+        let payslipFileName: string | null = null
+        let isUpdate = false
 
-        if (!existingPayslip) {
-          const parsedRow: ParsedPayrollRow = {
-            rowNumber: displayRowNumber,
-            staffId: staffRecord.staffId,
-            email: staffRecord.email,
-            fullName: `${staffRecord.firstName} ${staffRecord.lastName}`,
-            periodMonth,
-            periodYear: year,
+        // Prepare parsed row data for PDF generation
+        const parsedRow: ParsedPayrollRow = {
+          rowNumber: displayRowNumber,
+          staffId: staffRecord.staffId,
+          email: staffRecord.email,
+          fullName: `${staffRecord.firstName} ${staffRecord.lastName}`,
+          periodMonth,
+          periodYear: year,
 
-            basicSalary,
-            housingAllowance: housing,
-            transportAllowance: transport,
-            transportationAllowance: dressing,
-            otherAllowances: leaveAllowance + entertainment + utility,
+          basicSalary,
+          housingAllowance: housing,
+          transportAllowance: transport,
+          transportationAllowance: dressing,
+          otherAllowances: leaveAllowance + entertainment + utility,
 
-            grossPay,
-            payee,
-            pension,
-            netPay: netSalary,
+          grossPay,
+          payee,
+          pension,
+          netPay: netSalary,
 
-            daysInMonth,
-            daysWorked,
-            rawRow: rowData,
-          }
+          daysInMonth,
+          daysWorked,
+          rawRow: rowData,
+        }
 
+        if (existingPayslip) {
+          // If the payslip already exists, regenerate PDF and update it
+          isUpdate = true
           try {
             const { pdfPath: generatedPath } = await generatePayslipPdf({
               staff: {
@@ -639,17 +647,52 @@ export async function POST(request: NextRequest) {
               payroll: parsedRow,
             })
             pdfPath = generatedPath
+            payslipFileName = path.basename(pdfPath)
             results.payslipsGenerated++
+
+            // Update existing payslip with new data
+            await prisma.payslip.update({
+              where: {
+                id: existingPayslip.id,
+              },
+              data: {
+                payrollId: payroll.id,
+                filePath: pdfPath,
+                fileName: payslipFileName,
+                grossPay,
+                netPay: netSalary,
+                updatedBy: user.userId,
+                updatedAt: new Date(),
+              },
+            })
+            
+            results.payslipsUpdated++
           } catch (err: any) {
-            const message = `Failed to generate payslip PDF - ${err.message}`
+            const message = `Failed to regenerate payslip PDF for update - ${err.message}`
             results.failed++
             results.errors.push(`Row ${displayRowNumber}: ${message}`)
             results.failedRecords.push({ ...rowData, error: message })
             continue
           }
-
+        } else {
+          // If the payslip doesn't exist, generate a new one
           try {
-            const payslipFileName = path.basename(pdfPath)
+            const { pdfPath: generatedPath } = await generatePayslipPdf({
+              staff: {
+                staffId: staffRecord.staffId,
+                firstName: staffRecord.firstName,
+                lastName: staffRecord.lastName,
+                email: staffRecord.email,
+                department: staffRecord.department || undefined,
+                designation: staffRecord.position || undefined,
+              },
+              payroll: parsedRow,
+            })
+            pdfPath = generatedPath
+            payslipFileName = path.basename(pdfPath)
+            results.payslipsGenerated++
+
+            // Create new payslip record
             await prisma.payslip.create({
               data: {
                 payrollId: payroll.id,
@@ -661,10 +704,12 @@ export async function POST(request: NextRequest) {
                 year,
                 grossPay,
                 netPay: netSalary,
+                createdBy: user.userId,
+                updatedBy: user.userId,
               },
             })
           } catch (err: any) {
-            const message = `Payslip DB record error - ${err.message}`
+            const message = `Failed to generate payslip PDF - ${err.message}`
             results.failed++
             results.errors.push(`Row ${displayRowNumber}: ${message}`)
             results.failedRecords.push({ ...rowData, error: message })
@@ -672,25 +717,25 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // 🔔 EMAIL NOTIFICATION (separate from processing success)
-        if (sendEmails) {
-          results.emailAttempts++
-          try {
-            await sendPayrollNotificationEmail(staffRecord, {
-              month: monthName,
-              year,
-              netSalary,
-            })
-            results.emailsSent++
-          } catch (err: any) {
-            const msg = `Email sending failed - ${err.message}`
-            results.errors.push(`Row ${displayRowNumber}: ${msg}`)
-            results.emailFailures.push({
-              rowNumber: displayRowNumber,
-              email: staffRecord.email,
-              error: msg,
-            })
-          }
+        // Send email notification (always sent as per requirement)
+        results.emailAttempts++
+        try {
+          await sendPayrollNotificationEmail(staffRecord, {
+            month: monthName,
+            year,
+            netSalary,
+            isUpdate: isUpdate, // Pass flag to indicate if this is an update
+          })
+          results.emailsSent++
+        } catch (err: any) {
+          const msg = `Email sending failed - ${err.message}`
+          results.errors.push(`Row ${displayRowNumber}: ${msg}`)
+          results.emailFailures.push({
+            rowNumber: displayRowNumber,
+            email: staffRecord.email,
+            error: msg,
+          })
+          // Don't fail the entire record if email fails
         }
 
         results.successful++
@@ -699,8 +744,11 @@ export async function POST(request: NextRequest) {
           staffId: staffRecord.staffId,
           staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
           netSalary,
-          status: 'PROCESSED',
+          status: isUpdate ? 'UPDATED' : 'PROCESSED',
+          emailSent: sendEmails,
+          emailStatus: results.emailFailures.some(f => f.rowNumber === displayRowNumber) ? 'FAILED' : 'SENT',
         })
+
       } catch (err: any) {
         const message = err?.message || 'Unknown error'
         results.failed++
@@ -713,6 +761,7 @@ export async function POST(request: NextRequest) {
       successful: results.successful,
       failed: results.failed,
       payslipsGenerated: results.payslipsGenerated,
+      payslipsUpdated: results.payslipsUpdated,
       emailsSent: results.emailsSent,
       emailAttempts: results.emailAttempts,
       emailFailures: results.emailFailures.length,
@@ -766,6 +815,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Save original uploaded file
+    await writeFile(path.join(uploadDir, file.name), buffer)
+
     const uploadRecord = await prisma.payrollUpload.create({
       data: {
         companyId,
@@ -778,12 +830,13 @@ export async function POST(request: NextRequest) {
         totalRecords: data.length,
         successful: results.successful,
         failed: results.failed,
+        payslipsGenerated: results.payslipsGenerated,
+        payslipsUpdated: results.payslipsUpdated,
+        emailsSent: results.emailsSent,
         errors: results.errors,
         uploadedBy: user.userId,
       },
     })
-
-    await writeFile(path.join(uploadDir, file.name), buffer)
 
     const responseData: any = {
       results,
@@ -793,6 +846,7 @@ export async function POST(request: NextRequest) {
         successful: results.successful,
         failed: results.failed,
         payslipsGenerated: results.payslipsGenerated,
+        payslipsUpdated: results.payslipsUpdated,
         emailsSent: results.emailsSent,
         emailAttempts: results.emailAttempts,
         emailFailures: results.emailFailures.length,
