@@ -10,6 +10,165 @@ import { generatePayslipPdf } from '@/app/lib/payroll/generatePayslipPdf'
 import type { ParsedPayrollRow } from '@/app/lib/payroll/types'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
+// -----------------------------
+// Helpers
+// -----------------------------
+
+function normalizeHeader(h: string) {
+  return h
+    .toString()
+    .replace(/\s+/g, ' ')
+    .replace(/\n/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+function monthNameToNumber(month: string): number {
+  if (!month) return 0
+  const normalized = month.toString().trim().toLowerCase()
+  const months = [
+    'january',
+    'february',
+    'march',
+    'april',
+    'may',
+    'june',
+    'july',
+    'august',
+    'september',
+    'october',
+    'november',
+    'december',
+  ]
+  const idx = months.indexOf(normalized)
+  if (idx >= 0) return idx + 1
+  const asNumber = Number(normalized)
+  return Number.isFinite(asNumber) ? asNumber : 0
+}
+
+const num = (v: any) =>
+  v === null || v === undefined || v === '' ? 0 : Number(v) || 0
+
+const CANONICAL_HEADERS = [
+  'Name',
+  'Resumption Date',
+  'No of Working Days in the Month',
+  'No of days Worked',
+  'Gross Pay',
+  'Prorated Gross Pay',
+  'Basic',
+  'Housing',
+  'Transport',
+  'Dressing',
+  'Leave Allowance',
+  'Entertainment',
+  'Utility',
+  'Salary Of Attendance',
+  'PRORATED GROSS PAY WITH EXTRA ALL\'WCE',
+  'TAXABLE INCOME',
+  'Consolidated Relief',
+  'Payee',
+  'Pension',
+  'Deduction',
+  'Bonus KPI',
+  'Net Salary',
+  'FINAL GROSS',
+  'Medical Contribution',
+  'Employer Pension',
+  'NSITF',
+  'Prorated Sub Total Invoice',
+  'Mgt Fee',
+  'Vat on Management Fee @7.5%',
+  'Total Invoice Value',
+  'EMAIL',
+]
+
+const canonicalMap: Record<string, string> = {}
+for (const h of CANONICAL_HEADERS) {
+  canonicalMap[normalizeHeader(h)] = h
+}
+
+// required per-row columns for payslip generation
+const REQUIRED_COLS = [
+  'Gross Pay',
+  'Basic',
+  'Housing',
+  'Transport',
+  'Dressing',
+  'Leave Allowance',
+  'Entertainment',
+  'Utility',
+  'Payee',
+  'Pension',
+  'Deduction',
+  'Bonus KPI',
+  'Net Salary',
+  'FINAL GROSS',
+  'Medical Contribution',
+  'No of Working Days in the Month',
+  'No of days Worked',
+]
+
+function getCell(row: any, canonical: string) {
+  const normalized = normalizeHeader(canonical)
+  const actualKey = canonicalMap[normalized] || canonical
+  return row[actualKey]
+}
+
+function looksLikePercentageRow(rowObj: any) {
+  for (const col of [
+    'Basic',
+    'Housing',
+    'Transport',
+    'Dressing',
+    'Leave Allowance',
+    'Entertainment',
+    'Utility',
+    'Medical Contribution',
+  ]) {
+    const v = getCell(rowObj, col)
+    if (typeof v === 'string' && v.includes('%')) return true
+  }
+  return false
+}
+
+function splitCsvLine(line: string) {
+  const result: string[] = []
+  let cur = ''
+  let inQuotes = false
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (ch === '"' && line[i + 1] === '"') {
+      cur += '"'
+      i++
+      continue
+    }
+    if (ch === '"') {
+      inQuotes = !inQuotes
+      continue
+    }
+    if (ch === ',' && !inQuotes) {
+      result.push(cur.trim())
+      cur = ''
+      continue
+    }
+    cur += ch
+  }
+  result.push(cur.trim())
+  return result
+}
+
+// -----------------------------
+// CORS preflight
+// -----------------------------
+export async function OPTIONS(request: NextRequest) {
+  return handleCorsOptions(request)
+}
+
+// -----------------------------
+// POST /api/payroll/upload
+// -----------------------------
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin')
 
@@ -35,6 +194,13 @@ export async function POST(request: NextRequest) {
 
     const formData = await request.formData()
     const file = formData.get('file') as File | null
+
+    // Send email flag
+    const rawSendEmails = formData.get('sendEmails')
+    const sendEmails =
+      rawSendEmails === null
+        ? true
+        : String(rawSendEmails).toLowerCase() === 'true'
 
     if (!file) {
       return withCors(
@@ -143,6 +309,12 @@ export async function POST(request: NextRequest) {
       failed: 0,
       payslipsGenerated: 0,
       emailsSent: 0,
+      emailAttempts: 0,
+      emailFailures: [] as {
+        rowNumber: number
+        email: string
+        error: string
+      }[],
       processedRecords: [] as any[],
       failedRecords: [] as any[],
       errors: [] as string[],
@@ -500,22 +672,25 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // 🔔 EMAIL NOTIFICATION (Always send emails by default)
-        try {
-          await sendPayrollNotificationEmail(staffRecord, {
-            month: monthName,
-            year,
-            netSalary,
-          })
-          results.emailsSent++
-        } catch (err: any) {
-          const msg = `Email sending failed - ${err.message}`
-          results.errors.push(`Row ${displayRowNumber}: ${msg}`)
-          results.emailFailures.push({
-            rowNumber: displayRowNumber,
-            email: staffRecord.email,
-            error: msg,
-          })
+        // 🔔 EMAIL NOTIFICATION (separate from processing success)
+        if (sendEmails) {
+          results.emailAttempts++
+          try {
+            await sendPayrollNotificationEmail(staffRecord, {
+              month: monthName,
+              year,
+              netSalary,
+            })
+            results.emailsSent++
+          } catch (err: any) {
+            const msg = `Email sending failed - ${err.message}`
+            results.errors.push(`Row ${displayRowNumber}: ${msg}`)
+            results.emailFailures.push({
+              rowNumber: displayRowNumber,
+              email: staffRecord.email,
+              error: msg,
+            })
+          }
         }
 
         results.successful++
@@ -533,6 +708,15 @@ export async function POST(request: NextRequest) {
         results.failedRecords.push({ ...(row as any), error: message })
       }
     }
+
+    console.log('[PAYROLL_UPLOAD] Finished row processing', {
+      successful: results.successful,
+      failed: results.failed,
+      payslipsGenerated: results.payslipsGenerated,
+      emailsSent: results.emailsSent,
+      emailAttempts: results.emailAttempts,
+      emailFailures: results.emailFailures.length,
+    })
 
     const uploadDir = path.join(process.cwd(), 'uploads', 'payroll')
     await mkdir(uploadDir, { recursive: true })
