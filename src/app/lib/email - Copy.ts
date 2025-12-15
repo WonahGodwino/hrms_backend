@@ -18,7 +18,7 @@ const transporter = nodemailer.createTransport({
     maxMessages: 100,         // Max messages per connection
    logger: true,  // Enable logger for debugging
    debug: true,   // Enable debugging (will log details to console)
-   connectionTimeout: 30000, // Increase connection timeout if need
+   //connectionTimeout: 30000, // Increase connection timeout if need
 })
 
 type StaffLike = {
