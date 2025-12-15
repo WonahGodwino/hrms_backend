@@ -1,6 +1,6 @@
 import * as functions from 'firebase-functions';
 import * as nodemailer from 'nodemailer';
-import { prisma } from '.hrms-project/src/app/lib/db'; // Adjust the import as per your project structure
+//import { prisma } from '.hrms-project/src/app/lib/db'; // Adjust the import as per your project structure
 
 // Configure Nodemailer transporter with environment variables (use Gmail or other SMTP service)
 const transporter = nodemailer.createTransport({
