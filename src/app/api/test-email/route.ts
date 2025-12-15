@@ -1,4 +1,4 @@
-// src/app/api/email/test/route.ts
+// src/app/api/test-email/route.ts
 import { NextRequest } from 'next/server'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
