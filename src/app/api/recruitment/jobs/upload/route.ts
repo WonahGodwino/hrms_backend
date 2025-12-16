@@ -1,4 +1,5 @@
-//src/app/api/recruitment/jobs/upload/route.ts
+// src/app/api/recruitment/jobs/upload/route.ts
+
 import { NextRequest } from "next/server";
 import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
@@ -335,7 +336,7 @@ export async function POST(request: NextRequest) {
           },
           errors: results.errors,
         },
-        "Job postings processed"
+        "Jobs postings processed Successfully"
       ),
       origin
     );

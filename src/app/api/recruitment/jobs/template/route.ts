@@ -16,23 +16,33 @@ export async function GET(request: NextRequest) {
     const workbook = new ExcelJS.Workbook()
     const sheet = workbook.addWorksheet('Jobs Template')
 
-    // Example headers – adjust to match your upload logic
-    sheet.addRow(['title', 'description', 'department', 'position', 'expirationDate'])
-    // Optionally, you can add a sample row or comments here
+    // Define headers for the template
+    sheet.addRow(['title', 'description', 'department', 'position', 'expirationDate', 'status'])
 
+    // Optionally, you can add a sample row for guidance or comments
+    // Add sample row with default values
+    sheet.addRow([
+      'Software Engineer', 
+      'Develop and maintain software applications.', 
+      'Engineering', 
+      'Full-time', 
+      '', 
+      'ACTIVE'
+    ])
+
+    // Generate buffer for the file
     const buffer = await workbook.xlsx.writeBuffer()
 
-    // 2. Create a NextResponse, not a plain Response
+    // 2. Create a NextResponse with the appropriate headers
     const excelResponse = new NextResponse(buffer, {
       status: 200,
       headers: {
-        'Content-Type':
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': 'attachment; filename="jobs_template.xlsx"',
       },
     })
 
-    // 3. Wrap with CORS
+    // 3. Wrap the response with CORS
     return withCors(excelResponse, origin)
   } catch (error) {
     const message = formatError(error)

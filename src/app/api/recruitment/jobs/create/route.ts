@@ -37,6 +37,7 @@ export async function POST(request: NextRequest) {
   const origin = request.headers.get("origin");
 
   try {
+    // Authorization check
     const authHeader = request.headers.get("authorization");
     if (!authHeader) {
       return withCors(ApiResponse.error("Authorization header missing", 401), origin);
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest) {
 
     const companyId = String(user.companyId);
 
+    // Parsing the request body
     let body: CreateJobBody;
     try {
       body = (await request.json()) as CreateJobBody;
@@ -61,16 +63,19 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error("Invalid JSON body", 400), origin);
     }
 
+    // Extract and trim the fields
     const title = body.title?.trim();
     const description = body.description?.trim();
     const department = body.department?.trim();
     const position = body.position?.trim();
 
+    // Validation: Ensure required fields are provided
     if (!title) return withCors(ApiResponse.error("Title is required", 400), origin);
     if (!description) return withCors(ApiResponse.error("Description is required", 400), origin);
     if (!department) return withCors(ApiResponse.error("Department is required", 400), origin);
     if (!position) return withCors(ApiResponse.error("Position is required", 400), origin);
 
+    // Validate expirationDate if provided
     const expirationDate = parseDate(body.expirationDate ?? null);
     if (body.expirationDate && !expirationDate) {
       return withCors(
@@ -79,10 +84,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Normalize and validate status
     const status = normalizeStatus(body.status) ?? "ACTIVE";
 
     // Optional HR standard: prevent duplicate job spam (same role posted recently)
-    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Check last 30 days
     const duplicate = await prisma.job.findFirst({
       where: {
         companyId,
@@ -104,6 +110,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Create the job entry in the database
     const job = await prisma.job.create({
       data: {
         title,
@@ -118,11 +125,13 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // Return successful response with the created job data
     return withCors(
       ApiResponse.success({ job }, "Job created successfully"),
       origin
     );
   } catch (error) {
+    // Catch any other errors and return them
     return withCors(ApiResponse.error(formatError(error), 500), origin);
   }
 }
