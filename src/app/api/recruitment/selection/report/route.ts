@@ -5,7 +5,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { extractKeywords } from '@/app/lib/keywordExtractor'
+import { extractKeywords, calculateMatchScore } from '@/app/lib/keywordExtractor'
 import ExcelJS from 'exceljs'
 
 export async function OPTIONS(request: NextRequest) {
@@ -45,13 +45,30 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    // Get job with applications and their CV files
     const job = await prisma.job.findFirst({
       where: {
         id: jobId,
         companyId: user.companyId as string,
       },
       include: {
-        applications: true,
+        applications: {
+          include: {
+            candidate: true,
+            cvFile: {
+              select: {
+                parsedCvContent: true
+              }
+            },
+            stageHistory: {
+              orderBy: {
+                changedAt: 'desc'
+              },
+              take: 1
+            }
+          }
+        },
+        keywords: true
       },
     })
 
@@ -65,45 +82,54 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const applicants = job.applications
-
-    if (!applicants.length) {
+    if (!job.applications.length) {
       return withCors(
         ApiResponse.error('No applications found for this job', 404),
         origin
       )
     }
 
-    const jobKeywords = extractKeywords(job.description || '')
+    // Extract job keywords from description and saved keywords
+    const jobDescriptionKeywords = extractKeywords(job.description || '')
+    const savedKeywords = job.keywords.map(k => k.name.toLowerCase())
+    const allJobKeywords = [...new Set([...jobDescriptionKeywords, ...savedKeywords])]
 
-    const ranked = applicants.map((applicant) => {
-      const cvText =
-        (applicant as any).parsedCvContent?.toLowerCase?.() || ''
-      let matchCount = 0
-
-      jobKeywords.forEach((keyword) => {
-        if (!keyword) return
-        const k = keyword.toLowerCase()
-        if (cvText.includes(k)) {
-          matchCount++
+    // Process and rank applicants
+    const processedApplications = await Promise.all(
+      job.applications.map(async (applicant) => {
+        const cvText = applicant.parsedCvContent || ''
+        const matchScore = calculateMatchScore(allJobKeywords, cvText)
+        
+        // Determine if already reviewed
+        const lastStage = applicant.stageHistory[0]
+        const isReviewed = lastStage?.toStatus === 'REVIEWING' || lastStage?.toStatus === 'REVIEWED'
+        
+        return {
+          ...applicant,
+          matchCount: matchScore.matchCount,
+          matchPercentage: matchScore.percentage,
+          matchedKeywords: matchScore.matchedKeywords,
+          isReviewed
         }
       })
+    )
 
-      return { ...applicant, matchCount }
-    })
-
-    const sorted = ranked.sort((a, b) => b.matchCount - a.matchCount)
+    // Sort by match score
+    const sorted = processedApplications.sort((a, b) => b.matchCount - a.matchCount)
 
     // Shape data for export
     const exportRows = sorted.map((applicant, index) => ({
       rank: index + 1,
       applicationId: applicant.id,
-      firstName: applicant.firstName,
-      lastName: applicant.lastName,
-      email: applicant.email,
-      status: applicant.status,
-      matchCount: (applicant as any).matchCount ?? 0,
+      firstName: applicant.candidate.firstName,
+      lastName: applicant.candidate.lastName,
+      email: applicant.candidate.email,
+      currentStatus: applicant.status,
+      matchCount: applicant.matchCount,
+      matchPercentage: applicant.matchPercentage,
+      isReviewed: applicant.isReviewed ? 'Yes' : 'No',
       appliedAt: applicant.createdAt,
+      lastReviewDate: applicant.stageHistory[0]?.changedAt || null,
       jobId: job.id,
       jobTitle: job.title,
       department: job.department,
@@ -111,9 +137,28 @@ export async function GET(request: NextRequest) {
     }))
 
     if (format === 'excel' || format === 'xlsx') {
-      // ✅ Generate Excel report
       const workbook = new ExcelJS.Workbook()
-      const sheet = workbook.addWorksheet('Applicants')
+      const sheet = workbook.addWorksheet('Ranked Applicants')
+      
+      // Style header
+      sheet.getRow(1).font = { bold: true }
+      sheet.columns = [
+        { width: 10 }, // Rank
+        { width: 36 }, // Application ID
+        { width: 15 }, // First Name
+        { width: 15 }, // Last Name
+        { width: 25 }, // Email
+        { width: 15 }, // Status
+        { width: 12 }, // Match Count
+        { width: 15 }, // Match %
+        { width: 12 }, // Reviewed?
+        { width: 20 }, // Applied At
+        { width: 20 }, // Last Review
+        { width: 36 }, // Job ID
+        { width: 25 }, // Job Title
+        { width: 20 }, // Department
+        { width: 20 }, // Position
+      ]
 
       sheet.addRow([
         'Rank',
@@ -123,7 +168,10 @@ export async function GET(request: NextRequest) {
         'Email',
         'Status',
         'Match Score',
+        'Match %',
+        'Reviewed?',
         'Applied At',
+        'Last Review Date',
         'Job ID',
         'Job Title',
         'Department',
@@ -137,9 +185,12 @@ export async function GET(request: NextRequest) {
           row.firstName,
           row.lastName,
           row.email,
-          row.status,
+          row.currentStatus,
           row.matchCount,
-          row.appliedAt,
+          `${row.matchPercentage.toFixed(1)}%`,
+          row.isReviewed,
+          row.appliedAt.toISOString().split('T')[0],
+          row.lastReviewDate ? new Date(row.lastReviewDate).toISOString().split('T')[0] : 'Not Reviewed',
           row.jobId,
           row.jobTitle,
           row.department,
@@ -152,16 +203,15 @@ export async function GET(request: NextRequest) {
       const response = new NextResponse(buffer, {
         status: 200,
         headers: {
-          'Content-Type':
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition': `attachment; filename="job_${job.id}_ranked_applicants.xlsx"`,
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `attachment; filename="job_${job.id}_ranked_applicants_${new Date().toISOString().split('T')[0]}.xlsx"`,
         },
       })
 
       return withCors(response, origin)
     }
 
-    // ✅ Generate CSV report by default
+    // CSV format
     const header = [
       'Rank',
       'Application ID',
@@ -170,7 +220,10 @@ export async function GET(request: NextRequest) {
       'Email',
       'Status',
       'Match Score',
+      'Match %',
+      'Reviewed?',
       'Applied At',
+      'Last Review Date',
       'Job ID',
       'Job Title',
       'Department',
@@ -193,9 +246,12 @@ export async function GET(request: NextRequest) {
         row.firstName,
         row.lastName,
         row.email,
-        row.status,
+        row.currentStatus,
         row.matchCount,
-        row.appliedAt.toISOString(),
+        `${row.matchPercentage.toFixed(1)}%`,
+        row.isReviewed,
+        row.appliedAt.toISOString().split('T')[0],
+        row.lastReviewDate ? new Date(row.lastReviewDate).toISOString().split('T')[0] : 'Not Reviewed',
         row.jobId,
         row.jobTitle,
         row.department,
@@ -211,13 +267,14 @@ export async function GET(request: NextRequest) {
       status: 200,
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="job_${job.id}_ranked_applicants.csv"`,
+        'Content-Disposition': `attachment; filename="job_${job.id}_ranked_applicants_${new Date().toISOString().split('T')[0]}.csv"`,
       },
     })
 
     return withCors(response, origin)
   } catch (error: unknown) {
     const message = formatError(error)
+    console.error('Error generating selection report:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }
 }

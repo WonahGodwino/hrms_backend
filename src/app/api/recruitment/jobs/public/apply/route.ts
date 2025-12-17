@@ -1,57 +1,87 @@
 // src/app/api/jobs/public/apply/route.ts
 
-import { NextRequest } from 'next/server';
-import { prisma } from '@/app/lib/db';
-import { ApiResponse, formatError } from '@/app/lib/utils';
-import { handleCorsOptions, withCors } from '@/app/lib/cors';
-import { fileTypeFromBuffer } from 'file-type';
-import mammoth from 'mammoth';
-import { v4 as uuidv4 } from 'uuid';
+import { NextRequest } from 'next/server'
+import { prisma } from '@/app/lib/db'
+import { ApiResponse, formatError } from '@/app/lib/utils'
+import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { fileTypeFromBuffer } from 'file-type'
+
+// Use require syntax to avoid TypeScript issues with formidable
+const formidable = require('formidable');
 
 export async function OPTIONS(request: NextRequest) {
-  return handleCorsOptions(request);
+  return handleCorsOptions(request)
 }
 
 export async function POST(request: NextRequest) {
-  const origin = request.headers.get('origin');
+  const origin = request.headers.get('origin')
 
   try {
-    // Parse incoming form data using a multipart parser (formidable can be replaced with other libraries if preferred)
-    const formData = await request.formData();
+    const formData = await new Promise<{ fields: any; files: any }>((resolve, reject) => {
+      const form = formidable({
+        maxFileSize: 5 * 1024 * 1024, // 5 MB size limit
+        multiples: false, // Only one file allowed
+      });
 
-    const jobId = formData.get('jobId')?.toString();
-    const firstName = formData.get('firstName')?.toString();
-    const lastName = formData.get('lastName')?.toString();
-    const email = formData.get('email')?.toString();
-    const cvFile = formData.get('cv') as File | null;
+      form.parse(request as any, (err: any, fields: any, files: any) => {
+        if (err) reject(err);
+        resolve({ fields, files });
+      });
+    });
+
+    const { fields, files } = formData;
+
+    const { 
+      jobId, 
+      firstName, 
+      lastName, 
+      email, 
+      phone, 
+      address, 
+      linkedInUrl, 
+      portfolioUrl,
+      createdBy 
+    } = fields;
+    
+    const cvFile = files.cv;
 
     // Validate required fields
-    if (!jobId || !firstName || !lastName || !email || !cvFile) {
-      return withCors(ApiResponse.error('Job ID, first name, last name, email, and CV are required', 400), origin);
+    if (!jobId || !firstName || !lastName || !email) {
+      return withCors(ApiResponse.error('Job ID, first name, last name, and email are required', 400), origin);
     }
 
     // Check if the job exists
     const job = await prisma.job.findUnique({
       where: { id: jobId },
-      select: { id: true, expirationDate: true, status: true },
+      select: { id: true, expirationDate: true, status: true, companyId: true },
     });
 
     if (!job) {
       return withCors(ApiResponse.error('Job not found', 404), origin);
     }
 
-    // Check if the job has expired
-    if (job.expirationDate < new Date()) {
+    // Check if job is active
+    if (job.status !== 'ACTIVE') {
+      return withCors(ApiResponse.error('Job is not active for applications', 400), origin);
+    }
+
+    // Check if the job has expired (handle null expirationDate)
+    if (job.expirationDate && job.expirationDate < new Date()) {
       return withCors(ApiResponse.error('Job posting has expired', 400), origin);
     }
 
-    // Validate file type and size (limit to 5MB)
-    if (cvFile.size > 5 * 1024 * 1024) {
+    // Validate CV file
+    if (!cvFile) {
+      return withCors(ApiResponse.error('CV file is required', 400), origin);
+    }
+
+    // Validate file size
+    if (cvFile.size > 5 * 1024 * 1024) { // 5MB size limit
       return withCors(ApiResponse.error('CV file size exceeds the 5MB limit', 400), origin);
     }
 
-    // Check MIME type of the uploaded file
-    const fileBuffer = await cvFile.arrayBuffer();
+    // Check file type
+    const fileBuffer = Buffer.from(await cvFile.arrayBuffer());
     const fileType = await fileTypeFromBuffer(fileBuffer);
 
     const allowedMimeTypes = [
@@ -64,62 +94,115 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('Invalid file type. Allowed formats are .pdf, .doc, .docx', 400), origin);
     }
 
-    // Basic PDF validation - check if it starts with PDF header
-    if (fileType.mime === 'application/pdf') {
-      const pdfHeader = Buffer.from(fileBuffer.slice(0, 4)).toString();
-      if (pdfHeader !== '%PDF') {
-        return withCors(ApiResponse.error('Invalid PDF file format', 400), origin);
-      }
-    }
-
-    // Parse the content of the file to check for malicious code (DOC/DOCX only)
-    let parsedContent = '';
-    if (fileType.mime === 'application/msword' || fileType.mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-      const docxData = await mammoth.extractRawText({ buffer: Buffer.from(fileBuffer) });
-      parsedContent = docxData.value;
-
-      // Simple content validation to avoid executable scripts or malicious content
-      if (parsedContent.includes('<script>') || parsedContent.includes('eval(')) {
-        return withCors(ApiResponse.error('File contains potentially harmful content', 400), origin);
-      }
-    }
-
-    // Generate a unique filename for the CV (for database storage)
-    const fileExtension = cvFile.name.split('.').pop();
-    const fileName = `${uuidv4()}.${fileExtension}`;
-
-    // Create the candidate file and store the file directly in the database
-    const candidateFile = await prisma.candidateFile.create({
-      data: {
-        companyId: job.companyId, // assuming the job's companyId can be used for candidate files
-        candidateId: '', // This would need to be associated with the candidate, if needed
-        applicationId: jobId, // Relate to the job application
-        fileName,
-        mimeType: fileType.mime,
-        sizeBytes: cvFile.size,
-        data: Buffer.from(fileBuffer),
-        type: 'CV', // Assuming 'CV' as the file type, can be expanded
+    // Check if candidate already exists for this company (same email)
+    let candidate = await prisma.candidate.findFirst({
+      where: {
+        email,
+        companyId: job.companyId,
       },
     });
 
-    // Create the job application entry
-    const application = await prisma.jobApplication.create({
-      data: {
-        jobId: job.id,
-        firstName,
-        lastName,
-        email,
-        cvFileName: fileName,
-        status: 'PENDING',
-        files: {
-          connect: { id: candidateFile.id },
+    // If candidate doesn't exist, create a new one
+    if (!candidate) {
+      candidate = await prisma.candidate.create({
+        data: {
+          companyId: job.companyId,
+          firstName,
+          lastName,
+          email,
+          phone: phone || null,
+          address: address || null,
+          linkedInUrl: linkedInUrl || null,
+          portfolioUrl: portfolioUrl || null,
+          createdBy: createdBy || 'public_application',
+        },
+      });
+    } else {
+      // Update candidate information if they exist
+      candidate = await prisma.candidate.update({
+        where: { id: candidate.id },
+        data: {
+          firstName,
+          lastName,
+          phone: phone || candidate.phone,
+          address: address || candidate.address,
+          linkedInUrl: linkedInUrl || candidate.linkedInUrl,
+          portfolioUrl: portfolioUrl || candidate.portfolioUrl,
+          updatedAt: new Date(),
+        },
+      });
+    }
+
+    // IMPORTANT: Check if this candidate has ALREADY APPLIED TO THIS SPECIFIC JOB
+    // This prevents duplicate applications for the same job
+    const existingApplication = await prisma.jobApplication.findUnique({
+      where: {
+        jobId_candidateId: {
+          jobId,
+          candidateId: candidate.id,
         },
       },
     });
 
-    return withCors(ApiResponse.success(application, 'Application submitted successfully'), origin);
+    if (existingApplication) {
+      return withCors(ApiResponse.error('You have already applied for this job', 400), origin);
+    }
+
+    // Save the file into CandidateFile
+    const fileData = await prisma.candidateFile.create({
+      data: {
+        companyId: job.companyId,
+        candidateId: candidate.id,
+        applicationId: null, // Will be linked after application creation
+        fileName: cvFile.originalFilename,
+        mimeType: fileType.mime,
+        sizeBytes: cvFile.size,
+        data: fileBuffer,
+        type: 'CV',
+        createdBy: createdBy || 'public_application',
+      }
+    });
+
+    // Create the job application in the database
+    const application = await prisma.jobApplication.create({
+      data: {
+        companyId: job.companyId,
+        jobId: job.id,
+        candidateId: candidate.id,
+        cvFilePath: fileData.fileName,
+        cvFileName: fileData.fileName,
+        cvFileId: fileData.id, // Link to the CV file
+        status: 'SUBMITTED',
+        createdBy: createdBy || 'public_application',
+      },
+    });
+
+    // Now update the CandidateFile to link it to this application
+    await prisma.candidateFile.update({
+      where: { id: fileData.id },
+      data: {
+        applicationId: application.id,
+      },
+    });
+
+    // Create initial stage history
+    await prisma.applicationStageHistory.create({
+      data: {
+        applicationId: application.id,
+        toStatus: 'SUBMITTED',
+        changedBy: createdBy || 'public_application',
+      },
+    });
+
+    return withCors(ApiResponse.success({ 
+      applicationId: application.id,
+      candidateId: candidate.id,
+      message: 'Application submitted successfully',
+      note: 'You can apply to other jobs at this company, but cannot apply again to this same job.'
+    }, 'Job application submitted successfully'), origin);
   } catch (error) {
     const message = formatError(error);
-    return withCors(ApiResponse.error(message, 500), origin);
+    console.error('Error in public job application:', error);
+    return withCors(ApiResponse.error(message || 'An error occurred while processing your application', 500), origin);
   }
 }
