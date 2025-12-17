@@ -21,7 +21,7 @@ export interface StaffRecordInfo {
 
 export interface CompanyInfo {
   id: string;
-  name: string;
+  companyName: string;
 }
 
 export interface StaffItem {

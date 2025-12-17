@@ -98,7 +98,7 @@ export async function GET(request: NextRequest) {
         companyId: true,
         company: {
           select: {
-            name: true,
+            companyName: true,
           }
         },
         _count: {
@@ -132,9 +132,9 @@ export async function GET(request: NextRequest) {
       companies = await prisma.company.findMany({
         select: {
           id: true,
-          name: true,
+          companyName: true,
         },
-        orderBy: { name: 'asc' }
+        orderBy: { companyName: 'asc' }
       });
     }
 
