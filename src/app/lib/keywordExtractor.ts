@@ -123,15 +123,14 @@ export function calculateIndustryMatchScore(
     };
   } = {}
 ): MatchResult {
-  const {
-    useAIServices = false,
-    weights = {
-      technical: 0.4,
-      experience: 0.3,
-      education: 0.15,
-      softSkills: 0.15
-    }
-  } = options;
+  // Set defaults safely with nullish coalescing
+  const useAIServices = options.useAIServices ?? false;
+  
+  // Ensure all weights have defaults
+  const technicalWeight = options.weights?.technical ?? 0.4;
+  const experienceWeight = options.weights?.experience ?? 0.3;
+  const educationWeight = options.weights?.education ?? 0.15;
+  const softSkillsWeight = options.weights?.softSkills ?? 0.15;
 
   // Extract keywords from job description
   const jobKeywords = extractKeywords(jobDescription);
@@ -147,12 +146,12 @@ export function calculateIndustryMatchScore(
   // Calculate technical score based on keyword match
   const technicalScore = basicMatch.percentage;
   
-  // Calculate overall weighted score
+  // Calculate overall weighted score - FIXED: Using safe values
   const overallScore = 
-    technicalScore * weights.technical +
-    experienceScore * weights.experience +
-    educationScore * weights.education +
-    softSkillsScore * weights.softSkills;
+    technicalScore * technicalWeight +
+    experienceScore * experienceWeight +
+    educationScore * educationWeight +
+    softSkillsScore * softSkillsWeight;
   
   // Determine keyword matches with confidence
   const keywordMatches = basicMatch.matchedKeywords.map(keyword => ({
