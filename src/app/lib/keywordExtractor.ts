@@ -50,7 +50,14 @@ export function extractKeywords(text: string): string[] {
     !/\d/.test(word)
   );
   
-  return [...new Set(keywords)].slice(0, 50);
+  return removeDuplicates(keywords).slice(0, 50);
+}
+
+/**
+ * Remove duplicates from array
+ */
+function removeDuplicates<T>(array: T[]): T[] {
+  return array.filter((value, index, self) => self.indexOf(value) === index);
 }
 
 /**
@@ -232,7 +239,7 @@ function calculateSoftSkillsScore(cvText: string): number {
   const lowerText = cvText.toLowerCase();
   const foundSkills = softSkills.filter(skill => lowerText.includes(skill));
   
-  return (foundSkills.length / softSkills.length) * 100;
+  return foundSkills.length > 0 ? (foundSkills.length / softSkills.length) * 100 : 50;
 }
 
 function analyzeSkillGaps(missingKeywords: string[]): {

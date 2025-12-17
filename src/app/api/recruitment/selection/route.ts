@@ -112,7 +112,9 @@ export async function POST(request: NextRequest) {
       const jobKeywords = extractKeywords(jobDescription);
       
       const savedKeywords = job.keywords.map(k => k.name.toLowerCase());
-      const allJobKeywords = [...new Set([...jobKeywords, ...savedKeywords])];
+      
+      // FIX: Use Array.from instead of spread operator for Set
+      const allJobKeywords = Array.from(new Set([...jobKeywords, ...savedKeywords]));
 
       let processedCount = 0
       let reviewedCount = 0
@@ -235,7 +237,7 @@ export async function POST(request: NextRequest) {
         averageScore: parseFloat(averageScore.toFixed(1)),
         message: `Processed ${processedCount} applications with industry-standard algorithm. 
                  ${shortlistedCount} auto-shortlisted.`,
-        shortlisted: shortlistedCount // Added to match interface
+        shortlisted: shortlistedCount
       })
     }
 
@@ -243,8 +245,8 @@ export async function POST(request: NextRequest) {
     const totalJobs = jobs.length
     const totalApplications = jobs.reduce((sum, job) => sum + job.applications.length, 0)
     const totalProcessed = reviewResults.reduce((sum, r) => sum + r.processedCount, 0)
-    const totalReviewed = reviewResults.reduce((sum, r) => sum + r.reviewedCount || 0, 0)
-    const totalShortlisted = reviewResults.reduce((sum, r) => sum + r.shortlistedCount || 0, 0)
+    const totalReviewed = reviewResults.reduce((sum, r) => sum + (r.reviewedCount || 0), 0)
+    const totalShortlisted = reviewResults.reduce((sum, r) => sum + (r.shortlistedCount || 0), 0)
 
     return withCors(
       ApiResponse.success({

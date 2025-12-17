@@ -99,13 +99,14 @@ export async function GET(request: NextRequest) {
           { useAIServices: false }
         );
         
-        // Determine review status
+        // Determine review status - FIXED: Remove REVIEWED check
         const lastStage = applicant.stageHistory[0];
         const isReviewed = lastStage?.toStatus === 'REVIEWING' ||
-                  lastStage?.toStatus === 'SHORTLISTED' ||
-                  lastStage?.toStatus === 'INTERVIEWING' ||
-                  lastStage?.toStatus === 'OFFERED' ||
-                  lastStage?.toStatus === 'HIRED';
+                          lastStage?.toStatus === 'SHORTLISTED' ||
+                          lastStage?.toStatus === 'INTERVIEWING' ||
+                          lastStage?.toStatus === 'OFFERED' ||
+                          lastStage?.toStatus === 'HIRED';
+        
         // Calculate hiring recommendation
         let recommendation = 'Not Recommended';
         if (matchResult.overallScore >= 90) recommendation = 'Immediate Hire';
