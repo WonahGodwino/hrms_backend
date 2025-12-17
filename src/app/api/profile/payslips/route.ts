@@ -1,11 +1,12 @@
 // src/app/api/profile/payslips/route.ts
-// Using this from staff profile page (e.g., /profile) to show a table or list of payslips.
-
+//staff profile payslip
+// src/app/api/profile/payslips/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireAuth } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { PayslipItem, StaffRecordInfo } from '@/app/lib/types/payslip'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -15,7 +16,6 @@ export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
 
   try {
-    // Ensure we always pass a string to requireAuth
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
       return withCors(
@@ -25,20 +25,16 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    // This is actually your StaffRecord-based auth payload
-    const user = requireAuth(token) // { userId, email, role, companyId, ... }
-/* 
-    // SUPER_ADMIN is a system admin, not a staff of a specific company → block here
-    if (user.role === 'SUPER_ADMIN') {
+    const user = requireAuth(token)
+
+    // STAFF only endpoint - reject others
+    if (user.role !== 'STAFF') {
       return withCors(
-        ApiResponse.error(
-          'SUPER_ADMIN users do not have personal payslips',
-          403
-        ),
+        ApiResponse.error('This endpoint is for staff members only', 403),
         origin
       )
     }
-*/
+
     if (!user.companyId) {
       return withCors(
         ApiResponse.error('Company context missing for current user', 400),
@@ -48,34 +44,67 @@ export async function GET(request: NextRequest) {
 
     const companyId = user.companyId as string
 
-    // Find the staff record linked to this auth payload (no separate User model)
-    const staffRecord = await prisma.staffRecord.findFirst({
-      where: {
-        id: user.userId,      // StaffRecord.id stored in the token
-        companyId: companyId, // guaranteed string here
-      },
-    })
+    // Parse query parameters for filtering
+    const { searchParams } = new URL(request.url)
+    const year = searchParams.get('year')
+    const month = searchParams.get('month')
+    const page = parseInt(searchParams.get('page') || '1')
+    const limit = parseInt(searchParams.get('limit') || '10')
+    const skip = (page - 1) * limit
 
-    if (!staffRecord) {
-      return withCors(
-        ApiResponse.error('Staff record not found for current user', 404),
-        origin
-      )
+    // Build where clause - always filter by staffRecordId
+    const whereClause: any = {
+      staffRecordId: user.userId,
+      companyId: companyId,
     }
 
+    // Add year/month filters if provided
+    if (year) {
+      whereClause.year = parseInt(year)
+    }
+    if (month) {
+      whereClause.month = month
+    }
+
+    // Get total count for pagination
+    const totalCount = await prisma.payslip.count({
+      where: whereClause,
+    })
+
+    // Fetch payslips with pagination
     const payslips = await prisma.payslip.findMany({
-      where: {
-        staffRecordId: staffRecord.id,
-        companyId: companyId,
-      },
+      where: whereClause,
       orderBy: [
         { year: 'desc' },
         { month: 'desc' },
         { createdAt: 'desc' },
       ],
+      skip,
+      take: limit,
     })
 
-    const items = payslips.map((p: any) => ({
+    // Get staff info
+    const staffRecord = await prisma.staffRecord.findUnique({
+      where: { id: user.userId },
+      select: {
+        staffId: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        department: true,
+        position: true,
+      }
+    })
+
+    if (!staffRecord) {
+      return withCors(
+        ApiResponse.error('Staff record not found', 404),
+        origin
+      )
+    }
+
+    // Transform the data
+    const items: PayslipItem[] = payslips.map((p: any) => ({
       id: p.id,
       month: p.month,
       year: p.year,
@@ -86,12 +115,26 @@ export async function GET(request: NextRequest) {
       downloadUrl: `/api/payslips/${p.id}/download`,
     }))
 
+    const staffInfo: StaffRecordInfo = {
+      id: user.userId,
+      staffId: staffRecord.staffId,
+      name: `${staffRecord.firstName} ${staffRecord.lastName}`,
+      email: staffRecord.email,
+      department: staffRecord.department,
+      position: staffRecord.position,
+    }
+
     return withCors(
       ApiResponse.success(
         {
-          staffId: staffRecord.staffId,
-          email: staffRecord.email,
+          staff: staffInfo,
           payslips: items,
+          pagination: {
+            total: totalCount,
+            page,
+            limit,
+            totalPages: Math.ceil(totalCount / limit),
+          },
         },
         'Payslip history fetched successfully'
       ),

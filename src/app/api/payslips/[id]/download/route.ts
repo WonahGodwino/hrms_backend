@@ -34,23 +34,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const { id } = params
 
-    // SUPER_ADMIN can see across companies, others are scoped to their company
-    const whereClause: any = { id }
-
-    if (user.role !== 'SUPER_ADMIN') {
-      if (!user.companyId) {
-        return withCors(
-          ApiResponse.error('Company context missing for this user', 400),
-          origin
-        )
-      }
-      whereClause.companyId = user.companyId as string
-    }
-
-    const payslip = await prisma.payslip.findFirst({
-      where: whereClause,
+    // Fetch payslip with company info
+    const payslip = await prisma.payslip.findUnique({
+      where: { id },
       include: {
-        staffRecord: true,
+        staffRecord: {
+          select: {
+            id: true,
+            companyId: true,
+            firstName: true,
+            lastName: true,
+          }
+        },
       },
     })
 
@@ -61,34 +56,61 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    // STAFF can only download their own payslips
-    if (user.role === 'STAFF' && payslip.staffRecordId !== user.userId) {
-      return withCors(
-        ApiResponse.error('Forbidden', 403),
-        origin
-      )
+    // Permission checks based on role
+    switch (user.role) {
+      case 'STAFF':
+        // STAFF can only download their own payslips
+        if (payslip.staffRecordId !== user.userId) {
+          return withCors(
+            ApiResponse.error('Forbidden: You can only download your own payslips', 403),
+            origin
+          )
+        }
+        break
+
+      case 'HR':
+        // HR can download any payslip within their company
+        if (!user.companyId) {
+          return withCors(
+            ApiResponse.error('Company context missing for HR user', 400),
+            origin
+          )
+        }
+        if (payslip.staffRecord.companyId !== user.companyId) {
+          return withCors(
+            ApiResponse.error('Forbidden: HR can only download payslips within their company', 403),
+            origin
+          )
+        }
+        break
+
+      case 'SUPER_ADMIN':
+        // SUPER_ADMIN can download any payslip from any company
+        // No additional checks needed
+        break
+
+      default:
+        return withCors(
+          ApiResponse.error('Unauthorized role', 403),
+          origin
+        )
     }
 
-    // Handle different file path formats
+    // File handling logic (unchanged)
     let filePath: string
     
     if (payslip.filePath.startsWith('/uploads/')) {
-      // Uploads directory (for generated files)
       filePath = path.join(process.cwd(), payslip.filePath)
     } else if (payslip.filePath.startsWith('/')) {
-      // Public directory (stored in public folder)
       filePath = path.join(process.cwd(), 'public', payslip.filePath.slice(1))
     } else if (payslip.filePath.startsWith('uploads/')) {
-      // Relative uploads path
       filePath = path.join(process.cwd(), payslip.filePath)
     } else {
-      // Assume it's in public directory
       filePath = path.join(process.cwd(), 'public', payslip.filePath)
     }
 
     console.log(`Looking for payslip file at: ${filePath}`)
 
-    // Try primary location first
     let fileBuffer: Buffer | null = null
     
     try {
@@ -97,7 +119,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       console.error(`Primary file not found: ${filePath}`, error)
     }
 
-    // If primary location fails, try alternative locations
     if (!fileBuffer) {
       const alternativePaths = [
         path.join(process.cwd(), 'public', 'uploads', payslip.fileName),
@@ -116,7 +137,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    // If still no file found, return error
     if (!fileBuffer) {
       return withCors(
         ApiResponse.error('Payslip file not found on server', 404),
@@ -124,7 +144,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    // Determine content type based on file extension
     const extension = path.extname(payslip.fileName).toLowerCase()
     let contentType = 'application/octet-stream'
     
@@ -135,6 +154,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const uint8Array = new Uint8Array(fileBuffer)
     const blob = new Blob([uint8Array], { type: contentType })
+
+    // Audit log
+    console.log(`Payslip ${payslip.id} downloaded by ${user.role}: ${user.email}`)
 
     const response = new NextResponse(blob, {
       status: 200,
