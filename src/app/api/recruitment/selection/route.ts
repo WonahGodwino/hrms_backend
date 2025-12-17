@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
       include: {
         applications: {
           include: {
-            candidate: true, // Add candidate relation
+            candidate: true,
             stageHistory: {
               orderBy: {
                 changedAt: 'desc'
@@ -71,8 +71,28 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const reviewResults = []
-    const shortlistedCandidates = []
+    // Define types for arrays
+    interface ReviewResult {
+      jobId: string;
+      jobTitle: string;
+      message: string;
+      processedCount: number;
+      shortlisted: number;
+      totalApplications?: number;
+      reviewedCount?: number;
+      shortlistedCount?: number;
+      averageScore?: number;
+    }
+
+    interface ShortlistedCandidate {
+      applicationId: string;
+      candidateName: string;
+      score: number;
+      jobTitle: string;
+    }
+
+    const reviewResults: ReviewResult[] = []
+    const shortlistedCandidates: ShortlistedCandidate[] = []
 
     // Process each job with industry-standard matching
     for (const job of jobs) {
@@ -89,7 +109,7 @@ export async function POST(request: NextRequest) {
 
       // Extract job requirements
       const jobDescription = `${job.title} ${job.description} ${job.department} ${job.position}`;
-      const jobKeywords = extractKeywords(jobDescription); // FIXED: Changed from extractKeywordsAdvanced
+      const jobKeywords = extractKeywords(jobDescription);
       
       const savedKeywords = job.keywords.map(k => k.name.toLowerCase());
       const allJobKeywords = [...new Set([...jobKeywords, ...savedKeywords])];
@@ -97,16 +117,21 @@ export async function POST(request: NextRequest) {
       let processedCount = 0
       let reviewedCount = 0
       let shortlistedCount = 0
+      const applicationScores: number[] = []
 
       // Process each application with industry algorithm
       for (const application of job.applications) {
-        // Skip if already reviewed - FIXED: Remove REVIEWED check
+        // Skip if already reviewed
         const lastStage = application.stageHistory[0]
         const isAlreadyReviewed = lastStage?.toStatus === 'REVIEWING' || 
                                  lastStage?.toStatus === 'SHORTLISTED' ||
                                  lastStage?.toStatus === 'INTERVIEWING'
         
         if (isAlreadyReviewed) {
+          // Still count the existing score if available
+          if (application.score !== null) {
+            applicationScores.push(application.score)
+          }
           continue
         }
 
@@ -119,11 +144,14 @@ export async function POST(request: NextRequest) {
           { useAIServices: useAI }
         )
 
+        const newScore = Math.round(matchResult.overallScore)
+        applicationScores.push(newScore)
+
         // Update application with industry scores
         await prisma.jobApplication.update({
           where: { id: application.id },
           data: {
-            score: Math.round(matchResult.overallScore),
+            score: newScore,
             notes: `Industry-standard review completed. 
                     Overall: ${matchResult.overallScore}%
                     Technical: ${matchResult.technicalScore}%
@@ -193,15 +221,8 @@ export async function POST(request: NextRequest) {
       }
 
       // Calculate average score
-      const totalScore = job.applications.reduce((sum, app) => {
-        const score = app.score || 0
-        // Update score if it was calculated in this batch
-        const updatedApp = reviewResults.find(r => r.applicationId === app.id)
-        return sum + (updatedApp?.score || score)
-      }, 0)
-      
-      const averageScore = job.applications.length > 0 
-        ? totalScore / job.applications.length 
+      const averageScore = applicationScores.length > 0 
+        ? applicationScores.reduce((sum, score) => sum + score, 0) / applicationScores.length
         : 0
 
       reviewResults.push({
@@ -213,20 +234,28 @@ export async function POST(request: NextRequest) {
         shortlistedCount,
         averageScore: parseFloat(averageScore.toFixed(1)),
         message: `Processed ${processedCount} applications with industry-standard algorithm. 
-                 ${shortlistedCount} auto-shortlisted.`
+                 ${shortlistedCount} auto-shortlisted.`,
+        shortlisted: shortlistedCount // Added to match interface
       })
     }
+
+    // Calculate totals for summary
+    const totalJobs = jobs.length
+    const totalApplications = jobs.reduce((sum, job) => sum + job.applications.length, 0)
+    const totalProcessed = reviewResults.reduce((sum, r) => sum + r.processedCount, 0)
+    const totalReviewed = reviewResults.reduce((sum, r) => sum + r.reviewedCount || 0, 0)
+    const totalShortlisted = reviewResults.reduce((sum, r) => sum + r.shortlistedCount || 0, 0)
 
     return withCors(
       ApiResponse.success({
         results: reviewResults,
         shortlistedCandidates: autoShortlist ? shortlistedCandidates : undefined,
         summary: {
-          totalJobs: jobs.length,
-          totalApplications: jobs.reduce((sum, job) => sum + job.applications.length, 0),
-          totalProcessed: reviewResults.reduce((sum, r) => sum + r.processedCount, 0),
-          totalReviewed: reviewResults.reduce((sum, r) => sum + r.reviewedCount, 0),
-          totalShortlisted: reviewResults.reduce((sum, r) => sum + r.shortlistedCount, 0),
+          totalJobs,
+          totalApplications,
+          totalProcessed,
+          totalReviewed,
+          totalShortlisted,
           aiUsed: useAI,
           autoShortlistEnabled: autoShortlist,
           thresholdUsed: threshold
