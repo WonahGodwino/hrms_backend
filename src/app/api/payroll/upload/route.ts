@@ -1,3 +1,4 @@
+// src/app/api/payroll/upload/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
@@ -64,7 +65,7 @@ const CANONICAL_HEADERS = [
   'Entertainment',
   'Utility',
   'Salary Of Attendance',
-  'PRORATED GROSS PAY WITH EXTRA ALL\'WCE',
+  "PRORATED GROSS PAY WITH EXTRA ALL'WCE",
   'TAXABLE INCOME',
   'Consolidated Relief',
   'Payee',
@@ -161,6 +162,23 @@ function splitCsvLine(line: string) {
   }
   result.push(cur.trim())
   return result
+}
+
+// Helper function to convert absolute path to relative path
+function getRelativePath(absolutePath: string): string {
+  const projectRoot = process.cwd()
+  if (absolutePath.startsWith(projectRoot)) {
+    return path.relative(projectRoot, absolutePath)
+  }
+  return absolutePath
+}
+
+// Helper function to resolve relative path to absolute path
+function resolveRelativePath(relativePath: string): string {
+  if (path.isAbsolute(relativePath)) {
+    return relativePath
+  }
+  return path.join(process.cwd(), relativePath)
 }
 
 // -----------------------------
@@ -482,9 +500,7 @@ export async function POST(request: NextRequest) {
         const vatOnManagementFee = num(
           getCell(rowData, 'Vat on Management Fee @7.5%')
         )
-        const totalInvoiceValue = num(
-          getCell(rowData, 'Total Invoice Value')
-        )
+        const totalInvoiceValue = num(getCell(rowData, 'Total Invoice Value'))
 
         const daysInMonth = num(
           getCell(rowData, 'No of Working Days in the Month')
@@ -665,7 +681,7 @@ export async function POST(request: NextRequest) {
                 updatedAt: new Date(),
               },
             })
-            
+
             results.payslipsUpdated++
           } catch (err: any) {
             const message = `Failed to regenerate payslip PDF for update - ${err.message}`
@@ -746,9 +762,12 @@ export async function POST(request: NextRequest) {
           netSalary,
           status: isUpdate ? 'UPDATED' : 'PROCESSED',
           emailSent: sendEmails,
-          emailStatus: results.emailFailures.some(f => f.rowNumber === displayRowNumber) ? 'FAILED' : 'SENT',
+          emailStatus: results.emailFailures.some(
+            (f) => f.rowNumber === displayRowNumber
+          )
+            ? 'FAILED'
+            : 'SENT',
         })
-
       } catch (err: any) {
         const message = err?.message || 'Unknown error'
         results.failed++
@@ -767,6 +786,7 @@ export async function POST(request: NextRequest) {
       emailFailures: results.emailFailures.length,
     })
 
+    // Create upload directories
     const uploadDir = path.join(process.cwd(), 'uploads', 'payroll')
     await mkdir(uploadDir, { recursive: true })
 
@@ -805,25 +825,37 @@ export async function POST(request: NextRequest) {
       const failedFileName = `failed-records-${Date.now()}.xlsx`
       const failedFilePath = path.join(uploadDir, failedFileName)
 
+      // Ensure directory exists
+      await mkdir(path.dirname(failedFilePath), { recursive: true })
+
       const failedBuffer = await failedWorkbook.xlsx.writeBuffer()
       await writeFile(failedFilePath, Buffer.from(failedBuffer as any))
 
-      processedFilePath = failedFilePath
+      // Store relative path
+      processedFilePath = getRelativePath(failedFilePath)
 
       console.log(
-        `[PAYROLL_UPLOAD] Failed-records file written at: ${processedFilePath}`
+        `[PAYROLL_UPLOAD] Failed-records file written at: ${failedFilePath}`
+      )
+      console.log(
+        `[PAYROLL_UPLOAD] Relative path stored: ${processedFilePath}`
       )
     }
 
-    // Save original uploaded file
-    await writeFile(path.join(uploadDir, file.name), buffer)
+    // Save original uploaded file with a unique name
+    const originalFileName = `upload-${Date.now()}-${file.name}`
+    const originalFilePath = path.join(uploadDir, originalFileName)
+    await writeFile(originalFilePath, buffer)
+
+    // Store relative path for original file
+    const relativeOriginalPath = getRelativePath(originalFilePath)
 
     const uploadRecord = await prisma.payrollUpload.create({
       data: {
         companyId,
         fileName: file.name,
-        filePath: path.join(uploadDir, file.name),
-        processedFilePath,
+        filePath: relativeOriginalPath, // Store relative path
+        processedFilePath, // Already relative path
         processedFileName: processedFilePath
           ? path.basename(processedFilePath)
           : null,
@@ -854,11 +886,13 @@ export async function POST(request: NextRequest) {
     }
 
     if (results.failedRecords.length > 0) {
-      responseData.failedRecordsDownload =
-        `/api/payroll/download-failed/${uploadRecord.id}`
+      responseData.failedRecordsDownload = `/api/payroll/download-failed/${uploadRecord.id}`
     }
 
-    console.log('[PAYROLL_UPLOAD] Completed successfully for uploadId', uploadRecord.id)
+    console.log(
+      '[PAYROLL_UPLOAD] Completed successfully for uploadId',
+      uploadRecord.id
+    )
 
     return withCors(
       ApiResponse.success(
@@ -869,9 +903,6 @@ export async function POST(request: NextRequest) {
     )
   } catch (error) {
     console.error('[PAYROLL_UPLOAD] Top-level error:', error)
-    return withCors(
-      handleApiError(error),
-      origin
-    )
+    return withCors(handleApiError(error), origin)
   }
 }

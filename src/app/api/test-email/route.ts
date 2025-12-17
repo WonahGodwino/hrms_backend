@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}))
 
     const testEmail = body.email as string | undefined
-    const month = (body.month as string | undefined) || 'January'
+    const month = (body.month as string | undefined) || 'December'
     const year = Number(body.year ?? 2025)
     const netSalary = Number(body.netSalary ?? 150000)
 

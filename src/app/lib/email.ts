@@ -33,13 +33,13 @@ function mustEnv(name: string): string {
  */
 function buildLoginLink(): string {
   const base =
-    process.env.APP_URL?.trim() ||
-    process.env.NEXTAUTH_URL?.trim() ||
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    "http://localhost:5173//complete-registration";
+   // process.env.APP_URL?.trim() ||
+    //process.env.NEXTAUTH_URL?.trim() ||
+    //process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    "http://localhost:5173/complete-registration";
 
   const clean = base.replace(/\/$/, "");
-  return clean.endsWith("/profile") ? clean : `${clean}/profile`;
+  return clean.endsWith("/complete-registration") ? clean : `${clean}/complete-registration`;
 }
 
 function getMailgunClient() {
