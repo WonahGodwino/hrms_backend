@@ -1,11 +1,10 @@
 // src/app/api/recruitment/selection/route.ts
-
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
-import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { extractKeywords } from '@/app/lib/keywordExtractor'
+import { calculateIndustryMatchScore, extractKeywordsAdvanced } from '@/app/lib/keywordExtractor'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -15,7 +14,6 @@ export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin')
 
   try {
-    // 🔐 Auth + role check
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
       return withCors(
@@ -34,133 +32,203 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const body = await request.json().catch(() => null)
+    const body = await request.json()
+    const { jobIds, useAI = false, autoShortlist = false, threshold = 70 } = body
 
-    if (!body || !body.jobId) {
+    if (!jobIds || !Array.isArray(jobIds) || jobIds.length === 0) {
       return withCors(
-        ApiResponse.error('jobId is required', 400),
+        ApiResponse.error('jobIds array is required', 400),
         origin
       )
     }
 
-    const { jobId } = body
-
-    // 🔎 Fetch job *scoped by companyId*
-    const job = await prisma.job.findFirst({
+    // Get all specified jobs for this company
+    const jobs = await prisma.job.findMany({
       where: {
-        id: jobId,
+        id: { in: jobIds },
         companyId: user.companyId as string,
       },
       include: {
-        applications: true, // relation name from your Prisma schema
+        applications: {
+          include: {
+            cvFile: {
+              select: {
+                parsedCvContent: true
+              }
+            },
+            stageHistory: {
+              orderBy: {
+                changedAt: 'desc'
+              },
+              take: 1
+            }
+          }
+        },
+        keywords: true
       },
     })
 
-    if (!job) {
+    if (jobs.length === 0) {
       return withCors(
-        ApiResponse.error(
-          'Job not found for this company or you do not have access',
-          404
-        ),
+        ApiResponse.error('No jobs found for the specified IDs', 404),
         origin
       )
     }
 
-    const applicants = job.applications as any[]
+    const reviewResults = []
+    const shortlistedCandidates = []
 
-    if (!applicants.length) {
-      return withCors(
-        ApiResponse.success(
-          {
-            job: {
-              id: job.id,
-              title: job.title,
-            },
-            applicants: [],
-          },
-          'No applications found for this job'
-        ),
-        origin
-      )
-    }
+    // Process each job with industry-standard matching
+    for (const job of jobs) {
+      if (!job.applications.length) {
+        reviewResults.push({
+          jobId: job.id,
+          jobTitle: job.title,
+          message: 'No applications to review',
+          processedCount: 0,
+          shortlisted: 0
+        })
+        continue
+      }
 
-    // 🧠 Extract keywords from job description (and title to make it richer)
-    const jobText = [
-      job.title || '',
-      job.description || '',
-      (job as any).requirements || '',
-      (job as any).responsibilities || '',
-    ]
-      .join(' ')
-      .trim()
+      // Extract job requirements
+      const jobDescription = `${job.title} ${job.description} ${job.department} ${job.position}`;
+      const jobKeywords = extractKeywordsAdvanced(jobDescription, { 
+        maxKeywords: 100,
+        includeNgrams: true 
+      });
+      
+      const savedKeywords = job.keywords.map(k => k.name.toLowerCase());
+      const allJobKeywords = [...new Set([...jobKeywords, ...savedKeywords])];
 
-    let jobKeywords = extractKeywords(jobText)
-      .map((k) => k.toLowerCase().trim())
-      .filter(Boolean)
+      let processedCount = 0
+      let reviewedCount = 0
+      let shortlistedCount = 0
 
-    // De-duplicate keywords
-    jobKeywords = Array.from(new Set(jobKeywords))
-
-    // 🧮 Rank applicants based on keyword matching in parsedCvContent
-    const rankedApplicants = applicants.map((applicant) => {
-      const cvText =
-        (applicant.parsedCvContent as string | undefined)?.toLowerCase?.() || ''
-
-      let matchCount = 0
-      const matchedKeywords: string[] = []
-
-      for (const keyword of jobKeywords) {
-        if (!keyword) continue
-        if (cvText.includes(keyword)) {
-          matchCount++
-          matchedKeywords.push(keyword)
+      // Process each application with industry algorithm
+      for (const application of job.applications) {
+        // Skip if already reviewed
+        const lastStage = application.stageHistory[0]
+        const isAlreadyReviewed = lastStage?.toStatus === 'REVIEWING' || lastStage?.toStatus === 'REVIEWED'
+        
+        if (isAlreadyReviewed) {
+          continue
         }
+
+        const cvText = application.parsedCvContent || ''
+        
+        // Use industry-standard matching algorithm
+        const matchResult = calculateIndustryMatchScore(
+          jobDescription,
+          cvText,
+          { useAIServices: useAI }
+        )
+
+        // Update application with industry scores
+        await prisma.jobApplication.update({
+          where: { id: application.id },
+          data: {
+            score: Math.round(matchResult.overallScore),
+            notes: `Industry-standard review completed. 
+                    Overall: ${matchResult.overallScore}%
+                    Technical: ${matchResult.technicalScore}%
+                    Experience: ${matchResult.experienceScore}%
+                    Education: ${matchResult.educationScore}%
+                    Soft Skills: ${matchResult.softSkillsScore}%
+                    Recommendation: ${matchResult.recommendations[0] || 'Review required'}`
+          }
+        })
+
+        // Update stage history
+        const fromStatus = lastStage?.toStatus || 'SUBMITTED'
+        
+        await prisma.applicationStageHistory.create({
+          data: {
+            applicationId: application.id,
+            fromStatus: fromStatus as any,
+            toStatus: 'REVIEWING',
+            changedBy: user.userId || 'system',
+            comment: `Industry-standard CV review completed. Score: ${matchResult.overallScore}%. 
+                     ${matchResult.missingKeywords.length > 0 ? 
+                       `Missing: ${matchResult.missingKeywords.slice(0, 3).join(', ')}` : 
+                       'All key skills matched'}`
+          }
+        })
+
+        // Auto-shortlist if enabled and above threshold
+        if (autoShortlist && matchResult.overallScore >= threshold) {
+          await prisma.applicationStageHistory.create({
+            data: {
+              applicationId: application.id,
+              fromStatus: 'REVIEWING',
+              toStatus: 'SHORTLISTED',
+              changedBy: 'system',
+              comment: `Auto-shortlisted based on industry match score of ${matchResult.overallScore}%`
+            }
+          })
+
+          await prisma.jobApplication.update({
+            where: { id: application.id },
+            data: {
+              status: 'SHORTLISTED'
+            }
+          })
+
+          shortlistedCount++
+          shortlistedCandidates.push({
+            applicationId: application.id,
+            candidateName: `${application.candidate?.firstName} ${application.candidate?.lastName}`,
+            score: matchResult.overallScore,
+            jobTitle: job.title
+          })
+        } else {
+          // Just mark as reviewed
+          await prisma.jobApplication.update({
+            where: { id: application.id },
+            data: {
+              status: 'REVIEWING'
+            }
+          })
+        }
+
+        reviewedCount++
+        processedCount++
       }
 
-      const score =
-        jobKeywords.length > 0 ? matchCount / jobKeywords.length : 0
-
-      return {
-        ...applicant,
-        matchCount,
-        score, // 0–1 ratio of matched keywords
-        matchedKeywords: Array.from(new Set(matchedKeywords)),
-      }
-    })
-
-    // ⬇️ Sort by matchCount (desc), then by createdAt (oldest first if same score)
-    const sortedApplicants = rankedApplicants.sort((a, b) => {
-      if (b.matchCount !== a.matchCount) {
-        return b.matchCount - a.matchCount
-      }
-      const aDate = new Date(a.createdAt || 0).getTime()
-      const bDate = new Date(b.createdAt || 0).getTime()
-      return aDate - bDate
-    })
-
-    // Add explicit rank for UI (1 = most qualified)
-    const applicantsWithRank = sortedApplicants.map((app, index) => ({
-      ...app,
-      rank: index + 1,
-    }))
+      reviewResults.push({
+        jobId: job.id,
+        jobTitle: job.title,
+        totalApplications: job.applications.length,
+        processedCount,
+        reviewedCount,
+        shortlistedCount,
+        averageScore: job.applications.length > 0 ? 
+          job.applications.reduce((sum, app) => sum + (app.score || 0), 0) / job.applications.length : 0,
+        message: `Processed ${processedCount} applications with industry-standard algorithm. 
+                 ${shortlistedCount} auto-shortlisted.`
+      })
+    }
 
     return withCors(
-      ApiResponse.success(
-        {
-          job: {
-            id: job.id,
-            title: job.title,
-          },
-          applicants: applicantsWithRank,
-        },
-        'Applicants ranked based on keyword match'
-      ),
+      ApiResponse.success({
+        results: reviewResults,
+        shortlistedCandidates: autoShortlist ? shortlistedCandidates : undefined,
+        summary: {
+          totalJobs: jobs.length,
+          totalApplications: jobs.reduce((sum, job) => sum + job.applications.length, 0),
+          totalProcessed: reviewResults.reduce((sum, r) => sum + r.processedCount, 0),
+          totalReviewed: reviewResults.reduce((sum, r) => sum + r.reviewedCount, 0),
+          totalShortlisted: reviewResults.reduce((sum, r) => sum + r.shortlistedCount, 0),
+          aiUsed: useAI,
+          autoShortlistEnabled: autoShortlist,
+          thresholdUsed: threshold
+        }
+      }, 'Industry-standard CV review completed'),
       origin
     )
   } catch (error: unknown) {
-    return withCors(
-      handleApiError(error),
-      origin
-    )
+    const message = formatError(error)
+    console.error('Error in industry review:', error)
+    return withCors(ApiResponse.error(message, 500), origin)
   }
 }
