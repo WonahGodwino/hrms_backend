@@ -1,14 +1,5 @@
 // src/app/lib/keywordExtractor.ts
 
-import { removeStopwords } from 'stopword';
-
-export interface SkillMatch {
-  skill: string;
-  confidence: number;
-  category: 'technical' | 'soft' | 'tool' | 'certification';
-  frequency: number;
-}
-
 export interface MatchResult {
   overallScore: number;
   technicalScore: number;
@@ -31,11 +22,11 @@ export interface MatchResult {
 }
 
 /**
- * Extract keywords from text (basic implementation)
+ * Extract keywords from text
  */
 export function extractKeywords(text: string): string[] {
   if (!text || text.trim().length === 0) return [];
-
+  
   const stopWords = [
     'the', 'a', 'an', 'of', 'and', 'in', 'for', 'on', 'at', 'by', 'to', 'with',
     'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
@@ -44,25 +35,21 @@ export function extractKeywords(text: string): string[] {
     'too', 'very', 'just', 'also', 'only', 'about', 'above', 'below', 'under',
     'over', 'between', 'through', 'during', 'before', 'after', 'since', 'until'
   ];
-
-  // Clean text
+  
   const cleanText = text
     .toLowerCase()
     .replace(/[^\w\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-
-  // Split into words
+  
   const words = cleanText.split(' ');
   
-  // Filter out stop words and short words
   const keywords = words.filter(word => 
     word.length > 3 && 
     !stopWords.includes(word) &&
     !/\d/.test(word)
   );
-
-  // Remove duplicates and limit to top 50
+  
   return [...new Set(keywords)].slice(0, 50);
 }
 
@@ -114,7 +101,7 @@ export function calculateMatchScore(jobKeywords: string[], cvText: string): {
 }
 
 /**
- * Enhanced match analysis with industry standards
+ * Industry-standard matching algorithm
  */
 export function calculateIndustryMatchScore(
   jobDescription: string,
@@ -145,7 +132,7 @@ export function calculateIndustryMatchScore(
   // Calculate basic keyword match
   const basicMatch = calculateMatchScore(jobKeywords, cvText);
   
-  // Calculate additional scores (simplified for deployment)
+  // Calculate additional scores
   const experienceScore = calculateExperienceScore(cvText);
   const educationScore = calculateEducationScore(cvText);
   const softSkillsScore = calculateSoftSkillsScore(cvText);
@@ -189,7 +176,6 @@ export function calculateIndustryMatchScore(
 
 // Helper functions
 function calculateExperienceScore(cvText: string): number {
-  // Simplified experience calculation
   const yearPatterns = [
     /(\d+)\+?\s*years?.*experience/gi,
     /experience.*(\d+)\+?\s*years?/gi
@@ -209,7 +195,6 @@ function calculateExperienceScore(cvText: string): number {
     }
   });
   
-  // Cap at 10+ years = 100%
   return Math.min(maxYears * 10, 100);
 }
 
@@ -234,7 +219,7 @@ function calculateEducationScore(cvText: string): number {
     }
   });
   
-  return maxScore || 30; // Default to 30 if no education mentioned
+  return maxScore || 30;
 }
 
 function calculateSoftSkillsScore(cvText: string): number {
@@ -283,28 +268,25 @@ function generateRecommendations(score: number, skillGaps: any): string[] {
   const recommendations: string[] = [];
   
   if (score >= 90) {
-    recommendations.push('🏆 Top-tier candidate - Immediate hire consideration');
+    recommendations.push('Top-tier candidate - Immediate hire consideration');
     recommendations.push('Schedule executive interview within 48 hours');
   } else if (score >= 80) {
-    recommendations.push('✅ Strong candidate - Proceed with interviews');
+    recommendations.push('Strong candidate - Proceed with interviews');
     recommendations.push('Technical assessment recommended');
   } else if (score >= 70) {
-    recommendations.push('⚠️ Qualified candidate - Evaluate carefully');
+    recommendations.push('Qualified candidate - Evaluate carefully');
     recommendations.push('Focus interview on skill gaps');
   } else if (score >= 60) {
-    recommendations.push('📝 Borderline candidate - Secondary option');
+    recommendations.push('Borderline candidate - Secondary option');
     recommendations.push('Only consider if no better candidates available');
   } else {
-    recommendations.push('❌ Not recommended - Consider rejection');
+    recommendations.push('Not recommended - Consider rejection');
     recommendations.push('Keep in talent pool for future openings');
   }
   
   if (skillGaps.critical.length > 0) {
     recommendations.push(`Critical skill gaps: ${skillGaps.critical.slice(0, 3).join(', ')}`);
   }
-  
-  recommendations.push('Verify employment history through background check');
-  recommendations.push('Assess cultural fit during interview');
   
   return recommendations;
 }

@@ -101,10 +101,11 @@ export async function GET(request: NextRequest) {
         
         // Determine review status
         const lastStage = applicant.stageHistory[0];
-        const isReviewed = lastStage?.toStatus === 'REVIEWING' || 
-                          lastStage?.toStatus === 'REVIEWED' ||
-                          lastStage?.toStatus === 'SHORTLISTED';
-        
+        const isReviewed = lastStage?.toStatus === 'REVIEWING' ||
+                  lastStage?.toStatus === 'SHORTLISTED' ||
+                  lastStage?.toStatus === 'INTERVIEWING' ||
+                  lastStage?.toStatus === 'OFFERED' ||
+                  lastStage?.toStatus === 'HIRED';
         // Calculate hiring recommendation
         let recommendation = 'Not Recommended';
         if (matchResult.overallScore >= 90) recommendation = 'Immediate Hire';

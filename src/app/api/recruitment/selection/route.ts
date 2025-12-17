@@ -4,7 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { calculateIndustryMatchScore, extractKeywordsAdvanced } from '@/app/lib/keywordExtractor'
+import { calculateIndustryMatchScore, extractKeywords } from '@/app/lib/keywordExtractor'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -51,11 +51,7 @@ export async function POST(request: NextRequest) {
       include: {
         applications: {
           include: {
-            cvFile: {
-              select: {
-                parsedCvContent: true
-              }
-            },
+            candidate: true, // Add candidate relation
             stageHistory: {
               orderBy: {
                 changedAt: 'desc'
@@ -93,10 +89,7 @@ export async function POST(request: NextRequest) {
 
       // Extract job requirements
       const jobDescription = `${job.title} ${job.description} ${job.department} ${job.position}`;
-      const jobKeywords = extractKeywordsAdvanced(jobDescription, { 
-        maxKeywords: 100,
-        includeNgrams: true 
-      });
+      const jobKeywords = extractKeywords(jobDescription); // FIXED: Changed from extractKeywordsAdvanced
       
       const savedKeywords = job.keywords.map(k => k.name.toLowerCase());
       const allJobKeywords = [...new Set([...jobKeywords, ...savedKeywords])];
@@ -107,9 +100,11 @@ export async function POST(request: NextRequest) {
 
       // Process each application with industry algorithm
       for (const application of job.applications) {
-        // Skip if already reviewed
+        // Skip if already reviewed - FIXED: Remove REVIEWED check
         const lastStage = application.stageHistory[0]
-        const isAlreadyReviewed = lastStage?.toStatus === 'REVIEWING' || lastStage?.toStatus === 'REVIEWED'
+        const isAlreadyReviewed = lastStage?.toStatus === 'REVIEWING' || 
+                                 lastStage?.toStatus === 'SHORTLISTED' ||
+                                 lastStage?.toStatus === 'INTERVIEWING'
         
         if (isAlreadyReviewed) {
           continue
@@ -177,7 +172,9 @@ export async function POST(request: NextRequest) {
           shortlistedCount++
           shortlistedCandidates.push({
             applicationId: application.id,
-            candidateName: `${application.candidate?.firstName} ${application.candidate?.lastName}`,
+            candidateName: application.candidate 
+              ? `${application.candidate.firstName} ${application.candidate.lastName}`
+              : 'Unknown Candidate',
             score: matchResult.overallScore,
             jobTitle: job.title
           })
@@ -195,6 +192,18 @@ export async function POST(request: NextRequest) {
         processedCount++
       }
 
+      // Calculate average score
+      const totalScore = job.applications.reduce((sum, app) => {
+        const score = app.score || 0
+        // Update score if it was calculated in this batch
+        const updatedApp = reviewResults.find(r => r.applicationId === app.id)
+        return sum + (updatedApp?.score || score)
+      }, 0)
+      
+      const averageScore = job.applications.length > 0 
+        ? totalScore / job.applications.length 
+        : 0
+
       reviewResults.push({
         jobId: job.id,
         jobTitle: job.title,
@@ -202,8 +211,7 @@ export async function POST(request: NextRequest) {
         processedCount,
         reviewedCount,
         shortlistedCount,
-        averageScore: job.applications.length > 0 ? 
-          job.applications.reduce((sum, app) => sum + (app.score || 0), 0) / job.applications.length : 0,
+        averageScore: parseFloat(averageScore.toFixed(1)),
         message: `Processed ${processedCount} applications with industry-standard algorithm. 
                  ${shortlistedCount} auto-shortlisted.`
       })

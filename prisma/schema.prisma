@@ -208,7 +208,7 @@ enum JobStatus {
 
 enum ApplicationStatus {
   SUBMITTED
-  REVIEWING
+  REVIEWING      // Add this
   SHORTLISTED
   INTERVIEWING
   OFFERED
