@@ -1,4 +1,4 @@
-// src/app/api/payroll/resend-email/route.ts
+// src/app/api/payroll/resend-email/route.ts - CORRECTED VERSION
 
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
@@ -28,6 +28,7 @@ export async function OPTIONS(request: NextRequest) {
  * - Finds staffRecord by staffEmail (in that company).
  * - If newEmail is provided, validates it and updates staffRecord.email.
  * - Finds latest PROCESSED payroll (or specific month/year if provided).
+ * - Finds corresponding payslip.
  * - Resends payroll notification email.
  */
 export async function POST(request: NextRequest) {
@@ -159,7 +160,26 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 6) Safely convert Decimal → number
+    // 6) Find the corresponding payslip to get the payslip ID
+    const payslip = await prisma.payslip.findFirst({
+      where: {
+        payrollId: payroll.id,
+        staffRecordId: staff.id,
+        companyId,
+      },
+    })
+
+    if (!payslip) {
+      return withCors(
+        ApiResponse.error(
+          'No payslip found for this payroll. Please generate the payslip first.',
+          404
+        ),
+        origin
+      )
+    }
+
+    // 7) Safely convert Decimal → number
     const rawNet =
       (payroll as any).netSalary ??
       (payroll as any).netPay ??
@@ -167,15 +187,40 @@ export async function POST(request: NextRequest) {
 
     const netSalaryNumber = Number(rawNet || 0)
 
-    // 7) Send payroll notification email
-    await sendPayrollNotificationEmail(
-      staff,
-      {
-        month: payroll.month,
-        year: payroll.year,
-        netSalary: netSalaryNumber,
-      }
-    )
+    // 8) Prepare staff data for email function
+    const staffData = {
+      id: staff.id,
+      companyId: staff.companyId,
+      firstName: staff.firstName,
+      lastName: staff.lastName,
+      email: staff.email,
+      staffId: staff.staffId,
+      department: staff.department,
+      position: staff.position,
+      isRegistered: staff.isRegistered,
+    }
+
+    // 9) Prepare payroll/payslip data for email function
+    const payrollData = {
+      id: payslip.id, // Use payslip ID for the access link
+      month: payroll.month,
+      year: payroll.year,
+      netSalary: netSalaryNumber,
+      isUpdate: true, // Mark as update since this is a resend
+    }
+
+    // 10) Send payroll notification email
+    const result = await sendPayrollNotificationEmail(staffData, payrollData)
+
+    if (!result.success) {
+      return withCors(
+        ApiResponse.error(
+          `Failed to send email: ${result.error || 'Unknown error'}`,
+          500
+        ),
+        origin
+      )
+    }
 
     return withCors(
       ApiResponse.success(
@@ -185,6 +230,7 @@ export async function POST(request: NextRequest) {
           payrollMonth: payroll.month,
           payrollYear: payroll.year,
           netSalary: netSalaryNumber,
+          payslipId: payslip.id,
         },
         'Payroll notification email resent successfully'
       ),
