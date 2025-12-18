@@ -1,178 +1,250 @@
 // src/app/lib/payroll/generatePayslipPdf.ts
-import puppeteer from "puppeteer";
-import path from "path";
-import { mkdir } from "fs/promises";
-import fs from "fs/promises";
-import type { GeneratePayslipInput } from "./types";
+import PDFDocument from 'pdfkit'
+import { mkdir } from 'fs/promises'
+import fs from 'fs'
+import path from 'path'
+import type { GeneratePayslipInput } from './types'
 
-type PayslipPdfResult = {
-  filePath: string; // DB-safe relative path: uploads/payslips/xxx.pdf
-  fileName: string;
-};
-
-function toSafeFileName(v: string) {
-  return v.replace(/[^a-zA-Z0-9._-]/g, "_");
+function formatCurrency(n: number) {
+  const safe = Number.isFinite(n) ? n : 0
+  return `₦${safe.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`
 }
 
-function toPosix(p: string) {
-  return p.split(path.sep).join(path.posix.sep);
+function getMonthName(monthNumber: number): string {
+  const months = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ]
+  return months[monthNumber - 1] || 'Unknown'
 }
 
 export async function generatePayslipPdf(
   input: GeneratePayslipInput
-): Promise<PayslipPdfResult> {
-  // ✅ One canonical storage root for EVERYTHING
-  // - local: <project>/uploads/...
-  // - render with disk: set STORAGE_ROOT=/var/data (recommended)
-  const storageRoot = process.env.STORAGE_ROOT?.trim() || process.cwd();
-  const payslipsDirAbs = path.join(storageRoot, "uploads", "payslips");
-  await mkdir(payslipsDirAbs, { recursive: true });
+): Promise<{ pdfPath: string; fileName: string }> {
+  const { staff, payroll } = input
 
-  const staffIdSafe = toSafeFileName(input.staff.staffId || "UNKNOWN");
-  const monthSafe = String(input.payroll.periodMonth || 0).padStart(2, "0");
-  const yearSafe = String(input.payroll.periodYear || new Date().getFullYear());
-  const fileName = `payslip-${staffIdSafe}-${monthSafe}-${yearSafe}-${Date.now()}.pdf`;
+  // Create payslips directory if it doesn't exist
+  const payslipDir = path.join(process.cwd(), 'uploads', 'payslips')
+  await mkdir(payslipDir, { recursive: true })
 
-  const pdfAbsPath = path.join(payslipsDirAbs, fileName);
-  const htmlContent = generatePayslipHtml(input);
+  // Generate filename
+  const safeMonth = payroll.periodMonth.toString().padStart(2, '0')
+  const fileNameBase = `payslip-${staff.staffId}-${safeMonth}-${payroll.periodYear}`
+  let fileName = `${fileNameBase}.pdf`
+  let absPath = path.join(payslipDir, fileName)
 
-  const browser = await puppeteer.launch({
-    headless: "new",
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-    // If you ever need a custom chromium path in production:
-    // executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-  });
-
-  try {
-    const page = await browser.newPage();
-    await page.setContent(htmlContent, { waitUntil: "networkidle0" });
-
-    await page.pdf({
-      path: pdfAbsPath,
-      format: "A4",
-      printBackground: true,
-      margin: { top: "20mm", right: "20mm", bottom: "20mm", left: "20mm" },
-    });
-
-    // Sanity check: make sure file really exists
-    await fs.access(pdfAbsPath);
-
-    // ✅ DB-safe relative path (always POSIX)
-    // If STORAGE_ROOT is process.cwd(), this becomes uploads/payslips/...
-    // If STORAGE_ROOT is /var/data, still store uploads/payslips/... (portable)
-    const filePathDb = toPosix(path.join("uploads", "payslips", fileName));
-
-    return { filePath: filePathDb, fileName };
-  } finally {
-    await browser.close();
+  // Add timestamp if file already exists
+  if (fs.existsSync(absPath)) {
+    const timestamp = Date.now()
+    fileName = `${fileNameBase}-${timestamp}.pdf`
+    absPath = path.join(payslipDir, fileName)
   }
-}
 
-function generatePayslipHtml(input: GeneratePayslipInput): string {
-  const { staff, payroll } = input;
+  const doc = new PDFDocument({ margin: 40, size: 'A4' })
+  const writeStream = fs.createWriteStream(absPath)
+  doc.pipe(writeStream)
 
-  // Calculate total deductions
-  const totalDeductions = (payroll.payee || 0) + (payroll.pension || 0);
-  const netPay = payroll.netPay || 0;
+  // ========== HEADER SECTION ==========
+  // Header background
+  doc.rect(0, 0, doc.page.width, 80).fill('#1e3a5f')
+  
+  // Company name
+  doc.fillColor('#ffffff')
+    .fontSize(18)
+    .font('Helvetica-Bold')
+    .text(staff.companyName || 'COMPANY NAME LTD', 40, 25)
+  
+  // Document title
+  doc.fontSize(11)
+    .font('Helvetica')
+    .text('SALARY PAYSLIP', 40, 50)
+  
+  // Pay period and generation date
+  doc.fillColor('#ffffff')
+    .fontSize(10)
+    .text(`Pay Period: ${getMonthName(payroll.periodMonth)} ${payroll.periodYear}`, 
+          doc.page.width - 220, 30)
+    .text(`Generated: ${new Date().toLocaleDateString('en-NG')}`, 
+          doc.page.width - 220, 45)
 
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Payslip - ${staff.firstName} ${staff.lastName}</title>
-      <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
-        .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #2c5530; padding-bottom: 20px; }
-        .company-name { font-size: 24px; font-weight: bold; color: #2c5530; margin-bottom: 5px; }
-        .document-title { font-size: 18px; color: #666; margin-bottom: 20px; }
-        .info-section { display: flex; justify-content: space-between; margin-bottom: 30px; }
-        .staff-info, .payroll-info { width: 48%; }
-        .info-row { margin-bottom: 8px; }
-        .info-label { font-weight: bold; color: #555; display: inline-block; width: 150px; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        th { background-color: #f8f9fa; text-align: left; padding: 10px; border: 1px solid #dee2e6; font-weight: bold; color: #495057; }
-        td { padding: 10px; border: 1px solid #dee2e6; }
-        .text-right { text-align: right; }
-        .total-row { background-color: #f8f9fa; font-weight: bold; }
-        .section-title { background-color: #2c5530; color: white; padding: 10px; font-weight: bold; margin-bottom: 10px; }
-        .footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #dee2e6; color: #666; font-size: 12px; }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <div class="company-name">${staff.companyName || "Company Name"}</div>
-        <div class="document-title">PAYSLIP</div>
-        <div>Period: ${getMonthName(payroll.periodMonth)} ${payroll.periodYear}</div>
-      </div>
+  // ========== STAFF INFORMATION ==========
+  const staffSectionTop = 100
+  doc.roundedRect(40, staffSectionTop, doc.page.width - 80, 90, 6)
+    .fill('#f3f6fb')
+  
+  doc.fillColor('#000000')
+    .fontSize(11)
+    .font('Helvetica-Bold')
+    .text('STAFF INFORMATION', 55, staffSectionTop + 5)
+    .font('Helvetica')
+    .text(`Name: ${staff.firstName} ${staff.lastName}`, 55, staffSectionTop + 25)
+    .text(`Staff ID: ${staff.staffId}`, 55, staffSectionTop + 42)
+    .text(`Email: ${staff.email}`, 55, staffSectionTop + 59)
+  
+  doc.text(`Department: ${staff.department || 'N/A'}`, 
+           doc.page.width / 2 + 10, staffSectionTop + 25)
+    .text(`Designation: ${staff.designation || 'N/A'}`, 
+          doc.page.width / 2 + 10, staffSectionTop + 42)
+    .text(`Company: ${staff.companyName || 'N/A'}`, 
+          doc.page.width / 2 + 10, staffSectionTop + 59)
 
-      <div class="info-section">
-        <div class="staff-info">
-          <div class="info-row"><span class="info-label">Staff ID:</span> ${staff.staffId}</div>
-          <div class="info-row"><span class="info-label">Name:</span> ${staff.firstName} ${staff.lastName}</div>
-          <div class="info-row"><span class="info-label">Email:</span> ${staff.email}</div>
-          ${staff.department ? `<div class="info-row"><span class="info-label">Department:</span> ${staff.department}</div>` : ""}
-          ${staff.designation ? `<div class="info-row"><span class="info-label">Position:</span> ${staff.designation}</div>` : ""}
-        </div>
+  // ========== EARNINGS SECTION ==========
+  let currentY = staffSectionTop + 115
+  
+  // Section title
+  doc.fontSize(12)
+    .font('Helvetica-Bold')
+    .fillColor('#1e3a5f')
+    .text('EARNINGS', 40, currentY)
+  
+  currentY += 15
+  
+  // Separator line
+  doc.moveTo(40, currentY)
+    .lineTo(doc.page.width - 40, currentY)
+    .stroke('#1e3a5f')
+  
+  currentY += 10
 
-        <div class="payroll-info">
-          <div class="info-row"><span class="info-label">Pay Period:</span> ${getMonthName(payroll.periodMonth)} ${payroll.periodYear}</div>
-          <div class="info-row"><span class="info-label">Days in Month:</span> ${payroll.daysInMonth}</div>
-          <div class="info-row"><span class="info-label">Days Worked:</span> ${payroll.daysWorked}</div>
-          <div class="info-row"><span class="info-label">Payment Date:</span> ${new Date().toLocaleDateString()}</div>
-        </div>
-      </div>
+  // Earnings items
+  const earnings: Array<{label: string, value: number}> = [
+    { label: 'Basic Salary', value: payroll.basicSalary },
+    { label: 'Housing Allowance', value: payroll.housingAllowance },
+    { label: 'Transport Allowance', value: payroll.transportAllowance },
+    { label: 'Transportation/Dressing Allowance', value: payroll.transportationAllowance },
+    { label: 'Other Allowances', value: payroll.otherAllowances },
+  ]
 
-      <div>
-        <div class="section-title">EARNINGS</div>
-        <table>
-          <thead><tr><th>Description</th><th class="text-right">Amount (₦)</th></tr></thead>
-          <tbody>
-            <tr><td>Basic Salary</td><td class="text-right">${formatCurrency(payroll.basicSalary)}</td></tr>
-            ${payroll.housingAllowance > 0 ? `<tr><td>Housing Allowance</td><td class="text-right">${formatCurrency(payroll.housingAllowance)}</td></tr>` : ""}
-            ${payroll.transportAllowance > 0 ? `<tr><td>Transport Allowance</td><td class="text-right">${formatCurrency(payroll.transportAllowance)}</td></tr>` : ""}
-            ${payroll.transportationAllowance > 0 ? `<tr><td>Transportation Allowance</td><td class="text-right">${formatCurrency(payroll.transportationAllowance)}</td></tr>` : ""}
-            ${payroll.otherAllowances > 0 ? `<tr><td>Other Allowances</td><td class="text-right">${formatCurrency(payroll.otherAllowances)}</td></tr>` : ""}
-            <tr class="total-row"><td>Total Earnings</td><td class="text-right">${formatCurrency(payroll.grossPay)}</td></tr>
-          </tbody>
-        </table>
+  doc.fontSize(10)
+    .fillColor('#000000')
+    .font('Helvetica')
 
-        <div class="section-title">DEDUCTIONS</div>
-        <table>
-          <thead><tr><th>Description</th><th class="text-right">Amount (₦)</th></tr></thead>
-          <tbody>
-            ${payroll.payee > 0 ? `<tr><td>PAYE Tax</td><td class="text-right">${formatCurrency(payroll.payee)}</td></tr>` : ""}
-            ${payroll.pension > 0 ? `<tr><td>Pension Contribution</td><td class="text-right">${formatCurrency(payroll.pension)}</td></tr>` : ""}
-            <tr class="total-row"><td>Total Deductions</td><td class="text-right">${formatCurrency(totalDeductions)}</td></tr>
-          </tbody>
-        </table>
+  earnings.forEach(item => {
+    doc.text(item.label, 50, currentY)
+    doc.text(formatCurrency(item.value), doc.page.width - 180, currentY, {
+      width: 130,
+      align: 'right'
+    })
+    currentY += 18
+  })
 
-        <div class="section-title">SUMMARY</div>
-        <table>
-          <tbody>
-            <tr><td><b>Gross Pay</b></td><td class="text-right"><b>${formatCurrency(payroll.grossPay)}</b></td></tr>
-            <tr><td><b>Total Deductions</b></td><td class="text-right"><b>${formatCurrency(totalDeductions)}</b></td></tr>
-            <tr class="total-row"><td><b>NET PAY</b></td><td class="text-right"><b>${formatCurrency(netPay)}</b></td></tr>
-          </tbody>
-        </table>
-      </div>
+  // Total Gross Pay
+  currentY += 5
+  doc.fontSize(11)
+    .font('Helvetica-Bold')
+    .fillColor('#0f5132')
+    .text('Total Gross Pay', 50, currentY)
+    .text(formatCurrency(payroll.grossPay), doc.page.width - 180, currentY, {
+      width: 130,
+      align: 'right'
+    })
 
-      <div class="footer">
-        <p>This is a computer-generated document. No signature is required.</p>
-        <p>Generated on: ${new Date().toLocaleString()}</p>
-      </div>
-    </body>
-    </html>
-  `;
-}
+  // ========== DEDUCTIONS SECTION ==========
+  currentY += 35
+  
+  // Section title
+  doc.fontSize(12)
+    .font('Helvetica-Bold')
+    .fillColor('#8b0000')
+    .text('DEDUCTIONS', 40, currentY)
+  
+  currentY += 15
+  
+  // Separator line
+  doc.moveTo(40, currentY)
+    .lineTo(doc.page.width - 40, currentY)
+    .stroke('#8b0000')
+  
+  currentY += 10
 
-function getMonthName(monthNumber: number): string {
-  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-  return months[monthNumber - 1] || `Month ${monthNumber || 0}`;
-}
+  // Deductions items
+  const deductions: Array<{label: string, value: number}> = [
+    { label: 'PAYE (Tax)', value: payroll.payee },
+    { label: 'Pension Contribution', value: payroll.pension },
+  ]
 
-function formatCurrency(amount: number): string {
-  const safe = Number.isFinite(amount) ? amount : 0;
-  return new Intl.NumberFormat("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(safe);
+  doc.fontSize(10)
+    .fillColor('#000000')
+    .font('Helvetica')
+
+  deductions.forEach(item => {
+    doc.text(item.label, 50, currentY)
+    doc.text(formatCurrency(item.value), doc.page.width - 180, currentY, {
+      width: 130,
+      align: 'right'
+    })
+    currentY += 18
+  })
+
+  // Total Deductions
+  const totalDeductions = payroll.payee + payroll.pension
+  currentY += 5
+  doc.fontSize(11)
+    .font('Helvetica-Bold')
+    .fillColor('#8b0000')
+    .text('Total Deductions', 50, currentY)
+    .text(formatCurrency(totalDeductions), doc.page.width - 180, currentY, {
+      width: 130,
+      align: 'right'
+    })
+
+  // ========== NET PAY SECTION ==========
+  currentY += 45
+  
+  // Background box
+  doc.roundedRect(40, currentY, doc.page.width - 80, 45, 6)
+    .fill('#e8f0ff')
+  
+  // Net Pay label
+  doc.fillColor('#0b1f44')
+    .fontSize(14)
+    .font('Helvetica-Bold')
+    .text('NET SALARY PAYABLE', 55, currentY + 13)
+  
+  // Net Pay value
+  doc.text(formatCurrency(payroll.netPay), doc.page.width - 200, currentY + 13, {
+    width: 150,
+    align: 'right'
+  })
+
+  // ========== ATTENDANCE INFORMATION ==========
+  currentY += 70
+  
+  doc.fillColor('#000000')
+    .fontSize(10)
+    .font('Helvetica')
+    .text(`Working Days in Month: ${payroll.daysInMonth}`, 50, currentY)
+    .text(`Days Worked: ${payroll.daysWorked}`, doc.page.width / 2 + 10, currentY)
+
+  // ========== FOOTER ==========
+  const footerY = doc.page.height - 40
+  
+  doc.fontSize(8)
+    .fillColor('#666666')
+    .font('Helvetica')
+    .text(
+      'This is a system-generated payslip. For any discrepancies, please contact HR department.',
+      40,
+      footerY,
+      { align: 'center', width: doc.page.width - 80 }
+    )
+
+  // ========== FINALIZE DOCUMENT ==========
+  doc.end()
+
+  // Wait for PDF to be written
+  await new Promise<void>((resolve, reject) => {
+    writeStream.on('finish', () => resolve())
+    writeStream.on('error', reject)
+  })
+
+  // Return relative path for web access and filename for database
+  const publicPath = `/uploads/payslips/${fileName}`
+  
+  console.log(`✅ Payslip PDF generated: ${fileName}`)
+  
+  return {
+    pdfPath: publicPath,
+    fileName: fileName
+  }
 }
