@@ -26,23 +26,43 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // No companyId here – that's fine now
+    // Generate a test ID for the staff (using a fixed test ID)
+    const testStaffId = 'test-user-' + Date.now()
+    const testPayslipId = 'test-payslip-' + Date.now()
+
+    // Mock staff with required id field
     const mockStaff = {
+      id: testStaffId, // Required field
       firstName: 'Test',
       lastName: 'User',
       email: testEmail,
       staffId: 'TEST001',
       department: 'IT',
       position: 'Tester',
+      companyId: 'test-company', // Optional but good to include
+      isRegistered: true, // Assume registered for testing
     }
 
+    // Mock payroll with required id field (payslip ID)
     const mockPayroll = {
+      id: testPayslipId, // Required field - this is the payslip ID
       month,
       year,
       netSalary,
+      isUpdate: false,
     }
 
-    await sendPayrollNotificationEmail(mockStaff, mockPayroll)
+    const result = await sendPayrollNotificationEmail(mockStaff, mockPayroll)
+
+    if (!result.success) {
+      return withCors(
+        ApiResponse.error(
+          `Email sending failed: ${result.error || 'Unknown error'}`,
+          500
+        ),
+        origin
+      )
+    }
 
     return withCors(
       ApiResponse.success(
@@ -51,6 +71,8 @@ export async function POST(req: NextRequest) {
           month,
           year,
           netSalary,
+          testStaffId,
+          testPayslipId,
         },
         'Test email sent successfully (SMTP configuration looks OK)'
       ),
