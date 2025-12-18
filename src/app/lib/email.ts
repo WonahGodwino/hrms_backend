@@ -39,18 +39,21 @@ function generatePayslipAccessToken(
   payslipId: string,
   staffFirstName: string
 ): string {
-  const jwtSecret = mustEnv("JWT_SECRET");
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) {
+    throw new Error("JWT_SECRET environment variable is not configured");
+  }
   
   const token = sign(
     {
-      sub: staffRecordId,         // Subject: Staff record ID
-      email: staffEmail,         // User's email
-      payslipId: payslipId,      // Specific payslip ID
-      name: staffFirstName,      // User's first name for personalization
+      sub: staffRecordId,
+      email: staffEmail,
+      payslipId: payslipId,
+      name: staffFirstName,
       purpose: "payslip_access",
-      exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60), // 24 hours expiry
-      iss: "hrms-payslip-system", // Issuer
-      aud: "staff-portal",       // Audience
+      exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60),
+      iss: "hrms-payslip-system",
+      aud: "staff-portal",
     },
     jwtSecret
   );
@@ -365,30 +368,6 @@ export async function sendPayslipNotificationEmail(
     return {
       success: false,
       error: error?.message || "Unknown error",
-    };
-  }
-}
-
-/**
- * Test function to verify email configuration
- */
-export async function testEmailConfiguration(): Promise<{ success: boolean; error?: string }> {
-  try {
-    const mg = getMailgunClient();
-    
-    const sendingDomain = process.env.MAILGUN_DOMAIN?.trim();
-    if (!sendingDomain) {
-      throw new Error("MAILGUN_DOMAIN is not configured");
-    }
-    
-    // Try to fetch domains to verify API key
-    await mg.domains.list();
-    
-    return { success: true };
-  } catch (error: any) {
-    return {
-      success: false,
-      error: error?.message || "Email configuration test failed"
     };
   }
 }

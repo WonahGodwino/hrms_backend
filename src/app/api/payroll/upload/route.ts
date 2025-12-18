@@ -173,12 +173,18 @@ function getRelativePath(absolutePath: string): string {
   return absolutePath
 }
 
-// Helper function to resolve relative path to absolute path
-function resolveRelativePath(relativePath: string): string {
-  if (path.isAbsolute(relativePath)) {
-    return relativePath
-  }
-  return path.join(process.cwd(), relativePath)
+// Ensure upload directories exist
+async function ensureUploadDirectories() {
+  const baseDir = process.cwd()
+  const uploadsDir = path.join(baseDir, 'uploads')
+  const payrollDir = path.join(uploadsDir, 'payroll')
+  const payslipsDir = path.join(uploadsDir, 'payslips')
+  
+  await mkdir(uploadsDir, { recursive: true })
+  await mkdir(payrollDir, { recursive: true })
+  await mkdir(payslipsDir, { recursive: true })
+  
+  return { baseDir, uploadsDir, payrollDir, payslipsDir }
 }
 
 // -----------------------------
@@ -214,11 +220,11 @@ export async function POST(request: NextRequest) {
     }
     const companyId: string = user.companyId
 
+    // Ensure upload directories exist
+    const { baseDir, payrollDir, payslipsDir } = await ensureUploadDirectories()
+
     const formData = await request.formData()
     const file = formData.get('file') as File | null
-
-    // Send email flag is set to true by default (always send emails)
-    const sendEmails = true
 
     if (!file) {
       return withCors(
@@ -329,11 +335,13 @@ export async function POST(request: NextRequest) {
       payslipsUpdated: 0,
       emailsSent: 0,
       emailAttempts: 0,
-      emailFailures: [] as {
+      emailFailures: [] as Array<{
         rowNumber: number
         email: string
         error: string
-      }[],
+        staffName: string
+        staffId: string
+      }>,
       processedRecords: [] as any[],
       failedRecords: [] as any[],
       errors: [] as string[],
@@ -346,6 +354,7 @@ export async function POST(request: NextRequest) {
     for (let index = 0; index < data.length; index++) {
       const row = data[index]
       const displayRowNumber = index + 3 // row 1 = headers, row 2 = % row (usually)
+      let staffRecord = null
 
       try {
         const rowData = row as any
@@ -359,7 +368,14 @@ export async function POST(request: NextRequest) {
           const message = 'Missing Name/EMAIL for staff identification'
           results.failed++
           results.errors.push(`Row ${displayRowNumber}: ${message}`)
-          results.failedRecords.push({ ...rowData, error: message })
+          results.failedRecords.push({ 
+            ...rowData, 
+            error: message,
+            rowNumber: displayRowNumber,
+            staffName: name || 'Unknown',
+            staffId: '',
+            email: email || '',
+          })
           continue
         }
 
@@ -369,18 +385,21 @@ export async function POST(request: NextRequest) {
         })
 
         if (missingCols.length) {
-          const message = `Missing required column values: ${missingCols.join(
-            ', '
-          )}`
+          const message = `Missing required column values: ${missingCols.join(', ')}`
           results.failed++
           results.errors.push(`Row ${displayRowNumber}: ${message}`)
-          results.failedRecords.push({ ...rowData, error: message })
+          results.failedRecords.push({ 
+            ...rowData, 
+            error: message,
+            rowNumber: displayRowNumber,
+            staffName: name || 'Unknown',
+            staffId: '',
+            email: email || '',
+          })
           continue
         }
 
         // locate staff record
-        let staffRecord = null
-
         if (email) {
           staffRecord = await prisma.staffRecord.findUnique({
             where: {
@@ -443,7 +462,14 @@ export async function POST(request: NextRequest) {
           const message = `Staff record not found for ${name || email}. Staff must be pre-registered.`
           results.failed++
           results.errors.push(`Row ${displayRowNumber}: ${message}`)
-          results.failedRecords.push({ ...rowData, error: message })
+          results.failedRecords.push({ 
+            ...rowData, 
+            error: message,
+            rowNumber: displayRowNumber,
+            staffName: name || 'Unknown',
+            staffId: '',
+            email: email || '',
+          })
           continue
         }
 
@@ -508,15 +534,21 @@ export async function POST(request: NextRequest) {
         const daysWorked = num(getCell(rowData, 'No of days Worked'))
 
         if (netSalary < 0) {
-          const message =
-            'Net Salary cannot be negative. Check payroll values.'
+          const message = 'Net Salary cannot be negative. Check payroll values.'
           results.failed++
           results.errors.push(`Row ${displayRowNumber}: ${message}`)
-          results.failedRecords.push({ ...rowData, error: message })
+          results.failedRecords.push({ 
+            ...rowData, 
+            error: message,
+            rowNumber: displayRowNumber,
+            staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
+            staffId: staffRecord.staffId,
+            email: staffRecord.email,
+          })
           continue
         }
 
-        // Upsert payroll record first (always update payroll data)
+        // Upsert payroll record
         const payroll = await prisma.payroll.upsert({
           where: {
             staffRecordId_month_year_companyId: {
@@ -608,7 +640,7 @@ export async function POST(request: NextRequest) {
           },
         })
 
-        // Check if payslip already exists for this month, year, and staff
+        // Check if payslip already exists
         const existingPayslip = await prisma.payslip.findFirst({
           where: {
             staffRecordId: staffRecord.id,
@@ -618,8 +650,9 @@ export async function POST(request: NextRequest) {
           },
         })
 
-        let pdfPath: string | null = null
-        let payslipFileName: string | null = null
+        let payslipId: string = ''
+        let pdfPath: string = ''
+        let payslipFileName: string = ''
         let isUpdate = false
 
         // Prepare parsed row data for PDF generation
@@ -648,8 +681,10 @@ export async function POST(request: NextRequest) {
         }
 
         if (existingPayslip) {
-          // If the payslip already exists, regenerate PDF and update it
+          // Update existing payslip
           isUpdate = true
+          payslipId = existingPayslip.id
+          
           try {
             const { pdfPath: generatedPath } = await generatePayslipPdf({
               staff: {
@@ -662,15 +697,14 @@ export async function POST(request: NextRequest) {
               },
               payroll: parsedRow,
             })
+            
             pdfPath = generatedPath
             payslipFileName = path.basename(pdfPath)
             results.payslipsGenerated++
 
-            // Update existing payslip with new data
+            // Update existing payslip
             await prisma.payslip.update({
-              where: {
-                id: existingPayslip.id,
-              },
+              where: { id: existingPayslip.id },
               data: {
                 payrollId: payroll.id,
                 filePath: pdfPath,
@@ -687,11 +721,18 @@ export async function POST(request: NextRequest) {
             const message = `Failed to regenerate payslip PDF for update - ${err.message}`
             results.failed++
             results.errors.push(`Row ${displayRowNumber}: ${message}`)
-            results.failedRecords.push({ ...rowData, error: message })
+            results.failedRecords.push({ 
+              ...rowData, 
+              error: message,
+              rowNumber: displayRowNumber,
+              staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
+              staffId: staffRecord.staffId,
+              email: staffRecord.email,
+            })
             continue
           }
         } else {
-          // If the payslip doesn't exist, generate a new one
+          // Create new payslip
           try {
             const { pdfPath: generatedPath } = await generatePayslipPdf({
               staff: {
@@ -704,12 +745,13 @@ export async function POST(request: NextRequest) {
               },
               payroll: parsedRow,
             })
+            
             pdfPath = generatedPath
             payslipFileName = path.basename(pdfPath)
             results.payslipsGenerated++
 
             // Create new payslip record
-            await prisma.payslip.create({
+            const newPayslip = await prisma.payslip.create({
               data: {
                 payrollId: payroll.id,
                 staffRecordId: staffRecord.id,
@@ -724,25 +766,73 @@ export async function POST(request: NextRequest) {
                 updatedBy: user.userId,
               },
             })
+            
+            payslipId = newPayslip.id
           } catch (err: any) {
             const message = `Failed to generate payslip PDF - ${err.message}`
             results.failed++
             results.errors.push(`Row ${displayRowNumber}: ${message}`)
-            results.failedRecords.push({ ...rowData, error: message })
+            results.failedRecords.push({ 
+              ...rowData, 
+              error: message,
+              rowNumber: displayRowNumber,
+              staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
+              staffId: staffRecord.staffId,
+              email: staffRecord.email,
+            })
             continue
           }
         }
 
-        // Send email notification (always sent as per requirement)
+        // Send email notification
         results.emailAttempts++
         try {
-          await sendPayrollNotificationEmail(staffRecord, {
+          // If payslipId is not set (shouldn't happen), find it
+          if (!payslipId) {
+            const payslip = await prisma.payslip.findFirst({
+              where: {
+                payrollId: payroll.id,
+                staffRecordId: staffRecord.id,
+                companyId,
+              },
+            })
+            
+            if (payslip) {
+              payslipId = payslip.id
+            } else {
+              throw new Error('Payslip not found for email notification')
+            }
+          }
+
+          // Prepare staff data
+          const staffDataForEmail = {
+            id: staffRecord.id,
+            companyId: staffRecord.companyId,
+            firstName: staffRecord.firstName,
+            lastName: staffRecord.lastName,
+            email: staffRecord.email,
+            staffId: staffRecord.staffId,
+            department: staffRecord.department || null,
+            position: staffRecord.position || null,
+            isRegistered: staffRecord.isRegistered,
+          }
+
+          // Prepare payroll data with payslip ID
+          const payrollDataForEmail = {
+            id: payslipId,
             month: monthName,
             year,
             netSalary,
-            isUpdate: isUpdate, // Pass flag to indicate if this is an update
-          })
-          results.emailsSent++
+            isUpdate: isUpdate,
+          }
+
+          const emailResult = await sendPayrollNotificationEmail(staffDataForEmail, payrollDataForEmail)
+          
+          if (emailResult.success) {
+            results.emailsSent++
+          } else {
+            throw new Error(emailResult.error || 'Email sending failed')
+          }
         } catch (err: any) {
           const msg = `Email sending failed - ${err.message}`
           results.errors.push(`Row ${displayRowNumber}: ${msg}`)
@@ -750,29 +840,38 @@ export async function POST(request: NextRequest) {
             rowNumber: displayRowNumber,
             email: staffRecord.email,
             error: msg,
+            staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
+            staffId: staffRecord.staffId,
           })
           // Don't fail the entire record if email fails
         }
 
         results.successful++
         results.processedRecords.push({
-          ...rowData,
           staffId: staffRecord.staffId,
           staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
           netSalary,
           status: isUpdate ? 'UPDATED' : 'PROCESSED',
-          emailSent: sendEmails,
+          emailSent: true,
           emailStatus: results.emailFailures.some(
             (f) => f.rowNumber === displayRowNumber
           )
             ? 'FAILED'
             : 'SENT',
+          payslipId: payslipId,
         })
       } catch (err: any) {
         const message = err?.message || 'Unknown error'
         results.failed++
         results.errors.push(`Row ${displayRowNumber}: ${message}`)
-        results.failedRecords.push({ ...(row as any), error: message })
+        results.failedRecords.push({ 
+          ...(row as any), 
+          error: message,
+          rowNumber: displayRowNumber,
+          staffName: staffRecord ? `${staffRecord.firstName} ${staffRecord.lastName}` : 'Unknown',
+          staffId: staffRecord?.staffId || '',
+          email: staffRecord?.email || '',
+        })
       }
     }
 
@@ -786,34 +885,49 @@ export async function POST(request: NextRequest) {
       emailFailures: results.emailFailures.length,
     })
 
-    // Create upload directories
-    const uploadDir = path.join(process.cwd(), 'uploads', 'payroll')
-    await mkdir(uploadDir, { recursive: true })
-
     let processedFilePath: string | null = null
 
     if (results.failedRecords.length > 0) {
       const failedWorkbook = new ExcelJS.Workbook()
       const failedWorksheet = failedWorkbook.addWorksheet('Failed Records')
 
+      // Create headers based on first data row plus error columns
       const headersSet = new Set<string>()
-      results.failedRecords.forEach((r) =>
-        Object.keys(r).forEach((k) => headersSet.add(k))
-      )
-      headersSet.add('error')
+      
+      if (data.length > 0 && data[0]) {
+        Object.keys(data[0]).forEach(k => headersSet.add(k))
+      }
+      
+      // Add error columns
+      headersSet.add('ROW_NUMBER')
+      headersSet.add('ERROR_MESSAGE')
+      headersSet.add('STAFF_NAME')
+      headersSet.add('STAFF_ID')
+      headersSet.add('STAFF_EMAIL')
 
       const headers = Array.from(headersSet)
 
       failedWorksheet.columns = headers.map((h) => ({
         header: h,
         key: h,
-        width: 22,
+        width: 25,
       }))
 
+      // Add data rows
       results.failedRecords.forEach((record) => {
-        failedWorksheet.addRow(record)
+        const rowData: any = { ...record }
+        
+        // Ensure error columns are included
+        rowData.ROW_NUMBER = record.rowNumber || 'N/A'
+        rowData.ERROR_MESSAGE = record.error || 'Unknown error'
+        rowData.STAFF_NAME = record.staffName || 'Unknown'
+        rowData.STAFF_ID = record.staffId || ''
+        rowData.STAFF_EMAIL = record.email || ''
+
+        failedWorksheet.addRow(rowData)
       })
 
+      // Style header
       const headerRow = failedWorksheet.getRow(1)
       headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
       headerRow.fill = {
@@ -822,11 +936,18 @@ export async function POST(request: NextRequest) {
         fgColor: { argb: 'FFDC3545' },
       }
 
-      const failedFileName = `failed-records-${Date.now()}.xlsx`
-      const failedFilePath = path.join(uploadDir, failedFileName)
+      // Style error rows
+      failedWorksheet.eachRow((row, rowNumber) => {
+        if (rowNumber > 1) {
+          const errorCell = row.getCell('ERROR_MESSAGE')
+          if (errorCell.value) {
+            row.font = { color: { argb: 'FFDC3545' } }
+          }
+        }
+      })
 
-      // Ensure directory exists
-      await mkdir(path.dirname(failedFilePath), { recursive: true })
+      const failedFileName = `failed-payroll-${Date.now()}.xlsx`
+      const failedFilePath = path.join(payrollDir, failedFileName)
 
       const failedBuffer = await failedWorkbook.xlsx.writeBuffer()
       await writeFile(failedFilePath, Buffer.from(failedBuffer as any))
@@ -834,44 +955,38 @@ export async function POST(request: NextRequest) {
       // Store relative path
       processedFilePath = getRelativePath(failedFilePath)
 
-      console.log(
-        `[PAYROLL_UPLOAD] Failed-records file written at: ${failedFilePath}`
-      )
-      console.log(
-        `[PAYROLL_UPLOAD] Relative path stored: ${processedFilePath}`
-      )
+      console.log(`[PAYROLL_UPLOAD] Failed-records file written at: ${failedFilePath}`)
     }
 
-    // Save original uploaded file with a unique name
-    const originalFileName = `upload-${Date.now()}-${file.name}`
-    const originalFilePath = path.join(uploadDir, originalFileName)
+    // Save original uploaded file
+    const originalFileName = `payroll-upload-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
+    const originalFilePath = path.join(payrollDir, originalFileName)
     await writeFile(originalFilePath, buffer)
 
-    // Store relative path for original file
+    // Store relative path
     const relativeOriginalPath = getRelativePath(originalFilePath)
 
+    // Create upload record - using your exact schema
     const uploadRecord = await prisma.payrollUpload.create({
       data: {
         companyId,
         fileName: file.name,
-        filePath: relativeOriginalPath, // Store relative path
-        processedFilePath, // Already relative path
-        processedFileName: processedFilePath
-          ? path.basename(processedFilePath)
-          : null,
+        filePath: relativeOriginalPath,
+        processedFilePath: processedFilePath || null,
+        processedFileName: processedFilePath ? path.basename(processedFilePath) : null,
         totalRecords: data.length,
         successful: results.successful,
         failed: results.failed,
-        payslipsGenerated: results.payslipsGenerated,
-        payslipsUpdated: results.payslipsUpdated,
-        emailsSent: results.emailsSent,
+        payslipsGenerated: results.payslipsGenerated > 0 ? results.payslipsGenerated : null,
+        payslipsUpdated: results.payslipsUpdated > 0 ? results.payslipsUpdated : null,
+        emailsSent: results.emailsSent > 0 ? results.emailsSent : null,
+        emailAttempts: results.emailAttempts > 0 ? results.emailAttempts : null,
         errors: results.errors,
         uploadedBy: user.userId,
       },
     })
 
-    const responseData: any = {
-      results,
+    const responseData = {
       uploadId: uploadRecord.id,
       summary: {
         totalProcessed: data.length,
@@ -883,10 +998,16 @@ export async function POST(request: NextRequest) {
         emailAttempts: results.emailAttempts,
         emailFailures: results.emailFailures.length,
       },
-    }
-
-    if (results.failedRecords.length > 0) {
-      responseData.failedRecordsDownload = `/api/payroll/download-failed/${uploadRecord.id}`
+      failedRecordsCount: results.failedRecords.length,
+      downloadLinks: {
+        failedRecords: results.failedRecords.length > 0 
+          ? `/api/payroll/download-failed/${uploadRecord.id}`
+          : null,
+      },
+      filePaths: {
+        original: relativeOriginalPath,
+        processed: processedFilePath,
+      }
     }
 
     console.log(
