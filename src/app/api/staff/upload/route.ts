@@ -8,31 +8,132 @@ import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
+// -----------------------------
+// Helpers (robust CSV + Excel cell parsing)
+// -----------------------------
+
+function splitCsvLine(line: string) {
+  const result: string[] = []
+  let cur = ''
+  let inQuotes = false
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (ch === '"' && line[i + 1] === '"') {
+      cur += '"'
+      i++
+      continue
+    }
+    if (ch === '"') {
+      inQuotes = !inQuotes
+      continue
+    }
+    if (ch === ',' && !inQuotes) {
+      result.push(cur)
+      cur = ''
+      continue
+    }
+    cur += ch
+  }
+  result.push(cur)
+  return result.map((s) => s.trim())
+}
+
+function cellToString(value: any): string {
+  if (value === null || value === undefined) return ''
+
+  // ExcelJS RichText
+  if (typeof value === 'object' && Array.isArray(value?.richText)) {
+    return value.richText.map((t: any) => t?.text || '').join('').trim()
+  }
+
+  // ExcelJS hyperlink cell: { text, hyperlink }
+  if (typeof value === 'object' && value?.text) {
+    return String(value.text).trim()
+  }
+
+  // ExcelJS formula cell: { formula, result }
+  if (typeof value === 'object' && value?.result !== undefined) {
+    return String(value.result).trim()
+  }
+
+  return String(value).trim()
+}
+
+function cleanEmail(raw: any): string {
+  let s = cellToString(raw)
+
+  // normalize weird spaces
+  s = s.replace(/\u00A0/g, ' ').trim()
+
+  // handle mailto links
+  if (s.toLowerCase().startsWith('mailto:')) {
+    s = s.slice('mailto:'.length).trim()
+  }
+
+  // remove surrounding angle brackets
+  s = s.replace(/^<|>$/g, '').trim()
+
+  return s.toLowerCase()
+}
+
+function isValidEmail(email: string): boolean {
+  if (!email) return false
+  if (email.length > 254) return false
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+}
+
+function normalizeHeader(h: string) {
+  return h
+    .toString()
+    .replace(/\u00A0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\n/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+function pick(row: any, keys: string[]) {
+  // Try exact keys first, then normalized matching
+  for (const k of keys) {
+    if (row?.[k] !== undefined && row?.[k] !== null && row?.[k] !== '') return row[k]
+  }
+  const normalizedRow: Record<string, any> = {}
+  for (const key of Object.keys(row || {})) {
+    normalizedRow[normalizeHeader(key)] = row[key]
+  }
+  for (const k of keys) {
+    const nk = normalizeHeader(k)
+    if (normalizedRow[nk] !== undefined && normalizedRow[nk] !== null && normalizedRow[nk] !== '')
+      return normalizedRow[nk]
+  }
+  return undefined
+}
+
+// -----------------------------
+// CORS preflight
+// -----------------------------
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
+// -----------------------------
 // POST – upload staff Excel/CSV and create StaffRecord rows
+// -----------------------------
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin')
 
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
-      return withCors(
-        ApiResponse.error('Authorization header missing', 401),
-        origin
-      )
+      return withCors(ApiResponse.error('Authorization header missing', 401), origin)
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const authUser = requireRole(token, ['HR', 'SUPER_ADMIN']) // { userId, companyId, role, email, ... }
+    const authUser = requireRole(token, ['HR', 'SUPER_ADMIN'])
 
     if (!authUser.companyId) {
-      return withCors(
-        ApiResponse.error('Company context missing for this user', 400),
-        origin
-      )
+      return withCors(ApiResponse.error('Company context missing for this user', 400), origin)
     }
     const companyId = authUser.companyId as string
 
@@ -40,10 +141,7 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file') as File
 
     if (!file) {
-      return withCors(
-        ApiResponse.error('No file uploaded', 400),
-        origin
-      )
+      return withCors(ApiResponse.error('No file uploaded', 400), origin)
     }
 
     // Validate file type
@@ -54,134 +152,105 @@ export async function POST(request: NextRequest) {
     ]
 
     const fileExtension = file.name.split('.').pop()?.toLowerCase()
-    if (
-      !allowedTypes.includes(file.type) &&
-      !['xlsx', 'xls', 'csv'].includes(fileExtension || '')
-    ) {
+    const isCsv = file.type === 'text/csv' || fileExtension === 'csv'
+    const isExcel = ['xlsx', 'xls'].includes(fileExtension || '')
+
+    if (!allowedTypes.includes(file.type) && !isCsv && !isExcel) {
       return withCors(
-        ApiResponse.error(
-          'Invalid file type. Please upload Excel or CSV files.',
-          400
-        ),
+        ApiResponse.error('Invalid file type. Please upload Excel or CSV files.', 400),
         origin
       )
     }
 
-    // Read and parse file with ExcelJS
+    // Read file bytes
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
 
     let data: any[] = []
-    let failedRecords: any[] = []
 
+    // Parse file into row objects
     try {
       const workbook = new ExcelJS.Workbook()
 
-      if (file.type === 'text/csv' || fileExtension === 'csv') {
-        // CSV
+      if (isCsv) {
         const csvText = buffer.toString()
         const lines = csvText.split(/\r?\n/).filter((l) => l.trim())
         if (!lines.length) {
-          return withCors(
-            ApiResponse.error('Empty CSV file', 400),
-            origin
-          )
+          return withCors(ApiResponse.error('Empty CSV file', 400), origin)
         }
 
-        const headers = lines[0].split(',').map((header) => header.trim())
+        const headers = splitCsvLine(lines[0])
 
         for (let i = 1; i < lines.length; i++) {
-          const line = lines[i].trim()
-          if (!line) continue
+          const line = lines[i]
+          if (!line || !line.trim()) continue
+          const values = splitCsvLine(line)
 
-          const values = line.split(',').map((value) => value.trim())
           const rowData: any = {}
           headers.forEach((header, index) => {
-            rowData[header] = values[index] || ''
-          })
-          data.push(rowData)
-        }
-      } else {
-        // Excel
-        await workbook.xlsx.load(bytes as ArrayBuffer)
-        const worksheet = workbook.worksheets[0]
-        if (!worksheet) {
-          return withCors(
-            ApiResponse.error('No worksheet found in Excel file', 400),
-            origin
-          )
-        }
-
-        // Get headers from first row
-        const headers: string[] = []
-        const headerRow = worksheet.getRow(1)
-        headerRow.eachCell((cell, colNumber) => {
-          headers[colNumber - 1] =
-            cell.value?.toString().trim() || `col${colNumber}`
-        })
-
-        // Process data rows
-        worksheet.eachRow((row, rowNumber) => {
-          if (rowNumber <= 1) return // skip header row
-
-          const rowData: any = {}
-          row.eachCell((cell, colNumber) => {
-            const header = headers[colNumber - 1]
-            rowData[header] = cell.value
+            rowData[header] = values[index] ?? ''
           })
 
           const hasAny = Object.values(rowData).some(
-            (v) => v !== null && v !== undefined && v !== ''
+            (v) => v !== null && v !== undefined && String(v).trim() !== ''
           )
-          if (hasAny) {
-            data.push(rowData)
-          } else {
-            failedRecords.push({
-              ...rowData,
-              error: 'Missing required fields or invalid data',
-            })
-          }
+          if (hasAny) data.push(rowData)
+        }
+      } else {
+        await workbook.xlsx.load(bytes as ArrayBuffer)
+        const worksheet = workbook.worksheets[0]
+        if (!worksheet) {
+          return withCors(ApiResponse.error('No worksheet found in Excel file', 400), origin)
+        }
+
+        // Read headers row 1
+        const headers: string[] = []
+        const headerRow = worksheet.getRow(1)
+        headerRow.eachCell((cell, colNumber) => {
+          const raw = cellToString(cell.value) || `col${colNumber}`
+          headers[colNumber - 1] = raw
+        })
+
+        // Process rows
+        worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+          if (rowNumber <= 1) return
+
+          const rowData: any = {}
+          row.eachCell((cell, colNumber) => {
+            const header = headers[colNumber - 1] || `col${colNumber}`
+            rowData[header] = cellToString(cell.value) // ✅ normalize Excel values
+          })
+
+          const hasAny = Object.values(rowData).some(
+            (v) => v !== null && v !== undefined && String(v).trim() !== ''
+          )
+          if (hasAny) data.push(rowData)
         })
       }
     } catch (parseError) {
       console.error('File parsing error:', parseError)
       return withCors(
-        ApiResponse.error(
-          'Failed to parse file. Please check the file format.',
-          400
-        ),
+        ApiResponse.error('Failed to parse file. Please check the file format.', 400),
         origin
       )
     }
 
     if (!data.length) {
-      return withCors(
-        ApiResponse.error('No valid data found in the file', 400),
-        origin
-      )
+      return withCors(ApiResponse.error('No valid data found in the file', 400), origin)
     }
 
-    // Validate required columns
-    const requiredColumns = [
-      'staffId',
-      'email',
-      'firstName',
-      'lastName',
-      'department',
-      'position',
-    ]
-    const firstRow = data[0]
-    const actualColumns = Object.keys(firstRow)
-    const missingColumns = requiredColumns.filter(
-      (col) => !actualColumns.includes(col)
-    )
+    // Validate required columns (case-insensitive and flexible headers)
+    const requiredColumns = ['staffid', 'email', 'firstname', 'lastname', 'department', 'position']
+    const actualColumns = Object.keys(data[0] || {})
+    const actualColumnsLower = actualColumns.map((c) => normalizeHeader(c))
 
+    const missingColumns = requiredColumns.filter((col) => !actualColumnsLower.includes(col))
     if (missingColumns.length > 0) {
       return withCors(
         ApiResponse.error(
-          `Missing required columns: ${missingColumns.join(
+          `Missing required columns: ${missingColumns.join(', ')}. Found columns: ${actualColumns.join(
             ', '
-          )}. Found columns: ${actualColumns.join(', ')}`,
+          )}`,
           400
         ),
         origin
@@ -198,47 +267,42 @@ export async function POST(request: NextRequest) {
     // Process each staff record
     for (let index = 0; index < data.length; index++) {
       const row = data[index]
+      const displayRow = index + 2 // header row is 1
+
       try {
-        const rowData = row as any
+        const staffIdRaw = pick(row, ['staffId', 'StaffID', 'STAFFID', 'Staff Id', 'Staff ID', 'STAFF ID'])
+        const emailRaw = pick(row, ['email', 'Email', 'EMAIL', 'E-mail', 'E-Mail'])
+        const firstNameRaw = pick(row, ['firstName', 'First Name', 'Firstname', 'FIRSTNAME'])
+        const lastNameRaw = pick(row, ['lastName', 'Last Name', 'Lastname', 'LASTNAME'])
+        const departmentRaw = pick(row, ['department', 'Department', 'DEPARTMENT'])
+        const positionRaw = pick(row, ['position', 'Position', 'POSITION'])
+        const phoneRaw = pick(row, ['phone', 'Phone', 'PHONE'])
+        const bankNameRaw = pick(row, ['bankName', 'Bank Name', 'BankName', 'BANK NAME'])
+        const accountNumberRaw = pick(row, ['accountNumber', 'Account Number', 'AccountNumber', 'ACCOUNT NUMBER'])
+        const bvnRaw = pick(row, ['bvn', 'BVN'])
 
-        const staffId =
-          rowData.staffId || rowData.StaffID || rowData['Staff ID']
-        const email = rowData.email || rowData.Email
-        const firstName = rowData.firstName || rowData['First Name']
-        const lastName = rowData.lastName || rowData['Last Name']
-        const department = rowData.department || rowData.Department
-        const position = rowData.position || rowData.Position
-        const phone = rowData.phone || rowData.Phone
-        const bankName = rowData.bankName || rowData['Bank Name']
-        const accountNumber =
-          rowData.accountNumber || rowData['Account Number']
-        const bvn = rowData.bvn || rowData.BVN
-
-        const displayRow = index + 2 // because row 1 is header
+        const staffId = cellToString(staffIdRaw)
+        const email = cleanEmail(emailRaw)
+        const firstName = cellToString(firstNameRaw)
+        const lastName = cellToString(lastNameRaw)
+        const department = cellToString(departmentRaw)
+        const position = cellToString(positionRaw)
+        const phone = cellToString(phoneRaw)
+        const bankName = cellToString(bankNameRaw)
+        const accountNumber = cellToString(accountNumberRaw)
+        const bvn = cellToString(bvnRaw)
 
         // Validate required fields
-        if (
-          !staffId ||
-          !email ||
-          !firstName ||
-          !lastName ||
-          !department ||
-          !position
-        ) {
+        if (!staffId || !email || !firstName || !lastName || !department || !position) {
           results.failed++
-          results.errors.push(
-            `Row ${displayRow}: Missing required fields`
-          )
+          results.errors.push(`Row ${displayRow}: Missing required fields`)
           continue
         }
 
-        // Validate email format
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-        if (!emailRegex.test(email)) {
+        // Validate email format (robust)
+        if (!isValidEmail(email)) {
           results.failed++
-          results.errors.push(
-            `Row ${displayRow}: Invalid email format: ${email}`
-          )
+          results.errors.push(`Row ${displayRow}: Invalid email format: ${cellToString(emailRaw)}`)
           continue
         }
 
@@ -246,17 +310,15 @@ export async function POST(request: NextRequest) {
         const staffIdRegex = /^[a-zA-Z0-9]{3,20}$/
         if (!staffIdRegex.test(staffId)) {
           results.failed++
-          results.errors.push(
-            `Row ${displayRow}: Staff ID must be 3-20 alphanumeric characters`
-          )
+          results.errors.push(`Row ${displayRow}: Staff ID must be 3-20 alphanumeric characters`)
           continue
         }
 
         // Check for duplicate staffId or email within this company
         const existingStaff = await prisma.staffRecord.findFirst({
           where: {
-            companyId: companyId,
-            OR: [{ staffId }, { email: email.toLowerCase() }],
+            companyId,
+            OR: [{ staffId }, { email }],
           },
         })
 
@@ -268,43 +330,45 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // Create staff record (multi-company aware, matches your schema)
+        // Create staff record
         const staffRecord = await prisma.staffRecord.create({
           data: {
             staffId,
-            email: email.toLowerCase(),
+            email,
             firstName: firstName.trim(),
             lastName: lastName.trim(),
             department: department.trim(),
             position: position.trim(),
-            phone: phone?.toString().trim(),
-            bankName: bankName?.toString().trim(),
-            accountNumber: accountNumber?.toString().trim(),
-            bvn: bvn?.toString().trim(),
-            companyId: companyId,
+            phone: phone ? phone.trim() : undefined,
+            bankName: bankName ? bankName.trim() : undefined,
+            accountNumber: accountNumber ? accountNumber.trim() : undefined,
+            bvn: bvn ? bvn.trim() : undefined,
+            companyId,
             createdBy: authUser.userId,
           },
         })
 
         results.records.push(staffRecord)
         results.successful++
-      } catch (error) {
-        const msg =
-          error instanceof Error ? error.message : 'Unknown error'
+      } catch (error: any) {
+        const msg = error?.message || 'Unknown error'
         results.failed++
-        results.errors.push(`Row ${index + 2}: ${msg}`)
+        results.errors.push(`Row ${displayRow}: ${msg}`)
       }
     }
 
     // Save upload record (StaffUpload model)
+    // ✅ Keep same storage logic as your original route: process.cwd()/uploads/staff
     const uploadDir = path.join(process.cwd(), 'uploads', 'staff')
     await mkdir(uploadDir, { recursive: true })
 
+    const savedFilePath = path.join(uploadDir, file.name)
+
     const uploadRecord = await prisma.staffUpload.create({
       data: {
-        companyId: companyId,
+        companyId,
         fileName: file.name,
-        filePath: path.join(uploadDir, file.name),
+        filePath: savedFilePath, // ✅ consistent with your original route
         totalRecords: data.length,
         successful: results.successful,
         failed: results.failed,
@@ -314,7 +378,7 @@ export async function POST(request: NextRequest) {
     })
 
     // Save the original file
-    await writeFile(path.join(uploadDir, file.name), buffer)
+    await writeFile(savedFilePath, buffer)
 
     return withCors(
       ApiResponse.success(
@@ -335,24 +399,20 @@ export async function POST(request: NextRequest) {
       origin
     )
   } catch (error) {
-    return withCors(
-      handleApiError(error),
-      origin
-    )
+    return withCors(handleApiError(error), origin)
   }
 }
 
+// -----------------------------
 // GET – download staff template using ExcelJS
+// -----------------------------
 export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
 
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
-      return withCors(
-        ApiResponse.error('Authorization header missing', 401),
-        origin
-      )
+      return withCors(ApiResponse.error('Authorization header missing', 401), origin)
     }
 
     const token = authHeader.replace('Bearer ', '')
@@ -379,16 +439,8 @@ export async function GET(request: NextRequest) {
       ]
 
       const headerRow = worksheet.getRow(1)
-      headerRow.font = {
-        bold: true,
-        color: { argb: 'FFFFFFFF' },
-        size: 12,
-      }
-      headerRow.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FF2F5496' },
-      }
+      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 }
+      headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
       headerRow.alignment = { vertical: 'middle', horizontal: 'center' }
 
       const sampleData = [
@@ -418,58 +470,37 @@ export async function GET(request: NextRequest) {
         },
       ]
 
-      sampleData.forEach((row) => {
-        worksheet.addRow(row)
-      })
+      sampleData.forEach((row) => worksheet.addRow(row))
 
       worksheet.eachRow((row, rowNumber) => {
         if (rowNumber > 1) {
           row.alignment = { vertical: 'middle', horizontal: 'left' }
           row.font = { size: 11 }
-
           if (rowNumber % 2 === 0) {
-            row.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: 'FFF2F2F2' },
-            }
+            row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } }
           }
         }
       })
 
       worksheet.addRow([])
       worksheet.addRow(['IMPORTANT NOTES:'])
-      worksheet.addRow([
-        '- staffId: Unique staff ID (3-20 alphanumeric characters, REQUIRED)',
-      ])
+      worksheet.addRow(['- staffId: Unique staff ID (3-20 alphanumeric characters, REQUIRED)'])
       worksheet.addRow(['- email: Valid email address (REQUIRED)'])
-      worksheet.addRow([
-        '- firstName, lastName: Staff names (REQUIRED)',
-      ])
-      worksheet.addRow([
-        '- department, position: Staff details (REQUIRED)',
-      ])
-      worksheet.addRow([
-        '- phone, bankName, accountNumber, bvn: Optional fields',
-      ])
+      worksheet.addRow(['- firstName, lastName: Staff names (REQUIRED)'])
+      worksheet.addRow(['- department, position: Staff details (REQUIRED)'])
+      worksheet.addRow(['- phone, bankName, accountNumber, bvn: Optional fields'])
 
       for (let i = worksheet.rowCount - 6; i <= worksheet.rowCount; i++) {
         const noteRow = worksheet.getRow(i)
-        noteRow.font = {
-          italic: true,
-          color: { argb: 'FFFF0000' },
-          size: 10,
-        }
+        noteRow.font = { italic: true, color: { argb: 'FFFF0000' }, size: 10 }
       }
 
       const buffer = await workbook.xlsx.writeBuffer()
 
       const excelResponse = new NextResponse(buffer as any, {
         headers: {
-          'Content-Type':
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition':
-            'attachment; filename="staff-records-template.xlsx"',
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': 'attachment; filename="staff-records-template.xlsx"',
           'Cache-Control': 'no-cache',
         },
       })
@@ -477,14 +508,8 @@ export async function GET(request: NextRequest) {
       return withCors(excelResponse, origin)
     }
 
-    return withCors(
-      ApiResponse.error('Invalid action'),
-      origin
-    )
+    return withCors(ApiResponse.error('Invalid action'), origin)
   } catch (error) {
-    return withCors(
-      handleApiError(error),
-      origin
-    )
+    return withCors(handleApiError(error), origin)
   }
 }
