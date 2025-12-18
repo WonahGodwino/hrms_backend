@@ -10,7 +10,8 @@ export type ApiDoc = {
   auth?: string
   input?: string
   output?: string
-  sample?: any   // make this optional
+  sample?: any
+  contentType?: 'json' | 'form-data' // Add this to distinguish file uploads
 }
 
 export const apiDocs: ApiDoc[] = [
@@ -31,6 +32,14 @@ export const apiDocs: ApiDoc[] = [
       'JSON body: { email, firstName, lastName, role ("HR" | "STAFF" | "SUPER_ADMIN"), department?, position? }',
     output:
       'JSON: { success, message, data: { user: { id, email, firstName, lastName, role, department, position, companyId } } }',
+    sample: {
+      email: "staff@company.com",
+      firstName: "John",
+      lastName: "Doe",
+      role: "STAFF",
+      department: "Engineering",
+      position: "Software Developer"
+    }
   },
 
   {
@@ -46,6 +55,11 @@ export const apiDocs: ApiDoc[] = [
       'JSON body: { staffId, email, password }',
     output:
       'JSON: { success, message, data: { token, user: { id, staffId, email, firstName, lastName, department, position, role, companyId } } }',
+    sample: {
+      staffId: "EMP001",
+      email: "john.doe@company.com",
+      password: "securepassword123"
+    }
   },
 
   {
@@ -60,6 +74,10 @@ export const apiDocs: ApiDoc[] = [
     input: 'JSON body: { email, password }',
     output:
       'JSON: { success, message, data: { token, user: { id, staffId?, email, firstName, lastName, role, department?, position?, companyId }, company?: { id, companyName, email, phone } } }',
+    sample: {
+      email: "admin@company.com",
+      password: "adminpassword123"
+    }
   },
 
   {
@@ -73,7 +91,7 @@ export const apiDocs: ApiDoc[] = [
     auth: 'Authorization: Bearer <token>',
     input: 'No body',
     output:
-      'JSON: { success, message, data: { user: { id, staffId?, email, firstName, lastName, role, companyId }, company?: { id, companyName, email, phone } } }',
+      'JSON: { success, message, data: { user: { id, staffId?, email, firstName, lastName, role, companyId }, company?: { id, companyName, email, phone } } }'
   },
 
   // ======================
@@ -87,12 +105,12 @@ export const apiDocs: ApiDoc[] = [
     path: '/api/staff/upload',
     title: 'Upload staff records',
     description:
-      'HR uploads staff master data from Excel to create or update StaffRecord rows for the current company. The company is taken from the JWT (companyId).',
+      'HR uploads staff master data from Excel to create or update StaffRecord rows for the current company. The company is taken from the JWT (companyId). Supports Excel (.xlsx) files only.',
     auth: 'Authorization: Bearer <HR | SUPER_ADMIN token>',
-    input:
-      'multipart/form-data: file = .xlsx staff template (company-scoped via JWT companyId)',
+    input: 'multipart/form-data: file = .xlsx staff template',
     output:
       'JSON: { success, message, data: { uploadId, companyId, summary: { totalRecords, successful, failed }, errors?: [ { rowNumber, message } ] } }',
+    contentType: 'form-data'
   },
 
   {
@@ -102,11 +120,11 @@ export const apiDocs: ApiDoc[] = [
     path: '/api/staff/records',
     title: 'List staff records',
     description:
-      'Returns a paginated list of staff records for the authenticated user’s company. Multi-company aware via JWT companyId.',
+      'Returns a paginated list of staff records for the authenticated user\'s company. Multi-company aware via JWT companyId.',
     auth: 'Authorization: Bearer <HR | SUPER_ADMIN token>',
     input: 'Optional query: page, pageSize, search',
     output:
-      'JSON: { success, message, data: { companyId, items: [ { id, staffId, firstName, lastName, email, department, position, phone?, bankName?, accountNumber?, isActive } ], pagination: { page, pageSize, total } } }',
+      'JSON: { success, message, data: { companyId, items: [ { id, staffId, firstName, lastName, email, department, position, phone?, bankName?, accountNumber?, isActive } ], pagination: { page, pageSize, total } } }'
   },
 
   // ======================
@@ -114,7 +132,7 @@ export const apiDocs: ApiDoc[] = [
   // ======================
 
   {
-    id: 'payroll-upload-post',
+    id: 'payroll-upload',
     group: 'Payroll',
     method: 'POST',
     path: '/api/payroll/upload',
@@ -122,23 +140,23 @@ export const apiDocs: ApiDoc[] = [
     description:
       'HR uploads payroll Excel/CSV for one company. System parses rows, creates/updates Payroll entries, generates payslip PDFs (Payslip table), optionally sends notification emails, and records failed rows in PayrollUpload. Multi-company aware via JWT companyId.',
     auth: 'Authorization: Bearer <HR | SUPER_ADMIN token>',
-    input:
-      'multipart/form-data: file = .xlsx or .csv payroll file, sendEmails = "true" | "false"',
+    input: 'multipart/form-data: file = .xlsx or .csv payroll file, sendEmails = "true" | "false" (optional)',
     output:
-      'JSON: { success, message, data: { uploadId, companyId, results: { successful, failed, payslipsGenerated, emailsSent, errors: [ { rowNumber, message } ] }, summary: { totalProcessed, successful, failed, payslipsGenerated, emailsSent }, failedRecordsDownload?: string } }',
+      'JSON: { success, message, data: { uploadId, summary: { totalProcessed, successful, failed, payslipsGenerated, payslipsUpdated, emailsSent, emailAttempts, emailFailures }, failedRecordsCount, downloadLinks: { failedRecords }, filePaths: { original, processed } } }',
+    contentType: 'form-data'
   },
 
   {
-    id: 'payroll-upload-get',
+    id: 'payroll-template',
     group: 'Payroll',
     method: 'GET',
-    path: '/api/payroll/upload',
+    path: '/api/payroll/template',
     title: 'Download payroll template',
     description:
       'Returns the standard payroll Excel template that HR should populate and upload for the current company.',
     auth: 'Authorization: Bearer <HR | SUPER_ADMIN token> (recommended)',
     input: 'No body',
-    output: 'Excel file (.xlsx)',
+    output: 'Excel file (.xlsx)'
   },
 
   {
@@ -152,7 +170,21 @@ export const apiDocs: ApiDoc[] = [
     auth: 'Authorization: Bearer <HR | SUPER_ADMIN token>',
     input: 'Path param: id = PayrollUpload.id',
     output:
-      'Excel file (.xlsx) of failed rows, or JSON error if not found or not owned by your company.',
+      'Excel file (.xlsx) of failed rows, or JSON error if not found or not owned by your company.'
+  },
+
+  {
+    id: 'payroll-history',
+    group: 'Payroll',
+    method: 'GET',
+    path: '/api/payroll/history',
+    title: 'Get payroll upload history',
+    description:
+      'Returns a list of all payroll uploads for the current company with their processing results.',
+    auth: 'Authorization: Bearer <HR | SUPER_ADMIN token>',
+    input: 'Optional query: page, pageSize',
+    output:
+      'JSON: { success, message, data: { uploads: [ { id, fileName, totalRecords, successful, failed, createdAt } ], pagination: { page, pageSize, total } } }'
   },
 
   // ======================
@@ -170,7 +202,7 @@ export const apiDocs: ApiDoc[] = [
     auth: 'Authorization: Bearer <STAFF | HR | SUPER_ADMIN token>',
     input: 'No body',
     output:
-      'JSON: { success, message, data: { staffId, email, companyId, payslips: [ { id, payrollId, month, year, grossPay, netPay, createdAt, fileName, downloadUrl } ] } }',
+      'JSON: { success, message, data: { staffId, email, companyId, payslips: [ { id, payrollId, month, year, grossPay, netPay, createdAt, fileName, downloadUrl } ] } }'
   },
 
   {
@@ -184,6 +216,20 @@ export const apiDocs: ApiDoc[] = [
     auth: 'Authorization: Bearer <token>',
     input: 'Path param: id = Payslip.id',
     output:
-      'PDF file (Content-Type: application/pdf) or JSON error if unauthorized or not in the same company.',
+      'PDF file (Content-Type: application/pdf) or JSON error if unauthorized or not in the same company.'
+  },
+
+  {
+    id: 'payslip-view',
+    group: 'Payslip & Profile',
+    method: 'GET',
+    path: '/api/payslips/[id]',
+    title: 'Get payslip details',
+    description:
+      'Returns details about a specific payslip including file information and payroll data.',
+    auth: 'Authorization: Bearer <token>',
+    input: 'Path param: id = Payslip.id',
+    output:
+      'JSON: { success, message, data: { id, fileName, filePath, month, year, grossPay, netPay, createdAt, staff: { id, staffId, firstName, lastName } } }'
   },
 ]
