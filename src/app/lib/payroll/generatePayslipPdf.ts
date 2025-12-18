@@ -71,6 +71,7 @@ export async function generatePayslipPdf(
 function generatePayslipHtml(input: GeneratePayslipInput): string {
   const { staff, payroll } = input;
 
+  // Calculate total deductions
   const totalDeductions = (payroll.payee || 0) + (payroll.pension || 0);
   const netPay = payroll.netPay || 0;
 
