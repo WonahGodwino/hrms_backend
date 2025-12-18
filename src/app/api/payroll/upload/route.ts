@@ -677,7 +677,8 @@ export async function POST(request: NextRequest) {
           })
 
           // Your generator returns relative path; we normalize slashes to be safe
-          generatedRelativePdfPath = (pdfRes.pdfPath || '').replace(/\\/g, '/')
+          // Correcting the reference to pdfPath to filePath
+          generatedRelativePdfPath = (pdfRes.filePath || '').replace(/\\/g, '/')
           generatedFileName = pdfRes.fileName || path.basename(generatedRelativePdfPath)
 
           // For cleanup: rebuild absolute path from relative if it looks like uploads/...
