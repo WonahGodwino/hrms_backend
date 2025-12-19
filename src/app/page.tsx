@@ -128,8 +128,11 @@ export default function Home() {
         headers['Authorization'] = `Bearer ${token.trim()}`
       }
 
-      // Handle file upload (multipart/form-data)
-      if (selectedApi.contentType === 'form-data') {
+      // Check if this is a file upload endpoint
+      const isFileUpload = selectedApi.contentType === 'form-data'
+      
+      if (isFileUpload) {
+        // Handle file upload (multipart/form-data)
         const formData = new FormData()
         
         // Add file if selected
@@ -152,8 +155,8 @@ export default function Home() {
 
         await handleResponse(res)
       } 
-      // Handle JSON requests
-      else if (selectedApi.method === 'POST' && selectedApi.contentType !== 'form-data') {
+      else if (selectedApi.method === 'POST') {
+        // Handle JSON POST requests (both with and without contentType)
         headers['Content-Type'] = 'application/json'
         
         const res = await fetch(url, {
@@ -164,8 +167,8 @@ export default function Home() {
 
         await handleResponse(res)
       }
-      // Handle GET requests
       else {
+        // Handle GET requests
         const res = await fetch(url, {
           method: selectedApi.method,
           headers
@@ -257,15 +260,13 @@ export default function Home() {
 
   const handleDownloadSampleFile = () => {
     if (selectedApi?.id === 'payroll-upload') {
-      // Create a simple sample payroll Excel file using SheetJS
-      // For now, we'll just provide a download link to an empty template
-      const blob = new Blob([
-        `Staff ID,Name,Month,Year,Gross Pay,Basic Salary,Housing,Transport,Payee,Pension,Net Salary
-EMP001,John Doe,January,2024,500000,350000,75000,30000,45000,50000,405000
-EMP002,Jane Smith,January,2024,450000,315000,67500,27000,40500,45000,364500
-EMP003,Bob Johnson,January,2024,400000,280000,60000,24000,36000,40000,324000`
-      ], { type: 'text/csv' })
+      // Create a simple sample payroll CSV file
+      const csvContent = `Name,EMAIL,Month,Year,Gross Pay,Basic,Housing,Transport,Dressing,Leave Allowance,Entertainment,Utility,Payee,Pension,Deduction,Bonus KPI,Net Salary,FINAL GROSS,Medical Contribution,No of Working Days in the Month,No of days Worked,Employer Pension,NSITF,Prorated Sub Total Invoice,Mgt Fee,Vat on Management Fee @7.5%,Total Invoice Value
+John Doe,john.doe@company.com,January,2024,500000,350000,75000,30000,15000,10000,5000,5000,45000,50000,0,0,405000,500000,5000,22,20,50000,1000,450000,22500,1687.5,468187.5
+Jane Smith,jane.smith@company.com,January,2024,450000,315000,67500,27000,13500,9000,4500,4500,40500,45000,0,0,364500,450000,4500,22,22,45000,900,405000,20250,1518.75,421668.75
+Bob Johnson,bob.johnson@company.com,January,2024,400000,280000,60000,24000,12000,8000,4000,4000,36000,40000,0,0,324000,400000,4000,22,18,40000,800,360000,18000,1350,375150`
       
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -935,8 +936,8 @@ EMP003,Bob Johnson,January,2024,400000,280000,60000,24000,36000,40000,324000`
               </div>
             )}
 
-            {/* JSON body for POST endpoints */}
-            {selectedApi?.method === 'POST' && selectedApi?.contentType !== 'form-data' && (
+            {/* JSON body for POST endpoints - FIXED LINE */}
+            {selectedApi?.method === 'POST' && (selectedApi?.contentType ?? 'json') !== 'form-data' && (
               <div style={{ marginTop: '0.75rem' }}>
                 <label style={{ fontSize: '0.8rem', opacity: 0.8 }}>
                   Request Body (JSON)
