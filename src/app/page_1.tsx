@@ -35,7 +35,6 @@ export default function Home() {
   )
   const [responseText, setResponseText] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loginSuccess, setLoginSuccess] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -206,9 +205,7 @@ export default function Home() {
     else if (
       contentType.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') ||
       contentType.includes('application/pdf') ||
-      contentType.includes('application/octet-stream') ||
-      contentType.includes('text/csv') ||
-      contentType.includes('application/vnd.ms-excel')
+      contentType.includes('application/octet-stream')
     ) {
       const blob = await res.blob()
       const url = window.URL.createObjectURL(blob)
@@ -232,8 +229,6 @@ export default function Home() {
         // Use endpoint-specific default names
         if (selectedApi?.id === 'payroll-template') {
           filename = 'payroll-template.xlsx'
-        } else if (selectedApi?.id === 'staff-template') {
-          filename = 'staff-template.xlsx'
         } else if (selectedApi?.id === 'payslip-download') {
           filename = 'payslip.pdf'
         }
@@ -263,81 +258,23 @@ export default function Home() {
     localStorage.removeItem('hrms_token')
   }
 
-  const handleDownloadTemplate = async () => {
-    if (!selectedApi || !token) {
-      setError('Please set an authorization token first')
-      return
-    }
-
-    try {
-      setIsDownloadingTemplate(true)
-      setResponseText('')
-      setError(null)
-
-      let downloadUrl = ''
-      let defaultFilename = 'template.xlsx'
+  const handleDownloadSampleFile = () => {
+    if (selectedApi?.id === 'payroll-upload') {
+      // Create a simple sample payroll CSV file
+      const csvContent = `Name,EMAIL,Month,Year,Gross Pay,Basic,Housing,Transport,Dressing,Leave Allowance,Entertainment,Utility,Payee,Pension,Deduction,Bonus KPI,Net Salary,FINAL GROSS,Medical Contribution,No of Working Days in the Month,No of days Worked,Employer Pension,NSITF,Prorated Sub Total Invoice,Mgt Fee,Vat on Management Fee @7.5%,Total Invoice Value
+John Doe,john.doe@company.com,January,2024,500000,350000,75000,30000,15000,10000,5000,5000,45000,50000,0,0,405000,500000,5000,22,20,50000,1000,450000,22500,1687.5,468187.5
+Jane Smith,jane.smith@company.com,January,2024,450000,315000,67500,27000,13500,9000,4500,4500,40500,45000,0,0,364500,450000,4500,22,22,45000,900,405000,20250,1518.75,421668.75
+Bob Johnson,bob.johnson@company.com,January,2024,400000,280000,60000,24000,12000,8000,4000,4000,36000,40000,0,0,324000,400000,4000,22,18,40000,800,360000,18000,1350,375150`
       
-      // Determine which endpoint to call based on the selected API
-      if (selectedApi.id === 'payroll-upload') {
-        downloadUrl = '/api/payroll/template'
-        defaultFilename = 'payroll-template.xlsx'
-      } else if (selectedApi.id === 'staff-upload') {
-        downloadUrl = '/api/staff/template'
-        defaultFilename = 'staff-template.xlsx'
-      } else {
-        return
-      }
-
-      const headers: Record<string, string> = {
-        'Authorization': `Bearer ${token.trim()}`
-      }
-
-      const res = await fetch(downloadUrl, {
-        method: 'GET',
-        headers
-      })
-
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status} – ${res.statusText}`)
-      }
-
-      // Handle file download
-      const contentType = res.headers.get('content-type') || ''
-      const blob = await res.blob()
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      
-      // Extract filename from Content-Disposition header or use default
-      const contentDisposition = res.headers.get('content-disposition')
-      let filename = defaultFilename
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename="(.+)"/)
-        if (filenameMatch) {
-          filename = filenameMatch[1]
-        } else {
-          const filenameStarMatch = contentDisposition.match(/filename\*=.+'(.+)'/)
-          if (filenameStarMatch) {
-            filename = filenameStarMatch[1]
-          }
-        }
-      }
-      
-      a.download = filename
+      a.download = 'payroll-sample.csv'
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       window.URL.revokeObjectURL(url)
-
-      // Show success message in response area
-      setResponseText(`Template downloaded successfully: ${filename}\nContent-Type: ${contentType}\nSize: ${(blob.size / 1024).toFixed(2)} KB`)
-      setError(null)
-
-    } catch (err: any) {
-      setError(err?.message || 'Failed to download template')
-      setResponseText('')
-    } finally {
-      setIsDownloadingTemplate(false)
     }
   }
 
@@ -895,21 +832,20 @@ export default function Home() {
                       border: '1px solid #1f2937',
                     }}
                   />
-                  {(selectedApi.id === 'payroll-upload' || selectedApi.id === 'staff-upload') && (
+                  {selectedApi.id === 'payroll-upload' && (
                     <button
-                      onClick={handleDownloadTemplate}
-                      disabled={isDownloadingTemplate || !token}
+                      onClick={handleDownloadSampleFile}
                       style={{
                         padding: '0.5rem 1rem',
                         borderRadius: '0.4rem',
-                        backgroundColor: isDownloadingTemplate || !token ? '#4b5563' : '#3b82f6',
+                        backgroundColor: '#3b82f6',
                         border: 'none',
                         color: 'white',
-                        cursor: isDownloadingTemplate || !token ? 'not-allowed' : 'pointer',
+                        cursor: 'pointer',
                         fontSize: '0.8rem',
                       }}
                     >
-                      {isDownloadingTemplate ? 'Downloading...' : 'Get Template'}
+                      Get Sample CSV
                     </button>
                   )}
                 </div>
@@ -1000,7 +936,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* JSON body for POST endpoints */}
+            {/* JSON body for POST endpoints - FIXED LINE */}
             {selectedApi?.method === 'POST' && (selectedApi?.contentType ?? 'json') !== 'form-data' && (
               <div style={{ marginTop: '0.75rem' }}>
                 <label style={{ fontSize: '0.8rem', opacity: 0.8 }}>
@@ -1068,21 +1004,20 @@ export default function Home() {
                 </button>
               )}
 
-              {(selectedApi?.id === 'payroll-upload' || selectedApi?.id === 'staff-upload') && !selectedFile && (
+              {selectedApi?.id === 'payroll-upload' && !selectedFile && (
                 <button
-                  onClick={handleDownloadTemplate}
-                  disabled={isDownloadingTemplate || !token}
+                  onClick={handleDownloadSampleFile}
                   style={{
                     padding: '0.6rem 1.4rem',
                     borderRadius: '999px',
-                    backgroundColor: isDownloadingTemplate || !token ? '#4b5563' : '#8b5cf6',
+                    backgroundColor: '#8b5cf6',
                     border: 'none',
                     fontWeight: 700,
-                    cursor: isDownloadingTemplate || !token ? 'not-allowed' : 'pointer',
+                    cursor: 'pointer',
                     color: '#020617',
                   }}
                 >
-                  {isDownloadingTemplate ? 'Downloading...' : 'Download Template'}
+                  Download Sample CSV
                 </button>
               )}
             </div>
@@ -1142,10 +1077,9 @@ export default function Home() {
               </h3>
               <ol style={{ fontSize: '0.85rem', opacity: 0.8, paddingLeft: '1rem', margin: 0 }}>
                 <li>First, get a JWT token by logging in using /api/auth/login</li>
-                <li>Click "Get Template" to download the Excel/CSV template</li>
-                <li>Fill the template with your data</li>
-                <li>Click "Choose File" to select your filled template</li>
-                <li>Adjust any additional form fields if needed (e.g., sendEmails)</li>
+                <li>Select or prepare an Excel/CSV file with the correct format</li>
+                <li>Click "Choose File" to select your file</li>
+                <li>Adjust any additional form fields if needed</li>
                 <li>Click "Send Request" to upload and process</li>
                 <li>Check the response for processing results and any errors</li>
               </ol>

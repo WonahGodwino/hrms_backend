@@ -126,7 +126,17 @@ export const apiDocs: ApiDoc[] = [
     output:
       'JSON: { success, message, data: { companyId, items: [ { id, staffId, firstName, lastName, email, department, position, phone?, bankName?, accountNumber?, isActive } ], pagination: { page, pageSize, total } } }'
   },
-
+  // In your apiDocs array, add something like:
+{
+  id: 'staff-template',
+  method: 'GET',
+  path: '/api/staff/template',
+  title: 'Download Staff Upload Template',
+  description: 'Download an Excel/CSV template for bulk staff upload',
+  group: 'Staff',
+  auth: 'Requires Bearer token (Admin role recommended)',
+  contentType: 'form-data' // or 'file' if you want to categorize it differently
+},
   // ======================
   // PAYROLL
   // ======================
