@@ -48,10 +48,10 @@ export async function GET(request: NextRequest) {
     })
 
     // Get app URL from environment
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:5173'
 
     // Find staff record using compound unique constraint (email + companyId)
-    const staffRecord = await prisma.staffRecord.findUnique({
+    let staff = await prisma.staffRecord.findUnique({
       where: {
         email_companyId: {
           email: staffEmail,
@@ -68,13 +68,12 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    if (!staffRecord) {
+    if (!staff) {
       console.error(`❌ Staff record not found for email: ${staffEmail}, companyId: ${companyId}`)
       
       // Try alternative lookup by ID
-      let staffById = null
       if (staffRecordId) {
-        staffById = await prisma.staffRecord.findUnique({
+        const staffById = await prisma.staffRecord.findUnique({
           where: { id: staffRecordId },
           include: {
             company: {
@@ -85,7 +84,7 @@ export async function GET(request: NextRequest) {
         
         if (staffById) {
           console.log(`⚠️ Found staff by ID instead of email+company: ${staffById.email}, company: ${staffById.companyId}`)
-          // Continue with this record
+          staff = staffById // Assign to the main staff variable
         } else {
           return NextResponse.redirect(new URL('/auth/error?message=Staff record not found. Please contact your HR department.', request.url))
         }
@@ -94,16 +93,13 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Use the found staff record (either from email+company or ID lookup)
-    const staff = staffRecord || staffById
-
     // Verify staff ID matches
     if (staff.staffId !== staffId) {
       console.error(`❌ Staff ID mismatch: expected ${staffId}, got ${staff.staffId}`)
       return NextResponse.redirect(new URL('/auth/error?message=Staff ID verification failed', request.url))
     }
 
-    // Verify staff record ID matches token (if we found by ID, this is already verified)
+    // Verify staff record ID matches token
     if (staff.id !== staffRecordId) {
       console.error(`❌ Staff record ID mismatch: token ${staffRecordId}, record ${staff.id}`)
       return NextResponse.redirect(new URL('/auth/error?message=Staff record verification failed', request.url))
