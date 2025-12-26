@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     })
 
     // Get app URL from environment
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:5173'
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
 
     // Find staff record using compound unique constraint (email + companyId)
     let staff = await prisma.staffRecord.findUnique({
@@ -77,7 +77,10 @@ export async function GET(request: NextRequest) {
           where: { id: staffRecordId },
           include: {
             company: {
-              select: { companyName: true }
+              select: {
+                id: true, // ADDED: Include id to match the first query's type
+                companyName: true
+              }
             }
           }
         })
