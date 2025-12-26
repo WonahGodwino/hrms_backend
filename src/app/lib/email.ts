@@ -1,7 +1,7 @@
 // src/app/lib/email.ts
 import formData from 'form-data'
 import Mailgun from 'mailgun.js'
-import { prisma } from '@/lib/prisma'
+import { prisma } from '@/app/lib/db'
 import { sign } from 'jsonwebtoken'
 
 // Initialize Mailgun
