@@ -26,13 +26,14 @@ export async function GET(request: NextRequest) {
     }
 
     // Check for required fields in new token format
-    if (!decoded.sub || !decoded.email || !decoded.staffId) {
-      return NextResponse.redirect(new URL('/auth/error?message=Invalid token data', request.url))
+    if (!decoded.sub || !decoded.email || !decoded.staffId || !decoded.companyId) {
+      return NextResponse.redirect(new URL('/auth/error?message=Invalid token data. Missing required fields.', request.url))
     }
 
     const staffRecordId = decoded.sub
     const staffEmail = decoded.email
     const staffId = decoded.staffId
+    const companyId = decoded.companyId || staff.companyId // Fallback to staff.companyId if available
     const isRegistered = decoded.isRegistered || false
     const payslipId = decoded.payslipId // This is optional in new format
 
@@ -40,6 +41,7 @@ export async function GET(request: NextRequest) {
       staffRecordId,
       staffEmail,
       staffId,
+      companyId,
       isRegistered,
       payslipId,
       hasPayslipId: !!payslipId
@@ -48,10 +50,13 @@ export async function GET(request: NextRequest) {
     // Get app URL from environment
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
 
-    // Find staff record by email and company ID
+    // Find staff record using compound unique constraint (email + companyId)
     const staffRecord = await prisma.staffRecord.findUnique({
       where: {
-        email: staffEmail,
+        email_companyId: {
+          email: staffEmail,
+          companyId: companyId
+        }
       },
       include: {
         company: {
@@ -64,30 +69,53 @@ export async function GET(request: NextRequest) {
     })
 
     if (!staffRecord) {
-      console.error(`❌ Staff record not found for email: ${staffEmail}`)
-      return NextResponse.redirect(new URL('/auth/error?message=Staff record not found', request.url))
+      console.error(`❌ Staff record not found for email: ${staffEmail}, companyId: ${companyId}`)
+      
+      // Try alternative lookup by ID
+      if (staffRecordId) {
+        const staffById = await prisma.staffRecord.findUnique({
+          where: { id: staffRecordId },
+          include: {
+            company: {
+              select: { companyName: true }
+            }
+          }
+        })
+        
+        if (staffById) {
+          console.log(`⚠️ Found staff by ID instead of email+company: ${staffById.email}, company: ${staffById.companyId}`)
+          // Continue with this record
+        } else {
+          return NextResponse.redirect(new URL('/auth/error?message=Staff record not found. Please contact your HR department.', request.url))
+        }
+      } else {
+        return NextResponse.redirect(new URL('/auth/error?message=Staff record not found. Please contact your HR department.', request.url))
+      }
     }
 
+    // Use the found staff record (either from email+company or ID lookup)
+    const staff = staffRecord || staffById
+
     // Verify staff ID matches
-    if (staffRecord.staffId !== staffId) {
-      console.error(`❌ Staff ID mismatch: expected ${staffId}, got ${staffRecord.staffId}`)
+    if (staff.staffId !== staffId) {
+      console.error(`❌ Staff ID mismatch: expected ${staffId}, got ${staff.staffId}`)
       return NextResponse.redirect(new URL('/auth/error?message=Staff ID verification failed', request.url))
     }
 
-    // Verify staff record ID matches token
-    if (staffRecord.id !== staffRecordId) {
-      console.error(`❌ Staff record ID mismatch: token ${staffRecordId}, record ${staffRecord.id}`)
+    // Verify staff record ID matches token (if we found by ID, this is already verified)
+    if (staff.id !== staffRecordId) {
+      console.error(`❌ Staff record ID mismatch: token ${staffRecordId}, record ${staff.id}`)
       return NextResponse.redirect(new URL('/auth/error?message=Staff record verification failed', request.url))
     }
 
     // Handle based on registration status
     if (isRegistered) {
       // For registered users: Check if they're actually registered
-      if (!staffRecord.isRegistered) {
-        console.warn(`⚠️ Token says registered but staff record shows unregistered: ${staffEmail}`)
+      if (!staff.isRegistered) {
+        console.warn(`⚠️ Token says registered but staff record shows unregistered: ${staff.email}`)
         // Fall through to unregistered flow
       } else {
-        console.log(`✅ Registered user accessing: ${staffEmail}`)
+        console.log(`✅ Registered user accessing: ${staff.email}`)
         
         // If payslipId is provided, verify it belongs to this staff
         if (payslipId) {
@@ -100,11 +128,11 @@ export async function GET(request: NextRequest) {
             }
           })
 
-          if (payslip && payslip.staffRecord.id === staffRecordId) {
+          if (payslip && payslip.staffRecord.id === staff.id) {
             // Redirect to specific payslip
             console.log(`📄 Redirecting to specific payslip: ${payslipId}`)
             const loginUrl = new URL(`${appUrl}/login`, request.url)
-            loginUrl.searchParams.set('email', staffEmail)
+            loginUrl.searchParams.set('email', staff.email)
             loginUrl.searchParams.set('redirect', `/profile/payslips/${payslipId}`)
             return NextResponse.redirect(loginUrl)
           }
@@ -112,14 +140,14 @@ export async function GET(request: NextRequest) {
 
         // Generic login redirect for registered users
         const loginUrl = new URL(`${appUrl}/login`, request.url)
-        loginUrl.searchParams.set('email', staffEmail)
+        loginUrl.searchParams.set('email', staff.email)
         loginUrl.searchParams.set('message', 'Please login to access your payslips')
         return NextResponse.redirect(loginUrl)
       }
     }
 
     // For unregistered users (or fallback from above)
-    console.log(`📝 Unregistered user accessing: ${staffEmail}`)
+    console.log(`📝 Unregistered user accessing: ${staff.email}`)
     
     if (payslipId) {
       // Verify the payslip exists and belongs to this staff member
@@ -138,18 +166,19 @@ export async function GET(request: NextRequest) {
       }
 
       // Verify ownership
-      if (payslip.staffRecord.id !== staffRecordId) {
-        console.error(`❌ Payslip ownership mismatch: ${payslipId} belongs to ${payslip.staffRecord.id}, not ${staffRecordId}`)
+      if (payslip.staffRecord.id !== staff.id) {
+        console.error(`❌ Payslip ownership mismatch: ${payslipId} belongs to ${payslip.staffRecord.id}, not ${staff.id}`)
         return NextResponse.redirect(new URL('/auth/error?message=Unauthorized access to payslip', request.url))
       }
 
-      console.log(`✅ Verified payslip ownership: ${payslipId} belongs to ${staffEmail}`)
+      console.log(`✅ Verified payslip ownership: ${payslipId} belongs to ${staff.email}`)
     }
 
     // Redirect to complete registration
     const registrationUrl = new URL(`${appUrl}/complete-registration`, request.url)
-    registrationUrl.searchParams.set('email', staffEmail)
-    registrationUrl.searchParams.set('staffId', staffId)
+    registrationUrl.searchParams.set('email', staff.email)
+    registrationUrl.searchParams.set('staffId', staff.staffId)
+    registrationUrl.searchParams.set('companyId', staff.companyId)
     registrationUrl.searchParams.set('token', token)
     
     if (payslipId) {
@@ -215,6 +244,7 @@ export async function POST(request: NextRequest) {
       staffId: decoded.staffId,
       isRegistered: decoded.isRegistered || false,
       hasPayslipId: !!decoded.payslipId,
+      hasCompanyId: !!decoded.companyId,
       expiresAt: new Date(decoded.exp * 1000).toISOString()
     })
   } catch (error: any) {

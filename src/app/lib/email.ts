@@ -78,7 +78,7 @@ export async function sendPayrollNotificationEmail(
       // Continue with default name
     }
 
-    // Generate access token
+    // Generate access token - INCLUDING companyId
     const jwtSecret = process.env.JWT_SECRET
     const accessToken = sign(
       {
@@ -86,6 +86,7 @@ export async function sendPayrollNotificationEmail(
         sub: staff.id,
         email: staff.email,
         staffId: staff.staffId,
+        companyId: staff.companyId, // ADDED: Company ID for compound unique lookup
         payslipId: payroll.id,
         isRegistered: staff.isRegistered,
         exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 7 days expiry
@@ -330,6 +331,7 @@ If you have any questions, please contact your HR department.`
     console.log(`✅ Payroll notification email sent to ${staff.email} from ${companyName}: ${data.id}`)
     console.log(`🔗 Access URL: ${accessUrl}`)
     console.log(`👤 User registration status: ${staff.isRegistered ? 'Registered' : 'Unregistered'}`)
+    console.log(`🏢 Company ID in token: ${staff.companyId}`) // Log company ID
     
     return { success: true }
   } catch (error: any) {
@@ -358,6 +360,7 @@ export function generatePayslipAccessToken(staff: {
   id: string
   email: string
   staffId: string
+  companyId: string // ADDED: Company ID parameter
   isRegistered: boolean
 }, payslipId: string): string {
   if (!process.env.JWT_SECRET) {
@@ -370,6 +373,7 @@ export function generatePayslipAccessToken(staff: {
       sub: staff.id,
       email: staff.email,
       staffId: staff.staffId,
+      companyId: staff.companyId, // ADDED: Company ID
       payslipId: payslipId,
       isRegistered: staff.isRegistered,
       exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 7 days expiry
@@ -439,13 +443,14 @@ export async function testEmailConfig(companyId?: string): Promise<{ success: bo
       }
     }
 
-    // Generate a test token
+    // Generate a test token WITH companyId
     const testToken = sign(
       {
         purpose: 'payslip_access_test',
         sub: 'test-user-id',
         email: FROM_EMAIL,
         staffId: 'TEST001',
+        companyId: companyId || 'test-company-id', // ADDED: Company ID
         isRegistered: false,
         exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60), // 1 day expiry
       },
@@ -463,6 +468,7 @@ export async function testEmailConfig(companyId?: string): Promise<{ success: bo
       text: `This is a test email to verify your Mailgun configuration.
 
 Company: ${companyName}
+Company ID: ${companyId || 'test-company-id'}
 
 Test Token Generated: Yes (${testToken.substring(0, 20)}...)
 Test Access URL: ${testAccessUrl}
@@ -475,6 +481,7 @@ NEXT_PUBLIC_APP_URL: ${appUrl}`,
         
         <div style="background-color: #f8f9fa; padding: 15px; border-radius: 6px; margin: 15px 0;">
           <p><strong>Company:</strong> ${companyName}</p>
+          <p><strong>Company ID:</strong> ${companyId || 'test-company-id'}</p>
           <p><strong>Test Token Generated:</strong> Yes (${testToken.substring(0, 20)}...)</p>
           <p><strong>Test Access URL:</strong> <a href="${testAccessUrl}">${testAccessUrl}</a></p>
           <p><strong>JWT_SECRET configured:</strong> ${process.env.JWT_SECRET ? 'Yes' : 'No'}</p>
@@ -489,6 +496,7 @@ NEXT_PUBLIC_APP_URL: ${appUrl}`,
       details: { 
         messageId: testData.id,
         companyName,
+        companyId: companyId || 'test-company-id',
         domain: MAILGUN_DOMAIN,
         tokenPreview: testToken.substring(0, 20) + '...',
         accessUrl: testAccessUrl
