@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     const staffRecordId = decoded.sub
     const staffEmail = decoded.email
     const staffId = decoded.staffId
-    const companyId = decoded.companyId || staff.companyId // Fallback to staff.companyId if available
+    const companyId = decoded.companyId // Get companyId from token
     const isRegistered = decoded.isRegistered || false
     const payslipId = decoded.payslipId // This is optional in new format
 
@@ -72,8 +72,9 @@ export async function GET(request: NextRequest) {
       console.error(`❌ Staff record not found for email: ${staffEmail}, companyId: ${companyId}`)
       
       // Try alternative lookup by ID
+      let staffById = null
       if (staffRecordId) {
-        const staffById = await prisma.staffRecord.findUnique({
+        staffById = await prisma.staffRecord.findUnique({
           where: { id: staffRecordId },
           include: {
             company: {
@@ -242,9 +243,9 @@ export async function POST(request: NextRequest) {
       valid: true,
       email: decoded.email,
       staffId: decoded.staffId,
+      companyId: decoded.companyId,
       isRegistered: decoded.isRegistered || false,
       hasPayslipId: !!decoded.payslipId,
-      hasCompanyId: !!decoded.companyId,
       expiresAt: new Date(decoded.exp * 1000).toISOString()
     })
   } catch (error: any) {
