@@ -1,6 +1,8 @@
 // src/app/lib/email.ts
 import formData from 'form-data'
 import Mailgun from 'mailgun.js'
+import { prisma } from '@/lib/prisma'
+import { sign } from 'jsonwebtoken'
 
 // Initialize Mailgun
 const mailgun = new Mailgun(formData)
@@ -11,7 +13,6 @@ const mg = mailgun.client({
 
 const MAILGUN_DOMAIN = process.env.MAILGUN_DOMAIN || ''
 const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@yourdomain.com'
-const COMPANY_NAME = process.env.COMPANY_NAME || 'Your Company'
 
 export async function sendPayrollNotificationEmail(
   staff: {
@@ -50,8 +51,62 @@ export async function sendPayrollNotificationEmail(
       return { success: false, error: 'Sender email not configured' }
     }
 
+    if (!process.env.JWT_SECRET) {
+      console.error('❌ JWT_SECRET is not set')
+      return { success: false, error: 'JWT secret not configured' }
+    }
+
     console.log(`📧 Attempting to send payroll email to ${staff.email}`)
     console.log(`📧 Using domain: ${MAILGUN_DOMAIN}, from: ${FROM_EMAIL}`)
+
+    // Fetch company name from database
+    let companyName = 'Your Company' // Default fallback
+    
+    try {
+      const company = await prisma.company.findUnique({
+        where: { id: staff.companyId },
+        select: { companyName: true }
+      })
+      
+      if (company) {
+        companyName = company.companyName
+      } else {
+        console.warn(`⚠️ Company not found for ID: ${staff.companyId}, using default name`)
+      }
+    } catch (dbError) {
+      console.error('❌ Failed to fetch company name from database:', dbError)
+      // Continue with default name
+    }
+
+    // Generate access token
+    const jwtSecret = process.env.JWT_SECRET
+    const accessToken = sign(
+      {
+        purpose: 'payslip_access',
+        sub: staff.id,
+        email: staff.email,
+        staffId: staff.staffId,
+        payslipId: payroll.id,
+        isRegistered: staff.isRegistered,
+        exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 7 days expiry
+      },
+      jwtSecret
+    )
+
+    // Create access URL based on registration status
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+    let accessUrl = ''
+    let callToAction = ''
+
+    if (staff.isRegistered) {
+      // For registered users: Login page with pre-filled email
+      accessUrl = `${appUrl}/login?email=${encodeURIComponent(staff.email)}`
+      callToAction = 'Login to view your payslip'
+    } else {
+      // For unregistered users: Complete registration with token
+      accessUrl = `${appUrl}/api/auth/payslip-access?token=${accessToken}`
+      callToAction = 'Complete your registration to access your payslip'
+    }
 
     const subject = payroll.isUpdate 
       ? `📄 Updated Payslip for ${payroll.month} ${payroll.year}`
@@ -127,6 +182,18 @@ export async function sendPayrollNotificationEmail(
             text-align: center;
             margin: 20px 0;
           }
+          .secondary-button {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #6c757d;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            text-align: center;
+            margin: 10px 5px;
+            font-size: 14px;
+          }
           .footer {
             text-align: center;
             margin-top: 30px;
@@ -144,12 +211,31 @@ export async function sendPayrollNotificationEmail(
             margin: 20px 0;
             font-size: 14px;
           }
+          .info-box {
+            background-color: #e7f3ff;
+            border: 1px solid #b6d4fe;
+            color: #084298;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+            font-size: 14px;
+          }
+          .link-box {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 15px 0;
+            word-break: break-all;
+            font-size: 12px;
+            color: #666;
+          }
         </style>
       </head>
       <body>
         <div class="container">
           <div class="header">
-            <div class="company-name">${COMPANY_NAME}</div>
+            <div class="company-name">${companyName}</div>
             <div class="subject">${subject}</div>
           </div>
           
@@ -162,25 +248,45 @@ export async function sendPayrollNotificationEmail(
               ₦${payroll.netSalary.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
             </div>
             
-            <div style="text-align: center;">
-              <a href="${process.env.APP_URL || 'http://localhost:3000'}/api/payslips/${payroll.id}/download" class="button">
-                Download Your Payslip
-              </a>
+            <div class="info-box">
+              <strong>💰 Your Net Salary:</strong> ₦${payroll.netSalary.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
             </div>
             
-            <p>You can also view your payslip history by logging into your account.</p>
+            <div style="text-align: center;">
+              <a href="${accessUrl}" class="button">
+                ${callToAction}
+              </a>
+            </div>
             
             ${!staff.isRegistered ? `
               <div class="warning">
                 <strong>⚠️ Important Notice:</strong><br>
-                You need to complete your registration to access the payslip portal.
-                Please visit ${process.env.APP_URL || 'http://localhost:3000'} to complete your registration.
+                You need to complete your registration to access your payslip. 
+                Your Staff ID is: <strong>${staff.staffId}</strong>
               </div>
-            ` : ''}
+              
+              <div class="link-box">
+                <strong>Direct Access Link:</strong><br>
+                <a href="${accessUrl}">${accessUrl}</a>
+              </div>
+            ` : `
+              <div style="text-align: center; margin-top: 15px;">
+                <p>Already have an account? Click below to login:</p>
+                <a href="${appUrl}/login?email=${encodeURIComponent(staff.email)}" class="secondary-button">
+                  Login with your registered account
+                </a>
+              </div>
+            `}
+            
+            <p>You can also view your payslip history by logging into your account.</p>
+            
+            <div style="margin-top: 20px; font-size: 12px; color: #666; text-align: center;">
+              <p><em>Note: This link will expire in 7 days for security purposes.</em></p>
+            </div>
           </div>
           
           <div class="footer">
-            <p>This is an automated message from ${COMPANY_NAME}. Please do not reply to this email.</p>
+            <p>This is an automated message from ${companyName}. Please do not reply to this email.</p>
             <p>If you have any questions, please contact your HR department.</p>
           </div>
         </div>
@@ -188,16 +294,43 @@ export async function sendPayrollNotificationEmail(
       </html>
     `
 
+    // Plain text version
+    const textContent = `${greeting}
+
+${message}
+
+Your net salary: ₦${payroll.netSalary.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+
+${staff.isRegistered ? 
+`To view your payslip, please login to your account:
+${appUrl}/login?email=${encodeURIComponent(staff.email)}
+
+Your email address: ${staff.email}` : 
+`To access your payslip, you need to complete your registration:
+
+Access Link: ${accessUrl}
+
+Your Staff ID: ${staff.staffId}
+Your Email: ${staff.email}
+
+This link will expire in 7 days for security purposes.`}
+
+This is an automated message from ${companyName}. Please do not reply to this email.
+If you have any questions, please contact your HR department.`
+
     // Send email using Mailgun
     const data = await mg.messages.create(MAILGUN_DOMAIN, {
-      from: `${COMPANY_NAME} <${FROM_EMAIL}>`,
+      from: `${companyName} <${FROM_EMAIL}>`,
       to: [staff.email],
       subject: subject,
       html: htmlContent,
-      text: `${greeting}\n\n${message}\n\nYour net salary: ₦${payroll.netSalary.toLocaleString('en-NG')}\n\nDownload your payslip: ${process.env.APP_URL || 'http://localhost:3000'}/api/payslips/${payroll.id}/download${!staff.isRegistered ? `\n\nImportant: You need to complete your registration to access the payslip portal.` : ''}`
+      text: textContent
     })
 
-    console.log(`✅ Payroll notification email sent to ${staff.email}: ${data.id}`)
+    console.log(`✅ Payroll notification email sent to ${staff.email} from ${companyName}: ${data.id}`)
+    console.log(`🔗 Access URL: ${accessUrl}`)
+    console.log(`👤 User registration status: ${staff.isRegistered ? 'Registered' : 'Unregistered'}`)
+    
     return { success: true }
   } catch (error: any) {
     console.error('❌ Failed to send payroll notification email:', error)
@@ -220,8 +353,43 @@ export async function sendPayrollNotificationEmail(
   }
 }
 
+// Function to generate a payslip access token (for external use if needed)
+export function generatePayslipAccessToken(staff: {
+  id: string
+  email: string
+  staffId: string
+  isRegistered: boolean
+}, payslipId: string): string {
+  if (!process.env.JWT_SECRET) {
+    throw new Error('JWT_SECRET not configured')
+  }
+
+  return sign(
+    {
+      purpose: 'payslip_access',
+      sub: staff.id,
+      email: staff.email,
+      staffId: staff.staffId,
+      payslipId: payslipId,
+      isRegistered: staff.isRegistered,
+      exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 7 days expiry
+    },
+    process.env.JWT_SECRET
+  )
+}
+
+// Function to verify payslip access token (for external use if needed)
+export function verifyPayslipAccessToken(token: string): any {
+  if (!process.env.JWT_SECRET) {
+    throw new Error('JWT_SECRET not configured')
+  }
+
+  const { verify } = require('jsonwebtoken')
+  return verify(token, process.env.JWT_SECRET)
+}
+
 // Test email function for debugging
-export async function testEmailConfig(): Promise<{ success: boolean; message: string; details?: any }> {
+export async function testEmailConfig(companyId?: string): Promise<{ success: boolean; message: string; details?: any }> {
   try {
     if (!process.env.MAILGUN_API_KEY) {
       return { 
@@ -244,19 +412,87 @@ export async function testEmailConfig(): Promise<{ success: boolean; message: st
       }
     }
 
+    if (!process.env.JWT_SECRET) {
+      return { 
+        success: false, 
+        message: 'JWT_SECRET is not set in environment variables' 
+      }
+    }
+
+    // Get company name if companyId is provided
+    let companyName = 'Test Company'
+    let fromName = 'Test'
+    
+    if (companyId) {
+      try {
+        const company = await prisma.company.findUnique({
+          where: { id: companyId },
+          select: { companyName: true }
+        })
+        
+        if (company) {
+          companyName = company.companyName
+          fromName = companyName
+        }
+      } catch (dbError) {
+        console.error('❌ Failed to fetch company name:', dbError)
+      }
+    }
+
+    // Generate a test token
+    const testToken = sign(
+      {
+        purpose: 'payslip_access_test',
+        sub: 'test-user-id',
+        email: FROM_EMAIL,
+        staffId: 'TEST001',
+        isRegistered: false,
+        exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60), // 1 day expiry
+      },
+      process.env.JWT_SECRET
+    )
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+    const testAccessUrl = `${appUrl}/api/auth/payslip-access?token=${testToken}`
+
     // Test the Mailgun client
     const testData = await mg.messages.create(MAILGUN_DOMAIN, {
-      from: `Test <${FROM_EMAIL}>`,
+      from: `${fromName} <${FROM_EMAIL}>`,
       to: [FROM_EMAIL], // Send to yourself for testing
-      subject: 'Test Email Configuration',
-      text: 'This is a test email to verify your Mailgun configuration.',
-      html: '<h1>Test Email</h1><p>This is a test email to verify your Mailgun configuration.</p>'
+      subject: 'Test Email Configuration - Payslip Access',
+      text: `This is a test email to verify your Mailgun configuration.
+
+Company: ${companyName}
+
+Test Token Generated: Yes (${testToken.substring(0, 20)}...)
+Test Access URL: ${testAccessUrl}
+
+JWT_SECRET configured: ${process.env.JWT_SECRET ? 'Yes' : 'No'}
+NEXT_PUBLIC_APP_URL: ${appUrl}`,
+      html: `
+        <h1>Test Email Configuration</h1>
+        <p>This is a test email to verify your Mailgun configuration.</p>
+        
+        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 6px; margin: 15px 0;">
+          <p><strong>Company:</strong> ${companyName}</p>
+          <p><strong>Test Token Generated:</strong> Yes (${testToken.substring(0, 20)}...)</p>
+          <p><strong>Test Access URL:</strong> <a href="${testAccessUrl}">${testAccessUrl}</a></p>
+          <p><strong>JWT_SECRET configured:</strong> ${process.env.JWT_SECRET ? 'Yes' : 'No'}</p>
+          <p><strong>NEXT_PUBLIC_APP_URL:</strong> ${appUrl}</p>
+        </div>
+      `
     })
 
     return { 
       success: true, 
       message: 'Email configuration test successful',
-      details: { messageId: testData.id }
+      details: { 
+        messageId: testData.id,
+        companyName,
+        domain: MAILGUN_DOMAIN,
+        tokenPreview: testToken.substring(0, 20) + '...',
+        accessUrl: testAccessUrl
+      }
     }
   } catch (error: any) {
     console.error('❌ Email configuration test failed:', error)
