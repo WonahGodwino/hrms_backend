@@ -133,26 +133,23 @@ export async function GET(request: NextRequest) {
 
 // Helper function to get AI applications with proper filtering
 async function getAIApplications(companyId: string, isSuperAdmin: boolean) {
-  const whereClause: any = {
-    metadata: {
-      path: ['reviewMethod'],
-      string_contains: 'ai-'
-    }
-  }
-
-  if (companyId !== 'all') {
-    whereClause.job = {
-      companyId: companyId
-    }
-  }
-
-  return await prisma.jobApplication.findMany({
-    where: whereClause,
+  // First, get all applications with metadata
+  const applications = await prisma.jobApplication.findMany({
+    where: {
+      ...(companyId !== 'all' && {
+        job: {
+          companyId: companyId
+        }
+      }),
+      metadata: {
+        not: null
+      }
+    },
     select: {
       id: true,
       score: true,
       metadata: true,
-      reviewedAt: true,
+      updatedAt: true,  // Use updatedAt as fallback for review date
       job: {
         select: {
           id: true,
@@ -175,9 +172,20 @@ async function getAIApplications(companyId: string, isSuperAdmin: boolean) {
       }
     },
     orderBy: {
-      reviewedAt: 'desc'
+      updatedAt: 'desc'
     },
-    take: isSuperAdmin ? 500 : 100 // SUPER_ADMIN can see more records
+    take: isSuperAdmin ? 500 : 100
+  })
+
+  // Filter in memory for AI-reviewed applications
+  return applications.filter(app => {
+    const metadata = app.metadata as any
+    // Check if this application was reviewed by AI
+    return metadata?.reviewMethod?.includes('ai-') || 
+           metadata?.aiDetails?.service || 
+           metadata?.reviewedByAI === true ||
+           metadata?.aiReview === true ||
+           metadata?.aiScore !== undefined
   })
 }
 
@@ -202,7 +210,7 @@ async function processCostData(
     end.setHours(23, 59, 59, 999) // End of day
     
     filteredApplications = aiApplications.filter(app => {
-      const reviewDate = app.reviewedAt ? new Date(app.reviewedAt) : null
+      const reviewDate = app.updatedAt ? new Date(app.updatedAt) : null  // Use updatedAt
       return reviewDate && reviewDate >= start && reviewDate <= end
     })
   }
@@ -220,16 +228,16 @@ async function processCostData(
       companyId: app.job?.companyId,
       companyName: app.job?.company?.companyName || 'Unknown',
       score: app.score || 0,
-      aiService: aiDetails?.service || 'unknown',
-      aiModel: aiDetails?.model || 'unknown',
-      tokensUsed: aiDetails?.tokensUsed || 0,
-      estimatedCost: aiDetails?.estimatedCost || 0,
-      reviewDate: app.reviewedAt?.toISOString() || new Date().toISOString(),
-      timeToProductivity: aiDetails?.timeToProductivity,
-      culturalFit: aiDetails?.culturalFit,
-      growthPotential: aiDetails?.growthPotential,
-      strengths: aiDetails?.strengths,
-      weaknesses: aiDetails?.weaknesses
+      aiService: aiDetails?.service || metadata?.aiService || 'unknown',
+      aiModel: aiDetails?.model || metadata?.aiModel || 'unknown',
+      tokensUsed: aiDetails?.tokensUsed || metadata?.tokensUsed || 0,
+      estimatedCost: aiDetails?.estimatedCost || metadata?.estimatedCost || 0,
+      reviewDate: app.reviewedAt?.toISOString() || new Date().toISOString(),  // reviewedAt
+      timeToProductivity: aiDetails?.timeToProductivity || metadata?.timeToProductivity,
+      culturalFit: aiDetails?.culturalFit || metadata?.culturalFit,
+      growthPotential: aiDetails?.growthPotential || metadata?.growthPotential,
+      strengths: aiDetails?.strengths || metadata?.strengths,
+      weaknesses: aiDetails?.weaknesses || metadata?.weaknesses
     }
   })
 
@@ -237,7 +245,8 @@ async function processCostData(
   if (isSuperAdmin && isAllCompanies) {
     return await getSuperAdminAllCompaniesData(companies, costData, period, startDate, endDate)
   } else {
-    return await getCompanySpecificData(companies[0], costData, period, isSuperAdmin, startDate, endDate)
+    // Pass userRole instead of isSuperAdmin
+    return await getCompanySpecificData(companies[0], costData, period, userRole, startDate, endDate)
   }
 }
 
@@ -328,10 +337,11 @@ async function getCompanySpecificData(
   company: any, 
   costData: any[], 
   period: string, 
-  isSuperAdmin: boolean,
+  userRole: string,  // Changed from isSuperAdmin to userRole
   startDate?: string | null,
   endDate?: string | null
 ) {
+  const isSuperAdmin = userRole === 'SUPER_ADMIN'  // Calculate isSuperAdmin from userRole
   const totalApplications = costData.length
   const totalCost = costData.reduce((sum, item) => sum + item.estimatedCost, 0)
   const totalTokens = costData.reduce((sum, item) => sum + item.tokensUsed, 0)
@@ -423,12 +433,12 @@ async function getCompanySpecificData(
 
   return {
     viewType: 'company_specific',
-    userRole: isSuperAdmin ? 'SUPER_ADMIN' : 'HR',
+    userRole: userRole, // Use the actual role
     permissions: {
       canViewAllCompanies: isSuperAdmin,
       canViewDetails: true,
       canExportData: true,
-      canManageSettings: isSuperAdmin || userRole === 'ADMIN'
+      canManageSettings: isSuperAdmin || userRole === 'ADMIN' // Now userRole is available
     },
     company: {
       id: company.id,
