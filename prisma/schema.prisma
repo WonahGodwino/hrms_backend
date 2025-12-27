@@ -294,6 +294,9 @@ model JobApplication {
 
   score Int?
   notes String?
+  
+  // NEW: Add metadata field for AI review information
+  metadata Json?
 
   createdBy String?
   updatedBy String?
