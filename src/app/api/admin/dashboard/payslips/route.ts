@@ -1,4 +1,4 @@
-// src/app/api/admin/payslips/route.ts
+// src/app/api/admin/Dashboard/payslips/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'

@@ -18,6 +18,7 @@ model Company {
   createdBy   String
   createdAt   DateTime @default(now())
 
+  // Relations
   staff              StaffRecord[] // One-to-many relation with StaffRecord
   payrolls           Payroll[] // One-to-many relation with Payroll
   payslips           Payslip[] // One-to-many relation with Payslip
@@ -31,10 +32,13 @@ model Company {
   interviews         Interview[] // One-to-many relation with Interview
   candidateDocuments CandidateDocument[] // One-to-many relation with CandidateDocument
   candidateFiles     CandidateFile[] // One-to-many relation with CandidateFile
+  
+  // NEW: AI Settings relations (one-to-one and one-to-many)
+  aiSettings  AISettings? // One-to-one relation with AISettings
+  aiUsageLogs AIUsageLog[] // One-to-many relation with AIUsageLog
 
   @@map("companies")
 }
-
 model StaffRecord {
   id            String   @id @default(cuid())
   staffId       String
@@ -558,4 +562,60 @@ model CandidateDocument {
   @@index([candidateId, type])
   @@index([companyId])
   @@map("candidate_documents")
+}
+//AI cv review models
+model AISettings {
+  id                   String   @id @default(cuid())
+  companyId            String   @unique
+  company              Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  // Budget settings
+  monthlyBudget        Float    @default(100.00) // in USD
+  costPerReview        Float    @default(0.02)   // estimated cost per review
+  costAlertThreshold   Int      @default(80)     // percentage of budget to trigger alert
+  
+  // Service settings
+  enabled              Boolean  @default(true)
+  defaultService       String   @default("openai") // openai, anthropic, gemini, local
+  defaultModel         String   @default("gpt-3.5-turbo")
+  
+  // Usage settings
+  autoShortlistThreshold Int    @default(75)
+  useForSeniorRoles    Boolean  @default(true)
+  useForTechnicalRoles Boolean  @default(true)
+  useForManagerRoles   Boolean  @default(true) // Added this field based on your API code
+  
+  // Notification settings
+  notifyEmails         String[] // Emails to notify for alerts
+  
+  // Tracking
+  createdBy            String?
+  updatedBy            String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  
+  @@map("ai_settings")
+}
+
+model AIUsageLog {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  applicationId String? // Link to job application
+  service      String   // openai, anthropic, etc.
+  model        String
+  tokensUsed   Int
+  cost         Float
+  endpoint     String
+  inputLength  Int
+  outputLength Int
+  
+  metadata     Json?
+  
+  createdAt    DateTime @default(now())
+  
+  @@index([companyId])
+  @@index([createdAt])
+  @@map("ai_usage_logs")
 }
