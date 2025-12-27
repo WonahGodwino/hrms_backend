@@ -133,23 +133,59 @@ export async function GET(request: NextRequest) {
 
 // Helper function to get AI applications with proper filtering
 async function getAIApplications(companyId: string, isSuperAdmin: boolean) {
-  // First, get all applications with metadata
-  const applications = await prisma.jobApplication.findMany({
-    where: {
-      ...(companyId !== 'all' && {
-        job: {
-          companyId: companyId
+  const whereClause: any = {
+    OR: [
+      // Check for reviewMethod containing 'ai'
+      {
+        metadata: {
+          path: ['reviewMethod'],
+          string_contains: 'ai'
         }
-      }),
-      metadata: {
-        not: null
+      },
+      // Check for reviewedByAI flag
+      {
+        metadata: {
+          path: ['reviewedByAI'],
+          equals: true
+        }
+      },
+      // Check for aiReview flag
+      {
+        metadata: {
+          path: ['aiReview'],
+          equals: true
+        }
+      },
+      // Check for aiDetails.service field
+      {
+        metadata: {
+          path: ['aiDetails', 'service'],
+          not: null
+        }
+      },
+      // Check for aiService field
+      {
+        metadata: {
+          path: ['aiService'],
+          not: null
+        }
       }
-    },
+    ]
+  }
+
+  if (companyId !== 'all') {
+    whereClause.job = {
+      companyId: companyId
+    }
+  }
+
+  return await prisma.jobApplication.findMany({
+    where: whereClause,
     select: {
       id: true,
       score: true,
       metadata: true,
-      updatedAt: true,  // Use updatedAt as fallback for review date
+      updatedAt: true,
       job: {
         select: {
           id: true,
@@ -174,18 +210,7 @@ async function getAIApplications(companyId: string, isSuperAdmin: boolean) {
     orderBy: {
       updatedAt: 'desc'
     },
-    take: isSuperAdmin ? 500 : 100
-  })
-
-  // Filter in memory for AI-reviewed applications
-  return applications.filter(app => {
-    const metadata = app.metadata as any
-    // Check if this application was reviewed by AI
-    return metadata?.reviewMethod?.includes('ai-') || 
-           metadata?.aiDetails?.service || 
-           metadata?.reviewedByAI === true ||
-           metadata?.aiReview === true ||
-           metadata?.aiScore !== undefined
+    take: isSuperAdmin ? 500 : 100 // SUPER_ADMIN can see more records
   })
 }
 
@@ -210,7 +235,7 @@ async function processCostData(
     end.setHours(23, 59, 59, 999) // End of day
     
     filteredApplications = aiApplications.filter(app => {
-      const reviewDate = app.updatedAt ? new Date(app.updatedAt) : null  // Use updatedAt
+      const reviewDate = app.updatedAt ? new Date(app.updatedAt) : null
       return reviewDate && reviewDate >= start && reviewDate <= end
     })
   }
@@ -232,7 +257,7 @@ async function processCostData(
       aiModel: aiDetails?.model || metadata?.aiModel || 'unknown',
       tokensUsed: aiDetails?.tokensUsed || metadata?.tokensUsed || 0,
       estimatedCost: aiDetails?.estimatedCost || metadata?.estimatedCost || 0,
-      reviewDate: app.reviewedAt?.toISOString() || new Date().toISOString(),  // reviewedAt
+      reviewDate: app.updatedAt?.toISOString() || new Date().toISOString(),  // Use updatedAt since reviewedAt doesn't exist
       timeToProductivity: aiDetails?.timeToProductivity || metadata?.timeToProductivity,
       culturalFit: aiDetails?.culturalFit || metadata?.culturalFit,
       growthPotential: aiDetails?.growthPotential || metadata?.growthPotential,
