@@ -94,7 +94,6 @@ export async function POST(request: NextRequest) {
       where: { id: user.companyId as string },
       select: { 
         companyName: true, 
-        industry: true,
         id: true 
       }
     })
@@ -237,7 +236,7 @@ export async function POST(request: NextRequest) {
             model: aiModel || getDefaultModel(aiService),
             temperature: aiTemperature,
             companyContext: company.companyName || '',
-            industry: company.industry || job.department || 'Technology',
+            industry: job.department || 'Technology', // Use job.department instead of company.industry
             seniorityLevel: getSeniorityLevel(job.position),
             strictness: strictness,
             includeCulturalFit: includeCulturalFit,
@@ -256,7 +255,10 @@ export async function POST(request: NextRequest) {
             const cost = openaiUsageTracker.recordUsage(
               aiTokensUsed, 
               aiOptions.model || 'gpt-4-turbo-preview',
-              'cv-review'
+              'cv-review',
+              user.companyId,
+              user.userId,
+              application.id
             )
             
             jobEstimatedCost += cost
@@ -351,6 +353,7 @@ export async function POST(request: NextRequest) {
         const metadata: any = {
           reviewMethod: aiAnalysisUsed ? `ai-${aiService}` : 'industry-standard',
           reviewDate: new Date().toISOString(),
+          reviewedByAI: aiAnalysisUsed,
           scores: {
             overall: matchResult.overallScore,
             technical: matchResult.technicalScore,

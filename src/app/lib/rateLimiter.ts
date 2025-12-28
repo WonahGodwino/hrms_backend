@@ -1,3 +1,4 @@
+// src/app/lib/rateLimiter.ts
 import { LRUCache } from 'lru-cache'
 
 interface RateLimitOptions {
@@ -6,7 +7,7 @@ interface RateLimitOptions {
 }
 
 export default function rateLimit(options?: RateLimitOptions) {
-  const tokenCache = new LRUCache({
+  const tokenCache = new LRUCache<string, number[]>({
     max: options?.uniqueTokenPerInterval || 500,
     ttl: options?.interval || 60000
   })
@@ -14,7 +15,7 @@ export default function rateLimit(options?: RateLimitOptions) {
   return {
     check: (limit: number, token: string) =>
       new Promise<void>((resolve, reject) => {
-        const tokenCount = (tokenCache.get(token) as number[]) || [0]
+        const tokenCount = tokenCache.get(token) || [0]
         if (tokenCount[0] === 0) {
           tokenCache.set(token, tokenCount)
         }
