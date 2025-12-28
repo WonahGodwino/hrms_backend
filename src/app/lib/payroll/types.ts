@@ -45,6 +45,8 @@ export type GeneratePayslipInput = {
     companyName?: string
     companyAddress?: string
     companyPhone?: string
+    companyLogo?: string
+    companyTaxId?: string
   }
   payroll: ParsedPayrollRow
 }
