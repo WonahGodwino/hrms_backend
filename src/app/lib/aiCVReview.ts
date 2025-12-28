@@ -133,7 +133,7 @@ export async function calculateAICVReviewScore(
     // Calculate cultural fit if enabled
     if (options.includeCulturalFit) {
       aiResult.culturalFit = await calculateCulturalFit(jobDescription, cvText, options);
-      if (aiResult.culturalFit < 50) {
+      if (aiResult.culturalFit !== undefined && aiResult.culturalFit < 50) {
         aiResult.recommendations.push('Cultural fit concerns identified - conduct behavioral interview');
       }
     }
@@ -141,7 +141,7 @@ export async function calculateAICVReviewScore(
     // Calculate growth potential if enabled
     if (options.includeGrowthPotential) {
       aiResult.growthPotential = await calculateGrowthPotential(cvText, options);
-      if (aiResult.growthPotential > 80) {
+      if (aiResult.growthPotential !== undefined && aiResult.growthPotential > 80) {
         aiResult.recommendations.push('High growth potential identified - consider for leadership track');
       }
     }
@@ -324,7 +324,8 @@ async function analyzeWithAnthropic(prompt: string, options: AICVReviewOptions):
   });
 
   if (!response.ok) {
-    throw new Error(`Anthropic API error: ${response.statusText}`);
+    const errorText = await response.text();
+    throw new Error(`Anthropic API error: ${response.statusText} - ${errorText}`);
   }
 
   const data = await response.json();
@@ -371,7 +372,8 @@ async function analyzeWithGemini(prompt: string, options: AICVReviewOptions): Pr
   });
 
   if (!response.ok) {
-    throw new Error(`Gemini API error: ${response.statusText}`);
+    const errorText = await response.text();
+    throw new Error(`Gemini API error: ${response.statusText} - ${errorText}`);
   }
 
   const data = await response.json();
@@ -408,7 +410,8 @@ async function analyzeWithLocalLLM(prompt: string, options: AICVReviewOptions): 
   });
 
   if (!response.ok) {
-    throw new Error(`Local LLM error: ${response.statusText}`);
+    const errorText = await response.text();
+    throw new Error(`Local LLM error: ${response.statusText} - ${errorText}`);
   }
 
   const data = await response.json();

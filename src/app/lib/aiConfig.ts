@@ -87,7 +87,10 @@ export function getServiceConfig(service: string) {
 
 export function getAPIKey(service: string): string | undefined {
   const config = getServiceConfig(service);
-  return 'apiKey' in config ? config.apiKey : undefined;
+  if (config && 'apiKey' in config) {
+    return config.apiKey;
+  }
+  return undefined;
 }
 
 export function getDefaultModel(service: string): string {

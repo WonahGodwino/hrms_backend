@@ -6,7 +6,7 @@ import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { calculateIndustryMatchScore, extractKeywords } from '@/app/lib/keywordExtractor'
 import { calculateAICVReviewScore, AICVReviewOptions } from '@/app/lib/aiCVReview'
-import { aiConfig, getDefaultAIOptions, getAPIKey, getDefaultModel } from '@/app/lib/aiConfig'
+import { aiConfig, getAPIKey, getDefaultModel } from '@/app/lib/aiConfig'
 import rateLimit from '@/app/lib/rateLimiter'
 import { openaiUsageTracker } from '@/app/lib/openaiUsage'
 
@@ -394,7 +394,7 @@ export async function POST(request: NextRequest) {
         // Update stage history
         const fromStatus = lastStage?.toStatus || 'SUBMITTED'
         
-        // FIXED: Changed from ApplicationStageHistory to applicationStageHistory (camelCase)
+        // Use camelCase for Prisma model
         await prisma.applicationStageHistory.create({
           data: {
             applicationId: application.id,
@@ -411,7 +411,7 @@ export async function POST(request: NextRequest) {
 
         // Auto-shortlist if enabled and above threshold
         if (autoShortlist && matchResult.overallScore >= threshold) {
-          // FIXED: Changed from ApplicationStageHistory to applicationStageHistory (camelCase)
+          // Use camelCase for Prisma model
           await prisma.applicationStageHistory.create({
             data: {
               applicationId: application.id,

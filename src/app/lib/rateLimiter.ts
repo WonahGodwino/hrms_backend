@@ -1,5 +1,5 @@
 // src/app/lib/rateLimiter.ts
-import { LRUCache } from 'lru-cache'
+import LRUCache from 'lru-cache'
 
 interface RateLimitOptions {
   uniqueTokenPerInterval?: number
