@@ -394,7 +394,8 @@ export async function POST(request: NextRequest) {
         // Update stage history
         const fromStatus = lastStage?.toStatus || 'SUBMITTED'
         
-        await prisma.ApplicationStageHistory.create({
+        // FIXED: Changed from ApplicationStageHistory to applicationStageHistory (camelCase)
+        await prisma.applicationStageHistory.create({
           data: {
             applicationId: application.id,
             fromStatus: fromStatus as any,
@@ -410,7 +411,8 @@ export async function POST(request: NextRequest) {
 
         // Auto-shortlist if enabled and above threshold
         if (autoShortlist && matchResult.overallScore >= threshold) {
-          await prisma.ApplicationStageHistory.create({
+          // FIXED: Changed from ApplicationStageHistory to applicationStageHistory (camelCase)
+          await prisma.applicationStageHistory.create({
             data: {
               applicationId: application.id,
               fromStatus: 'REVIEWING',
