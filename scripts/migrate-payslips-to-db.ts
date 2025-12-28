@@ -1,3 +1,4 @@
+/*
 // scripts/migrate-simple-fs.ts
 import fs from 'fs/promises'
 import path from 'path'
@@ -56,3 +57,4 @@ async function scanAndListFiles() {
 }
 
 scanAndListFiles()
+**/
