@@ -6,7 +6,7 @@ import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { calculateIndustryMatchScore, extractKeywords } from '@/app/lib/keywordExtractor'
 import { calculateAICVReviewScore, AICVReviewOptions } from '@/app/lib/aiCVReview'
-import { aiConfig, getDefaultAIOptions } from '@/app/lib/aiConfig'
+import { aiConfig, getDefaultAIOptions, getAPIKey, getDefaultModel } from '@/app/lib/aiConfig'
 import rateLimit from '@/app/lib/rateLimiter'
 import { openaiUsageTracker } from '@/app/lib/openaiUsage'
 
@@ -394,7 +394,7 @@ export async function POST(request: NextRequest) {
         // Update stage history
         const fromStatus = lastStage?.toStatus || 'SUBMITTED'
         
-        await prisma.applicationStageHistory.create({
+        await prisma.ApplicationStageHistory.create({
           data: {
             applicationId: application.id,
             fromStatus: fromStatus as any,
@@ -410,7 +410,7 @@ export async function POST(request: NextRequest) {
 
         // Auto-shortlist if enabled and above threshold
         if (autoShortlist && matchResult.overallScore >= threshold) {
-          await prisma.applicationStageHistory.create({
+          await prisma.ApplicationStageHistory.create({
             data: {
               applicationId: application.id,
               fromStatus: 'REVIEWING',
@@ -553,17 +553,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Helper functions
-function getAPIKey(service: string): string | undefined {
-  const serviceConfig = aiConfig.services[service as keyof typeof aiConfig.services]
-  return serviceConfig?.apiKey
-}
-
-function getDefaultModel(service: string): string {
-  const serviceConfig = aiConfig.services[service as keyof typeof aiConfig.services]
-  return serviceConfig?.defaultModel || 'gpt-4-turbo-preview'
-}
-
+// Helper functions (kept local to this file)
 function getSeniorityLevel(position: string | null): string {
   if (!position) return 'Mid-level'
   
