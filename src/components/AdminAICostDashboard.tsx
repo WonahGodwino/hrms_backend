@@ -2,13 +2,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
-  LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer,
-  AreaChart, Area, ComposedChart, Scatter, TooltipProps
-} from 'recharts'
 import { Download, RefreshCw, AlertTriangle, TrendingUp, DollarSign, Users, BarChart2 } from 'lucide-react'
-import { ValueType, NameType } from 'recharts/types/component/DefaultTooltipContent'
 
 interface AICostData {
   viewType: 'superadmin_all' | 'company_specific'
@@ -216,29 +210,151 @@ export function AdminAICostDashboard() {
     }
   }
 
-  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#FF6B6B', '#4ECDC4', '#FFD166']
-
-  // Fixed tooltip formatter with proper types
-  const tooltipFormatter = (value: number | string, name: string) => {
-    if (name === 'cost') return [`$${parseFloat(value.toString()).toFixed(3)}`, 'Cost']
-    if (name === 'reviews') return [value, 'Reviews']
-    return [value, 'Score']
+  // Simple chart rendering without Recharts
+  const renderSimpleBarChart = (title: string, data: Array<{name: string, value: number, color?: string}>) => {
+    const maxValue = Math.max(...data.map(d => d.value), 1)
+    
+    return (
+      <div className="space-y-4">
+        <h4 className="font-medium text-gray-700">{title}</h4>
+        <div className="space-y-3">
+          {data.map((item, index) => (
+            <div key={index} className="space-y-1">
+              <div className="flex justify-between text-sm">
+                <span className="font-medium text-gray-700">{item.name}</span>
+                <span className="text-gray-900">${item.value.toFixed(2)}</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className={`h-2 rounded-full ${item.color || 'bg-blue-500'}`}
+                  style={{ width: `${(item.value / maxValue) * 100}%` }}
+                ></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
   }
 
-  // Pie chart tooltip formatter
-  const pieTooltipFormatter = (value: number, name: string, props: any) => {
-    if (name === 'value') return [`$${parseFloat(value.toString()).toFixed(3)}`, 'Cost']
-    if (name === 'count') return [value, 'Reviews']
-    if (name === 'tokens') return [value.toLocaleString(), 'Tokens']
-    return [value, name]
+  // Render daily trends
+  const renderDailyTrends = () => {
+    if (!data?.trends?.daily) return null
+    
+    return (
+      <div className="space-y-4">
+        <h4 className="font-medium text-gray-700">Daily Activity Trend</h4>
+        <div className="space-y-3">
+          {data.trends.daily.map((day, index) => (
+            <div key={index} className="space-y-1">
+              <div className="flex justify-between">
+                <span className="text-sm font-medium text-gray-700">
+                  {new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </span>
+                <span className="text-sm text-gray-900">
+                  ${day.totalCost.toFixed(3)} • {day.count} reviews
+                </span>
+              </div>
+              <div className="flex space-x-2">
+                <div className="flex-1 bg-gray-200 rounded-full h-2">
+                  <div 
+                    className="h-2 rounded-full bg-green-500"
+                    style={{ width: `${(day.count / Math.max(...data.trends!.daily.map(d => d.count))) * 100}%` }}
+                  ></div>
+                </div>
+              </div>
+              <div className="text-xs text-gray-500">
+                Avg Score: {day.avgScore.toFixed(1)}%
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
   }
 
-  // Bar chart tooltip formatter
-  const barTooltipFormatter = (value: number, name: string) => {
-    if (name === 'value') return [`$${parseFloat(value.toString()).toFixed(3)}`, 'Total Cost']
-    if (name === 'count') return [value, 'Review Count']
-    if (name === 'avgScore') return [`${parseFloat(value.toString()).toFixed(1)}%`, 'Avg Score']
-    return [value, name]
+  // Render service breakdown
+  const renderServiceBreakdown = () => {
+    if (!data?.breakdown?.byService) return null
+    
+    const serviceData = Object.entries(data.breakdown.byService)
+      .sort(([, a], [, b]) => b.totalCost - a.totalCost)
+      .map(([service, details]) => ({
+        name: service.toUpperCase(),
+        value: details.totalCost,
+        count: details.count,
+        avgCost: details.avgCost,
+        tokens: details.totalTokens
+      }))
+    
+    const totalCost = serviceData.reduce((sum, item) => sum + item.value, 0)
+    
+    return (
+      <div className="space-y-4">
+        <h4 className="font-medium text-gray-700">Cost by AI Service</h4>
+        <div className="space-y-3">
+          {serviceData.map((service, index) => (
+            <div key={index} className="space-y-1">
+              <div className="flex justify-between">
+                <span className="font-medium text-gray-700">{service.name}</span>
+                <span className="text-gray-900">${service.value.toFixed(2)} ({(service.value / totalCost * 100).toFixed(0)}%)</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className="h-2 rounded-full bg-blue-500"
+                  style={{ width: `${(service.value / totalCost) * 100}%` }}
+                ></div>
+              </div>
+              <div className="text-xs text-gray-500">
+                {service.count} reviews • ${service.avgCost.toFixed(3)} avg • {service.tokens.toLocaleString()} tokens
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  // Render department breakdown
+  const renderDepartmentBreakdown = () => {
+    if (!data?.breakdown?.byDepartment) return null
+    
+    const deptData = Object.entries(data.breakdown.byDepartment)
+      .sort(([, a], [, b]) => b.totalCost - a.totalCost)
+      .map(([dept, details]) => ({
+        name: dept,
+        value: details.totalCost,
+        count: details.count,
+        avgScore: details.avgScore,
+        avgCost: details.avgCost
+      }))
+    
+    const totalCost = deptData.reduce((sum, item) => sum + item.value, 0)
+    
+    return (
+      <div className="space-y-4">
+        <h4 className="font-medium text-gray-700">Cost by Department</h4>
+        <div className="space-y-3">
+          {deptData.map((dept, index) => (
+            <div key={index} className="space-y-1">
+              <div className="flex justify-between">
+                <span className="font-medium text-gray-700">{dept.name}</span>
+                <span className="text-gray-900">${dept.value.toFixed(2)} ({(dept.value / totalCost * 100).toFixed(0)}%)</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className="h-2 rounded-full bg-purple-500"
+                  style={{ width: `${(dept.value / totalCost) * 100}%` }}
+                ></div>
+              </div>
+              <div className="text-xs text-gray-500">
+                {dept.count} reviews • ${dept.avgCost.toFixed(3)} avg • Score: {dept.avgScore.toFixed(1)}%
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
   }
 
   if (loading) {
@@ -685,7 +801,7 @@ export function AdminAICostDashboard() {
         </div>
       )}
 
-      {/* Company-Specific Charts */}
+      {/* Company-Specific Data */}
       {!isAllCompaniesView && data.breakdown && data.trends && (
         <>
           {/* Charts Section */}
@@ -694,134 +810,26 @@ export function AdminAICostDashboard() {
             <div className="bg-white rounded-xl shadow-sm p-4 md:p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Daily Activity Trend</h3>
               <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={data.trends.daily.map(day => ({
-                    date: new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                    cost: parseFloat(day.totalCost.toFixed(3)),
-                    reviews: day.count,
-                    avgScore: day.avgScore
-                  }))}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                    <XAxis dataKey="date" />
-                    <YAxis yAxisId="left" />
-                    <YAxis yAxisId="right" orientation="right" />
-                    <Tooltip 
-                      formatter={(value: number | string, name: string) => tooltipFormatter(value, name)}
-                    />
-                    <Legend />
-                    <Area 
-                      yAxisId="left"
-                      type="monotone" 
-                      dataKey="reviews" 
-                      fill="#10b981" 
-                      fillOpacity={0.2}
-                      stroke="#10b981" 
-                      name="Review Count"
-                    />
-                    <Bar 
-                      yAxisId="left"
-                      dataKey="cost" 
-                      fill="#3b82f6" 
-                      name="Cost ($)"
-                    />
-                    <Line 
-                      yAxisId="right"
-                      type="monotone" 
-                      dataKey="avgScore" 
-                      stroke="#8b5cf6" 
-                      strokeWidth={2}
-                      name="Avg Score (%)"
-                      dot={{ r: 3 }}
-                    />
-                  </ComposedChart>
-                </ResponsiveContainer>
+                {renderDailyTrends()}
               </div>
             </div>
 
             {/* Service Breakdown */}
-            {data.breakdown.byService && Object.keys(data.breakdown.byService).length > 0 && (
-              <div className="bg-white rounded-xl shadow-sm p-4 md:p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Cost by AI Service</h3>
-                <div className="h-80">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={Object.entries(data.breakdown.byService).map(([service, details]: [string, any]) => ({
-                          name: service.toUpperCase(),
-                          value: details.totalCost,
-                          count: details.count,
-                          avgCost: details.avgCost,
-                          tokens: details.totalTokens
-                        }))}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={({ name, percent, value }) => 
-                          `${name}: $${value.toFixed(2)} (${(percent * 100).toFixed(0)}%)`
-                        }
-                        outerRadius={80}
-                        fill="#8884d8"
-                        dataKey="value"
-                      >
-                        {Object.keys(data.breakdown.byService).map((_, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip 
-                        formatter={(value: number, name: string, props: any) => pieTooltipFormatter(value, name, props)}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
+            <div className="bg-white rounded-xl shadow-sm p-4 md:p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Cost by AI Service</h3>
+              <div className="h-80">
+                {renderServiceBreakdown()}
               </div>
-            )}
+            </div>
           </div>
 
           {/* Department Breakdown */}
-          {data.breakdown.byDepartment && Object.keys(data.breakdown.byDepartment).length > 0 && (
-            <div className="bg-white rounded-xl shadow-sm p-4 md:p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Cost by Department</h3>
-              <div className="h-96">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart 
-                    data={Object.entries(data.breakdown.byDepartment)
-                      .sort((a: [string, any], b: [string, any]) => b[1].totalCost - a[1].totalCost)
-                      .map(([dept, details]: [string, any]) => ({
-                        name: dept.length > 15 ? dept.substring(0, 12) + '...' : dept,
-                        fullName: dept,
-                        value: details.totalCost,
-                        count: details.count,
-                        avgScore: details.avgScore,
-                        avgCost: details.avgCost
-                      }))}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                    <XAxis dataKey="name" />
-                    <YAxis />
-                    <YAxis yAxisId="right" orientation="right" />
-                    <Tooltip 
-                      formatter={(value: number, name: string) => barTooltipFormatter(value, name)}
-                      labelFormatter={(label, items) => 
-                        items?.[0]?.payload?.fullName || label
-                      }
-                    />
-                    <Legend />
-                    <Bar dataKey="value" name="Total Cost ($)" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="count" name="Review Count" fill="#10b981" radius={[4, 4, 0, 0]} />
-                    <Line 
-                      yAxisId="right"
-                      type="monotone" 
-                      dataKey="avgScore" 
-                      stroke="#f59e0b" 
-                      strokeWidth={2}
-                      name="Avg Score (%)"
-                      dot={{ r: 4 }}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+          <div className="bg-white rounded-xl shadow-sm p-4 md:p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Cost by Department</h3>
+            <div className="h-96">
+              {renderDepartmentBreakdown()}
             </div>
-          )}
+          </div>
         </>
       )}
 
@@ -860,24 +868,6 @@ export function AdminAICostDashboard() {
               </div>
             ))}
           </div>
-          
-          {!isAllCompaniesView && data.company && (
-            <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
-              <div className="flex items-start gap-3">
-                <div className="flex-shrink-0 p-2 bg-blue-100 rounded-lg">
-                  <BarChart2 className="h-5 w-5 text-blue-600" />
-                </div>
-                <div>
-                  <h4 className="font-medium text-blue-800 mb-1">Budget Management Tip</h4>
-                  <p className="text-sm text-blue-700">
-                    Your current budget usage is at <span className="font-semibold">{data.company.budgetUsedPercent.toFixed(1)}%</span>.
-                    {data.company.budgetUsedPercent > 80 && ' Consider increasing your monthly budget or optimizing AI usage for cost-sensitive roles.'}
-                    {data.company.budgetUsedPercent <= 80 && ' Your budget utilization is healthy. Consider enabling AI for more roles to improve hiring quality.'}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -992,14 +982,6 @@ export function AdminAICostDashboard() {
               </tbody>
             </table>
           </div>
-          
-          {data.recentActivity.length > 10 && (
-            <div className="mt-4 text-center">
-              <button className="text-sm text-blue-600 hover:text-blue-800 font-medium">
-                View all {data.recentActivity.length} reviews →
-              </button>
-            </div>
-          )}
         </div>
       )}
 
