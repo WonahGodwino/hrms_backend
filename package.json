@@ -30,6 +30,7 @@
     "formidable": "^3.5.4",
     "iconv-lite": "^0.7.0",
     "jsonwebtoken": "^9.0.2",
+    "lucide-react": "^0.562.0",
     "mailgun-js": "^0.22.0",
     "mailgun.js": "^12.4.0",
     "mammoth": "^1.11.0",
