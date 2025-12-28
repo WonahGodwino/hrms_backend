@@ -303,20 +303,20 @@ export async function POST(request: NextRequest) {
           if (matchResult.aiAnalysis) {
             notes += `Summary: ${matchResult.aiAnalysis.summary}\n`
             
-            if (matchResult.aiAnalysis.strengths?.length) {
-              notes += `Strengths:\n${matchResult.aiAnalysis.strengths.slice(0, 3).map(s => `  • ${s}`).join('\n')}\n`
+            if (matchResult.aiAnalysis.strengths && matchResult.aiAnalysis.strengths.length > 0) {
+              notes += `Strengths:\n${matchResult.aiAnalysis.strengths.slice(0, 3).map((s: string) => `  • ${s}`).join('\n')}\n`
             }
             
-            if (matchResult.aiAnalysis.weaknesses?.length) {
-              notes += `Weaknesses:\n${matchResult.aiAnalysis.weaknesses.slice(0, 3).map(w => `  • ${w}`).join('\n')}\n`
+            if (matchResult.aiAnalysis.weaknesses && matchResult.aiAnalysis.weaknesses.length > 0) {
+              notes += `Weaknesses:\n${matchResult.aiAnalysis.weaknesses.slice(0, 3).map((w: string) => `  • ${w}`).join('\n')}\n`
             }
             
             if (matchResult.aiAnalysis.timeToProductivity) {
               notes += `Time to Productivity: ${matchResult.aiAnalysis.timeToProductivity}\n`
             }
             
-            if (matchResult.aiAnalysis.suggestions?.length) {
-              notes += `Suggestions:\n${matchResult.aiAnalysis.suggestions.slice(0, 2).map(s => `  • ${s}`).join('\n')}\n`
+            if (matchResult.aiAnalysis.suggestions && matchResult.aiAnalysis.suggestions.length > 0) {
+              notes += `Suggestions:\n${matchResult.aiAnalysis.suggestions.slice(0, 2).map((s: string) => `  • ${s}`).join('\n')}\n`
             }
           }
           
@@ -336,9 +336,9 @@ export async function POST(request: NextRequest) {
         notes += `Soft Skills: ${matchResult.softSkillsScore}%\n`
         
         notes += `\n=== KEY FINDINGS ===\n`
-        notes += `Recommendation: ${matchResult.recommendations[0] || 'Review required'}\n`
+        notes += `Recommendation: ${matchResult.recommendations ? matchResult.recommendations[0] || 'Review required' : 'Review required'}\n`
         
-        if (matchResult.missingKeywords?.length > 0) {
+        if (matchResult.missingKeywords && matchResult.missingKeywords.length > 0) {
           notes += `Missing Critical Skills: ${matchResult.missingKeywords.slice(0, 5).join(', ')}\n`
         }
         
@@ -361,7 +361,7 @@ export async function POST(request: NextRequest) {
             education: matchResult.educationScore,
             softSkills: matchResult.softSkillsScore
           },
-          skillGaps: matchResult.skillGapAnalysis
+          skillGaps: matchResult.skillGapAnalysis || {}
         }
 
         if (aiAnalysisUsed) {
@@ -370,10 +370,10 @@ export async function POST(request: NextRequest) {
             model: aiModel || getDefaultModel(aiService),
             culturalFit: matchResult.culturalFit,
             growthPotential: matchResult.growthPotential,
-            aiSummary: matchResult.aiAnalysis?.summary,
-            strengths: matchResult.aiAnalysis?.strengths?.slice(0, 3),
-            weaknesses: matchResult.aiAnalysis?.weaknesses?.slice(0, 3),
-            timeToProductivity: matchResult.aiAnalysis?.timeToProductivity,
+            aiSummary: matchResult.aiAnalysis?.summary || '',
+            strengths: matchResult.aiAnalysis?.strengths?.slice(0, 3) || [],
+            weaknesses: matchResult.aiAnalysis?.weaknesses?.slice(0, 3) || [],
+            timeToProductivity: matchResult.aiAnalysis?.timeToProductivity || '',
             tokensUsed: aiTokensUsed,
             estimatedCost: jobEstimatedCost / job.applications.length
           }
@@ -402,7 +402,7 @@ export async function POST(request: NextRequest) {
             changedBy: user.userId || 'system',
             comment: `CV review completed. Score: ${matchResult.overallScore}%. ` +
                     `${aiAnalysisUsed ? `AI Analysis (${aiService}) used. ` : 'Industry-standard algorithm used. '}` +
-                    `${matchResult.missingKeywords?.length > 0 ? 
+                    `${matchResult.missingKeywords && matchResult.missingKeywords.length > 0 ? 
                       `Missing key skills: ${matchResult.missingKeywords.slice(0, 3).join(', ')}` : 
                       'All key skills matched'}`
           }
@@ -443,7 +443,7 @@ export async function POST(request: NextRequest) {
             candidateData.culturalFit = matchResult.culturalFit
             candidateData.growthPotential = matchResult.growthPotential
             candidateData.aiAnalysis = {
-              summary: matchResult.aiAnalysis.summary?.substring(0, 200) + (matchResult.aiAnalysis.summary?.length > 200 ? '...' : ''),
+              summary: matchResult.aiAnalysis.summary?.substring(0, 200) + (matchResult.aiAnalysis.summary && matchResult.aiAnalysis.summary.length > 200 ? '...' : ''),
               timeToProductivity: matchResult.aiAnalysis.timeToProductivity,
               potential: matchResult.aiAnalysis.potential,
               strengths: matchResult.aiAnalysis.strengths?.slice(0, 2),
