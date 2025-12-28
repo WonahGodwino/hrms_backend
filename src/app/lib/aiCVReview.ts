@@ -243,7 +243,7 @@ async function analyzeWithOpenAI(prompt: string, options: AICVReviewOptions): Pr
     throw new Error('OpenAI API key required');
   }
 
-  const apiKey = options.apiKey || process.env.OPENAI_API_KEY;
+  const apiKey = options.apiKey || process.env.OPENAI_API_KEY || '';
   const model = options.model || 'gpt-4-turbo-preview';
   
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -292,16 +292,23 @@ async function analyzeWithAnthropic(prompt: string, options: AICVReviewOptions):
     throw new Error('Anthropic API key required');
   }
 
-  const apiKey = options.apiKey || process.env.ANTHROPIC_API_KEY;
+  const apiKey = options.apiKey || process.env.ANTHROPIC_API_KEY || '';
   const model = options.model || 'claude-3-opus-20240229';
+  
+  // Create headers object with proper type
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'anthropic-version': '2023-06-01'
+  };
+  
+  // Only add x-api-key if apiKey is not empty
+  if (apiKey) {
+    headers['x-api-key'] = apiKey;
+  }
   
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01'
-    },
+    headers: headers,
     body: JSON.stringify({
       model: model,
       max_tokens: options.maxTokens || 1500,
@@ -338,7 +345,7 @@ async function analyzeWithGemini(prompt: string, options: AICVReviewOptions): Pr
     throw new Error('Gemini API key required');
   }
 
-  const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
+  const apiKey = options.apiKey || process.env.GEMINI_API_KEY || '';
   const model = options.model || 'gemini-pro';
   
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
