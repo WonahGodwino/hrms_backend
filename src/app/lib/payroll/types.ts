@@ -41,7 +41,7 @@ export type GeneratePayslipInput = {
     email: string
     department?: string
     designation?: string
-    position?: string // Alias for designation
+    position?: string
     companyName?: string
     companyAddress?: string
     companyPhone?: string
@@ -49,9 +49,4 @@ export type GeneratePayslipInput = {
     companyTaxId?: string
   }
   payroll: ParsedPayrollRow
-}
-
-export type PayslipGenerationResult = {
-  pdfBuffer: Uint8Array
-  fileName: string
 }

@@ -11,10 +11,7 @@ import { generatePayslipPdf } from '@/app/lib/payroll/generatePayslipPdf'
 import type { ParsedPayrollRow } from '@/app/lib/payroll/types'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
-// -----------------------------
-// Helpers (UNCHANGED)
-// -----------------------------
-
+// Helper Functions
 function normalizeHeader(h: string) {
   return h
     .toString()
@@ -28,18 +25,8 @@ function monthNameToNumber(month: string): number {
   if (!month) return 0
   const normalized = month.toString().trim().toLowerCase()
   const months = [
-    'january',
-    'february',
-    'march',
-    'april',
-    'may',
-    'june',
-    'july',
-    'august',
-    'september',
-    'october',
-    'november',
-    'december',
+    'january', 'february', 'march', 'april', 'may', 'june',
+    'july', 'august', 'september', 'october', 'november', 'december'
   ]
   const idx = months.indexOf(normalized)
   if (idx >= 0) return idx + 1
@@ -51,41 +38,14 @@ const num = (v: any) =>
   v === null || v === undefined || v === '' ? 0 : Number(v) || 0
 
 const CANONICAL_HEADERS = [
-  'Name',
-  'Resumption Date',
-  'No of Working Days in the Month',
-  'No of days Worked',
-  'Gross Pay',
-  'Prorated Gross Pay',
-  'Basic',
-  'Housing',
-  'Transport',
-  'Dressing',
-  'Leave Allowance',
-  'Entertainment',
-  'Utility',
-  'Salary Of Attendance',
-  "PRORATED GROSS PAY WITH EXTRA ALL'WCE",
-  'TAXABLE INCOME',
-  'Consolidated Relief',
-  'Payee',
-  'Pension',
-  'Deduction',
-  'Bonus KPI',
-  'Net Salary',
-  'FINAL GROSS',
-  'Medical Contribution',
-  'Employer Pension',
-  'NSITF',
-  'Prorated Sub Total Invoice',
-  'Mgt Fee',
-  'Vat on Management Fee @7.5%',
-  'Total Invoice Value',
-  'EMAIL',
-  'Month',
-  'MONTH',
-  'Year',
-  'YEAR',
+  'Name', 'Resumption Date', 'No of Working Days in the Month', 'No of days Worked',
+  'Gross Pay', 'Prorated Gross Pay', 'Basic', 'Housing', 'Transport', 'Dressing',
+  'Leave Allowance', 'Entertainment', 'Utility', 'Salary Of Attendance',
+  "PRORATED GROSS PAY WITH EXTRA ALL'WCE", 'TAXABLE INCOME', 'Consolidated Relief',
+  'Payee', 'Pension', 'Deduction', 'Bonus KPI', 'Net Salary', 'FINAL GROSS',
+  'Medical Contribution', 'Employer Pension', 'NSITF', 'Prorated Sub Total Invoice',
+  'Mgt Fee', 'Vat on Management Fee @7.5%', 'Total Invoice Value', 'EMAIL',
+  'Month', 'MONTH', 'Year', 'YEAR',
 ]
 
 const canonicalMap: Record<string, string> = {}
@@ -94,23 +54,10 @@ for (const h of CANONICAL_HEADERS) {
 }
 
 const REQUIRED_COLS = [
-  'Gross Pay',
-  'Basic',
-  'Housing',
-  'Transport',
-  'Dressing',
-  'Leave Allowance',
-  'Entertainment',
-  'Utility',
-  'Payee',
-  'Pension',
-  'Deduction',
-  'Bonus KPI',
-  'Net Salary',
-  'FINAL GROSS',
-  'Medical Contribution',
-  'No of Working Days in the Month',
-  'No of days Worked',
+  'Gross Pay', 'Basic', 'Housing', 'Transport', 'Dressing', 'Leave Allowance',
+  'Entertainment', 'Utility', 'Payee', 'Pension', 'Deduction', 'Bonus KPI',
+  'Net Salary', 'FINAL GROSS', 'Medical Contribution',
+  'No of Working Days in the Month', 'No of days Worked',
 ]
 
 function getCell(row: any, canonical: string) {
@@ -120,16 +67,7 @@ function getCell(row: any, canonical: string) {
 }
 
 function looksLikePercentageRow(rowObj: any) {
-  for (const col of [
-    'Basic',
-    'Housing',
-    'Transport',
-    'Dressing',
-    'Leave Allowance',
-    'Entertainment',
-    'Utility',
-    'Medical Contribution',
-  ]) {
+  for (const col of ['Basic', 'Housing', 'Transport', 'Dressing', 'Leave Allowance', 'Entertainment', 'Utility', 'Medical Contribution']) {
     const v = getCell(rowObj, col)
     if (typeof v === 'string' && v.includes('%')) return true
   }
@@ -182,16 +120,17 @@ async function ensureUploadDirectories() {
   return { baseDir, uploadsDir, payrollDir }
 }
 
-// -----------------------------
+// Helper function to convert Uint8Array for Prisma
+function toPrismaBytes(data: Uint8Array): any {
+  return data as any
+}
+
 // CORS preflight
-// -----------------------------
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-// -----------------------------
 // POST /api/payroll/upload
-// -----------------------------
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin')
 
@@ -244,7 +183,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 1) Parse file into row objects
+    // Parse file into row objects
     let data: any[] = []
 
     try {
@@ -321,7 +260,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 2) Process rows
+    // Process rows
     const results = {
       successful: 0,
       failed: 0,
@@ -393,7 +332,7 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // locate staff record
+        // Locate staff record
         if (email) {
           staffRecord = await prisma.staffRecord.findUnique({
             where: {
@@ -417,34 +356,14 @@ export async function POST(request: NextRequest) {
               OR: [
                 {
                   AND: [
-                    {
-                      firstName: {
-                        contains: firstName,
-                        mode: 'insensitive',
-                      },
-                    },
-                    {
-                      lastName: {
-                        contains: lastName,
-                        mode: 'insensitive',
-                      },
-                    },
+                    { firstName: { contains: firstName, mode: 'insensitive' } },
+                    { lastName: { contains: lastName, mode: 'insensitive' } },
                   ],
                 },
                 {
                   AND: [
-                    {
-                      lastName: {
-                        contains: firstName,
-                        mode: 'insensitive',
-                      },
-                    },
-                    {
-                      firstName: {
-                        contains: lastName,
-                        mode: 'insensitive',
-                      },
-                    },
+                    { lastName: { contains: firstName, mode: 'insensitive' } },
+                    { firstName: { contains: lastName, mode: 'insensitive' } },
                   ],
                 },
               ],
@@ -467,23 +386,12 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        const monthName =
-          rowData['Month']?.toString() ||
-          rowData['MONTH']?.toString() ||
-          defaultMonthName
-
-        const year = parseInt(
-          rowData['Year']?.toString() ||
-            rowData['YEAR']?.toString() ||
-            defaultYear.toString(),
-          10
-        )
-
+        const monthName = rowData['Month']?.toString() || rowData['MONTH']?.toString() || defaultMonthName
+        const year = parseInt(rowData['Year']?.toString() || rowData['YEAR']?.toString() || defaultYear.toString(), 10)
         const periodMonth = monthNameToNumber(monthName)
 
         const grossPay = num(getCell(rowData, 'Gross Pay'))
         const proratedGrossPay = num(getCell(rowData, 'Prorated Gross Pay'))
-
         const basicSalary = num(getCell(rowData, 'Basic'))
         const housing = num(getCell(rowData, 'Housing'))
         const transport = num(getCell(rowData, 'Transport'))
@@ -491,40 +399,25 @@ export async function POST(request: NextRequest) {
         const leaveAllowance = num(getCell(rowData, 'Leave Allowance'))
         const entertainment = num(getCell(rowData, 'Entertainment'))
         const utility = num(getCell(rowData, 'Utility'))
-
         const payee = num(getCell(rowData, 'Payee'))
         const pension = num(getCell(rowData, 'Pension'))
         const deduction = num(getCell(rowData, 'Deduction'))
         const bonusKPI = num(getCell(rowData, 'Bonus KPI'))
         const netSalary = num(getCell(rowData, 'Net Salary'))
         const finalGross = num(getCell(rowData, 'FINAL GROSS'))
-        const medicalContribution = num(
-          getCell(rowData, 'Medical Contribution')
-        )
-
-        const proratedGrossWithExtra = num(
-          getCell(rowData, "PRORATED GROSS PAY WITH EXTRA ALL'WCE")
-        )
+        const medicalContribution = num(getCell(rowData, 'Medical Contribution'))
+        const proratedGrossWithExtra = num(getCell(rowData, "PRORATED GROSS PAY WITH EXTRA ALL'WCE"))
         const taxableIncome = num(getCell(rowData, 'TAXABLE INCOME'))
         const consolidatedRelief = num(getCell(rowData, 'Consolidated Relief'))
-
         const annualPension = pension * 12
         const annualGrossPay = grossPay * 12
-
         const employerPension = num(getCell(rowData, 'Employer Pension'))
         const nsitf = num(getCell(rowData, 'NSITF'))
-        const proratedSubTotal = num(
-          getCell(rowData, 'Prorated Sub Total Invoice')
-        )
+        const proratedSubTotal = num(getCell(rowData, 'Prorated Sub Total Invoice'))
         const managementFee = num(getCell(rowData, 'Mgt Fee'))
-        const vatOnManagementFee = num(
-          getCell(rowData, 'Vat on Management Fee @7.5%')
-        )
+        const vatOnManagementFee = num(getCell(rowData, 'Vat on Management Fee @7.5%'))
         const totalInvoiceValue = num(getCell(rowData, 'Total Invoice Value'))
-
-        const daysInMonth = num(
-          getCell(rowData, 'No of Working Days in the Month')
-        )
+        const daysInMonth = num(getCell(rowData, 'No of Working Days in the Month'))
         const daysWorked = num(getCell(rowData, 'No of days Worked'))
 
         if (netSalary < 0) {
@@ -542,7 +435,7 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // Get company info for payslip
+        // Get company info
         const company = await prisma.company.findUnique({
           where: { id: companyId },
           select: { 
@@ -555,7 +448,7 @@ export async function POST(request: NextRequest) {
           }
         })
 
-        // Upsert payroll record
+        // Create/update payroll record
         const payrollRecord = await prisma.payroll.upsert({
           where: {
             staffRecordId_month_year_companyId: {
@@ -569,7 +462,6 @@ export async function POST(request: NextRequest) {
             companyId,
             month: monthName,
             year,
-
             grossPay,
             proratedGrossPay,
             basicSalary,
@@ -579,13 +471,11 @@ export async function POST(request: NextRequest) {
             leaveAllowance,
             entertainment,
             utility,
-
             proratedGrossWithExtra,
             annualPension,
             annualGrossPay,
             consolidatedRelief,
             taxableIncome,
-
             deductions: deduction,
             payee,
             pensionDeduction: pension,
@@ -593,14 +483,12 @@ export async function POST(request: NextRequest) {
             netSalary,
             finalGross,
             medicalContribution,
-
             employerPension,
             nsitf,
             proratedSubTotal,
             managementFee,
             vatOnManagementFee,
             totalInvoiceValue,
-
             status: 'PROCESSED',
             uploadedBy: user.userId,
             updatedAt: new Date(),
@@ -610,7 +498,6 @@ export async function POST(request: NextRequest) {
             staffRecordId: staffRecord.id,
             month: monthName,
             year,
-
             grossPay,
             proratedGrossPay,
             basicSalary,
@@ -620,13 +507,11 @@ export async function POST(request: NextRequest) {
             leaveAllowance,
             entertainment,
             utility,
-
             proratedGrossWithExtra,
             annualPension,
             annualGrossPay,
             consolidatedRelief,
             taxableIncome,
-
             deductions: deduction,
             payee,
             pensionDeduction: pension,
@@ -634,14 +519,12 @@ export async function POST(request: NextRequest) {
             netSalary,
             finalGross,
             medicalContribution,
-
             employerPension,
             nsitf,
             proratedSubTotal,
             managementFee,
             vatOnManagementFee,
             totalInvoiceValue,
-
             status: 'PROCESSED',
             uploadedBy: user.userId,
           },
@@ -660,7 +543,7 @@ export async function POST(request: NextRequest) {
         let payslipId: string = ''
         let isUpdate = false
 
-        // Prepare parsed row data for PDF generation
+        // Prepare data for PDF
         const parsedRow: ParsedPayrollRow = {
           rowNumber: displayRowNumber,
           staffId: staffRecord.staffId,
@@ -668,24 +551,21 @@ export async function POST(request: NextRequest) {
           fullName: `${staffRecord.firstName} ${staffRecord.lastName}`,
           periodMonth,
           periodYear: year,
-
           basicSalary,
           housingAllowance: housing,
           transportAllowance: transport,
           transportationAllowance: dressing,
           otherAllowances: leaveAllowance + entertainment + utility,
-
           grossPay,
           payee,
           pension,
           netPay: netSalary,
-
           daysInMonth,
           daysWorked,
           rawRow: rowData,
         }
 
-        // Generate PDF payslip - FIXED FOR Uint8Array
+        // Generate PDF and save to database
         try {
           const pdfResult = await generatePayslipPdf({
             staff: {
@@ -695,7 +575,7 @@ export async function POST(request: NextRequest) {
               email: staffRecord.email,
               department: staffRecord.department || '',
               designation: staffRecord.position || '',
-              position: staffRecord.position || '', // Alias for backward compatibility
+              position: staffRecord.position || '',
               companyName: company?.companyName || '',
               companyAddress: company?.address || '',
               companyPhone: company?.phone || '',
@@ -705,27 +585,25 @@ export async function POST(request: NextRequest) {
             payroll: parsedRow,
           })
 
-          const pdfBuffer = pdfResult.pdfBuffer // This is Uint8Array
+          const pdfBuffer = pdfResult.pdfBuffer
           const payslipFileName = pdfResult.fileName
           const fileSize = pdfBuffer.length
 
           results.payslipsGenerated++
 
-          // Prepare payslip data with Uint8Array for Prisma Bytes field
+          // Prepare payslip data with proper type casting
           const payslipData = {
             payrollId: payrollRecord.id,
             fileName: payslipFileName,
-            fileData: pdfBuffer, // Uint8Array is compatible with Prisma Bytes
+            fileData: toPrismaBytes(pdfBuffer),
             fileType: 'application/pdf',
             fileSize: fileSize,
             grossPay,
             netPay: netSalary,
-            // Keep filePath for backward compatibility
             filePath: `/database/payslips/${staffRecord.staffId}/${year}/${monthName}/${payslipFileName}`,
           }
 
           if (existingPayslip) {
-            // Update existing payslip
             isUpdate = true
             payslipId = existingPayslip.id
             
@@ -741,7 +619,6 @@ export async function POST(request: NextRequest) {
             results.payslipsUpdated++
             console.log(`✅ Updated payslip for ${staffRecord.staffId}: ${payslipFileName} (${fileSize} bytes)`)
           } else {
-            // Create new payslip
             const newPayslip = await prisma.payslip.create({
               data: {
                 ...payslipData,
@@ -777,7 +654,6 @@ export async function POST(request: NextRequest) {
         results.emailAttempts++
         try {
           if (!payslipId) {
-            // If payslipId is not set, find it
             const payslip = await prisma.payslip.findFirst({
               where: {
                 staffRecordId: staffRecord.id,
@@ -794,7 +670,6 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // Prepare staff data
           const staffDataForEmail = {
             id: staffRecord.id,
             companyId: staffRecord.companyId,
@@ -807,7 +682,6 @@ export async function POST(request: NextRequest) {
             isRegistered: staffRecord.isRegistered,
           }
 
-          // Prepare payroll data with payslip ID
           const payrollDataForEmail = {
             id: payslipId,
             month: monthName,
@@ -833,7 +707,6 @@ export async function POST(request: NextRequest) {
             staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
             staffId: staffRecord.staffId,
           })
-          // Don't fail the entire record if email fails
         }
 
         results.successful++
@@ -843,11 +716,7 @@ export async function POST(request: NextRequest) {
           netSalary,
           status: isUpdate ? 'UPDATED' : 'PROCESSED',
           emailSent: true,
-          emailStatus: results.emailFailures.some(
-            (f) => f.rowNumber === displayRowNumber
-          )
-            ? 'FAILED'
-            : 'SENT',
+          emailStatus: results.emailFailures.some((f) => f.rowNumber === displayRowNumber) ? 'FAILED' : 'SENT',
           payslipId: payslipId,
           fileName: payslipFileName,
         })
@@ -922,15 +791,6 @@ export async function POST(request: NextRequest) {
         fgColor: { argb: 'FFDC3545' },
       }
 
-      failedWorksheet.eachRow((row, rowNumber) => {
-        if (rowNumber > 1) {
-          const errorCell = row.getCell('ERROR_MESSAGE')
-          if (errorCell.value) {
-            row.font = { color: { argb: 'FFDC3545' } }
-          }
-        }
-      })
-
       const failedFileName = `failed-payroll-${Date.now()}.xlsx`
       const failedFilePath = path.join(payrollDir, failedFileName)
 
@@ -938,11 +798,9 @@ export async function POST(request: NextRequest) {
       await writeFile(failedFilePath, Buffer.from(failedBuffer as any))
 
       processedFilePath = getRelativePath(failedFilePath)
-
-      console.log(`[PAYROLL_UPLOAD] Failed-records file written at: ${failedFilePath}`)
     }
 
-    // Save original uploaded file (for audit trail only)
+    // Save original uploaded file
     const originalFileName = `payroll-upload-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
     const originalFilePath = path.join(payrollDir, originalFileName)
     await writeFile(originalFilePath, buffer)
@@ -993,10 +851,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.log(
-      '[PAYROLL_UPLOAD] Completed successfully for uploadId',
-      uploadRecord.id
-    )
+    console.log('[PAYROLL_UPLOAD] Completed successfully for uploadId', uploadRecord.id)
 
     return withCors(
       ApiResponse.success(
