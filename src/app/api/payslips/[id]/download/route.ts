@@ -4,8 +4,6 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import fs from 'fs/promises'
-import path from 'path'
 
 type RouteParams = {
   params: {
@@ -30,20 +28,30 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'STAFF'])
+    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'STAFF', 'EMPLOYEE'])
 
     const { id } = params
 
-    // Fetch payslip with company info
+    // Fetch payslip with minimal data first for authorization
     const payslip = await prisma.payslip.findUnique({
       where: { id },
-      include: {
+      select: {
+        id: true,
+        staffRecordId: true,
+        companyId: true,
+        fileName: true,
+        fileType: true,
+        fileSize: true,
+        month: true,
+        year: true,
         staffRecord: {
           select: {
             id: true,
             companyId: true,
             firstName: true,
             lastName: true,
+            email: true,
+            staffId: true,
           }
         },
       },
@@ -59,8 +67,20 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Permission checks based on role
     switch (user.role) {
       case 'STAFF':
-        // STAFF can only download their own payslips
-        if (payslip.staffRecordId !== user.userId) {
+      case 'EMPLOYEE':
+        // STAFF/EMPLOYEE can only download their own payslips
+        // Check if user is associated with this staff record
+        const employee = await prisma.employee.findFirst({
+          where: {
+            userId: user.userId,
+            companyId: payslip.companyId,
+          },
+          include: {
+            staffRecord: true
+          }
+        })
+
+        if (!employee?.staffRecord?.id || employee.staffRecord.id !== payslip.staffRecordId) {
           return withCors(
             ApiResponse.error('Forbidden: You can only download your own payslips', 403),
             origin
@@ -76,7 +96,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             origin
           )
         }
-        if (payslip.staffRecord.companyId !== user.companyId) {
+        if (payslip.companyId !== user.companyId) {
           return withCors(
             ApiResponse.error('Forbidden: HR can only download payslips within their company', 403),
             origin
@@ -96,78 +116,67 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         )
     }
 
-    // File handling logic (unchanged)
-    let filePath: string
-    
-    if (payslip.filePath.startsWith('/uploads/')) {
-      filePath = path.join(process.cwd(), payslip.filePath)
-    } else if (payslip.filePath.startsWith('/')) {
-      filePath = path.join(process.cwd(), 'public', payslip.filePath.slice(1))
-    } else if (payslip.filePath.startsWith('uploads/')) {
-      filePath = path.join(process.cwd(), payslip.filePath)
-    } else {
-      filePath = path.join(process.cwd(), 'public', payslip.filePath)
-    }
-
-    console.log(`Looking for payslip file at: ${filePath}`)
-
-    let fileBuffer: Buffer | null = null
-    
-    try {
-      fileBuffer = await fs.readFile(filePath)
-    } catch (error) {
-      console.error(`Primary file not found: ${filePath}`, error)
-    }
-
-    if (!fileBuffer) {
-      const alternativePaths = [
-        path.join(process.cwd(), 'public', 'uploads', payslip.fileName),
-        path.join(process.cwd(), 'uploads', payslip.fileName),
-        path.join(process.cwd(), payslip.filePath),
-      ]
-      
-      for (const altPath of alternativePaths) {
-        try {
-          fileBuffer = await fs.readFile(altPath)
-          console.log(`Found file at alternative path: ${altPath}`)
-          break
-        } catch {
-          continue
-        }
+    // Now fetch the actual file data from database
+    const payslipWithFile = await prisma.payslip.findUnique({
+      where: { id },
+      select: {
+        fileData: true,
+        fileName: true,
+        fileType: true,
+        fileSize: true,
       }
-    }
+    })
 
-    if (!fileBuffer) {
+    if (!payslipWithFile?.fileData) {
       return withCors(
-        ApiResponse.error('Payslip file not found on server', 404),
+        ApiResponse.error('Payslip file not found in database', 404),
         origin
       )
     }
 
-    const extension = path.extname(payslip.fileName).toLowerCase()
-    let contentType = 'application/octet-stream'
-    
-    if (extension === '.pdf') contentType = 'application/pdf'
-    else if (extension === '.xlsx' || extension === '.xls') contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    else if (extension === '.docx') contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    else if (extension === '.doc') contentType = 'application/msword'
-
+    // Convert Buffer to Uint8Array for Response
+    const fileBuffer = payslipWithFile.fileData
     const uint8Array = new Uint8Array(fileBuffer)
-    const blob = new Blob([uint8Array], { type: contentType })
 
-    // Audit log
-    console.log(`Payslip ${payslip.id} downloaded by ${user.role}: ${user.email}`)
+    // Determine content type
+    const extension = payslipWithFile.fileName.toLowerCase().endsWith('.pdf') ? '.pdf' : 
+                     payslipWithFile.fileName.toLowerCase().endsWith('.xlsx') ? '.xlsx' : 
+                     payslipWithFile.fileName.toLowerCase().endsWith('.docx') ? '.docx' : 
+                     payslipWithFile.fileName.toLowerCase().endsWith('.doc') ? '.doc' : '';
+    
+    let contentType = payslipWithFile.fileType || 'application/octet-stream'
+    
+    // Fallback content type based on file extension
+    if (contentType === 'application/octet-stream') {
+      if (extension === '.pdf') contentType = 'application/pdf'
+      else if (extension === '.xlsx') contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      else if (extension === '.docx') contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      else if (extension === '.doc') contentType = 'application/msword'
+    }
 
-    const response = new NextResponse(blob, {
+    // Clean filename for download (remove special characters)
+    const cleanFileName = payslipWithFile.fileName
+      .replace(/[^\w\s.-]/g, '_') // Replace special chars with underscore
+      .replace(/\s+/g, '_')       // Replace spaces with underscore
+
+    // Create response with file - using attachment for forced download
+    const response = new NextResponse(uint8Array, {
       status: 200,
       headers: {
         'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(payslip.fileName)}"`,
+        'Content-Disposition': `attachment; filename="${cleanFileName}"; filename*=UTF-8''${encodeURIComponent(payslipWithFile.fileName)}`,
+        'Content-Length': payslipWithFile.fileSize?.toString() || uint8Array.length.toString(),
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache',
         'Expires': '0',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Payslip-Info': `${payslip.staffRecord?.firstName} ${payslip.staffRecord?.lastName} - ${payslip.month} ${payslip.year}`,
       },
     })
+
+    // Audit log
+    console.log(`Payslip ${payslip.id} downloaded by ${user.role}: ${user.email || user.userId}`)
+    console.log(`File: ${payslipWithFile.fileName} (${payslipWithFile.fileSize} bytes)`)
 
     return withCors(response, origin)
   } catch (error) {

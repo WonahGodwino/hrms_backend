@@ -128,19 +128,26 @@ model Payroll {
 }
 
 model Payslip {
-  id            String @id @default(cuid())
+  id            String   @id @default(cuid())
   payrollId     String
   staffRecordId String
   companyId     String
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  filePath String
-  fileName String
-  month    String
-  year     Int
-  grossPay Decimal? @db.Decimal(18, 2)
-  netPay   Decimal? @db.Decimal(18, 2)
+  // File storage as binary data
+  fileData      Bytes?   // Store PDF as binary data
+  fileName      String
+  fileType      String   @default("application/pdf")
+  fileSize      Int?     // in bytes
+  
+  // Keep original filePath for migration/backward compatibility
+  filePath      String?  
+  
+  month         String
+  year          Int
+  grossPay      Decimal? @db.Decimal(18, 2)
+  netPay        Decimal? @db.Decimal(18, 2)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt

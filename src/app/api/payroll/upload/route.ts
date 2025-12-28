@@ -173,7 +173,7 @@ function getRelativePath(absolutePath: string): string {
   return absolutePath
 }
 
-// Ensure upload directories exist
+// Ensure upload directories exist (for failed records file only)
 async function ensureUploadDirectories() {
   const baseDir = process.cwd()
   const uploadsDir = path.join(baseDir, 'uploads')
@@ -218,7 +218,7 @@ export async function POST(request: NextRequest) {
     }
     const companyId: string = user.companyId
 
-    // Ensure upload directories exist
+    // Ensure upload directories exist (for failed records file)
     const { payrollDir } = await ensureUploadDirectories()
 
     const formData = await request.formData()
@@ -549,11 +549,18 @@ export async function POST(request: NextRequest) {
         // Get company info for payslip
         const company = await prisma.company.findUnique({
           where: { id: companyId },
-          select: { companyName: true, email: true, address: true, phone: true }
+          select: { 
+            companyName: true, 
+            email: true, 
+            address: true, 
+            phone: true,
+            logo: true,
+            taxId: true,
+          }
         })
 
         // Upsert payroll record
-        const payroll = await prisma.payroll.upsert({
+        const payrollRecord = await prisma.payroll.upsert({
           where: {
             staffRecordId_month_year_companyId: {
               staffRecordId: staffRecord.id,
@@ -655,8 +662,6 @@ export async function POST(request: NextRequest) {
         })
 
         let payslipId: string = ''
-        let pdfPath: string = ''
-        let payslipFileName: string = ''
         let isUpdate = false
 
         // Prepare parsed row data for PDF generation
@@ -697,13 +702,30 @@ export async function POST(request: NextRequest) {
               companyName: company?.companyName || '',
               companyAddress: company?.address || '',
               companyPhone: company?.phone || '',
+              companyLogo: company?.logo || '',
+              companyTaxId: company?.taxId || '',
             },
             payroll: parsedRow,
           })
 
-          pdfPath = pdfResult.pdfPath
-          payslipFileName = pdfResult.fileName
+          const pdfBuffer = pdfResult.pdfBuffer
+          const payslipFileName = pdfResult.fileName
+          const fileSize = pdfBuffer.length
+
           results.payslipsGenerated++
+
+          // Prepare payslip data
+          const payslipData = {
+            payrollId: payrollRecord.id,
+            fileName: payslipFileName,
+            fileData: pdfBuffer,
+            fileType: 'application/pdf',
+            fileSize: fileSize,
+            grossPay,
+            netPay: netSalary,
+            // Keep filePath for backward compatibility
+            filePath: `/database/payslips/${staffRecord.staffId}/${year}/${monthName}/${payslipFileName}`,
+          }
 
           if (existingPayslip) {
             // Update existing payslip
@@ -713,38 +735,30 @@ export async function POST(request: NextRequest) {
             await prisma.payslip.update({
               where: { id: existingPayslip.id },
               data: {
-                payrollId: payroll.id,
-                filePath: pdfPath,
-                fileName: payslipFileName,
-                grossPay,
-                netPay: netSalary,
+                ...payslipData,
                 updatedBy: user.userId,
                 updatedAt: new Date(),
               },
             })
 
             results.payslipsUpdated++
-            console.log(`✅ Updated payslip for ${staffRecord.staffId}: ${payslipFileName}`)
+            console.log(`✅ Updated payslip for ${staffRecord.staffId}: ${payslipFileName} (${fileSize} bytes)`)
           } else {
             // Create new payslip
             const newPayslip = await prisma.payslip.create({
               data: {
-                payrollId: payroll.id,
+                ...payslipData,
                 staffRecordId: staffRecord.id,
                 companyId,
-                filePath: pdfPath,
-                fileName: payslipFileName,
                 month: monthName,
                 year,
-                grossPay,
-                netPay: netSalary,
                 createdBy: user.userId,
                 updatedBy: user.userId,
               },
             })
             
             payslipId = newPayslip.id
-            console.log(`✅ Created payslip for ${staffRecord.staffId}: ${payslipFileName}`)
+            console.log(`✅ Created payslip for ${staffRecord.staffId}: ${payslipFileName} (${fileSize} bytes)`)
           }
         } catch (err: any) {
           const message = `Failed to generate payslip - ${err.message}`
@@ -769,8 +783,9 @@ export async function POST(request: NextRequest) {
             // If payslipId is not set, find it
             const payslip = await prisma.payslip.findFirst({
               where: {
-                payrollId: payroll.id,
                 staffRecordId: staffRecord.id,
+                month: monthName,
+                year,
                 companyId,
               },
             })
@@ -837,7 +852,7 @@ export async function POST(request: NextRequest) {
             ? 'FAILED'
             : 'SENT',
           payslipId: payslipId,
-          payslipFileName: payslipFileName,
+          fileName: payslipFileName,
         })
       } catch (err: any) {
         const message = err?.message || 'Unknown error'
@@ -937,7 +952,7 @@ export async function POST(request: NextRequest) {
       console.log(`[PAYROLL_UPLOAD] Failed-records file written at: ${failedFilePath}`)
     }
 
-    // Save original uploaded file
+    // Save original uploaded file (for audit trail only)
     const originalFileName = `payroll-upload-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
     const originalFilePath = path.join(payrollDir, originalFileName)
     await writeFile(originalFilePath, buffer)
