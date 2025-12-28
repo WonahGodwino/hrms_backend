@@ -53,6 +53,24 @@ export interface AICVReviewOptions {
   enableDetailedAnalysis?: boolean;
 }
 
+// Add interface for AI Analysis response
+interface AIAnalysisResponse {
+  summary: string;
+  strengths: string[];
+  weaknesses: string[];
+  suggestions: string[];
+  riskFactors: string[];
+  potential: number;
+  timeToProductivity: string;
+  keywords?: Array<{
+    keyword: string;
+    confidence: number;
+    explanation: string;
+  }>;
+  skillGaps?: string[];
+  recommendations?: string[];
+}
+
 /**
  * Enhanced AI-powered CV review with multiple AI service options
  */
@@ -93,7 +111,7 @@ export async function calculateAICVReviewScore(
         
         // Add AI-identified keywords and skill gaps
         if (aiAnalysis.keywords) {
-          aiResult.keywordMatches.push(...aiAnalysis.keywords.map(kw => ({
+          aiResult.keywordMatches.push(...aiAnalysis.keywords.map((kw: { keyword: string; confidence: number; explanation: string }) => ({
             keyword: kw.keyword,
             matchType: 'ai' as const,
             confidence: kw.confidence,
@@ -154,7 +172,7 @@ async function performAIAnalysis(
   jobDescription: string,
   cvText: string,
   options: AICVReviewOptions
-): Promise<any> {
+): Promise<AIAnalysisResponse | null> {
   const prompt = createAnalysisPrompt(jobDescription, cvText, options);
   
   if (options.useOpenAI) {
@@ -220,7 +238,7 @@ Additional context:
 /**
  * OpenAI analysis implementation
  */
-async function analyzeWithOpenAI(prompt: string, options: AICVReviewOptions): Promise<any> {
+async function analyzeWithOpenAI(prompt: string, options: AICVReviewOptions): Promise<AIAnalysisResponse | null> {
   if (!options.apiKey && !process.env.OPENAI_API_KEY) {
     throw new Error('OpenAI API key required');
   }
@@ -263,13 +281,13 @@ async function analyzeWithOpenAI(prompt: string, options: AICVReviewOptions): Pr
     throw new Error('No content returned from OpenAI');
   }
 
-  return JSON.parse(content);
+  return JSON.parse(content) as AIAnalysisResponse;
 }
 
 /**
  * Anthropic Claude analysis implementation
  */
-async function analyzeWithAnthropic(prompt: string, options: AICVReviewOptions): Promise<any> {
+async function analyzeWithAnthropic(prompt: string, options: AICVReviewOptions): Promise<AIAnalysisResponse | null> {
   if (!options.apiKey && !process.env.ANTHROPIC_API_KEY) {
     throw new Error('Anthropic API key required');
   }
@@ -309,13 +327,13 @@ async function analyzeWithAnthropic(prompt: string, options: AICVReviewOptions):
     throw new Error('No content returned from Anthropic');
   }
 
-  return JSON.parse(content);
+  return JSON.parse(content) as AIAnalysisResponse;
 }
 
 /**
  * Google Gemini analysis implementation
  */
-async function analyzeWithGemini(prompt: string, options: AICVReviewOptions): Promise<any> {
+async function analyzeWithGemini(prompt: string, options: AICVReviewOptions): Promise<AIAnalysisResponse | null> {
   if (!options.apiKey && !process.env.GEMINI_API_KEY) {
     throw new Error('Gemini API key required');
   }
@@ -356,13 +374,13 @@ async function analyzeWithGemini(prompt: string, options: AICVReviewOptions): Pr
     throw new Error('No content returned from Gemini');
   }
 
-  return JSON.parse(content);
+  return JSON.parse(content) as AIAnalysisResponse;
 }
 
 /**
  * Local LLM analysis (Ollama, LocalAI, etc.)
  */
-async function analyzeWithLocalLLM(prompt: string, options: AICVReviewOptions): Promise<any> {
+async function analyzeWithLocalLLM(prompt: string, options: AICVReviewOptions): Promise<AIAnalysisResponse | null> {
   const localEndpoint = process.env.LOCAL_LLM_ENDPOINT || 'http://localhost:11434/api/generate';
   const model = options.model || 'llama2';
   
@@ -393,13 +411,13 @@ async function analyzeWithLocalLLM(prompt: string, options: AICVReviewOptions): 
     throw new Error('No content returned from local LLM');
   }
 
-  return JSON.parse(content);
+  return JSON.parse(content) as AIAnalysisResponse;
 }
 
 /**
  * Score adjustment functions
  */
-function adjustScoreWithAI(baseScore: number, aiAnalysis: any): number {
+function adjustScoreWithAI(baseScore: number, aiAnalysis: AIAnalysisResponse): number {
   const aiPotential = aiAnalysis.potential || 70;
   const adjustmentFactor = (aiPotential - 70) / 100; // -0.3 to +0.3
   
@@ -409,7 +427,7 @@ function adjustScoreWithAI(baseScore: number, aiAnalysis: any): number {
   return Math.min(Math.max(baseScore + adjustment, 0), 100);
 }
 
-function adjustTechnicalScore(baseScore: number, aiAnalysis: any): number {
+function adjustTechnicalScore(baseScore: number, aiAnalysis: AIAnalysisResponse): number {
   const strengths = aiAnalysis.strengths || [];
   const weaknesses = aiAnalysis.weaknesses || [];
   
@@ -432,7 +450,7 @@ function adjustTechnicalScore(baseScore: number, aiAnalysis: any): number {
   return Math.min(Math.max(baseScore + adjustment, 0), 100);
 }
 
-function adjustExperienceScore(baseScore: number, aiAnalysis: any): number {
+function adjustExperienceScore(baseScore: number, aiAnalysis: AIAnalysisResponse): number {
   const timeToProductivity = aiAnalysis.timeToProductivity || '3-6 months';
   
   // Convert time to productivity to score adjustment
@@ -448,7 +466,7 @@ function adjustExperienceScore(baseScore: number, aiAnalysis: any): number {
   return Math.min(Math.max(baseScore + adjustment, 0), 100);
 }
 
-function adjustEducationScore(baseScore: number, aiAnalysis: any): number {
+function adjustEducationScore(baseScore: number, aiAnalysis: AIAnalysisResponse): number {
   // Education adjustments based on AI analysis
   const strengths = aiAnalysis.strengths || [];
   const hasRelevantEducation = strengths.some((s: string) => 
@@ -460,7 +478,7 @@ function adjustEducationScore(baseScore: number, aiAnalysis: any): number {
   return hasRelevantEducation ? Math.min(baseScore + 5, 100) : baseScore;
 }
 
-function adjustSoftSkillsScore(baseScore: number, aiAnalysis: any): number {
+function adjustSoftSkillsScore(baseScore: number, aiAnalysis: AIAnalysisResponse): number {
   const strengths = aiAnalysis.strengths || [];
   const weaknesses = aiAnalysis.weaknesses || [];
   
@@ -543,6 +561,3 @@ function applyStrictness(score: number, strictness: string): number {
   const adjusted = strictnessMap[strictness] || score;
   return Math.min(Math.max(adjusted, 0), 100);
 }
-
-// Remove the export statement at the end since we're already importing at the top
-// export { calculateIndustryMatchScore } from './keywordExtractor';
