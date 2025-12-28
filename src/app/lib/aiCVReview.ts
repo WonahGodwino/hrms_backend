@@ -1,4 +1,5 @@
 // src/app/lib/aiCVReview.ts
+import { calculateIndustryMatchScore } from './keywordExtractor'
 
 export interface AIMatchResult {
   overallScore: number;
@@ -543,7 +544,5 @@ function applyStrictness(score: number, strictness: string): number {
   return Math.min(Math.max(adjusted, 0), 100);
 }
 
-/**
- * Export enhanced version of existing function for backward compatibility
- */
-export { calculateIndustryMatchScore } from './keywordExtractor';
+// Remove the export statement at the end since we're already importing at the top
+// export { calculateIndustryMatchScore } from './keywordExtractor';
