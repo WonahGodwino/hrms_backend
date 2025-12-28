@@ -4,7 +4,6 @@ import { prisma } from '@/app/lib/db'
 import { getUserFromToken } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import * as XLSX from 'xlsx'
 import { openaiUsageTracker } from '@/app/lib/openaiUsage'
 
 export async function OPTIONS(request: NextRequest) {
@@ -35,20 +34,26 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const format = searchParams.get('format') || 'csv' // csv or excel
+    const format = searchParams.get('format') || 'csv'
     const companyId = searchParams.get('companyId')
     const startDate = searchParams.get('startDate')
     const endDate = searchParams.get('endDate')
-    const reportType = searchParams.get('type') || 'detailed' // detailed, summary, or audit
+    const reportType = searchParams.get('type') || 'detailed'
+
+    // Only support CSV format
+    if (format !== 'csv') {
+      return withCors(
+        ApiResponse.error('Only CSV format is currently supported. Please use format=csv', 400),
+        origin
+      )
+    }
 
     // SUPER_ADMIN can export any company, HR/ADMIN only their own
     let targetCompanyId: string
     
     if (user.role === 'SUPER_ADMIN') {
-      // SUPER_ADMIN can specify company or see all
       targetCompanyId = companyId || 'all'
     } else {
-      // HR/ADMIN can only export their own company
       if (!user.companyId) {
         return withCors(
           ApiResponse.error('Company context missing for HR/ADMIN user', 400),
@@ -57,7 +62,6 @@ export async function GET(request: NextRequest) {
       }
       targetCompanyId = user.companyId
       
-      // HR/ADMIN cannot export other companies even if specified
       if (companyId && companyId !== user.companyId) {
         return withCors(
           ApiResponse.error('HR/ADMIN users can only export their own company data', 403),
@@ -69,7 +73,6 @@ export async function GET(request: NextRequest) {
     // Get company/companies info
     let companies: any[] = []
     if (targetCompanyId === 'all') {
-      // SUPER_ADMIN viewing all companies
       companies = await prisma.company.findMany({
         select: { 
           id: true, 
@@ -84,7 +87,6 @@ export async function GET(request: NextRequest) {
         orderBy: { companyName: 'asc' }
       })
     } else {
-      // Single company view
       const company = await prisma.company.findUnique({
         where: { id: targetCompanyId },
         select: { 
@@ -113,47 +115,42 @@ export async function GET(request: NextRequest) {
     
     // Process data based on report type
     let reportData: any
-    switch (reportType) {
-      case 'summary':
-        reportData = await generateSummaryReport(companies, aiApplications, user.role, startDate, endDate)
-        break
-      case 'audit':
-        reportData = await generateAuditReport(companies, aiApplications, user.role, startDate, endDate)
-        break
-      case 'detailed':
-      default:
-        reportData = await generateDetailedReport(companies, aiApplications, user.role, startDate, endDate)
-        break
-    }
-
-    // Generate file based on format
-    let fileBuffer: Buffer
-    let contentType: string
+    let csvContent: string
     let filename: string
-
+    
     const timestamp = new Date().toISOString().split('T')[0]
     const companyName = targetCompanyId === 'all' 
       ? 'all-companies' 
       : companies[0]?.companyName?.replace(/\s+/g, '-').toLowerCase() || 'company'
 
-    if (format === 'excel') {
-      const workbook = await generateExcelWorkbook(reportData, reportType, user.role, targetCompanyId)
-      fileBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })
-      contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      filename = `ai-cost-${reportType}-report-${companyName}-${timestamp}.xlsx`
-    } else {
-      // CSV format
-      const csvContent = generateCSV(reportData, reportType)
-      fileBuffer = Buffer.from(csvContent, 'utf-8')
-      contentType = 'text/csv'
-      filename = `ai-cost-${reportType}-report-${companyName}-${timestamp}.csv`
+    switch (reportType) {
+      case 'summary':
+        reportData = await generateSummaryReport(companies, aiApplications, user.role, startDate, endDate)
+        csvContent = generateSummaryCSV(reportData)
+        filename = `ai-cost-summary-${companyName}-${timestamp}.csv`
+        break
+      case 'audit':
+        reportData = await generateAuditReport(companies, user.role, startDate, endDate)
+        csvContent = generateAuditCSV(reportData)
+        filename = `ai-cost-audit-${companyName}-${timestamp}.csv`
+        break
+      case 'detailed':
+      default:
+        reportData = await generateDetailedReport(companies, aiApplications, user.role, startDate, endDate)
+        csvContent = generateDetailedCSV(reportData)
+        filename = `ai-cost-detailed-${companyName}-${timestamp}.csv`
+        break
     }
 
+    // Convert to Uint8Array for NextResponse
+    const encoder = new TextEncoder()
+    const fileData = encoder.encode(csvContent)
+    
     // Return file as response
-    return new NextResponse(fileBuffer, {
+    return new NextResponse(fileData, {
       status: 200,
       headers: {
-        'Content-Type': contentType,
+        'Content-Type': 'text/csv; charset=utf-8',
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Access-Control-Allow-Origin': origin || '*',
         'Access-Control-Allow-Methods': 'GET, OPTIONS',
@@ -171,9 +168,38 @@ export async function GET(request: NextRequest) {
 // Helper function to get AI applications with proper filtering
 async function getAIApplications(companyId: string, isSuperAdmin: boolean) {
   const whereClause: any = {
-    metadata: {
-      not: null
-    }
+    OR: [
+      {
+        metadata: {
+          path: ['reviewMethod'],
+          string_contains: 'ai'
+        }
+      },
+      {
+        metadata: {
+          path: ['reviewedByAI'],
+          equals: true
+        }
+      },
+      {
+        metadata: {
+          path: ['aiReview'],
+          equals: true
+        }
+      },
+      {
+        metadata: {
+          path: ['aiDetails', 'service'],
+          not: null
+        }
+      },
+      {
+        metadata: {
+          path: ['aiService'],
+          not: null
+        }
+      }
+    ]
   }
 
   if (companyId !== 'all') {
@@ -188,7 +214,7 @@ async function getAIApplications(companyId: string, isSuperAdmin: boolean) {
       id: true,
       score: true,
       metadata: true,
-      updatedAt: true,
+      reviewedAt: true,
       job: {
         select: {
           id: true,
@@ -212,22 +238,15 @@ async function getAIApplications(companyId: string, isSuperAdmin: boolean) {
       }
     },
     orderBy: {
-      updatedAt: 'desc'
+      reviewedAt: 'desc'
     },
-    take: isSuperAdmin ? 10000 : 5000 // SUPER_ADMIN can export more records
+    take: isSuperAdmin ? 10000 : 5000
   })
 
-  // Filter in memory for AI-reviewed applications
-  return applications.filter(app => {
-    const metadata = app.metadata as any
-    return metadata?.reviewMethod?.includes('ai-') || 
-           metadata?.aiDetails?.service || 
-           metadata?.reviewedByAI === true ||
-           metadata?.aiReview === true
-  })
+  return applications
 }
 
-// Generate detailed report with all application data
+// Generate detailed report
 async function generateDetailedReport(
   companies: any[], 
   aiApplications: any[], 
@@ -245,71 +264,62 @@ async function generateDetailedReport(
     end.setHours(23, 59, 59, 999)
     
     filteredApplications = aiApplications.filter(app => {
-      const reviewDate = app.updatedAt ? new Date(app.updatedAt) : null
+      const reviewDate = app.reviewedAt ? new Date(app.reviewedAt) : null
       return reviewDate && reviewDate >= start && reviewDate <= end
     })
   }
 
-  // Transform data for export
-  const detailedData = filteredApplications.map(app => {
-    const metadata = app.metadata as any
-    const aiDetails = metadata?.aiDetails
-    
-    return {
-      'Application ID': app.id,
-      'Review Date': app.updatedAt ? new Date(app.updatedAt).toLocaleDateString() : 'N/A',
-      'Review Time': app.updatedAt ? new Date(app.updatedAt).toLocaleTimeString() : 'N/A',
-      'Candidate Name': app.candidate ? `${app.candidate.firstName} ${app.candidate.lastName}` : 'Unknown',
-      'Candidate Email': app.candidate?.email || 'N/A',
-      'Job Title': app.job?.title || 'Unknown',
-      'Department': app.job?.department || 'Unknown',
-      'Company': app.job?.company?.companyName || 'Unknown',
-      'Company ID': app.job?.companyId || 'Unknown',
-      'AI Service': aiDetails?.service || metadata?.aiService || 'unknown',
-      'AI Model': aiDetails?.model || metadata?.aiModel || 'unknown',
-      'Score (%)': app.score || 0,
-      'Tokens Used': aiDetails?.tokensUsed || metadata?.tokensUsed || 0,
-      'Cost ($)': aiDetails?.estimatedCost || metadata?.estimatedCost || 0,
-      'Time to Productivity': aiDetails?.timeToProductivity || metadata?.timeToProductivity || 'N/A',
-      'Cultural Fit': aiDetails?.culturalFit || metadata?.culturalFit || 'N/A',
-      'Growth Potential': aiDetails?.growthPotential || metadata?.growthPotential || 'N/A',
-      'Strengths': (aiDetails?.strengths || metadata?.strengths || []).join('; '),
-      'Weaknesses': (aiDetails?.weaknesses || metadata?.weaknesses || []).join('; '),
-      'Review Method': metadata?.reviewMethod || 'N/A'
-    }
-  })
-
-  // Calculate summary statistics
-  const totalCost = detailedData.reduce((sum, item) => sum + (item['Cost ($)'] || 0), 0)
-  const totalApplications = detailedData.length
-  const totalTokens = detailedData.reduce((sum, item) => sum + (item['Tokens Used'] || 0), 0)
-  const avgScore = totalApplications > 0 
-    ? detailedData.reduce((sum, item) => sum + (item['Score (%)'] || 0), 0) / totalApplications 
-    : 0
-
   return {
-    detailed: detailedData,
+    data: filteredApplications.map(app => {
+      const metadata = app.metadata as any
+      const aiDetails = metadata?.aiDetails
+      
+      return {
+        'Application ID': app.id,
+        'Review Date': app.reviewedAt ? new Date(app.reviewedAt).toLocaleDateString() : 'N/A',
+        'Review Time': app.reviewedAt ? new Date(app.reviewedAt).toLocaleTimeString() : 'N/A',
+        'Candidate Name': app.candidate ? `${app.candidate.firstName} ${app.candidate.lastName}` : 'Unknown',
+        'Candidate Email': app.candidate?.email || 'N/A',
+        'Job Title': app.job?.title || 'Unknown',
+        'Department': app.job?.department || 'Unknown',
+        'Company': app.job?.company?.companyName || 'Unknown',
+        'Company ID': app.job?.companyId || 'Unknown',
+        'AI Service': aiDetails?.service || metadata?.aiService || 'unknown',
+        'AI Model': aiDetails?.model || metadata?.aiModel || 'unknown',
+        'Score (%)': app.score || 0,
+        'Tokens Used': aiDetails?.tokensUsed || metadata?.tokensUsed || 0,
+        'Cost ($)': aiDetails?.estimatedCost || metadata?.estimatedCost || 0,
+        'Time to Productivity': aiDetails?.timeToProductivity || metadata?.timeToProductivity || 'N/A',
+        'Cultural Fit': aiDetails?.culturalFit || metadata?.culturalFit || 'N/A',
+        'Growth Potential': aiDetails?.growthPotential || metadata?.growthPotential || 'N/A',
+        'Strengths': (aiDetails?.strengths || metadata?.strengths || []).join('; '),
+        'Weaknesses': (aiDetails?.weaknesses || metadata?.weaknesses || []).join('; '),
+        'Review Method': metadata?.reviewMethod || 'N/A'
+      }
+    }),
     summary: {
-      totalApplications,
-      totalCost: parseFloat(totalCost.toFixed(4)),
-      totalTokens,
-      avgScore: parseFloat(avgScore.toFixed(1)),
+      totalApplications: filteredApplications.length,
+      totalCost: filteredApplications.reduce((sum, app) => {
+        const metadata = app.metadata as any
+        const aiDetails = metadata?.aiDetails
+        return sum + (aiDetails?.estimatedCost || metadata?.estimatedCost || 0)
+      }, 0),
+      totalTokens: filteredApplications.reduce((sum, app) => {
+        const metadata = app.metadata as any
+        const aiDetails = metadata?.aiDetails
+        return sum + (aiDetails?.tokensUsed || metadata?.tokensUsed || 0)
+      }, 0),
       dateRange: {
         start: startDate || 'all',
         end: endDate || 'all'
       },
       generatedAt: new Date().toISOString(),
       generatedBy: userRole
-    },
-    metadata: {
-      isSuperAdmin,
-      companyCount: companies.length,
-      reportType: 'detailed'
     }
   }
 }
 
-// Generate summary report with aggregated data
+// Generate summary report
 async function generateSummaryReport(
   companies: any[], 
   aiApplications: any[], 
@@ -327,19 +337,16 @@ async function generateSummaryReport(
     end.setHours(23, 59, 59, 999)
     
     filteredApplications = aiApplications.filter(app => {
-      const reviewDate = app.updatedAt ? new Date(app.updatedAt) : null
+      const reviewDate = app.reviewedAt ? new Date(app.reviewedAt) : null
       return reviewDate && reviewDate >= start && reviewDate <= end
     })
   }
 
-  // Group data based on user role
   let summaryData: any[]
   
   if (isSuperAdmin && companies.length > 1) {
-    // SUPER_ADMIN all companies view - group by company
-    const companyMap = new Map()
-    
-    companies.forEach(company => {
+    // SUPER_ADMIN all companies view
+    summaryData = companies.map(company => {
       const companyApps = filteredApplications.filter(app => app.job?.companyId === company.id)
       const totalCost = companyApps.reduce((sum, app) => {
         const metadata = app.metadata as any
@@ -355,7 +362,7 @@ async function generateSummaryReport(
         return sum + (aiDetails?.tokensUsed || metadata?.tokensUsed || 0)
       }, 0)
       
-      companyMap.set(company.id, {
+      return {
         'Company Name': company.companyName,
         'Company ID': company.id,
         'Monthly Budget ($)': company.aiSettings?.monthlyBudget || 100,
@@ -371,10 +378,8 @@ async function generateSummaryReport(
           : company.aiSettings?.monthlyBudget && (totalCost / company.aiSettings.monthlyBudget) > 0.9
             ? 'Near Limit'
             : 'Normal'
-      })
+      }
     })
-    
-    summaryData = Array.from(companyMap.values())
   } else {
     // Single company view - group by department and service
     const company = companies[0]
@@ -447,18 +452,15 @@ async function generateSummaryReport(
     summaryData = [...departmentRows, ...serviceRows]
   }
 
-  // Calculate overall totals
-  const totalCost = filteredApplications.reduce((sum, app) => {
-    const metadata = app.metadata as any
-    const aiDetails = metadata?.aiDetails
-    return sum + (aiDetails?.estimatedCost || metadata?.estimatedCost || 0)
-  }, 0)
-
   return {
-    summary: summaryData,
-    overview: {
+    data: summaryData,
+    summary: {
       totalApplications: filteredApplications.length,
-      totalCost: parseFloat(totalCost.toFixed(4)),
+      totalCost: filteredApplications.reduce((sum, app) => {
+        const metadata = app.metadata as any
+        const aiDetails = metadata?.aiDetails
+        return sum + (aiDetails?.estimatedCost || metadata?.estimatedCost || 0)
+      }, 0),
       dateRange: {
         start: startDate || 'all',
         end: endDate || 'all'
@@ -466,24 +468,19 @@ async function generateSummaryReport(
       generatedAt: new Date().toISOString(),
       generatedBy: userRole,
       company: companies[0]?.companyName || 'Multiple Companies'
-    },
-    metadata: {
-      isSuperAdmin,
-      companyCount: companies.length,
-      reportType: 'summary'
     }
   }
 }
 
-// Generate audit report with usage logs
+// Generate audit report
 async function generateAuditReport(
   companies: any[], 
-  aiApplications: any[], 
   userRole: string,
   startDate?: string | null,
   endDate?: string | null
 ) {
   const isSuperAdmin = userRole === 'SUPER_ADMIN'
+  const targetCompanyId = companies.length === 1 ? companies[0].id : 'all'
   
   // Get usage logs from tracker
   let usageLogs: any[] = []
@@ -516,30 +513,11 @@ async function generateAuditReport(
     'Model': log.model || 'N/A',
     'Tokens Used': log.tokens || 0,
     'Cost ($)': parseFloat(log.cost.toFixed(4)),
-    'Endpoint': log.endpoint || 'N/A',
-    'Input Length': log.inputLength || 0,
-    'Output Length': log.outputLength || 0
+    'Endpoint': log.endpoint || 'N/A'
   }))
 
-  // Get company breakdown for SUPER_ADMIN
-  let companyBreakdown: any[] = []
-  if (isSuperAdmin && companies.length > 1) {
-    const breakdown = openaiUsageTracker.getCompanyBreakdown()
-    companyBreakdown = Object.entries(breakdown).map(([companyId, data]: [string, any]) => {
-      const company = companies.find(c => c.id === companyId)
-      return {
-        'Company': company?.companyName || companyId,
-        'API Calls': data.count,
-        'Total Cost ($)': parseFloat(data.totalCost.toFixed(4)),
-        'Total Tokens': data.totalTokens,
-        'Average Cost/Call ($)': parseFloat((data.totalCost / data.count).toFixed(4))
-      }
-    })
-  }
-
   return {
-    auditLogs: auditData,
-    companyBreakdown: companyBreakdown,
+    data: auditData,
     summary: {
       totalLogs: auditData.length,
       totalCost: auditData.reduce((sum, log) => sum + (log['Cost ($)'] || 0), 0),
@@ -550,187 +528,118 @@ async function generateAuditReport(
       },
       generatedAt: new Date().toISOString(),
       generatedBy: userRole
-    },
-    metadata: {
-      isSuperAdmin,
-      companyCount: companies.length,
-      reportType: 'audit'
     }
   }
 }
 
-// Generate Excel workbook with multiple sheets
-async function generateExcelWorkbook(reportData: any, reportType: string, userRole: string, targetCompanyId: string) {
-  const workbook = XLSX.utils.book_new()
-  
-  switch (reportType) {
-    case 'detailed':
-      if (reportData.detailed && reportData.detailed.length > 0) {
-        const detailedSheet = XLSX.utils.json_to_sheet(reportData.detailed)
-        XLSX.utils.book_append_sheet(workbook, detailedSheet, 'Detailed Applications')
-        
-        // Add summary sheet
-        const summaryData = [
-          { 'Metric': 'Total Applications', 'Value': reportData.summary.totalApplications },
-          { 'Metric': 'Total Cost ($)', 'Value': reportData.summary.totalCost },
-          { 'Metric': 'Total Tokens', 'Value': reportData.summary.totalTokens },
-          { 'Metric': 'Average Score (%)', 'Value': reportData.summary.avgScore },
-          { 'Metric': 'Date Range', 'Value': `${reportData.summary.dateRange.start} to ${reportData.summary.dateRange.end}` },
-          { 'Metric': 'Generated By', 'Value': reportData.summary.generatedBy },
-          { 'Metric': 'Generated At', 'Value': new Date(reportData.summary.generatedAt).toLocaleString() }
-        ]
-        const summarySheet = XLSX.utils.json_to_sheet(summaryData)
-        XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
-      }
-      break
-      
-    case 'summary':
-      if (reportData.summary && reportData.summary.length > 0) {
-        const summarySheet = XLSX.utils.json_to_sheet(reportData.summary)
-        XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
-        
-        // Add overview sheet
-        const overviewData = [
-          { 'Metric': 'Total Applications', 'Value': reportData.overview.totalApplications },
-          { 'Metric': 'Total Cost ($)', 'Value': reportData.overview.totalCost },
-          { 'Metric': 'Company', 'Value': reportData.overview.company },
-          { 'Metric': 'Date Range', 'Value': `${reportData.overview.dateRange.start} to ${reportData.overview.dateRange.end}` },
-          { 'Metric': 'Generated By', 'Value': reportData.overview.generatedBy },
-          { 'Metric': 'Generated At', 'Value': new Date(reportData.overview.generatedAt).toLocaleString() }
-        ]
-        const overviewSheet = XLSX.utils.json_to_sheet(overviewData)
-        XLSX.utils.book_append_sheet(workbook, overviewSheet, 'Overview')
-      }
-      break
-      
-    case 'audit':
-      if (reportData.auditLogs && reportData.auditLogs.length > 0) {
-        const auditSheet = XLSX.utils.json_to_sheet(reportData.auditLogs)
-        XLSX.utils.book_append_sheet(workbook, auditSheet, 'Audit Logs')
-        
-        if (reportData.companyBreakdown && reportData.companyBreakdown.length > 0) {
-          const breakdownSheet = XLSX.utils.json_to_sheet(reportData.companyBreakdown)
-          XLSX.utils.book_append_sheet(workbook, breakdownSheet, 'Company Breakdown')
-        }
-        
-        // Add summary sheet
-        const summaryData = [
-          { 'Metric': 'Total Logs', 'Value': reportData.summary.totalLogs },
-          { 'Metric': 'Total Cost ($)', 'Value': reportData.summary.totalCost },
-          { 'Metric': 'Total Tokens', 'Value': reportData.summary.totalTokens },
-          { 'Metric': 'Date Range', 'Value': `${reportData.summary.dateRange.start} to ${reportData.summary.dateRange.end}` },
-          { 'Metric': 'Generated By', 'Value': reportData.summary.generatedBy },
-          { 'Metric': 'Generated At', 'Value': new Date(reportData.summary.generatedAt).toLocaleString() }
-        ]
-        const summarySheet = XLSX.utils.json_to_sheet(summaryData)
-        XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
-      }
-      break
-  }
-  
-  return workbook
-}
-
-// Generate CSV content
-function generateCSV(reportData: any, reportType: string): string {
+// Generate CSV for detailed report
+function generateDetailedCSV(reportData: any): string {
   let csvContent = ''
   
-  switch (reportType) {
-    case 'detailed':
-      if (reportData.detailed && reportData.detailed.length > 0) {
-        // Add headers
-        const headers = Object.keys(reportData.detailed[0])
-        csvContent += headers.join(',') + '\n'
-        
-        // Add data rows
-        reportData.detailed.forEach((row: any) => {
-          const values = headers.map(header => {
-            const value = row[header]
-            // Handle values with commas or quotes
-            if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
-              return `"${value.replace(/"/g, '""')}"`
-            }
-            return value
-          })
-          csvContent += values.join(',') + '\n'
-        })
-        
-        // Add summary section
-        csvContent += '\n\nSUMMARY\n'
-        csvContent += 'Metric,Value\n'
-        csvContent += `Total Applications,${reportData.summary.totalApplications}\n`
-        csvContent += `Total Cost ($${reportData.summary.totalCost}\n`
-        csvContent += `Total Tokens,${reportData.summary.totalTokens}\n`
-        csvContent += `Average Score (%),${reportData.summary.avgScore}\n`
-        csvContent += `Date Range,${reportData.summary.dateRange.start} to ${reportData.summary.dateRange.end}\n`
-        csvContent += `Generated By,${reportData.summary.generatedBy}\n`
-        csvContent += `Generated At,${new Date(reportData.summary.generatedAt).toLocaleString()}\n`
-      }
-      break
-      
-    case 'summary':
-      if (reportData.summary && reportData.summary.length > 0) {
-        // Add headers
-        const headers = Object.keys(reportData.summary[0])
-        csvContent += headers.join(',') + '\n'
-        
-        // Add data rows
-        reportData.summary.forEach((row: any) => {
-          const values = headers.map(header => {
-            const value = row[header]
-            if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
-              return `"${value.replace(/"/g, '""')}"`
-            }
-            return value
-          })
-          csvContent += values.join(',') + '\n'
-        })
-        
-        // Add overview section
-        csvContent += '\n\nOVERVIEW\n'
-        csvContent += 'Metric,Value\n'
-        csvContent += `Total Applications,${reportData.overview.totalApplications}\n`
-        csvContent += `Total Cost ($${reportData.overview.totalCost}\n`
-        csvContent += `Company,${reportData.overview.company}\n`
-        csvContent += `Date Range,${reportData.overview.dateRange.start} to ${reportData.overview.dateRange.end}\n`
-        csvContent += `Generated By,${reportData.overview.generatedBy}\n`
-        csvContent += `Generated At,${new Date(reportData.overview.generatedAt).toLocaleString()}\n`
-      }
-      break
-      
-    case 'audit':
-      if (reportData.auditLogs && reportData.auditLogs.length > 0) {
-        // Add headers
-        const headers = Object.keys(reportData.auditLogs[0])
-        csvContent += headers.join(',') + '\n'
-        
-        // Add data rows
-        reportData.auditLogs.forEach((row: any) => {
-          const values = headers.map(header => {
-            const value = row[header]
-            if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
-              return `"${value.replace(/"/g, '""')}"`
-            }
-            return value
-          })
-          csvContent += values.join(',') + '\n'
-        })
-        
-        // Add summary section
-        csvContent += '\n\nSUMMARY\n'
-        csvContent += 'Metric,Value\n'
-        csvContent += `Total Logs,${reportData.summary.totalLogs}\n`
-        csvContent += `Total Cost ($${reportData.summary.totalCost}\n`
-        csvContent += `Total Tokens,${reportData.summary.totalTokens}\n`
-        csvContent += `Date Range,${reportData.summary.dateRange.start} to ${reportData.summary.dateRange.end}\n`
-        csvContent += `Generated By,${reportData.summary.generatedBy}\n`
-        csvContent += `Generated At,${new Date(reportData.summary.generatedAt).toLocaleString()}\n`
-      }
-      break
+  if (reportData.data && reportData.data.length > 0) {
+    // Add headers
+    const headers = Object.keys(reportData.data[0])
+    csvContent += headers.join(',') + '\n'
+    
+    // Add data rows
+    reportData.data.forEach((row: any) => {
+      const values = headers.map(header => {
+        const value = row[header]
+        // Handle values with commas or quotes
+        if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+          return `"${value.replace(/"/g, '""')}"`
+        }
+        return value
+      })
+      csvContent += values.join(',') + '\n'
+    })
+    
+    // Add summary section
+    csvContent += '\n\nSUMMARY\n'
+    csvContent += 'Metric,Value\n'
+    csvContent += `Total Applications,${reportData.summary.totalApplications}\n`
+    csvContent += `Total Cost,$${reportData.summary.totalCost.toFixed(4)}\n`
+    csvContent += `Total Tokens,${reportData.summary.totalTokens}\n`
+    csvContent += `Date Range,${reportData.summary.dateRange.start} to ${reportData.summary.dateRange.end}\n`
+    csvContent += `Generated By,${reportData.summary.generatedBy}\n`
+    csvContent += `Generated At,${new Date(reportData.summary.generatedAt).toLocaleString()}\n`
+  } else {
+    csvContent = 'No data available for the selected parameters\n'
   }
   
   return csvContent
 }
 
-// Helper variable for audit report function
-let targetCompanyId: string
+// Generate CSV for summary report
+function generateSummaryCSV(reportData: any): string {
+  let csvContent = ''
+  
+  if (reportData.data && reportData.data.length > 0) {
+    // Add headers
+    const headers = Object.keys(reportData.data[0])
+    csvContent += headers.join(',') + '\n'
+    
+    // Add data rows
+    reportData.data.forEach((row: any) => {
+      const values = headers.map(header => {
+        const value = row[header]
+        if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+          return `"${value.replace(/"/g, '""')}"`
+        }
+        return value
+      })
+      csvContent += values.join(',') + '\n'
+    })
+    
+    // Add overview section
+    csvContent += '\n\nOVERVIEW\n'
+    csvContent += 'Metric,Value\n'
+    csvContent += `Total Applications,${reportData.summary.totalApplications}\n`
+    csvContent += `Total Cost,$${reportData.summary.totalCost.toFixed(4)}\n`
+    csvContent += `Company,${reportData.summary.company}\n`
+    csvContent += `Date Range,${reportData.summary.dateRange.start} to ${reportData.summary.dateRange.end}\n`
+    csvContent += `Generated By,${reportData.summary.generatedBy}\n`
+    csvContent += `Generated At,${new Date(reportData.summary.generatedAt).toLocaleString()}\n`
+  } else {
+    csvContent = 'No data available for the selected parameters\n'
+  }
+  
+  return csvContent
+}
+
+// Generate CSV for audit report
+function generateAuditCSV(reportData: any): string {
+  let csvContent = ''
+  
+  if (reportData.data && reportData.data.length > 0) {
+    // Add headers
+    const headers = Object.keys(reportData.data[0])
+    csvContent += headers.join(',') + '\n'
+    
+    // Add data rows
+    reportData.data.forEach((row: any) => {
+      const values = headers.map(header => {
+        const value = row[header]
+        if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+          return `"${value.replace(/"/g, '""')}"`
+        }
+        return value
+      })
+      csvContent += values.join(',') + '\n'
+    })
+    
+    // Add summary section
+    csvContent += '\n\nSUMMARY\n'
+    csvContent += 'Metric,Value\n'
+    csvContent += `Total Logs,${reportData.summary.totalLogs}\n`
+    csvContent += `Total Cost,$${reportData.summary.totalCost.toFixed(4)}\n`
+    csvContent += `Total Tokens,${reportData.summary.totalTokens}\n`
+    csvContent += `Date Range,${reportData.summary.dateRange.start} to ${reportData.summary.dateRange.end}\n`
+    csvContent += `Generated By,${reportData.summary.generatedBy}\n`
+    csvContent += `Generated At,${new Date(reportData.summary.generatedAt).toLocaleString()}\n`
+  } else {
+    csvContent = 'No audit logs available for the selected parameters\n'
+  }
+  
+  return csvContent
+}

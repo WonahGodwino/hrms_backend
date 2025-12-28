@@ -185,7 +185,7 @@ async function getAIApplications(companyId: string, isSuperAdmin: boolean) {
       id: true,
       score: true,
       metadata: true,
-      updatedAt: true,
+      reviewedAt: true,
       job: {
         select: {
           id: true,
@@ -208,9 +208,9 @@ async function getAIApplications(companyId: string, isSuperAdmin: boolean) {
       }
     },
     orderBy: {
-      updatedAt: 'desc'
+      reviewedAt: 'desc'
     },
-    take: isSuperAdmin ? 500 : 100 // SUPER_ADMIN can see more records
+    take: isSuperAdmin ? 500 : 100
   })
 }
 
@@ -235,7 +235,7 @@ async function processCostData(
     end.setHours(23, 59, 59, 999) // End of day
     
     filteredApplications = aiApplications.filter(app => {
-      const reviewDate = app.updatedAt ? new Date(app.updatedAt) : null
+      const reviewDate = app.reviewedAt ? new Date(app.reviewedAt) : null
       return reviewDate && reviewDate >= start && reviewDate <= end
     })
   }
@@ -257,7 +257,7 @@ async function processCostData(
       aiModel: aiDetails?.model || metadata?.aiModel || 'unknown',
       tokensUsed: aiDetails?.tokensUsed || metadata?.tokensUsed || 0,
       estimatedCost: aiDetails?.estimatedCost || metadata?.estimatedCost || 0,
-      reviewDate: app.updatedAt?.toISOString() || new Date().toISOString(),  // Use updatedAt since reviewedAt doesn't exist
+      reviewDate: app.reviewedAt?.toISOString() || new Date().toISOString(),
       timeToProductivity: aiDetails?.timeToProductivity || metadata?.timeToProductivity,
       culturalFit: aiDetails?.culturalFit || metadata?.culturalFit,
       growthPotential: aiDetails?.growthPotential || metadata?.growthPotential,
@@ -362,11 +362,11 @@ async function getCompanySpecificData(
   company: any, 
   costData: any[], 
   period: string, 
-  userRole: string,  // Changed from isSuperAdmin to userRole
+  userRole: string,
   startDate?: string | null,
   endDate?: string | null
 ) {
-  const isSuperAdmin = userRole === 'SUPER_ADMIN'  // Calculate isSuperAdmin from userRole
+  const isSuperAdmin = userRole === 'SUPER_ADMIN'
   const totalApplications = costData.length
   const totalCost = costData.reduce((sum, item) => sum + item.estimatedCost, 0)
   const totalTokens = costData.reduce((sum, item) => sum + item.tokensUsed, 0)
@@ -458,12 +458,12 @@ async function getCompanySpecificData(
 
   return {
     viewType: 'company_specific',
-    userRole: userRole, // Use the actual role
+    userRole: userRole,
     permissions: {
       canViewAllCompanies: isSuperAdmin,
       canViewDetails: true,
       canExportData: true,
-      canManageSettings: isSuperAdmin || userRole === 'ADMIN' // Now userRole is available
+      canManageSettings: isSuperAdmin || userRole === 'ADMIN'
     },
     company: {
       id: company.id,
