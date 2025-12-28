@@ -3,7 +3,7 @@ import PDFDocument from 'pdfkit'
 import { mkdir } from 'fs/promises'
 import fs from 'fs'
 import path from 'path'
-import type { GeneratePayslipInput } from './types'
+import type { GeneratePayslipInput, PayslipGenerationResult } from './types'
 
 function formatCurrency(n: number) {
   const safe = Number.isFinite(n) ? n : 0
@@ -20,7 +20,7 @@ function getMonthName(monthNumber: number): string {
 
 export async function generatePayslipPdf(
   input: GeneratePayslipInput
-): Promise<{ pdfBuffer: Buffer; fileName: string }> {
+): Promise<PayslipGenerationResult> {
   const { staff, payroll } = input
 
   // Create payslips directory if it doesn't exist (for migration purposes)
@@ -48,7 +48,9 @@ export async function generatePayslipPdf(
       // Collect PDF chunks
       doc.on('data', (chunk) => chunks.push(chunk))
       doc.on('end', () => {
-        const pdfBuffer = Buffer.concat(chunks)
+        const buffer = Buffer.concat(chunks)
+        // Convert to Uint8Array for Prisma compatibility
+        const pdfBuffer = new Uint8Array(buffer)
         resolve({
           pdfBuffer,
           fileName: fileName
@@ -96,7 +98,7 @@ export async function generatePayslipPdf(
       
       doc.text(`Department: ${staff.department || 'N/A'}`, 
               doc.page.width / 2 + 10, staffSectionTop + 25)
-        .text(`Designation: ${staff.designation || 'N/A'}`, 
+        .text(`Designation: ${staff.designation || staff.position || 'N/A'}`, 
               doc.page.width / 2 + 10, staffSectionTop + 42)
         .text(`Company: ${staff.companyName || 'N/A'}`, 
               doc.page.width / 2 + 10, staffSectionTop + 59)
@@ -264,7 +266,7 @@ export async function generatePayslipPdfToFile(
   await mkdir(payslipDir, { recursive: true })
   
   const filePath = path.join(payslipDir, result.fileName)
-  await fs.promises.writeFile(filePath, result.pdfBuffer)
+  await fs.promises.writeFile(filePath, Buffer.from(result.pdfBuffer))
   
   const publicPath = `/uploads/payslips/${result.fileName}`
   

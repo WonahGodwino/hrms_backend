@@ -12,7 +12,7 @@ import type { ParsedPayrollRow } from '@/app/lib/payroll/types'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 // -----------------------------
-// Helpers
+// Helpers (UNCHANGED)
 // -----------------------------
 
 function normalizeHeader(h: string) {
@@ -93,7 +93,6 @@ for (const h of CANONICAL_HEADERS) {
   canonicalMap[normalizeHeader(h)] = h
 }
 
-// required per-row columns for payslip generation
 const REQUIRED_COLS = [
   'Gross Pay',
   'Basic',
@@ -164,7 +163,6 @@ function splitCsvLine(line: string) {
   return result
 }
 
-// Helper function to convert absolute path to relative path
 function getRelativePath(absolutePath: string): string {
   const projectRoot = process.cwd()
   if (absolutePath.startsWith(projectRoot)) {
@@ -173,7 +171,6 @@ function getRelativePath(absolutePath: string): string {
   return absolutePath
 }
 
-// Ensure upload directories exist (for failed records file only)
 async function ensureUploadDirectories() {
   const baseDir = process.cwd()
   const uploadsDir = path.join(baseDir, 'uploads')
@@ -218,7 +215,6 @@ export async function POST(request: NextRequest) {
     }
     const companyId: string = user.companyId
 
-    // Ensure upload directories exist (for failed records file)
     const { payrollDir } = await ensureUploadDirectories()
 
     const formData = await request.formData()
@@ -689,7 +685,7 @@ export async function POST(request: NextRequest) {
           rawRow: rowData,
         }
 
-        // Generate PDF payslip
+        // Generate PDF payslip - FIXED FOR Uint8Array
         try {
           const pdfResult = await generatePayslipPdf({
             staff: {
@@ -699,6 +695,7 @@ export async function POST(request: NextRequest) {
               email: staffRecord.email,
               department: staffRecord.department || '',
               designation: staffRecord.position || '',
+              position: staffRecord.position || '', // Alias for backward compatibility
               companyName: company?.companyName || '',
               companyAddress: company?.address || '',
               companyPhone: company?.phone || '',
@@ -708,17 +705,17 @@ export async function POST(request: NextRequest) {
             payroll: parsedRow,
           })
 
-          const pdfBuffer = pdfResult.pdfBuffer
+          const pdfBuffer = pdfResult.pdfBuffer // This is Uint8Array
           const payslipFileName = pdfResult.fileName
           const fileSize = pdfBuffer.length
 
           results.payslipsGenerated++
 
-          // Prepare payslip data
+          // Prepare payslip data with Uint8Array for Prisma Bytes field
           const payslipData = {
             payrollId: payrollRecord.id,
             fileName: payslipFileName,
-            fileData: pdfBuffer,
+            fileData: pdfBuffer, // Uint8Array is compatible with Prisma Bytes
             fileType: 'application/pdf',
             fileSize: fileSize,
             grossPay,
@@ -885,14 +882,12 @@ export async function POST(request: NextRequest) {
       const failedWorkbook = new ExcelJS.Workbook()
       const failedWorksheet = failedWorkbook.addWorksheet('Failed Records')
 
-      // Create headers based on first data row plus error columns
       const headersSet = new Set<string>()
       
       if (data.length > 0 && data[0]) {
         Object.keys(data[0]).forEach(k => headersSet.add(k))
       }
       
-      // Add error columns
       headersSet.add('ROW_NUMBER')
       headersSet.add('ERROR_MESSAGE')
       headersSet.add('STAFF_NAME')
@@ -907,11 +902,9 @@ export async function POST(request: NextRequest) {
         width: 25,
       }))
 
-      // Add data rows
       results.failedRecords.forEach((record) => {
         const rowData: any = { ...record }
         
-        // Ensure error columns are included
         rowData.ROW_NUMBER = record.rowNumber || 'N/A'
         rowData.ERROR_MESSAGE = record.error || 'Unknown error'
         rowData.STAFF_NAME = record.staffName || 'Unknown'
@@ -921,7 +914,6 @@ export async function POST(request: NextRequest) {
         failedWorksheet.addRow(rowData)
       })
 
-      // Style header
       const headerRow = failedWorksheet.getRow(1)
       headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
       headerRow.fill = {
@@ -930,7 +922,6 @@ export async function POST(request: NextRequest) {
         fgColor: { argb: 'FFDC3545' },
       }
 
-      // Style error rows
       failedWorksheet.eachRow((row, rowNumber) => {
         if (rowNumber > 1) {
           const errorCell = row.getCell('ERROR_MESSAGE')
@@ -946,7 +937,6 @@ export async function POST(request: NextRequest) {
       const failedBuffer = await failedWorkbook.xlsx.writeBuffer()
       await writeFile(failedFilePath, Buffer.from(failedBuffer as any))
 
-      // Store relative path
       processedFilePath = getRelativePath(failedFilePath)
 
       console.log(`[PAYROLL_UPLOAD] Failed-records file written at: ${failedFilePath}`)
@@ -957,7 +947,6 @@ export async function POST(request: NextRequest) {
     const originalFilePath = path.join(payrollDir, originalFileName)
     await writeFile(originalFilePath, buffer)
 
-    // Store relative path
     const relativeOriginalPath = getRelativePath(originalFilePath)
 
     // Create upload record

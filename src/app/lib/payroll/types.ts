@@ -2,15 +2,14 @@
 
 export type ParsedPayrollRow = {
   rowNumber: number
-
   staffId: string
   email: string
   fullName: string
-
+  
   // pay period
   periodMonth: number
   periodYear: number
-
+  
   // earnings
   basicSalary: number
   housingAllowance: number
@@ -18,18 +17,18 @@ export type ParsedPayrollRow = {
   transportationAllowance: number
   otherAllowances: number
   grossPay: number
-
+  
   // deductions
   payee: number
   pension: number
-
+  
   // totals
   netPay: number
-
+  
   // attendance
   daysInMonth: number
   daysWorked: number
-
+  
   // raw original row (for debugging / failed records)
   rawRow: any
 }
@@ -42,6 +41,7 @@ export type GeneratePayslipInput = {
     email: string
     department?: string
     designation?: string
+    position?: string // Alias for designation
     companyName?: string
     companyAddress?: string
     companyPhone?: string
@@ -49,4 +49,9 @@ export type GeneratePayslipInput = {
     companyTaxId?: string
   }
   payroll: ParsedPayrollRow
+}
+
+export type PayslipGenerationResult = {
+  pdfBuffer: Uint8Array
+  fileName: string
 }
