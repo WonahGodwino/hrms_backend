@@ -5,9 +5,10 @@ import { useState, useEffect } from 'react'
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
   LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer,
-  AreaChart, Area, ComposedChart, Scatter
+  AreaChart, Area, ComposedChart, Scatter, TooltipProps
 } from 'recharts'
 import { Download, RefreshCw, AlertTriangle, TrendingUp, DollarSign, Users, BarChart2 } from 'lucide-react'
+import { ValueType, NameType } from 'recharts/types/component/DefaultTooltipContent'
 
 interface AICostData {
   viewType: 'superadmin_all' | 'company_specific'
@@ -216,6 +217,29 @@ export function AdminAICostDashboard() {
   }
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#FF6B6B', '#4ECDC4', '#FFD166']
+
+  // Fixed tooltip formatter with proper types
+  const tooltipFormatter = (value: number | string, name: string) => {
+    if (name === 'cost') return [`$${parseFloat(value.toString()).toFixed(3)}`, 'Cost']
+    if (name === 'reviews') return [value, 'Reviews']
+    return [value, 'Score']
+  }
+
+  // Pie chart tooltip formatter
+  const pieTooltipFormatter = (value: number, name: string, props: any) => {
+    if (name === 'value') return [`$${parseFloat(value.toString()).toFixed(3)}`, 'Cost']
+    if (name === 'count') return [value, 'Reviews']
+    if (name === 'tokens') return [value.toLocaleString(), 'Tokens']
+    return [value, name]
+  }
+
+  // Bar chart tooltip formatter
+  const barTooltipFormatter = (value: number, name: string) => {
+    if (name === 'value') return [`$${parseFloat(value.toString()).toFixed(3)}`, 'Total Cost']
+    if (name === 'count') return [value, 'Review Count']
+    if (name === 'avgScore') return [`${parseFloat(value.toString()).toFixed(1)}%`, 'Avg Score']
+    return [value, name]
+  }
 
   if (loading) {
     return (
@@ -682,11 +706,7 @@ export function AdminAICostDashboard() {
                     <YAxis yAxisId="left" />
                     <YAxis yAxisId="right" orientation="right" />
                     <Tooltip 
-                      formatter={(value: any, name: string) => {
-                        if (name === 'cost') return [`$${parseFloat(value).toFixed(3)}`, 'Cost']
-                        if (name === 'reviews') return [value, 'Reviews']
-                        return [value, 'Score']
-                      }}
+                      formatter={(value: number | string, name: string) => tooltipFormatter(value, name)}
                     />
                     <Legend />
                     <Area 
@@ -748,12 +768,7 @@ export function AdminAICostDashboard() {
                         ))}
                       </Pie>
                       <Tooltip 
-                        formatter={(value: any, name: string, props: any) => {
-                          if (name === 'value') return [`$${parseFloat(value).toFixed(3)}`, 'Cost']
-                          if (name === 'count') return [value, 'Reviews']
-                          if (name === 'tokens') return [value.toLocaleString(), 'Tokens']
-                          return [value, name]
-                        }}
+                        formatter={(value: number, name: string, props: any) => pieTooltipFormatter(value, name, props)}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -785,12 +800,7 @@ export function AdminAICostDashboard() {
                     <YAxis />
                     <YAxis yAxisId="right" orientation="right" />
                     <Tooltip 
-                      formatter={(value: any, name: string, props: any) => {
-                        if (name === 'value') return [`$${parseFloat(value).toFixed(3)}`, 'Total Cost']
-                        if (name === 'count') return [value, 'Review Count']
-                        if (name === 'avgScore') return [`${value.toFixed(1)}%`, 'Avg Score']
-                        return [value, name]
-                      }}
+                      formatter={(value: number, name: string) => barTooltipFormatter(value, name)}
                       labelFormatter={(label, items) => 
                         items?.[0]?.payload?.fullName || label
                       }
