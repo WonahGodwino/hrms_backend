@@ -288,6 +288,7 @@ export async function POST(request: NextRequest) {
       const row = data[index]
       const displayRowNumber = index + 3
       let staffRecord = null
+      let payslipFileName = '' // Declare variable at the top level of the loop
 
       try {
         const rowData = row as any
@@ -586,7 +587,7 @@ export async function POST(request: NextRequest) {
           })
 
           const pdfBuffer = pdfResult.pdfBuffer
-          const payslipFileName = pdfResult.fileName
+          payslipFileName = pdfResult.fileName // Assign to the outer variable
           const fileSize = pdfBuffer.length
 
           results.payslipsGenerated++
@@ -634,7 +635,79 @@ export async function POST(request: NextRequest) {
             payslipId = newPayslip.id
             console.log(`✅ Created payslip for ${staffRecord.staffId}: ${payslipFileName} (${fileSize} bytes)`)
           }
-        } catch (err: any) {
+
+          // Send email notification
+          results.emailAttempts++
+          try {
+            if (!payslipId) {
+              const payslip = await prisma.payslip.findFirst({
+                where: {
+                  staffRecordId: staffRecord.id,
+                  month: monthName,
+                  year,
+                  companyId,
+                },
+              })
+              
+              if (payslip) {
+                payslipId = payslip.id
+              } else {
+                throw new Error('Payslip not found for email notification')
+              }
+            }
+
+            const staffDataForEmail = {
+              id: staffRecord.id,
+              companyId: staffRecord.companyId,
+              firstName: staffRecord.firstName,
+              lastName: staffRecord.lastName,
+              email: staffRecord.email,
+              staffId: staffRecord.staffId,
+              department: staffRecord.department || null,
+              position: staffRecord.position || null,
+              isRegistered: staffRecord.isRegistered,
+            }
+
+            const payrollDataForEmail = {
+              id: payslipId,
+              month: monthName,
+              year,
+              netSalary,
+              isUpdate: isUpdate,
+            }
+
+            const emailResult = await sendPayrollNotificationEmail(staffDataForEmail, payrollDataForEmail)
+            
+            if (emailResult.success) {
+              results.emailsSent++
+            } else {
+              throw new Error(emailResult.error || 'Email sending failed')
+            }
+          } catch (err: any) {
+            const msg = `Email sending failed - ${err.message}`
+            results.errors.push(`Row ${displayRowNumber}: ${msg}`)
+            results.emailFailures.push({
+              rowNumber: displayRowNumber,
+              email: staffRecord.email,
+              error: msg,
+              staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
+              staffId: staffRecord.staffId,
+            })
+          }
+
+          results.successful++
+          results.processedRecords.push({
+            staffId: staffRecord.staffId,
+            staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
+            netSalary,
+            status: isUpdate ? 'UPDATED' : 'PROCESSED',
+            emailSent: true,
+            emailStatus: results.emailFailures.some((f) => f.rowNumber === displayRowNumber) ? 'FAILED' : 'SENT',
+            payslipId: payslipId,
+            fileName: payslipFileName,
+          })
+
+        } catch (err: any) { // This catches PDF generation errors
           const message = `Failed to generate payslip - ${err.message}`
           console.error(`❌ ${message}`, err)
           results.failed++
@@ -650,76 +723,6 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // Send email notification
-        results.emailAttempts++
-        try {
-          if (!payslipId) {
-            const payslip = await prisma.payslip.findFirst({
-              where: {
-                staffRecordId: staffRecord.id,
-                month: monthName,
-                year,
-                companyId,
-              },
-            })
-            
-            if (payslip) {
-              payslipId = payslip.id
-            } else {
-              throw new Error('Payslip not found for email notification')
-            }
-          }
-
-          const staffDataForEmail = {
-            id: staffRecord.id,
-            companyId: staffRecord.companyId,
-            firstName: staffRecord.firstName,
-            lastName: staffRecord.lastName,
-            email: staffRecord.email,
-            staffId: staffRecord.staffId,
-            department: staffRecord.department || null,
-            position: staffRecord.position || null,
-            isRegistered: staffRecord.isRegistered,
-          }
-
-          const payrollDataForEmail = {
-            id: payslipId,
-            month: monthName,
-            year,
-            netSalary,
-            isUpdate: isUpdate,
-          }
-
-          const emailResult = await sendPayrollNotificationEmail(staffDataForEmail, payrollDataForEmail)
-          
-          if (emailResult.success) {
-            results.emailsSent++
-          } else {
-            throw new Error(emailResult.error || 'Email sending failed')
-          }
-        } catch (err: any) {
-          const msg = `Email sending failed - ${err.message}`
-          results.errors.push(`Row ${displayRowNumber}: ${msg}`)
-          results.emailFailures.push({
-            rowNumber: displayRowNumber,
-            email: staffRecord.email,
-            error: msg,
-            staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
-            staffId: staffRecord.staffId,
-          })
-        }
-
-        results.successful++
-        results.processedRecords.push({
-          staffId: staffRecord.staffId,
-          staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
-          netSalary,
-          status: isUpdate ? 'UPDATED' : 'PROCESSED',
-          emailSent: true,
-          emailStatus: results.emailFailures.some((f) => f.rowNumber === displayRowNumber) ? 'FAILED' : 'SENT',
-          payslipId: payslipId,
-          fileName: payslipFileName,
-        })
       } catch (err: any) {
         const message = err?.message || 'Unknown error'
         results.failed++
