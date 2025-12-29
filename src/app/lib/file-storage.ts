@@ -1,5 +1,5 @@
 // src/app/lib/file-storage.ts
-import { prisma } from '@/app/lib/db' // Add this import
+import { prisma } from '@/app/lib/db'
 
 export class FileStorage {
   static async storePayslip(
@@ -16,13 +16,16 @@ export class FileStorage {
       createdBy?: string;
     }
   ) {
+    // Convert Buffer to Uint8Array for Prisma compatibility
+    const uint8Array = new Uint8Array(fileBuffer)
+    
     const payslip = await prisma.payslip.create({
       data: {
         payrollId: metadata.payrollId,
         staffRecordId: metadata.staffRecordId,
         companyId: metadata.companyId,
         fileName: fileName,
-        fileData: fileBuffer,
+        fileData: uint8Array, // Use Uint8Array instead of Buffer
         fileType: 'application/pdf',
         fileSize: fileBuffer.length,
         month: metadata.month,
@@ -55,8 +58,11 @@ export class FileStorage {
       throw new Error('Payslip file not found');
     }
 
+    // Convert Uint8Array back to Buffer if needed
+    const buffer = Buffer.from(payslip.fileData)
+
     return {
-      buffer: payslip.fileData,
+      buffer: buffer,
       fileName: payslip.fileName,
       contentType: payslip.fileType || 'application/pdf',
       size: payslip.fileSize,
@@ -75,11 +81,14 @@ export class FileStorage {
     fileName: string,
     updatedBy?: string
   ) {
+    // Convert Buffer to Uint8Array for Prisma compatibility
+    const uint8Array = new Uint8Array(fileBuffer)
+    
     return await prisma.payslip.update({
       where: { id: payslipId },
       data: {
         fileName: fileName,
-        fileData: fileBuffer,
+        fileData: uint8Array, // Use Uint8Array instead of Buffer
         fileType: 'application/pdf',
         fileSize: fileBuffer.length,
         updatedBy: updatedBy,
