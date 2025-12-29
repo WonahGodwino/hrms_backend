@@ -1,4 +1,6 @@
 // src/app/lib/file-storage.ts
+import { prisma } from '@/app/lib/db' // Add this import
+
 export class FileStorage {
   static async storePayslip(
     fileBuffer: Buffer,
