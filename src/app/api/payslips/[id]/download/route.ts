@@ -28,11 +28,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'STAFF', 'EMPLOYEE'])
+    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'STAFF'])
 
     const { id } = params
 
-    // Fetch payslip with minimal data first for authorization
+    // First fetch payslip with minimal data for authorization
     const payslip = await prisma.payslip.findUnique({
       where: { id },
       select: {
@@ -67,20 +67,26 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Permission checks based on role
     switch (user.role) {
       case 'STAFF':
-      case 'EMPLOYEE':
-        // STAFF/EMPLOYEE can only download their own payslips
+        // STAFF can only download their own payslips
         // Check if user is associated with this staff record
-        const employee = await prisma.employee.findFirst({
-          where: {
-            userId: user.userId,
-            companyId: payslip.companyId,
-          },
-          include: {
-            staffRecord: true
-          }
-        })
-
-        if (!employee?.staffRecord?.id || employee.staffRecord.id !== payslip.staffRecordId) {
+        // Assuming your authentication returns staffRecordId or userId that matches staffRecord
+        if (!user.staffRecordId && !user.email) {
+          return withCors(
+            ApiResponse.error('Staff identity not found in token', 403),
+            origin
+          )
+        }
+        
+        // Check by staffRecordId if available
+        if (user.staffRecordId && user.staffRecordId !== payslip.staffRecordId) {
+          return withCors(
+            ApiResponse.error('Forbidden: You can only download your own payslips', 403),
+            origin
+          )
+        }
+        
+        // Alternatively check by email if staffRecordId is not available
+        if (user.email && payslip.staffRecord.email.toLowerCase() !== user.email.toLowerCase()) {
           return withCors(
             ApiResponse.error('Forbidden: You can only download your own payslips', 403),
             origin
@@ -138,7 +144,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const fileBuffer = payslipWithFile.fileData
     const uint8Array = new Uint8Array(fileBuffer)
 
-    // Determine content type
+    // Determine content type from database field or file extension
     const extension = payslipWithFile.fileName.toLowerCase().endsWith('.pdf') ? '.pdf' : 
                      payslipWithFile.fileName.toLowerCase().endsWith('.xlsx') ? '.xlsx' : 
                      payslipWithFile.fileName.toLowerCase().endsWith('.docx') ? '.docx' : 
@@ -146,7 +152,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     
     let contentType = payslipWithFile.fileType || 'application/octet-stream'
     
-    // Fallback content type based on file extension
+    // Fallback content type based on file extension if not stored in database
     if (contentType === 'application/octet-stream') {
       if (extension === '.pdf') contentType = 'application/pdf'
       else if (extension === '.xlsx') contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -175,7 +181,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     })
 
     // Audit log
-    console.log(`Payslip ${payslip.id} downloaded by ${user.role}: ${user.email || user.userId}`)
+    console.log(`Payslip ${payslip.id} downloaded by ${user.role}: ${user.email || 'unknown'}`)
     console.log(`File: ${payslipWithFile.fileName} (${payslipWithFile.fileSize} bytes)`)
 
     return withCors(response, origin)
