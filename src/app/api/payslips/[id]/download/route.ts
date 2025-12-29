@@ -40,7 +40,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         staffRecordId: true,
         companyId: true,
         fileName: true,
-        fileType: true,
         fileSize: true,
         month: true,
         year: true,
@@ -68,25 +67,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     switch (user.role) {
       case 'STAFF':
         // STAFF can only download their own payslips
-        // Check if user is associated with this staff record
-        // Assuming your authentication returns staffRecordId or userId that matches staffRecord
-        if (!user.staffRecordId && !user.email) {
+        // We use email comparison since AuthUser only has userId and email
+        
+        // First, verify the user has an email in their token
+        if (!user.email) {
           return withCors(
-            ApiResponse.error('Staff identity not found in token', 403),
+            ApiResponse.error('Email not found in authentication token', 403),
             origin
           )
         }
         
-        // Check by staffRecordId if available
-        if (user.staffRecordId && user.staffRecordId !== payslip.staffRecordId) {
-          return withCors(
-            ApiResponse.error('Forbidden: You can only download your own payslips', 403),
-            origin
-          )
-        }
-        
-        // Alternatively check by email if staffRecordId is not available
-        if (user.email && payslip.staffRecord.email.toLowerCase() !== user.email.toLowerCase()) {
+        // Check if the staff record email matches the authenticated user's email
+        if (payslip.staffRecord.email.toLowerCase() !== user.email.toLowerCase()) {
           return withCors(
             ApiResponse.error('Forbidden: You can only download your own payslips', 403),
             origin
@@ -122,7 +114,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         )
     }
 
-    // Now fetch the actual file data from database
+    // Now fetch the actual file data from database including fileType
     const payslipWithFile = await prisma.payslip.findUnique({
       where: { id },
       select: {
@@ -176,12 +168,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         'Pragma': 'no-cache',
         'Expires': '0',
         'X-Content-Type-Options': 'nosniff',
-        'X-Payslip-Info': `${payslip.staffRecord?.firstName} ${payslip.staffRecord?.lastName} - ${payslip.month} ${payslip.year}`,
       },
     })
 
+    // Add payslip info header if we have the data
+    if (payslip.staffRecord) {
+      response.headers.set(
+        'X-Payslip-Info', 
+        `${payslip.staffRecord.firstName} ${payslip.staffRecord.lastName} - ${payslip.month} ${payslip.year}`
+      )
+    }
+
     // Audit log
-    console.log(`Payslip ${payslip.id} downloaded by ${user.role}: ${user.email || 'unknown'}`)
+    console.log(`Payslip ${payslip.id} downloaded by ${user.role}: ${user.email}`)
     console.log(`File: ${payslipWithFile.fileName} (${payslipWithFile.fileSize} bytes)`)
 
     return withCors(response, origin)
