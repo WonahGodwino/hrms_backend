@@ -24,7 +24,18 @@ export async function GET(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = requireRole(token, ['SUPER_ADMIN', 'HR', 'ADMIN', 'STAFF'])
 
-    let companies = []
+    // Define the company type explicitly
+    interface AccessibleCompany {
+      id: string
+      companyName: string
+      email?: string | null
+      phone?: string | null
+      address?: string | null
+      logo?: string | null
+      taxId?: string | null
+    }
+
+    let companies: AccessibleCompany[] = [] // Explicitly typed
 
     if (user.role === 'SUPER_ADMIN') {
       // SUPER_ADMIN gets all companies
@@ -85,7 +96,10 @@ export async function GET(request: NextRequest) {
         }
       })
       
-      companies = userCompanies.map(uc => uc.company).filter(Boolean)
+      // Type cast the result to ensure type safety
+      companies = userCompanies
+        .map(uc => uc.company)
+        .filter((company): company is AccessibleCompany => company !== null)
     }
 
     return withCors(
