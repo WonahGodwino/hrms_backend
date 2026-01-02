@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
       // Get current user's company assignments using userId from auth
       const userAssignments = await prisma.userCompany.findMany({
         where: { 
-          userId: currentUser.userId // Use userId from AuthUser
+          userId: currentUser.userId
         },
         select: { companyId: true }
       })
@@ -93,10 +93,10 @@ export async function GET(request: NextRequest) {
 
     // Generate different reports based on type
     if (reportType === 'coverage' && currentUser.role === 'SUPER_ADMIN') {
-      return await generateCoverageReport(currentUser, format, assignedCompanyIds)
+      return await generateCoverageReport(currentUser, format, assignedCompanyIds, origin)
     }
 
-    return await generateAssignmentsReport(currentUser, where, format, assignedCompanyIds)
+    return await generateAssignmentsReport(currentUser, where, format, assignedCompanyIds, origin)
 
   } catch (error) {
     const message = formatError(error)
@@ -110,7 +110,8 @@ async function generateAssignmentsReport(
   currentUser: any,
   where: any,
   format: string,
-  assignedCompanyIds: string[]
+  assignedCompanyIds: string[],
+  origin: string | null
 ) {
   // Fetch assignments with related data
   const assignments = await prisma.userCompany.findMany({
@@ -123,12 +124,10 @@ async function generateAssignmentsReport(
           email: true,
           phone: true,
           address: true,
-          city: true,
-          state: true,
-          country: true,
           status: true,
           archived: true,
-          createdAt: true
+          createdAt: true,
+          updatedAt: true
         }
       },
       staffRecord: {
@@ -176,9 +175,6 @@ async function generateAssignmentsReport(
       'Company Status': company?.status || 'N/A',
       'Company Archived': company?.archived === 1 ? 'Yes' : 'No',
       'Company Address': company?.address || 'N/A',
-      'Company City': company?.city || 'N/A',
-      'Company State': company?.state || 'N/A',
-      'Company Country': company?.country || 'N/A',
       'Assignment Role': assignment.role,
       'Assigned By': assignment.createdBy || 'System',
       'Assigned At': assignment.createdAt.toLocaleString(),
@@ -255,9 +251,6 @@ async function generateAssignmentsReport(
     { wch: 15 },  // Company Status
     { wch: 10 },  // Company Archived
     { wch: 30 },  // Company Address
-    { wch: 15 },  // Company City
-    { wch: 15 },  // Company State
-    { wch: 15 },  // Company Country
     { wch: 15 },  // Assignment Role
     { wch: 25 },  // Assigned By
     { wch: 20 },  // Assigned At
@@ -268,14 +261,15 @@ async function generateAssignmentsReport(
 
   XLSX.utils.book_append_sheet(wb, ws, 'Assignments')
 
-  return createFileResponse(wb, format, currentUser, 'assignments')
+  return createFileResponse(wb, format, currentUser, 'assignments', origin)
 }
 
 // Generate coverage report for SUPER_ADMIN only
 async function generateCoverageReport(
   currentUser: any,
   format: string,
-  assignedCompanyIds: string[]
+  assignedCompanyIds: string[],
+  origin: string | null
 ) {
   // Get all non-archived companies
   const allCompanies = await prisma.company.findMany({
@@ -286,9 +280,6 @@ async function generateCoverageReport(
       email: true,
       phone: true,
       address: true,
-      city: true,
-      state: true,
-      country: true,
       status: true,
       createdAt: true,
       updatedAt: true
@@ -344,9 +335,6 @@ async function generateCoverageReport(
       'Company Phone': company.phone || 'N/A',
       'Company Status': company.status || 'N/A',
       'Company Address': company.address || 'N/A',
-      'Company City': company.city || 'N/A',
-      'Company State': company.state || 'N/A',
-      'Company Country': company.country || 'N/A',
       'Has Admin?': hasAdmin ? 'YES' : 'NO',
       'Admin Count': admins.length,
       'Admins': admins.map(a => `${a.staffRecord?.firstName} ${a.staffRecord?.lastName}`).join(', ') || 'None',
@@ -433,9 +421,6 @@ async function generateCoverageReport(
     { wch: 15 },   // Company Phone
     { wch: 15 },   // Company Status
     { wch: 30 },   // Company Address
-    { wch: 15 },   // Company City
-    { wch: 15 },   // Company State
-    { wch: 15 },   // Company Country
     { wch: 10 },   // Has Admin?
     { wch: 10 },   // Admin Count
     { wch: 25 },   // Admins
@@ -470,9 +455,6 @@ async function generateCoverageReport(
       'Company Email': company['Company Email'],
       'Company Phone': company['Company Phone'],
       'Company Address': company['Company Address'],
-      'Company City': company['Company City'],
-      'Company State': company['Company State'],
-      'Company Country': company['Company Country'],
       'Risk Level': 'HIGH',
       'Action Required': 'ASSIGN ADMIN/HR/MANAGER',
       'Priority': 'URGENT',
@@ -489,9 +471,6 @@ async function generateCoverageReport(
       { wch: 25 },   // Company Email
       { wch: 15 },   // Company Phone
       { wch: 30 },   // Company Address
-      { wch: 15 },   // Company City
-      { wch: 15 },   // Company State
-      { wch: 15 },   // Company Country
       { wch: 10 },   // Risk Level
       { wch: 20 },   // Action Required
       { wch: 10 },   // Priority
@@ -503,7 +482,7 @@ async function generateCoverageReport(
     XLSX.utils.book_append_sheet(wb, uncoveredWs, 'High Risk Companies')
   }
 
-  return createFileResponse(wb, format, currentUser, 'coverage')
+  return createFileResponse(wb, format, currentUser, 'coverage', origin)
 }
 
 // Helper function to create file response
@@ -511,7 +490,8 @@ function createFileResponse(
   wb: XLSX.WorkBook,
   format: string,
   currentUser: any,
-  reportType: string
+  reportType: string,
+  origin: string | null
 ): NextResponse {
   // Generate buffer based on format
   let buffer: Buffer
@@ -545,16 +525,11 @@ function createFileResponse(
     }
   })
 
-  return response
+  // Apply CORS headers using your withCors utility
+  return withCors(response, origin)
 }
 
 export async function OPTIONS(request: NextRequest) {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-    }
-  })
+  const origin = request.headers.get('origin')
+  return withCors(new NextResponse(null, { status: 200 }), origin)
 }
