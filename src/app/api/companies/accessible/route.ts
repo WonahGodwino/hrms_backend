@@ -22,80 +22,115 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['SUPER_ADMIN', 'HR', 'ADMIN', 'STAFF'])
+    const user = await requireRole(token, ['SUPER_ADMIN', 'HR', 'ADMIN', 'STAFF'])
 
-    let companies: Array<{
-      id: string
-      companyName: string
-      email: string | null
-      phone: string | null
-      address: string | null
-      logo: string | null
-      taxId: string | null
-    }> = []
+    // Define select without logo first
+    const baseSelect = {
+      id: true,
+      companyName: true,
+      email: true,
+      phone: true,
+      address: true,
+      taxId: true,
+    }
+
+    // Try to query with logo, fallback without if error occurs
+    async function fetchCompanies(whereClause: any, isSingle = false) {
+      try {
+        if (isSingle) {
+          const result = await prisma.company.findUnique({
+            where: whereClause,
+            select: { ...baseSelect, logo: true }
+          })
+          return result ? [result] : []
+        } else {
+          const result = await prisma.company.findMany({
+            where: whereClause,
+            select: { ...baseSelect, logo: true },
+            orderBy: { companyName: 'asc' }
+          })
+          return result
+        }
+      } catch (error: any) {
+        // If error is about logo field, try without it
+        if (error.message?.includes('logo') || error.message?.includes('Logo')) {
+          console.log('Logo field not found, fetching without it')
+          if (isSingle) {
+            const result = await prisma.company.findUnique({
+              where: whereClause,
+              select: baseSelect
+            })
+            return result ? [result] : []
+          } else {
+            const result = await prisma.company.findMany({
+              where: whereClause,
+              select: baseSelect,
+              orderBy: { companyName: 'asc' }
+            })
+            return result
+          }
+        }
+        throw error
+      }
+    }
+
+    let companies: any[] = []
 
     if (user.role === 'SUPER_ADMIN') {
-      // SUPER_ADMIN gets all companies
-      companies = await prisma.company.findMany({
-        where: { archived: 0 },
-        select: {
-          id: true,
-          companyName: true,
-          email: true,
-          phone: true,
-          address: true,
-          logo: true,
-          taxId: true,
-        },
-        orderBy: { companyName: 'asc' }
-      })
+      companies = await fetchCompanies({ archived: 0 }, false)
     } 
     else if (user.role === 'STAFF') {
-      // STAFF only gets their own company
       if (user.companyId) {
-        const company = await prisma.company.findUnique({
-          where: { id: user.companyId },
-          select: {
-            id: true,
-            companyName: true,
-            email: true,
-            phone: true,
-            address: true,
-            logo: true,
-            taxId: true,
-          }
-        })
-        companies = company ? [company] : []
+        companies = await fetchCompanies({ id: user.companyId }, true)
       }
     }
     else {
-      // HR/ADMIN gets assigned companies
-      const userCompanies = await prisma.userCompany.findMany({
-        where: { 
-          userId: user.userId,
-          OR: [
-            { role: user.role },
-            { role: 'ALL' }
-          ]
-        },
-        include: {
-          company: {
-            select: {
-              id: true,
-              companyName: true,
-              email: true,
-              phone: true,
-              address: true,
-              logo: true,
-              taxId: true,
+      // HR/ADMIN - try userCompany first
+      if ('userCompany' in prisma) {
+        try {
+          const userCompanies = await (prisma as any).userCompany.findMany({
+            where: { 
+              userId: user.userId,
+              OR: [
+                { role: user.role },
+                { role: 'ALL' }
+              ]
+            },
+            include: {
+              company: true // Let Prisma decide what fields to include
             }
+          })
+          
+          const allCompanies = userCompanies
+            .map((uc: any) => {
+              const company = uc.company
+              if (!company) return null
+              
+              // Transform to expected format
+              return {
+                id: company.id,
+                companyName: company.companyName,
+                email: company.email,
+                phone: company.phone,
+                address: company.address,
+                logo: company.logo, // Will be undefined if field doesn't exist
+                taxId: company.taxId
+              }
+            })
+            .filter((company: any) => company !== null)
+          
+          companies = allCompanies
+        } catch (error) {
+          console.warn('Error fetching user companies:', error)
+          if (user.companyId) {
+            companies = await fetchCompanies({ id: user.companyId }, true)
           }
         }
-      })
-      
-      // Extract companies and filter out nulls
-      const allCompanies = userCompanies.map(uc => uc.company)
-      companies = allCompanies.filter(company => company !== null) as typeof companies
+      } else {
+        if (user.companyId) {
+          companies = await fetchCompanies({ id: user.companyId }, true)
+        }
+      }
     }
 
     return withCors(
