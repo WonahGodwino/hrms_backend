@@ -284,7 +284,7 @@ async function generateAssignmentsReport(
 
   XLSX.utils.book_append_sheet(wb, ws, 'Assignments')
 
-  return createFileResponse(wb, format, currentUser, 'assignments', origin)
+  return await createFileResponse(wb, format, currentUser, 'assignments', origin)
 }
 
 // Generate coverage report for SUPER_ADMIN only
@@ -552,17 +552,17 @@ async function generateCoverageReport(
     XLSX.utils.book_append_sheet(wb, uncoveredWs, 'High Risk Companies')
   }
 
-  return createFileResponse(wb, format, currentUser, 'coverage', origin)
+  return await createFileResponse(wb, format, currentUser, 'coverage', origin)
 }
 
 // Helper function to create file response
-function createFileResponse(
+async function createFileResponse(
   wb: XLSX.WorkBook,
   format: string,
   currentUser: any,
   reportType: string,
   origin: string | null
-): NextResponse {
+): Promise<NextResponse> {
   // Generate buffer based on format
   let buffer: Buffer
   let contentType: string
@@ -584,8 +584,11 @@ function createFileResponse(
     filename = `company${typeSuffix}-${userPrefix}${timestamp}.xlsx`
   }
 
+  // Convert buffer to Uint8Array for NextResponse
+  const uint8Array = new Uint8Array(buffer)
+
   // Create response with file
-  const response = new NextResponse(buffer, {
+  const response = new NextResponse(uint8Array, {
     headers: {
       'Content-Type': contentType,
       'Content-Disposition': `attachment; filename="${filename}"`,
