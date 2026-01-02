@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = getUserFromToken(token)
+    const user = await getUserFromToken(token) // Added await here
     
     // Check permissions
     if (!user || (user.role !== 'SUPER_ADMIN' && user.role !== 'HR' && user.role !== 'ADMIN')) {
@@ -270,7 +270,6 @@ async function processCostData(
   if (isSuperAdmin && isAllCompanies) {
     return await getSuperAdminAllCompaniesData(companies, costData, period, startDate, endDate)
   } else {
-    // Pass userRole instead of isSuperAdmin
     return await getCompanySpecificData(companies[0], costData, period, userRole, startDate, endDate)
   }
 }
