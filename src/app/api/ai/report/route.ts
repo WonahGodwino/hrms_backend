@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = getUserFromToken(token)
+    const user = await getUserFromToken(token) // Added await here
     
     // Check permissions
     if (!user || (user.role !== 'SUPER_ADMIN' && user.role !== 'HR' && user.role !== 'ADMIN')) {
