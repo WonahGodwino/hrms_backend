@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = getUserFromToken(token)
+    const user = await getUserFromToken(token) // Added await
 
     if (!user || (user.role !== 'SUPER_ADMIN' && user.role !== 'HR' && user.role !== 'ADMIN')) {
       return withCors(
@@ -137,7 +137,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = getUserFromToken(token)
+    const user = await getUserFromToken(token) // Added await
 
     if (!user || (user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN')) {
       return withCors(
@@ -264,7 +264,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = getUserFromToken(token)
+    const user = await getUserFromToken(token) // Added await
 
     if (!user || user.role !== 'SUPER_ADMIN') {
       return withCors(
