@@ -110,6 +110,14 @@ function pick(row: any, keys: string[]) {
   return undefined
 }
 
+function getRelativePath(absolutePath: string): string {
+  const projectRoot = process.cwd()
+  if (absolutePath.startsWith(projectRoot)) {
+    return path.relative(projectRoot, absolutePath)
+  }
+  return absolutePath
+}
+
 // -----------------------------
 // CORS preflight
 // -----------------------------
@@ -130,15 +138,77 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const authUser = requireRole(token, ['HR', 'SUPER_ADMIN'])
-
-    if (!authUser.companyId) {
-      return withCors(ApiResponse.error('Company context missing for this user', 400), origin)
-    }
-    const companyId = authUser.companyId as string
+    const authUser = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
     const formData = await request.formData()
     const file = formData.get('file') as File
+    
+    let companyId: string | null = null
+
+    // Determine company based on user role
+    if (authUser.role === 'HR') {
+      // HR can only upload for their own company
+      if (!authUser.companyId) {
+        return withCors(
+          ApiResponse.error('Company context missing for HR user', 400),
+          origin
+        )
+      }
+      companyId = authUser.companyId
+    } 
+    else if (authUser.role === 'SUPER_ADMIN' || authUser.role === 'ADMIN') {
+      // SUPER_ADMIN and ADMIN must select a company
+      const selectedCompanyId = formData.get('companyId') as string | null
+      
+      if (!selectedCompanyId) {
+        return withCors(
+          ApiResponse.error('Company selection is required for administrators', 400),
+          origin
+        )
+      }
+      companyId = selectedCompanyId
+
+      // Validate that user has access to the selected company
+      if (authUser.role === 'ADMIN') {
+        const hasAccess = await prisma.userCompany.findFirst({
+          where: {
+            userId: authUser.userId,
+            companyId: selectedCompanyId,
+            role: { in: ['ADMIN', 'ALL'] }
+          }
+        })
+
+        if (!hasAccess) {
+          return withCors(
+            ApiResponse.error('You do not have access to upload staff for this company', 403),
+            origin
+          )
+        }
+      }
+      // SUPER_ADMIN doesn't need access validation - they have access to all companies
+    }
+
+    if (!companyId) {
+      return withCors(
+        ApiResponse.error('Company context is missing', 400),
+        origin
+      )
+    }
+
+    // Verify company exists and is not archived
+    const company = await prisma.company.findFirst({
+      where: {
+        id: companyId,
+        archived: 0
+      }
+    })
+
+    if (!company) {
+      return withCors(
+        ApiResponse.error('Company not found or is archived', 404),
+        origin
+      )
+    }
 
     if (!file) {
       return withCors(ApiResponse.error('No file uploaded', 400), origin)
@@ -218,7 +288,7 @@ export async function POST(request: NextRequest) {
           const rowData: any = {}
           row.eachCell((cell, colNumber) => {
             const header = headers[colNumber - 1] || `col${colNumber}`
-            rowData[header] = cellToString(cell.value) // ✅ normalize Excel values
+            rowData[header] = cellToString(cell.value)
           })
 
           const hasAny = Object.values(rowData).some(
@@ -299,7 +369,7 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // Validate email format (robust)
+        // Validate email format
         if (!isValidEmail(email)) {
           results.failed++
           results.errors.push(`Row ${displayRow}: Invalid email format: ${cellToString(emailRaw)}`)
@@ -317,7 +387,7 @@ export async function POST(request: NextRequest) {
         // Check for duplicate staffId or email within this company
         const existingStaff = await prisma.staffRecord.findFirst({
           where: {
-            companyId,
+            companyId: companyId!,
             OR: [{ staffId }, { email }],
           },
         })
@@ -343,7 +413,7 @@ export async function POST(request: NextRequest) {
             bankName: bankName ? bankName.trim() : undefined,
             accountNumber: accountNumber ? accountNumber.trim() : undefined,
             bvn: bvn ? bvn.trim() : undefined,
-            companyId,
+            companyId: companyId!,
             createdBy: authUser.userId,
           },
         })
@@ -358,17 +428,19 @@ export async function POST(request: NextRequest) {
     }
 
     // Save upload record (StaffUpload model)
-    // ✅ Keep same storage logic as your original route: process.cwd()/uploads/staff
-    const uploadDir = path.join(process.cwd(), 'uploads', 'staff')
-    await mkdir(uploadDir, { recursive: true })
+    const { baseDir, uploadsDir } = await ensureUploadDirectories()
+    const staffDir = path.join(uploadsDir, 'staff')
+    await mkdir(staffDir, { recursive: true })
 
-    const savedFilePath = path.join(uploadDir, file.name)
+    const fileName = `staff-upload-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
+    const savedFilePath = path.join(staffDir, fileName)
+    const relativeFilePath = getRelativePath(savedFilePath)
 
     const uploadRecord = await prisma.staffUpload.create({
       data: {
-        companyId,
+        companyId: companyId!,
         fileName: file.name,
-        filePath: savedFilePath, // ✅ consistent with your original route
+        filePath: relativeFilePath,
         totalRecords: data.length,
         successful: results.successful,
         failed: results.failed,
@@ -389,6 +461,9 @@ export async function POST(request: NextRequest) {
             totalProcessed: data.length,
             successful: results.successful,
             failed: results.failed,
+            userRole: authUser.role,
+            companyId: companyId,
+            companyName: company.companyName,
           },
           ...(results.failed > 0 && {
             failedRecordsInfo: `${results.failed} records failed. Check errors array for details.`,
@@ -416,7 +491,16 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    requireRole(token, ['HR', 'SUPER_ADMIN'])
+    const authUser = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
+
+    // For HR users, we need to include company info in the template
+    let companyInfo = null
+    if (authUser.role === 'HR' && authUser.companyId) {
+      companyInfo = await prisma.company.findUnique({
+        where: { id: authUser.companyId },
+        select: { companyName: true }
+      })
+    }
 
     const { searchParams } = new URL(request.url)
     const action = searchParams.get('action')
@@ -424,6 +508,13 @@ export async function GET(request: NextRequest) {
     if (action === 'template') {
       const workbook = new ExcelJS.Workbook()
       const worksheet = workbook.addWorksheet('Staff Records')
+
+      // Add company info for HR users
+      if (companyInfo) {
+        worksheet.addRow([`Company: ${companyInfo.companyName}`])
+        worksheet.addRow(['Upload staff records for your company only'])
+        worksheet.addRow([])
+      }
 
       worksheet.columns = [
         { header: 'staffId', key: 'staffId', width: 15 },
@@ -438,7 +529,7 @@ export async function GET(request: NextRequest) {
         { header: 'bvn', key: 'bvn', width: 15 },
       ]
 
-      const headerRow = worksheet.getRow(1)
+      const headerRow = worksheet.getRow(companyInfo ? 4 : 1) // Adjust row number if company info added
       headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 }
       headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
       headerRow.alignment = { vertical: 'middle', horizontal: 'center' }
@@ -472,27 +563,35 @@ export async function GET(request: NextRequest) {
 
       sampleData.forEach((row) => worksheet.addRow(row))
 
+      const startRow = companyInfo ? 5 : 2 // Adjust starting row for data
       worksheet.eachRow((row, rowNumber) => {
-        if (rowNumber > 1) {
+        if (rowNumber >= startRow && rowNumber < startRow + sampleData.length) {
           row.alignment = { vertical: 'middle', horizontal: 'left' }
           row.font = { size: 11 }
-          if (rowNumber % 2 === 0) {
+          if ((rowNumber - startRow) % 2 === 0) {
             row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } }
           }
         }
       })
 
-      worksheet.addRow([])
-      worksheet.addRow(['IMPORTANT NOTES:'])
-      worksheet.addRow(['- staffId: Unique staff ID (3-20 alphanumeric characters, REQUIRED)'])
-      worksheet.addRow(['- email: Valid email address (REQUIRED)'])
-      worksheet.addRow(['- firstName, lastName: Staff names (REQUIRED)'])
-      worksheet.addRow(['- department, position: Staff details (REQUIRED)'])
-      worksheet.addRow(['- phone, bankName, accountNumber, bvn: Optional fields'])
+      // Add instructions
+      const instructionsRow = worksheet.rowCount + 2
+      worksheet.getRow(instructionsRow).values = ['IMPORTANT NOTES:']
+      worksheet.getRow(instructionsRow + 1).values = ['- staffId: Unique staff ID (3-20 alphanumeric characters, REQUIRED)']
+      worksheet.getRow(instructionsRow + 2).values = ['- email: Valid email address (REQUIRED)']
+      worksheet.getRow(instructionsRow + 3).values = ['- firstName, lastName: Staff names (REQUIRED)']
+      worksheet.getRow(instructionsRow + 4).values = ['- department, position: Staff details (REQUIRED)']
+      worksheet.getRow(instructionsRow + 5).values = ['- phone, bankName, accountNumber, bvn: Optional fields']
+      
+      if (authUser.role === 'ADMIN' || authUser.role === 'SUPER_ADMIN') {
+        worksheet.getRow(instructionsRow + 6).values = ['- ADMIN/SUPER_ADMIN: Select company before uploading']
+      }
 
-      for (let i = worksheet.rowCount - 6; i <= worksheet.rowCount; i++) {
+      for (let i = instructionsRow; i <= instructionsRow + 6; i++) {
         const noteRow = worksheet.getRow(i)
-        noteRow.font = { italic: true, color: { argb: 'FFFF0000' }, size: 10 }
+        if (noteRow) {
+          noteRow.font = { italic: true, color: { argb: 'FFFF0000' }, size: 10 }
+        }
       }
 
       const buffer = await workbook.xlsx.writeBuffer()
@@ -512,4 +611,16 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     return withCors(handleApiError(error), origin)
   }
+}
+
+// -----------------------------
+// Helper function for upload directories
+// -----------------------------
+async function ensureUploadDirectories() {
+  const baseDir = process.cwd()
+  const uploadsDir = path.join(baseDir, 'uploads')
+  
+  await mkdir(uploadsDir, { recursive: true })
+  
+  return { baseDir, uploadsDir }
 }

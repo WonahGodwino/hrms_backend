@@ -144,20 +144,77 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN'])
-
-    if (!user.companyId) {
-      return withCors(
-        ApiResponse.error('Company context missing for this user', 400),
-        origin
-      )
-    }
-    const companyId: string = user.companyId
-
-    const { payrollDir } = await ensureUploadDirectories()
+    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
     const formData = await request.formData()
     const file = formData.get('file') as File | null
+    
+    let companyId: string | null = null
+
+    // Determine company based on user role
+    if (user.role === 'HR') {
+      // HR can only upload for their own company
+      if (!user.companyId) {
+        return withCors(
+          ApiResponse.error('Company context missing for HR user', 400),
+          origin
+        )
+      }
+      companyId = user.companyId
+    } 
+    else if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') {
+      // SUPER_ADMIN and ADMIN must select a company
+      const selectedCompanyId = formData.get('companyId') as string | null
+      
+      if (!selectedCompanyId) {
+        return withCors(
+          ApiResponse.error('Company selection is required for administrators', 400),
+          origin
+        )
+      }
+      companyId = selectedCompanyId
+
+      // Validate that user has access to the selected company
+      if (user.role === 'ADMIN') {
+        const hasAccess = await prisma.userCompany.findFirst({
+          where: {
+            userId: user.userId,
+            companyId: selectedCompanyId,
+            role: { in: ['ADMIN', 'ALL'] }
+          }
+        })
+
+        if (!hasAccess) {
+          return withCors(
+            ApiResponse.error('You do not have access to upload payroll for this company', 403),
+            origin
+          )
+        }
+      }
+      // SUPER_ADMIN doesn't need access validation - they have access to all companies
+    }
+
+    if (!companyId) {
+      return withCors(
+        ApiResponse.error('Company context is missing', 400),
+        origin
+      )
+    }
+
+    // Verify company exists and is not archived
+    const company = await prisma.company.findFirst({
+      where: {
+        id: companyId,
+        archived: 0
+      }
+    })
+
+    if (!company) {
+      return withCors(
+        ApiResponse.error('Company not found or is archived', 404),
+        origin
+      )
+    }
 
     if (!file) {
       return withCors(
@@ -165,6 +222,8 @@ export async function POST(request: NextRequest) {
         origin
       )
     }
+
+    const { payrollDir } = await ensureUploadDirectories()
 
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
@@ -339,7 +398,7 @@ export async function POST(request: NextRequest) {
             where: {
               email_companyId: {
                 email,
-                companyId,
+                companyId: companyId!,
               },
             },
           })
@@ -352,7 +411,7 @@ export async function POST(request: NextRequest) {
 
           staffRecord = await prisma.staffRecord.findFirst({
             where: {
-              companyId,
+              companyId: companyId!,
               isActive: true,
               OR: [
                 {
@@ -438,14 +497,14 @@ export async function POST(request: NextRequest) {
 
         // Get company info
         const company = await prisma.company.findUnique({
-          where: { id: companyId },
+          where: { id: companyId! },
           select: { 
             companyName: true, 
             email: true, 
             address: true, 
             phone: true,
-            logo: true,
-            taxId: true,
+            logo: true as any,
+            taxId: true as any,
           }
         })
 
@@ -456,11 +515,11 @@ export async function POST(request: NextRequest) {
               staffRecordId: staffRecord.id,
               month: monthName,
               year,
-              companyId,
+              companyId: companyId!,
             },
           },
           update: {
-            companyId,
+            companyId: companyId!,
             month: monthName,
             year,
             grossPay,
@@ -495,7 +554,7 @@ export async function POST(request: NextRequest) {
             updatedAt: new Date(),
           },
           create: {
-            companyId,
+            companyId: companyId!,
             staffRecordId: staffRecord.id,
             month: monthName,
             year,
@@ -537,7 +596,7 @@ export async function POST(request: NextRequest) {
             staffRecordId: staffRecord.id,
             month: monthName,
             year,
-            companyId,
+            companyId: companyId!,
           },
         })
 
@@ -624,7 +683,7 @@ export async function POST(request: NextRequest) {
               data: {
                 ...payslipData,
                 staffRecordId: staffRecord.id,
-                companyId,
+                companyId: companyId!,
                 month: monthName,
                 year,
                 createdBy: user.userId,
@@ -645,7 +704,7 @@ export async function POST(request: NextRequest) {
                   staffRecordId: staffRecord.id,
                   month: monthName,
                   year,
-                  companyId,
+                  companyId: companyId!,
                 },
               })
               
@@ -746,6 +805,8 @@ export async function POST(request: NextRequest) {
       emailsSent: results.emailsSent,
       emailAttempts: results.emailAttempts,
       emailFailures: results.emailFailures.length,
+      userRole: user.role,
+      companyId: companyId,
     })
 
     let processedFilePath: string | null = null
@@ -813,7 +874,7 @@ export async function POST(request: NextRequest) {
     // Create upload record
     const uploadRecord = await prisma.payrollUpload.create({
       data: {
-        companyId,
+        companyId: companyId!,
         fileName: file.name,
         filePath: relativeOriginalPath,
         processedFilePath: processedFilePath || null,

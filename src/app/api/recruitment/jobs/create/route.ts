@@ -14,8 +14,9 @@ type CreateJobBody = {
   description?: string;
   department?: string;
   position?: string;
-  expirationDate?: string | null; // optional, ISO string from form
-  status?: "DRAFT" | "ACTIVE" | "CLOSED" | "EXPIRED"; // optional
+  expirationDate?: string | null;
+  status?: "DRAFT" | "ACTIVE" | "CLOSED" | "EXPIRED";
+  companyId?: string; // This comes from the dropdown selection
 };
 
 function parseDate(value?: string | null): Date | null {
@@ -44,23 +45,83 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace("Bearer ", "");
-    const user = requireRole(token, ["HR", "SUPER_ADMIN"]);
+    const user = requireRole(token, ["HR", "SUPER_ADMIN", "ADMIN"]);
 
-    if (!user.companyId) {
-      return withCors(
-        ApiResponse.error("Company context missing for this user", 400),
-        origin
-      );
-    }
-
-    const companyId = String(user.companyId);
-
-    // Parsing the request body
+    // First, parse the request body to get all data
     let body: CreateJobBody;
     try {
       body = (await request.json()) as CreateJobBody;
     } catch {
       return withCors(ApiResponse.error("Invalid JSON body", 400), origin);
+    }
+
+    let companyId: string | null = null;
+
+    // Determine company based on user role
+    if (user.role === "HR") {
+      // HR can only create jobs for their own company
+      if (!user.companyId) {
+        return withCors(
+          ApiResponse.error("Company context missing for HR user", 400),
+          origin
+        );
+      }
+      companyId = user.companyId;
+      
+      // HR should NOT send companyId in request - ignore if they do
+      if (body.companyId && body.companyId !== user.companyId) {
+        console.warn(`HR ${user.email} attempted to specify companyId ${body.companyId}, using their own ${user.companyId} instead`);
+      }
+    } else if (user.role === "SUPER_ADMIN" || user.role === "ADMIN") {
+      // ADMIN and SUPER_ADMIN must provide companyId from dropdown
+      if (!body.companyId) {
+        return withCors(
+          ApiResponse.error("Company selection is required. Please select a company from the dropdown.", 400),
+          origin
+        );
+      }
+      companyId = body.companyId;
+
+      // Validate that ADMIN has access to the selected company
+      if (user.role === "ADMIN") {
+        const hasAccess = await prisma.userCompany.findFirst({
+          where: {
+            userId: user.userId,
+            companyId: body.companyId!,
+            role: { in: ["ADMIN", "ALL"] }
+          }
+        });
+
+        if (!hasAccess) {
+          return withCors(
+            ApiResponse.error("You do not have access to create jobs for this company", 403),
+            origin
+          );
+        }
+      }
+      // SUPER_ADMIN doesn't need access validation
+    }
+
+    if (!companyId) {
+      return withCors(
+        ApiResponse.error("Company context is missing", 400),
+        origin
+      );
+    }
+
+    // Verify company exists and is not archived
+    const company = await prisma.company.findFirst({
+      where: {
+        id: companyId,
+        archived: 0
+      }
+    });
+
+    if (!company) {
+      return withCors(
+        ApiResponse.error("Company not found or is archived", 404),
+        origin
+      );
     }
 
     // Extract and trim the fields
@@ -87,11 +148,11 @@ export async function POST(request: NextRequest) {
     // Normalize and validate status
     const status = normalizeStatus(body.status) ?? "ACTIVE";
 
-    // Optional HR standard: prevent duplicate job spam (same role posted recently)
+    // Optional: prevent duplicate job spam (same role posted recently)
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Check last 30 days
     const duplicate = await prisma.job.findFirst({
       where: {
-        companyId,
+        companyId: companyId!,
         title,
         department,
         position,
@@ -117,21 +178,32 @@ export async function POST(request: NextRequest) {
         description,
         department,
         position,
-        companyId,
-        expirationDate, // nullable (fits improved model)
-        status: status as any, // Prisma enum
+        companyId: companyId!,
+        expirationDate,
+        status: status as any,
         createdBy: user.userId,
         updatedBy: user.userId,
       },
     });
 
-    // Return successful response with the created job data
+    // Log the job creation
+    console.log(`[JOB_CREATE] Job created: ${job.id} for company ${companyId} (${company.companyName}) by ${user.role}:${user.email}`);
+
+    // Return a successful response with the created job data
     return withCors(
-      ApiResponse.success({ job }, "Job created successfully"),
+      ApiResponse.success({ 
+        job,
+        metadata: {
+          userRole: user.role,
+          companyId: companyId,
+          companyName: company.companyName
+        }
+      }, "Job created successfully"),
       origin
     );
   } catch (error) {
     // Catch any other errors and return them
+    console.error("[JOB_CREATE] Error:", error);
     return withCors(ApiResponse.error(formatError(error), 500), origin);
   }
 }

@@ -1,5 +1,4 @@
 // src/app/api/recruitment/jobs/upload/route.ts
-
 import { NextRequest } from "next/server";
 import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
@@ -188,16 +187,76 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace("Bearer ", "");
-    const user = requireRole(token, ["HR", "SUPER_ADMIN"]);
-
-    if (!user.companyId) {
-      return withCors(ApiResponse.error("Company context missing for this user", 400), origin);
-    }
-
-    const companyId = String(user.companyId);
+    const user = requireRole(token, ["HR", "SUPER_ADMIN", "ADMIN"]);
 
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
+    
+    let companyId: string | null = null;
+
+    // Determine company based on user role
+    if (user.role === "HR") {
+      // HR can only upload for their own company
+      if (!user.companyId) {
+        return withCors(
+          ApiResponse.error("Company context missing for HR user", 400),
+          origin
+        );
+      }
+      companyId = user.companyId;
+    } else if (user.role === "SUPER_ADMIN" || user.role === "ADMIN") {
+      // SUPER_ADMIN and ADMIN must select a company
+      const selectedCompanyId = formData.get("companyId") as string | null;
+      
+      if (!selectedCompanyId) {
+        return withCors(
+          ApiResponse.error("Company selection is required for administrators", 400),
+          origin
+        );
+      }
+      companyId = selectedCompanyId;
+
+      // Validate that user has access to the selected company
+      if (user.role === "ADMIN") {
+        const hasAccess = await prisma.userCompany.findFirst({
+          where: {
+            userId: user.userId,
+            companyId: selectedCompanyId,
+            role: { in: ["ADMIN", "ALL"] }
+          }
+        });
+
+        if (!hasAccess) {
+          return withCors(
+            ApiResponse.error("You do not have access to upload jobs for this company", 403),
+            origin
+          );
+        }
+      }
+      // SUPER_ADMIN doesn't need access validation
+    }
+
+    if (!companyId) {
+      return withCors(
+        ApiResponse.error("Company context is missing", 400),
+        origin
+      );
+    }
+
+    // Verify company exists and is not archived
+    const company = await prisma.company.findFirst({
+      where: {
+        id: companyId,
+        archived: 0
+      }
+    });
+
+    if (!company) {
+      return withCors(
+        ApiResponse.error("Company not found or is archived", 404),
+        origin
+      );
+    }
 
     if (!file) {
       return withCors(ApiResponse.error("No file uploaded", 400), origin);
@@ -310,9 +369,9 @@ export async function POST(request: NextRequest) {
             description: jobData.description,
             department: jobData.department,
             position: jobData.position,
-            companyId,
-            expirationDate: jobData.expirationDate, // nullable aligns with new model
-            status: (jobData.status ?? "ACTIVE") as any, // enum in Prisma
+            companyId: companyId!,
+            expirationDate: jobData.expirationDate,
+            status: (jobData.status ?? "ACTIVE") as any,
             createdBy: user.userId,
             updatedBy: user.userId,
           },
@@ -325,6 +384,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Log the bulk upload
+    console.log(`[JOB_BULK_UPLOAD] Jobs uploaded for company ${companyId} (${company.companyName}) by ${user.role}:${user.email}`);
+    console.log(`[JOB_BULK_UPLOAD] Summary: ${results.successful} successful, ${results.failed} failed, ${results.skippedDuplicates} skipped duplicates`);
+
     return withCors(
       ApiResponse.success(
         {
@@ -333,6 +396,9 @@ export async function POST(request: NextRequest) {
             successful: results.successful,
             failed: results.failed,
             skippedDuplicates: results.skippedDuplicates,
+            userRole: user.role,
+            companyId: companyId,
+            companyName: company.companyName
           },
           errors: results.errors,
         },
@@ -341,6 +407,7 @@ export async function POST(request: NextRequest) {
       origin
     );
   } catch (error) {
+    console.error("[JOB_BULK_UPLOAD] Error:", error);
     return withCors(ApiResponse.error(formatError(error), 500), request.headers.get("origin"));
   }
 }

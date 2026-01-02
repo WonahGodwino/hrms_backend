@@ -122,6 +122,7 @@ export async function GET(request: NextRequest) {
     worksheet.getRow(4).values = ['1. Fill in employee data for each row']
     worksheet.getRow(5).values = ['2. Do not modify column headers']
     worksheet.getRow(6).values = ['3. Save as CSV for upload']
+    worksheet.getRow(6).values = ['4.Delete these instruction before uploading the payroll']
     
     // Style instruction rows
     for (let i = 3; i <= 6; i++) {

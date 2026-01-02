@@ -20,7 +20,6 @@ model Company {
   createdBy   String
   createdAt   DateTime @default(now())
   updatedAt   DateTime? @updatedAt  // Nullable first
-
   // Relations
   staff              StaffRecord[] // One-to-many relation with StaffRecord
   payrolls           Payroll[] // One-to-many relation with Payroll
@@ -39,6 +38,9 @@ model Company {
   // NEW: AI Settings relations (one-to-one and one-to-many)
   aiSettings  AISettings? // One-to-one relation with AISettings
   aiUsageLogs AIUsageLog[] // One-to-many relation with AIUsageLog
+
+   // NEW: UserCompany relation
+  userCompanies UserCompany[] // Add this line
 
   @@map("companies")
 }
@@ -633,4 +635,27 @@ model AIUsageLog {
   @@index([companyId])
   @@index([createdAt])
   @@map("ai_usage_logs")
+}
+// Updated UserCompany model
+model UserCompany {
+  id         String   @id @default(cuid())
+  userId     String
+  companyId  String
+  role       String   @default("HR") // "HR", "ADMIN", "MANAGER", etc.
+  
+  // Audit fields
+  createdBy  String?
+  updatedBy  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  // Relations
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  // Add a composite unique constraint
+  @@unique([userId, companyId])
+  @@index([userId])
+  @@index([companyId])
+  @@index([role])
+  @@map("user_companies")
 }
