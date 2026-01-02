@@ -67,9 +67,11 @@ model StaffRecord {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  // Relations
   payrolls    Payroll[]
   payslips    Payslip[]
   onboardings Onboarding[]
+  userCompanies UserCompany[] // Add this line to complete the relation
 
   @@unique([staffId, companyId])
   @@unique([email, companyId])
@@ -636,7 +638,7 @@ model AIUsageLog {
   @@index([createdAt])
   @@map("ai_usage_logs")
 }
-// Updated UserCompany model
+// Updated UserCompany model with StaffRecord relation
 model UserCompany {
   id         String   @id @default(cuid())
   userId     String
@@ -651,6 +653,7 @@ model UserCompany {
   
   // Relations
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    StaffRecord @relation(fields: [userId], references: [id], onDelete: Cascade)
   
   // Add a composite unique constraint
   @@unique([userId, companyId])

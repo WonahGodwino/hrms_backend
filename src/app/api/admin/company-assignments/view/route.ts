@@ -52,9 +52,9 @@ export async function GET(request: NextRequest) {
 
     // Apply role-based access control
     if (currentUser.role !== 'SUPER_ADMIN') {
-      // Get current user's company assignments
+      // Get current user's company assignments - use userId from AuthUser
       const userAssignments = await prisma.userCompany.findMany({
-        where: { userId: currentUser.id },
+        where: { userId: currentUser.userId },
         select: { companyId: true }
       })
 
@@ -93,11 +93,11 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Search functionality
+    // Search functionality - Now we can use the user relation
     if (search) {
       where.OR = [
         {
-          staffRecord: {
+          user: {
             OR: [
               { firstName: { contains: search, mode: 'insensitive' } },
               { lastName: { contains: search, mode: 'insensitive' } },
@@ -116,7 +116,7 @@ export async function GET(request: NextRequest) {
       ]
     }
 
-    // Get assignments with pagination
+    // Get assignments with pagination and relations
     const [assignments, totalCount] = await Promise.all([
       prisma.userCompany.findMany({
         where,
@@ -127,13 +127,16 @@ export async function GET(request: NextRequest) {
               companyName: true,
               email: true,
               phone: true,
-              status: true,
+              address: true,
+              logo: true,
+              taxId: true,
               archived: true,
+              createdBy: true,
               createdAt: true,
               updatedAt: true
             }
           },
-          staffRecord: {
+          user: {
             select: {
               id: true,
               staffId: true,
@@ -145,6 +148,7 @@ export async function GET(request: NextRequest) {
               role: true,
               isActive: true,
               isRegistered: true,
+              phone: true,
               createdAt: true,
               updatedAt: true
             }
@@ -167,28 +171,32 @@ export async function GET(request: NextRequest) {
       updatedAt: assignment.updatedAt,
       createdBy: assignment.createdBy,
       updatedBy: assignment.updatedBy,
-      user: assignment.staffRecord ? {
-        id: assignment.staffRecord.id,
-        staffId: assignment.staffRecord.staffId,
-        firstName: assignment.staffRecord.firstName,
-        lastName: assignment.staffRecord.lastName,
-        fullName: `${assignment.staffRecord.firstName} ${assignment.staffRecord.lastName}`,
-        email: assignment.staffRecord.email,
-        department: assignment.staffRecord.department,
-        position: assignment.staffRecord.position,
-        role: assignment.staffRecord.role,
-        isActive: assignment.staffRecord.isActive,
-        isRegistered: assignment.staffRecord.isRegistered,
-        createdAt: assignment.staffRecord.createdAt,
-        updatedAt: assignment.staffRecord.updatedAt
+      user: assignment.user ? {
+        id: assignment.user.id,
+        staffId: assignment.user.staffId,
+        firstName: assignment.user.firstName,
+        lastName: assignment.user.lastName,
+        fullName: `${assignment.user.firstName} ${assignment.user.lastName}`,
+        email: assignment.user.email,
+        department: assignment.user.department,
+        position: assignment.user.position,
+        role: assignment.user.role,
+        isActive: assignment.user.isActive,
+        isRegistered: assignment.user.isRegistered,
+        phone: assignment.user.phone,
+        createdAt: assignment.user.createdAt,
+        updatedAt: assignment.user.updatedAt
       } : null,
       company: assignment.company ? {
         id: assignment.company.id,
         companyName: assignment.company.companyName,
         email: assignment.company.email,
         phone: assignment.company.phone,
-        status: assignment.company.status,
+        address: assignment.company.address,
+        logo: assignment.company.logo,
+        taxId: assignment.company.taxId,
         isArchived: assignment.company.archived === 1,
+        createdBy: assignment.company.createdBy,
         createdAt: assignment.company.createdAt,
         updatedAt: assignment.company.updatedAt
       } : null

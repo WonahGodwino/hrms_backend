@@ -113,7 +113,7 @@ async function generateAssignmentsReport(
   assignedCompanyIds: string[],
   origin: string | null
 ) {
-  // Fetch assignments with company data
+  // Fetch assignments with related data using the proper user relation
   const assignments = await prisma.userCompany.findMany({
     where,
     include: {
@@ -131,62 +131,45 @@ async function generateAssignmentsReport(
           createdAt: true,
           updatedAt: true
         }
+      },
+      user: {  // Changed from staffRecord to user
+        select: {
+          id: true,
+          staffId: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          department: true,
+          position: true,
+          role: true,
+          isActive: true,
+          isRegistered: true,
+          phone: true,
+          createdAt: true,
+          updatedAt: true
+        }
       }
     },
     orderBy: { createdAt: 'desc' }
   })
 
-  // Get all user IDs from assignments
-  const userIds = assignments.map(a => a.userId).filter(Boolean)
-  
-  // Fetch staff records in a separate query
-  let staffRecords: any[] = []
-  if (userIds.length > 0) {
-    staffRecords = await prisma.staffRecord.findMany({
-      where: {
-        id: { in: userIds }
-      },
-      select: {
-        id: true,
-        staffId: true,
-        firstName: true,
-        lastName: true,
-        email: true,
-        department: true,
-        position: true,
-        role: true,
-        isActive: true,
-        isRegistered: true,
-        phone: true,
-        createdAt: true,
-        updatedAt: true
-      }
-    })
-  }
-
-  // Create a map of staff records by ID for easy lookup
-  const staffMap = new Map()
-  staffRecords.forEach(staff => {
-    staffMap.set(staff.id, staff)
-  })
-
   // Prepare data for Excel
   const reportData = assignments.map((assignment, index) => {
-    const staff = staffMap.get(assignment.userId)
+    const user = assignment.user  // Changed from staffRecord
     const company = assignment.company
     
     return {
       'S/N': index + 1,
       'User ID': assignment.userId,
-      'Staff ID': staff?.staffId || 'N/A',
-      'Full Name': staff ? `${staff.firstName} ${staff.lastName}` : 'User Not Found',
-      'Email': staff?.email || 'N/A',
-      'User Role': staff?.role || 'N/A',
-      'Department': staff?.department || 'N/A',
-      'Position': staff?.position || 'N/A',
-      'User Status': staff?.isActive ? 'Active' : 'Inactive',
-      'Registered': staff?.isRegistered ? 'Yes' : 'No',
-      'Phone': staff?.phone || 'N/A',
+      'Staff ID': user?.staffId || 'N/A',
+      'Full Name': user ? `${user.firstName} ${user.lastName}` : 'User Not Found',
+      'Email': user?.email || 'N/A',
+      'User Role': user?.role || 'N/A',
+      'Department': user?.department || 'N/A',
+      'Position': user?.position || 'N/A',
+      'User Status': user?.isActive ? 'Active' : 'Inactive',
+      'Registered': user?.isRegistered ? 'Yes' : 'No',
+      'Phone': user?.phone || 'N/A',
       'Company ID': company?.id || assignment.companyId,
       'Company Name': company?.companyName || 'Company Not Found',
       'Company Email': company?.email || 'N/A',
@@ -312,38 +295,23 @@ async function generateCoverageReport(
     orderBy: { companyName: 'asc' }
   })
 
-  // Get all assignments for these companies
+  // Get all assignments for these companies with user relation
   const allAssignments = await prisma.userCompany.findMany({
     where: {
       companyId: { in: allCompanies.map(c => c.id) },
       role: { in: ['ADMIN', 'HR', 'MANAGER'] }
-    }
-  })
-
-  // Get all user IDs from assignments
-  const userIds = allAssignments.map(a => a.userId).filter(Boolean)
-  
-  // Fetch staff records
-  let staffRecords: any[] = []
-  if (userIds.length > 0) {
-    staffRecords = await prisma.staffRecord.findMany({
-      where: {
-        id: { in: userIds }
-      },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        email: true,
-        role: true
+    },
+    include: {
+      user: {  // Changed from staffRecord to user
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          role: true
+        }
       }
-    })
-  }
-
-  // Create a map of staff records by ID
-  const staffMap = new Map()
-  staffRecords.forEach(staff => {
-    staffMap.set(staff.id, staff)
+    }
   })
 
   // Group assignments by company
@@ -380,42 +348,42 @@ async function generateCoverageReport(
       'Has Admin?': hasAdmin ? 'YES' : 'NO',
       'Admin Count': admins.length,
       'Admins': admins.map(a => {
-        const staff = staffMap.get(a.userId)
-        return staff ? `${staff.firstName} ${staff.lastName}` : 'Unknown'
+        const user = a.user  // Changed from staffRecord
+        return user ? `${user.firstName} ${user.lastName}` : 'Unknown'
       }).join(', ') || 'None',
       'Admin Emails': admins.map(a => {
-        const staff = staffMap.get(a.userId)
-        return staff?.email || 'Unknown'
+        const user = a.user  // Changed from staffRecord
+        return user?.email || 'Unknown'
       }).join(', ') || 'None',
       'Has HR?': hasHR ? 'YES' : 'NO',
       'HR Count': hrs.length,
       'HRs': hrs.map(a => {
-        const staff = staffMap.get(a.userId)
-        return staff ? `${staff.firstName} ${staff.lastName}` : 'Unknown'
+        const user = a.user  // Changed from staffRecord
+        return user ? `${user.firstName} ${user.lastName}` : 'Unknown'
       }).join(', ') || 'None',
       'HR Emails': hrs.map(a => {
-        const staff = staffMap.get(a.userId)
-        return staff?.email || 'Unknown'
+        const user = a.user  // Changed from staffRecord
+        return user?.email || 'Unknown'
       }).join(', ') || 'None',
       'Has Manager?': hasManager ? 'YES' : 'NO',
       'Manager Count': managers.length,
       'Managers': managers.map(a => {
-        const staff = staffMap.get(a.userId)
-        return staff ? `${staff.firstName} ${staff.lastName}` : 'Unknown'
+        const user = a.user  // Changed from staffRecord
+        return user ? `${user.firstName} ${user.lastName}` : 'Unknown'
       }).join(', ') || 'None',
       'Manager Emails': managers.map(a => {
-        const staff = staffMap.get(a.userId)
-        return staff?.email || 'Unknown'
+        const user = a.user  // Changed from staffRecord
+        return user?.email || 'Unknown'
       }).join(', ') || 'None',
       'Has ANY Manager?': hasAnyManager ? 'YES' : 'NO',
       'Total Managers': companyAssignments.length,
       'All Managers': companyAssignments.map(a => {
-        const staff = staffMap.get(a.userId)
-        return staff ? `${staff.firstName} ${staff.lastName} (${a.role})` : `Unknown (${a.role})`
+        const user = a.user  // Changed from staffRecord
+        return user ? `${user.firstName} ${user.lastName} (${a.role})` : `Unknown (${a.role})`
       }).join(', ') || 'None',
       'All Emails': companyAssignments.map(a => {
-        const staff = staffMap.get(a.userId)
-        return staff?.email || 'Unknown'
+        const user = a.user  // Changed from staffRecord
+        return user?.email || 'Unknown'
       }).join(', ') || 'None',
       'Coverage Status': hasAnyManager ? 'COVERED' : 'UNCOVERED',
       'Risk Level': hasAnyManager ? 'LOW' : 'HIGH',
