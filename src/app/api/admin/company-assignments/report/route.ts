@@ -124,8 +124,10 @@ async function generateAssignmentsReport(
           email: true,
           phone: true,
           address: true,
-          status: true,
+          logo: true,
+          taxId: true,
           archived: true,
+          createdBy: true,
           createdAt: true,
           updatedAt: true
         }
@@ -172,9 +174,11 @@ async function generateAssignmentsReport(
       'Company Name': company?.companyName || 'Company Not Found',
       'Company Email': company?.email || 'N/A',
       'Company Phone': company?.phone || 'N/A',
-      'Company Status': company?.status || 'N/A',
-      'Company Archived': company?.archived === 1 ? 'Yes' : 'No',
       'Company Address': company?.address || 'N/A',
+      'Company Logo': company?.logo ? 'Yes' : 'No',
+      'Company Tax ID': company?.taxId || 'N/A',
+      'Company Archived': company?.archived === 1 ? 'Yes' : 'No',
+      'Company Created By': company?.createdBy || 'N/A',
       'Assignment Role': assignment.role,
       'Assigned By': assignment.createdBy || 'System',
       'Assigned At': assignment.createdAt.toLocaleString(),
@@ -248,9 +252,11 @@ async function generateAssignmentsReport(
     { wch: 30 },  // Company Name
     { wch: 25 },  // Company Email
     { wch: 15 },  // Company Phone
-    { wch: 15 },  // Company Status
-    { wch: 10 },  // Company Archived
     { wch: 30 },  // Company Address
+    { wch: 10 },  // Company Logo
+    { wch: 20 },  // Company Tax ID
+    { wch: 10 },  // Company Archived
+    { wch: 25 },  // Company Created By
     { wch: 15 },  // Assignment Role
     { wch: 25 },  // Assigned By
     { wch: 20 },  // Assigned At
@@ -280,7 +286,9 @@ async function generateCoverageReport(
       email: true,
       phone: true,
       address: true,
-      status: true,
+      logo: true,
+      taxId: true,
+      createdBy: true,
       createdAt: true,
       updatedAt: true
     },
@@ -333,8 +341,10 @@ async function generateCoverageReport(
       'Company Name': company.companyName,
       'Company Email': company.email || 'N/A',
       'Company Phone': company.phone || 'N/A',
-      'Company Status': company.status || 'N/A',
       'Company Address': company.address || 'N/A',
+      'Company Logo': company.logo ? 'Yes' : 'No',
+      'Company Tax ID': company.taxId || 'N/A',
+      'Company Created By': company.createdBy || 'N/A',
       'Has Admin?': hasAdmin ? 'YES' : 'NO',
       'Admin Count': admins.length,
       'Admins': admins.map(a => `${a.staffRecord?.firstName} ${a.staffRecord?.lastName}`).join(', ') || 'None',
@@ -419,8 +429,10 @@ async function generateCoverageReport(
     { wch: 30 },   // Company Name
     { wch: 25 },   // Company Email
     { wch: 15 },   // Company Phone
-    { wch: 15 },   // Company Status
     { wch: 30 },   // Company Address
+    { wch: 10 },   // Company Logo
+    { wch: 20 },   // Company Tax ID
+    { wch: 25 },   // Company Created By
     { wch: 10 },   // Has Admin?
     { wch: 10 },   // Admin Count
     { wch: 25 },   // Admins
@@ -455,6 +467,8 @@ async function generateCoverageReport(
       'Company Email': company['Company Email'],
       'Company Phone': company['Company Phone'],
       'Company Address': company['Company Address'],
+      'Company Logo': company['Company Logo'],
+      'Company Tax ID': company['Company Tax ID'],
       'Risk Level': 'HIGH',
       'Action Required': 'ASSIGN ADMIN/HR/MANAGER',
       'Priority': 'URGENT',
@@ -471,6 +485,8 @@ async function generateCoverageReport(
       { wch: 25 },   // Company Email
       { wch: 15 },   // Company Phone
       { wch: 30 },   // Company Address
+      { wch: 10 },   // Company Logo
+      { wch: 20 },   // Company Tax ID
       { wch: 10 },   // Risk Level
       { wch: 20 },   // Action Required
       { wch: 10 },   // Priority
