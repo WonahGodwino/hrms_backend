@@ -4,7 +4,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { withCors } from '@/app/lib/cors' // Updated import
+
+export async function OPTIONS(request: NextRequest) {
+  const origin = request.headers.get('origin')
+  return withCors(new NextResponse(null, { status: 200 }), origin)
+}
 
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin')
