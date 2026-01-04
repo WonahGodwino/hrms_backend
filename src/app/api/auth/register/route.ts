@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
 
     const token = authHeader.replace('Bearer ', '')
     // Decoded payload: { userId, email, role, companyId? }
-    const admin = requireRole(token, ['SUPER_ADMIN'])
+    const admin = await requireRole(token, ['SUPER_ADMIN'])
 
     const body = await request.json()
     const {
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
       role = 'HR',
       department = '',
       position = '',
-      companyId,  // optional; defaults to admin.companyId
+      companyId,  // required for SUPER_ADMIN to specify target company
       staffId,    // optional; we'll auto-generate if missing
     } = body || {}
 
@@ -60,16 +60,38 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const targetCompanyId = companyId || admin.companyId
-    if (!targetCompanyId) {
+    // For SUPER_ADMIN, companyId is required in the request body
+    if (!companyId) {
       return withCors(
         ApiResponse.error(
-          'No company assigned for this user',
+          'companyId is required for SUPER_ADMIN to register users',
           400
         ),
         origin
       )
     }
+
+    // Verify the target company exists and is not archived
+    const targetCompany = await prisma.company.findUnique({
+      where: {
+        id: companyId,
+        archived: 0
+      }
+    })
+
+    if (!targetCompany) {
+      return withCors(
+        ApiResponse.error(
+          'Company not found or is archived',
+          404
+        ),
+        origin
+      )
+    }
+
+    // SUPER_ADMIN can register users in any company
+    // No need to check if admin has access to this company
+    const targetCompanyId = companyId
 
     const cleanEmail = email.toLowerCase().trim()
 
@@ -119,7 +141,7 @@ export async function POST(request: NextRequest) {
       // 2) No existing staff record: create a new one
       const generatedStaffId =
         staffId ||
-        `ADM-${Date.now().toString(36).toUpperCase()}`
+        `${role.toUpperCase().substring(0, 3)}-${Date.now().toString(36).toUpperCase()}`
 
       staffRecord = await prisma.staffRecord.create({
         data: {
@@ -135,6 +157,28 @@ export async function POST(request: NextRequest) {
           role,
           companyId: targetCompanyId,
           // SUPER_ADMIN who created this account
+          createdBy: admin.userId,
+        },
+      })
+    }
+
+    // Create a UserCompany record for HR/ADMIN roles (not for regular STAFF)
+    if (role === 'HR' || role === 'ADMIN' || role === 'MANAGER') {
+      await prisma.userCompany.upsert({
+        where: {
+          userId_companyId: {
+            userId: staffRecord.id,
+            companyId: targetCompanyId,
+          },
+        },
+        update: {
+          role: role,
+          updatedBy: admin.userId,
+        },
+        create: {
+          userId: staffRecord.id,
+          companyId: targetCompanyId,
+          role: role,
           createdBy: admin.userId,
         },
       })
@@ -162,6 +206,12 @@ export async function POST(request: NextRequest) {
             department: staffRecord.department,
             position: staffRecord.position,
             createdBy: staffRecord.createdBy,
+          },
+          company: {
+            id: targetCompany.id,
+            companyName: targetCompany.companyName,
+            email: targetCompany.email,
+            phone: targetCompany.phone,
           },
         },
         'User registered successfully',

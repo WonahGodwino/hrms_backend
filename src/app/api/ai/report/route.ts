@@ -1,13 +1,14 @@
 // src/app/api/ai/report/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { getUserFromToken } from '@/app/lib/auth'
+import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { withCors } from '@/app/lib/cors'
 import { openaiUsageTracker } from '@/app/lib/openaiUsage'
 
 export async function OPTIONS(request: NextRequest) {
-  return handleCorsOptions(request)
+  const origin = request.headers.get('origin')
+  return withCors(new NextResponse(null, { status: 200 }), origin)
 }
 
 export async function GET(request: NextRequest) {
@@ -23,16 +24,8 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = await getUserFromToken(token) // Added await here
+    const user = await requireRole(token, ['SUPER_ADMIN', 'HR', 'ADMIN'])
     
-    // Check permissions
-    if (!user || (user.role !== 'SUPER_ADMIN' && user.role !== 'HR' && user.role !== 'ADMIN')) {
-      return withCors(
-        ApiResponse.error('Insufficient permissions. Required role: SUPER_ADMIN, HR, or ADMIN', 403),
-        origin
-      )
-    }
-
     const { searchParams } = new URL(request.url)
     const format = searchParams.get('format') || 'csv'
     const companyId = searchParams.get('companyId')
@@ -48,32 +41,121 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // SUPER_ADMIN can export any company, HR/ADMIN only their own
-    let targetCompanyId: string
-    
+    // Determine target companies based on user role and input
+    let targetCompanyIds: string[] = []
+    let isAllCompanies = false
+    let selectedCompanyName = ''
+
     if (user.role === 'SUPER_ADMIN') {
-      targetCompanyId = companyId || 'all'
+      // SUPER_ADMIN can view all companies or specific company
+      if (companyId === 'all') {
+        // Get all companies
+        isAllCompanies = true
+        const allCompanies = await prisma.company.findMany({
+          where: { archived: 0 },
+          select: { id: true }
+        })
+        targetCompanyIds = allCompanies.map(c => c.id)
+      } else if (companyId) {
+        // Specific company selected
+        targetCompanyIds = [companyId]
+        const company = await prisma.company.findUnique({
+          where: { id: companyId },
+          select: { companyName: true }
+        })
+        selectedCompanyName = company?.companyName || companyId
+      } else {
+        // No company specified - return error
+        return withCors(
+          ApiResponse.error('SUPER_ADMIN must specify companyId parameter or use "all" for all companies', 400),
+          origin
+        )
+      }
+    } else if (user.role === 'ADMIN') {
+      // ADMIN can view assigned companies or specific assigned company
+      const userCompanies = await prisma.userCompany.findMany({
+        where: { 
+          userId: user.userId,
+          role: { in: ['ADMIN', 'ALL'] }
+        },
+        include: {
+          company: {
+            select: {
+              id: true,
+              companyName: true,
+              archived: true
+            }
+          }
+        }
+      })
+
+      // Filter out archived companies
+      const accessibleCompanies = userCompanies
+        .filter(uc => uc.company && uc.company.archived === 0)
+        .map(uc => uc.company!)
+
+      if (accessibleCompanies.length === 0) {
+        return withCors(
+          ApiResponse.error('No accessible companies found for ADMIN user', 403),
+          origin
+        )
+      }
+
+      if (companyId) {
+        // Check if ADMIN has access to the specified company
+        const hasAccess = accessibleCompanies.some(c => c.id === companyId)
+        if (!hasAccess) {
+          return withCors(
+            ApiResponse.error('ADMIN does not have access to the specified company', 403),
+            origin
+          )
+        }
+        targetCompanyIds = [companyId]
+        selectedCompanyName = accessibleCompanies.find(c => c.id === companyId)?.companyName || companyId
+      } else {
+        // No specific company - use all accessible companies
+        targetCompanyIds = accessibleCompanies.map(c => c.id)
+        if (accessibleCompanies.length === 1) {
+          selectedCompanyName = accessibleCompanies[0].companyName
+        }
+      }
     } else {
+      // HR users - only their own company (from token)
       if (!user.companyId) {
         return withCors(
-          ApiResponse.error('Company context missing for HR/ADMIN user', 400),
+          ApiResponse.error('Company context missing for HR user', 400),
           origin
         )
       }
-      targetCompanyId = user.companyId
-      
+
+      // HR cannot specify companyId - they only have access to their own
       if (companyId && companyId !== user.companyId) {
         return withCors(
-          ApiResponse.error('HR/ADMIN users can only export their own company data', 403),
+          ApiResponse.error('HR users can only generate reports for their own company', 403),
           origin
         )
       }
+
+      targetCompanyIds = [user.companyId]
+      
+      // Get company name for HR
+      const company = await prisma.company.findUnique({
+        where: { id: user.companyId },
+        select: { companyName: true }
+      })
+      selectedCompanyName = company?.companyName || user.companyId
     }
 
-    // Get company/companies info
+    // Get company/companies info for the report
     let companies: any[] = []
-    if (targetCompanyId === 'all') {
+    
+    if (isAllCompanies) {
+      // SUPER_ADMIN viewing all companies
       companies = await prisma.company.findMany({
+        where: { 
+          id: { in: targetCompanyIds },
+          archived: 0 
+        },
         select: { 
           id: true, 
           companyName: true,
@@ -87,8 +169,12 @@ export async function GET(request: NextRequest) {
         orderBy: { companyName: 'asc' }
       })
     } else {
-      const company = await prisma.company.findUnique({
-        where: { id: targetCompanyId },
+      // Single or multiple companies (for ADMIN with multiple assignments)
+      companies = await prisma.company.findMany({
+        where: { 
+          id: { in: targetCompanyIds },
+          archived: 0 
+        },
         select: { 
           id: true, 
           companyName: true,
@@ -98,20 +184,24 @@ export async function GET(request: NextRequest) {
               costAlertThreshold: true
             }
           }
-        }
+        },
+        orderBy: { companyName: 'asc' }
       })
-      
-      if (!company) {
-        return withCors(
-          ApiResponse.error('Company not found', 404),
-          origin
-        )
-      }
-      companies = [company]
+    }
+
+    if (companies.length === 0) {
+      return withCors(
+        ApiResponse.error('No companies found for the specified criteria', 404),
+        origin
+      )
     }
 
     // Get AI usage data
-    const aiApplications = await getAIApplications(targetCompanyId, user.role === 'SUPER_ADMIN')
+    const aiApplications = await getAIApplications(
+      targetCompanyIds, 
+      user.role === 'SUPER_ADMIN' && isAllCompanies,
+      isAllCompanies
+    )
     
     // Process data based on report type
     let reportData: any
@@ -119,26 +209,48 @@ export async function GET(request: NextRequest) {
     let filename: string
     
     const timestamp = new Date().toISOString().split('T')[0]
-    const companyName = targetCompanyId === 'all' 
+    const companyPrefix = isAllCompanies 
       ? 'all-companies' 
-      : companies[0]?.companyName?.replace(/\s+/g, '-').toLowerCase() || 'company'
+      : companies.length === 1
+        ? companies[0].companyName?.replace(/\s+/g, '-').toLowerCase() || 'company'
+        : 'multiple-companies'
 
     switch (reportType) {
       case 'summary':
-        reportData = await generateSummaryReport(companies, aiApplications, user.role, startDate, endDate)
+        reportData = await generateSummaryReport(
+          companies, 
+          aiApplications, 
+          user.role, 
+          startDate, 
+          endDate,
+          isAllCompanies
+        )
         csvContent = generateSummaryCSV(reportData)
-        filename = `ai-cost-summary-${companyName}-${timestamp}.csv`
+        filename = `ai-cost-summary-${companyPrefix}-${timestamp}.csv`
         break
       case 'audit':
-        reportData = await generateAuditReport(companies, user.role, startDate, endDate)
+        reportData = await generateAuditReport(
+          companies, 
+          user.role, 
+          startDate, 
+          endDate,
+          targetCompanyIds
+        )
         csvContent = generateAuditCSV(reportData)
-        filename = `ai-cost-audit-${companyName}-${timestamp}.csv`
+        filename = `ai-cost-audit-${companyPrefix}-${timestamp}.csv`
         break
       case 'detailed':
       default:
-        reportData = await generateDetailedReport(companies, aiApplications, user.role, startDate, endDate)
+        reportData = await generateDetailedReport(
+          companies, 
+          aiApplications, 
+          user.role, 
+          startDate, 
+          endDate,
+          isAllCompanies
+        )
         csvContent = generateDetailedCSV(reportData)
-        filename = `ai-cost-detailed-${companyName}-${timestamp}.csv`
+        filename = `ai-cost-detailed-${companyPrefix}-${timestamp}.csv`
         break
     }
 
@@ -146,17 +258,16 @@ export async function GET(request: NextRequest) {
     const encoder = new TextEncoder()
     const fileData = encoder.encode(csvContent)
     
-    // Return file as response
-    return new NextResponse(fileData, {
+    // Return file as response with CORS
+    const response = new NextResponse(fileData, {
       status: 200,
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
         'Content-Disposition': `attachment; filename="${filename}"`,
-        'Access-Control-Allow-Origin': origin || '*',
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       },
     })
+    
+    return withCors(response, origin)
 
   } catch (error: unknown) {
     const message = formatError(error)
@@ -166,7 +277,11 @@ export async function GET(request: NextRequest) {
 }
 
 // Helper function to get AI applications with proper filtering
-async function getAIApplications(companyId: string, isSuperAdmin: boolean) {
+async function getAIApplications(
+  companyIds: string[], 
+  isSuperAdmin: boolean,
+  isAllCompanies: boolean = false
+) {
   const whereClause: any = {
     OR: [
       {
@@ -202,9 +317,9 @@ async function getAIApplications(companyId: string, isSuperAdmin: boolean) {
     ]
   }
 
-  if (companyId !== 'all') {
+  if (!isAllCompanies) {
     whereClause.job = {
-      companyId: companyId
+      companyId: { in: companyIds }
     }
   }
 
@@ -252,10 +367,9 @@ async function generateDetailedReport(
   aiApplications: any[], 
   userRole: string,
   startDate?: string | null,
-  endDate?: string | null
+  endDate?: string | null,
+  isAllCompanies: boolean = false
 ) {
-  const isSuperAdmin = userRole === 'SUPER_ADMIN'
-  
   // Filter by date range if provided
   let filteredApplications = aiApplications
   if (startDate && endDate) {
@@ -314,7 +428,9 @@ async function generateDetailedReport(
         end: endDate || 'all'
       },
       generatedAt: new Date().toISOString(),
-      generatedBy: userRole
+      generatedBy: userRole,
+      companiesCount: companies.length,
+      isAllCompanies: isAllCompanies
     }
   }
 }
@@ -325,10 +441,9 @@ async function generateSummaryReport(
   aiApplications: any[], 
   userRole: string,
   startDate?: string | null,
-  endDate?: string | null
+  endDate?: string | null,
+  isAllCompanies: boolean = false
 ) {
-  const isSuperAdmin = userRole === 'SUPER_ADMIN'
-  
   // Filter by date range if provided
   let filteredApplications = aiApplications
   if (startDate && endDate) {
@@ -344,8 +459,8 @@ async function generateSummaryReport(
 
   let summaryData: any[]
   
-  if (isSuperAdmin && companies.length > 1) {
-    // SUPER_ADMIN all companies view
+  if (isAllCompanies || companies.length > 1) {
+    // Multiple companies view (SUPER_ADMIN: all or ADMIN: multiple assigned)
     summaryData = companies.map(company => {
       const companyApps = filteredApplications.filter(app => app.job?.companyId === company.id)
       const totalCost = companyApps.reduce((sum, app) => {
@@ -467,7 +582,7 @@ async function generateSummaryReport(
       },
       generatedAt: new Date().toISOString(),
       generatedBy: userRole,
-      company: companies[0]?.companyName || 'Multiple Companies'
+      company: companies.length === 1 ? companies[0]?.companyName : `${companies.length} Companies`
     }
   }
 }
@@ -477,17 +592,21 @@ async function generateAuditReport(
   companies: any[], 
   userRole: string,
   startDate?: string | null,
-  endDate?: string | null
+  endDate?: string | null,
+  targetCompanyIds: string[] = []
 ) {
-  const isSuperAdmin = userRole === 'SUPER_ADMIN'
-  const targetCompanyId = companies.length === 1 ? companies[0].id : 'all'
-  
   // Get usage logs from tracker
   let usageLogs: any[] = []
-  if (targetCompanyId === 'all') {
+  
+  if (targetCompanyIds.length === 0 || (targetCompanyIds.length === 1 && targetCompanyIds[0] === 'all')) {
+    // All companies (SUPER_ADMIN only)
     usageLogs = openaiUsageTracker.getRecentUsage(10000)
   } else {
-    usageLogs = openaiUsageTracker.getRecentUsage(5000, targetCompanyId)
+    // Filter logs for specific companies
+    const allLogs = openaiUsageTracker.getRecentUsage(10000)
+    usageLogs = allLogs.filter(log => 
+      log.companyId && targetCompanyIds.includes(log.companyId)
+    )
   }
 
   // Filter by date range if provided
@@ -507,12 +626,13 @@ async function generateAuditReport(
   const auditData = filteredLogs.map(log => ({
     'Timestamp': new Date(log.timestamp).toLocaleString(),
     'Company ID': log.companyId || 'N/A',
+    'Company Name': companies.find(c => c.id === log.companyId)?.companyName || 'N/A',
     'Application ID': log.applicationId || 'N/A',
     'User ID': log.userId || 'System',
-    'AI Service': log.endpoint || 'N/A',
+    'AI Service': log.service || 'N/A',
     'Model': log.model || 'N/A',
     'Tokens Used': log.tokens || 0,
-    'Cost ($)': parseFloat(log.cost.toFixed(4)),
+    'Cost ($)': parseFloat((log.cost || 0).toFixed(4)),
     'Endpoint': log.endpoint || 'N/A'
   }))
 
@@ -563,6 +683,8 @@ function generateDetailedCSV(reportData: any): string {
     csvContent += `Date Range,${reportData.summary.dateRange.start} to ${reportData.summary.dateRange.end}\n`
     csvContent += `Generated By,${reportData.summary.generatedBy}\n`
     csvContent += `Generated At,${new Date(reportData.summary.generatedAt).toLocaleString()}\n`
+    csvContent += `Companies Count,${reportData.summary.companiesCount}\n`
+    csvContent += `All Companies,${reportData.summary.isAllCompanies ? 'Yes' : 'No'}\n`
   } else {
     csvContent = 'No data available for the selected parameters\n'
   }
