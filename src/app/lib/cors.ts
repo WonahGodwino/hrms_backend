@@ -1,43 +1,65 @@
-// src/app/lib/cors.ts - SIMPLIFIED WORKING VERSION
-import { NextRequest, NextResponse } from 'next/server'
+// src/app/lib/cors.ts
+import { NextRequest, NextResponse } from "next/server";
 
-export function handleCorsOptions(req: NextRequest) {
-  const origin = req.headers.get('origin')
-  
-  // Create response
-  const response = new NextResponse(null, { 
-    status: 204,
-    statusText: 'No Content'
-  })
-  
-  // Always set CORS headers for OPTIONS
-  response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
-  response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With')
-  response.headers.set('Access-Control-Allow-Credentials', 'true')
-  response.headers.set('Access-Control-Max-Age', '86400')
-  
-  // Set origin if provided and allowed
-  if (origin && (
-    origin === 'https://app.isurfglobal.com' ||
-    origin.endsWith('.isurfglobal.com') ||
-    origin.includes('localhost:')
-  )) {
-    response.headers.set('Access-Control-Allow-Origin', origin)
-  }
-  
-  return response
+const PROD_FRONTEND = "https://app.isurfglobal.com";
+
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  PROD_FRONTEND,
+  process.env.NEXT_PUBLIC_FRONTEND_URL || "",
+].filter(Boolean);
+
+function resolveOrigin(origin: string | null): string | undefined {
+  // If no Origin header (server-to-server / curl), don’t force CORS.
+  if (!origin) return undefined;
+
+  // Exact match only (required when credentials=true)
+  if (allowedOrigins.includes(origin)) return origin;
+
+  return undefined;
 }
 
-export function withCors(response: NextResponse, origin: string | null) {
-  // Set origin if provided and allowed
-  if (origin && (
-    origin === 'https://app.isurfglobal.com' ||
-    origin.endsWith('.isurfglobal.com') ||
-    origin.includes('localhost:')
-  )) {
-    response.headers.set('Access-Control-Allow-Origin', origin)
-    response.headers.set('Access-Control-Allow-Credentials', 'true')
+export function getCorsHeaders(origin: string | null) {
+  const resolvedOrigin = resolveOrigin(origin);
+
+  const headers: Record<string, string> = {
+    "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Credentials": "true",
+    // Helps proxies/CDNs cache per-origin correctly
+    Vary: "Origin",
+  };
+
+  if (resolvedOrigin) {
+    headers["Access-Control-Allow-Origin"] = resolvedOrigin;
   }
-  
-  return response
+
+  return headers;
+}
+
+export function withCors(res: NextResponse, origin: string | null) {
+  const headers = getCorsHeaders(origin);
+  Object.entries(headers).forEach(([key, value]) => {
+    res.headers.set(key, value);
+  });
+  return res;
+}
+
+export function handleCorsOptions(req: NextRequest) {
+  const origin = req.headers.get("origin");
+  const headers = getCorsHeaders(origin);
+
+  // If origin is not allowed, return 204 without Allow-Origin (browser will block)
+  return new NextResponse(null, { status: 204, headers });
+}
+
+/**
+ * Convenience helper for route handlers:
+ * - If OPTIONS request => returns preflight response
+ * - Otherwise returns null so you can continue normal handling
+ */
+export function maybeHandleCors(req: NextRequest) {
+  if (req.method === "OPTIONS") return handleCorsOptions(req);
+  return null;
 }
