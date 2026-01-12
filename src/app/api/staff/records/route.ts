@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
 
     const token = authHeader.replace('Bearer ', '')
     // Only HR, SUPER_ADMIN, MANAGER can use this endpoint (STAFF is excluded)
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'MANAGER'])
+    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'MANAGER','ADMIN'])
 
     const { searchParams } = new URL(request.url)
     const page = parseInt(searchParams.get('page') || '1', 10)
