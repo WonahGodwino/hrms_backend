@@ -331,7 +331,7 @@ If you have any questions, please contact your HR department.`
     console.log(`✅ Payroll notification email sent to ${staff.email} from ${companyName}: ${data.id}`)
     console.log(`🔗 Access URL: ${accessUrl}`)
     console.log(`👤 User registration status: ${staff.isRegistered ? 'Registered' : 'Unregistered'}`)
-    console.log(`🏢 Company ID in token: ${staff.companyId}`) // Log company ID
+    //console.log(`🏢 Company ID in token: ${staff.companyId}`) // Log company ID
     
     return { success: true }
   } catch (error: any) {
