@@ -1,157 +1,513 @@
 // src/app/lib/email.ts
-import nodemailer from 'nodemailer'
-import { prisma } from '@/app/lib/db' // Make sure this import exists
+import formData from 'form-data'
+import Mailgun from 'mailgun.js'
+import { prisma } from '@/app/lib/db'
+import { sign } from 'jsonwebtoken'
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-    connectionTimeout: 100000, // 10 seconds
-    greetingTimeout: 100000,   // 10 seconds
-    socketTimeout: 100000,     // 15 seconds
-    pool: true,               // Use connection pooling
-    maxConnections: 20,        // Max connections in pool
-    maxMessages: 100,         // Max messages per connection
-   logger: true,  // Enable logger for debugging
-   debug: true,   // Enable debugging (will log details to console)
-   //connectionTimeout: 30000, // Increase connection timeout if need
+// Initialize Mailgun
+const mailgun = new Mailgun(formData)
+const mg = mailgun.client({
+  username: 'api',
+  key: process.env.MAILGUN_API_KEY || '',
 })
 
-type StaffLike = {
-  companyId?: string | null
-  firstName: string
-  lastName: string
-  email: string
-  staffId?: string
-  department?: string | null
-  position?: string | null
-}
-
-type PayrollLike = {
-  month: string
-  year: number
-  netSalary: number
-  isUpdate?: boolean  // Add this optional parameter
-}
+const MAILGUN_DOMAIN = process.env.MAILGUN_DOMAIN || ''
+const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@yourdomain.com'
 
 export async function sendPayrollNotificationEmail(
-  staffRecord: StaffLike,
-  payroll: PayrollLike
+  staff: {
+    id: string
+    companyId: string
+    firstName: string
+    lastName: string
+    email: string
+    staffId: string
+    department: string | null
+    position: string | null
+    isRegistered: boolean
+  },
+  payroll: {
+    id: string
+    month: string
+    year: number
+    netSalary: number
+    isUpdate: boolean
+  }
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // ✅ Safely try to fetch company only if companyId exists
-    let companyName = 'Your Company'
-    let companyFromEmail =
-      process.env.SMTP_FROM || process.env.SMTP_USER || 'no-reply@hrms.com'
+    // Validate required environment variables
+    if (!process.env.MAILGUN_API_KEY) {
+      console.error('❌ MAILGUN_API_KEY is not set')
+      return { success: false, error: 'Email service not configured' }
+    }
 
-    if (staffRecord.companyId) {
-      try {
-        const company = await prisma.company.findUnique({
-          where: { id: staffRecord.companyId },
-        })
+    if (!MAILGUN_DOMAIN) {
+      console.error('❌ MAILGUN_DOMAIN is not set')
+      return { success: false, error: 'Email domain not configured' }
+    }
 
-        if (company) {
-          if (company.companyName) companyName = company.companyName
-          if (company.email) companyFromEmail = company.email
-        }
-      } catch (err) {
-        // Log and continue with fallback from address
-        console.error('Company lookup failed in sendPayrollNotificationEmail:', err)
+    if (!FROM_EMAIL) {
+      console.error('❌ FROM_EMAIL is not set')
+      return { success: false, error: 'Sender email not configured' }
+    }
+
+    if (!process.env.JWT_SECRET) {
+      console.error('❌ JWT_SECRET is not set')
+      return { success: false, error: 'JWT secret not configured' }
+    }
+
+    console.log(`📧 Attempting to send payroll email to ${staff.email}`)
+    console.log(`📧 Using domain: ${MAILGUN_DOMAIN}, from: ${FROM_EMAIL}`)
+
+    // Fetch company name from database
+    let companyName = 'Your Company' // Default fallback
+    
+    try {
+      const company = await prisma.company.findUnique({
+        where: { id: staff.companyId },
+        select: { companyName: true }
+      })
+      
+      if (company) {
+        companyName = company.companyName
+      } else {
+        console.warn(`⚠️ Company not found for ID: ${staff.companyId}, using default name`)
+      }
+    } catch (dbError) {
+      console.error('❌ Failed to fetch company name from database:', dbError)
+      // Continue with default name
+    }
+
+    // Generate access token - INCLUDING companyId
+    const jwtSecret = process.env.JWT_SECRET
+    const accessToken = sign(
+      {
+        purpose: 'payslip_access',
+        sub: staff.id,
+        email: staff.email,
+        staffId: staff.staffId,
+        companyId: staff.companyId, // ADDED: Company ID for compound unique lookup
+        payslipId: payroll.id,
+        isRegistered: staff.isRegistered,
+        exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 7 days expiry
+      },
+      jwtSecret
+    )
+
+    // Create access URL based on registration status
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ||'https://app.isurfglobal.com/'
+    let accessUrl = ''
+    let callToAction = ''
+
+    if (staff.isRegistered) {
+      // For registered users: Login page with pre-filled email
+      accessUrl = `${appUrl}/login?email=${encodeURIComponent(staff.email)}`
+      callToAction = 'Login to view your payslip'
+    } else {
+      // For unregistered users: Complete registration with token
+       accessUrl = `${appUrl}/complete-registration?token=${accessToken}`
+       callToAction = 'Complete your registration to access your payslip'
+    }
+
+    const subject = payroll.isUpdate 
+      ? `📄 Updated Payslip for ${payroll.month} ${payroll.year}`
+      : `📄 New Payslip for ${payroll.month} ${payroll.year}`
+
+    const greeting = `Dear ${staff.firstName} ${staff.lastName},`
+
+    const message = payroll.isUpdate
+      ? `Your payslip for ${payroll.month} ${payroll.year} has been updated. Your net salary is ₦${payroll.netSalary.toLocaleString('en-NG')}.`
+      : `Your payslip for ${payroll.month} ${payroll.year} is now available. Your net salary is ₦${payroll.netSalary.toLocaleString('en-NG')}.`
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${subject}</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+          }
+          .container {
+            background-color: #ffffff;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+          }
+          .header {
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #2c5530;
+            padding-bottom: 20px;
+          }
+          .company-name {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c5530;
+            margin-bottom: 10px;
+          }
+          .subject {
+            font-size: 18px;
+            color: #666;
+          }
+          .content {
+            margin-bottom: 30px;
+          }
+          .salary-amount {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c5530;
+            text-align: center;
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            border: 1px solid #dee2e6;
+          }
+          .button {
+            display: inline-block;
+            padding: 12px 30px;
+            background-color: #2c5530;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            text-align: center;
+            margin: 20px 0;
+          }
+          .secondary-button {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #6c757d;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            text-align: center;
+            margin: 10px 5px;
+            font-size: 14px;
+          }
+          .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #dee2e6;
+            color: #666;
+            font-size: 12px;
+          }
+          .warning {
+            background-color: #fff3cd;
+            border: 1px solid #ffc107;
+            color: #856404;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+            font-size: 14px;
+          }
+          .info-box {
+            background-color: #e7f3ff;
+            border: 1px solid #b6d4fe;
+            color: #084298;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+            font-size: 14px;
+          }
+          .link-box {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 15px 0;
+            word-break: break-all;
+            font-size: 12px;
+            color: #666;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <div class="company-name">${companyName}</div>
+            <div class="subject">${subject}</div>
+          </div>
+          
+          <div class="content">
+            <p>${greeting}</p>
+            
+            <p>${message}</p>
+            
+            <div class="salary-amount">
+              ₦${payroll.netSalary.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+            </div>
+            
+            <div class="info-box">
+              <strong>💰 Your Net Salary:</strong> ₦${payroll.netSalary.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+            </div>
+            
+            <div style="text-align: center;">
+              <a href="${accessUrl}" class="button">
+                ${callToAction}
+              </a>
+            </div>
+            
+            ${!staff.isRegistered ? `
+              <div class="warning">
+                <strong>⚠️ Important Notice:</strong><br>
+                You need to complete your registration to access your payslip. 
+                Your Staff ID is: <strong>${staff.staffId}</strong>
+              </div>
+              
+              <div class="link-box">
+                <strong>Direct Access Link:</strong><br>
+                <a href="${accessUrl}">${accessUrl}</a>
+              </div>
+            ` : `
+              <div style="text-align: center; margin-top: 15px;">
+                <p>Already have an account? Click below to login:</p>
+                <a href="${appUrl}/login?email=${encodeURIComponent(staff.email)}" class="secondary-button">
+                  Login with your registered account
+                </a>
+              </div>
+            `}
+            
+            <p>You can also view your payslip history by logging into your account.</p>
+            
+            <div style="margin-top: 20px; font-size: 12px; color: #666; text-align: center;">
+              <p><em>Note: This link will expire in 7 days for security purposes.</em></p>
+            </div>
+          </div>
+          
+          <div class="footer">
+            <p>This is an automated message from ${companyName}. Please do not reply to this email.</p>
+            <p>If you have any questions, please contact your HR department.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `
+
+    // Plain text version
+    const textContent = `${greeting}
+
+${message}
+
+Your net salary: ₦${payroll.netSalary.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+
+${staff.isRegistered ? 
+`To view your payslip, please login to your account:
+${appUrl}/login?email=${encodeURIComponent(staff.email)}
+
+Your email address: ${staff.email}` : 
+`To access your payslip, you need to complete your registration:
+
+Access Link: ${accessUrl}
+
+Your Staff ID: ${staff.staffId}
+Your Email: ${staff.email}
+
+This link will expire in 7 days for security purposes.`}
+
+This is an automated message from ${companyName}. Please do not reply to this email.
+If you have any questions, please contact your HR department.`
+
+    // Send email using Mailgun
+    const data = await mg.messages.create(MAILGUN_DOMAIN, {
+      from: `${companyName} <${FROM_EMAIL}>`,
+      to: [staff.email],
+      subject: subject,
+      html: htmlContent,
+      text: textContent
+    })
+
+    console.log(`✅ Payroll notification email sent to ${staff.email} from ${companyName}: ${data.id}`)
+    console.log(`🔗 Access URL: ${accessUrl}`)
+    console.log(`👤 User registration status: ${staff.isRegistered ? 'Registered' : 'Unregistered'}`)
+    //console.log(`🏢 Company ID in token: ${staff.companyId}`) // Log company ID
+    
+    return { success: true }
+  } catch (error: any) {
+    console.error('❌ Failed to send payroll notification email:', error)
+    
+    // Log more details about the error
+    if (error.status === 404) {
+      console.error('🔍 Mailgun 404 Error Details:', {
+        domain: MAILGUN_DOMAIN,
+        fromEmail: FROM_EMAIL,
+        apiKeyExists: !!process.env.MAILGUN_API_KEY,
+        apiKeyLength: process.env.MAILGUN_API_KEY?.length,
+        apiKeyPreview: process.env.MAILGUN_API_KEY ? `${process.env.MAILGUN_API_KEY.substring(0, 10)}...` : 'Not set'
+      })
+    }
+    
+    return { 
+      success: false, 
+      error: error.message || 'Failed to send email' 
+    }
+  }
+}
+
+// Function to generate a payslip access token (for external use if needed)
+export function generatePayslipAccessToken(staff: {
+  id: string
+  email: string
+  staffId: string
+  companyId: string // ADDED: Company ID parameter
+  isRegistered: boolean
+}, payslipId: string): string {
+  if (!process.env.JWT_SECRET) {
+    throw new Error('JWT_SECRET not configured')
+  }
+
+  return sign(
+    {
+      purpose: 'payslip_access',
+      sub: staff.id,
+      email: staff.email,
+      staffId: staff.staffId,
+      companyId: staff.companyId, // ADDED: Company ID
+      payslipId: payslipId,
+      isRegistered: staff.isRegistered,
+      exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 7 days expiry
+    },
+    process.env.JWT_SECRET
+  )
+}
+
+// Function to verify payslip access token (for external use if needed)
+export function verifyPayslipAccessToken(token: string): any {
+  if (!process.env.JWT_SECRET) {
+    throw new Error('JWT_SECRET not configured')
+  }
+
+  const { verify } = require('jsonwebtoken')
+  return verify(token, process.env.JWT_SECRET)
+}
+
+// Test email function for debugging
+export async function testEmailConfig(companyId?: string): Promise<{ success: boolean; message: string; details?: any }> {
+  try {
+    if (!process.env.MAILGUN_API_KEY) {
+      return { 
+        success: false, 
+        message: 'MAILGUN_API_KEY is not set in environment variables' 
       }
     }
 
-    const loginLink =
-      process.env.NEXTAUTH_URL ||
-      process.env.APP_URL ||
-      'http://localhost:3000/profile'
-
-    // Handle both number and decimal types for netSalary
-    const netAmount = typeof payroll.netSalary === 'number' 
-      ? payroll.netSalary 
-      : Number(payroll.netSalary) || 0
-    
-    // Customize the subject based on isUpdate flag
-    const subject = payroll.isUpdate 
-      ? `Updated Payslip for ${payroll.month} ${payroll.year}`
-      : `Your Payslip for ${payroll.month} ${payroll.year}`
-
-    // Customize the message based on isUpdate flag
-    const message = payroll.isUpdate
-      ? `Your payslip for <strong>${payroll.month} ${payroll.year}</strong> has been updated.`
-      : `Your payslip for <strong>${payroll.month} ${payroll.year}</strong> is ready.`
-
-    const mailOptions = {
-      from: companyFromEmail,
-      to: staffRecord.email,
-      subject: subject,
-      html: `
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        </head>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-          <div style="max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
-            <div style="background-color: #2c5530; color: white; padding: 24px 20px; text-align: center;">
-              <h1 style="margin: 0 0 10px 0; font-size: 24px;">${companyName}</h1>
-              <h3 style="margin: 0; font-size: 18px; font-weight: normal;">Payslip Notification</h3>
-            </div>
-
-            <div style="padding: 30px 20px; background: #ffffff;">
-              <p style="margin: 0 0 16px 0;">Hello <strong>${staffRecord.firstName} ${staffRecord.lastName}</strong>,</p>
-              <p style="margin: 0 0 20px 0;">${message}</p>
-
-              <div style="background: #f8f9fa; padding: 16px; border-radius: 6px; margin: 0 0 20px 0;">
-                <p style="margin: 0 0 8px 0;"><strong>Net Salary:</strong> ₦${netAmount.toLocaleString(
-                  'en-NG',
-                  { minimumFractionDigits: 2, maximumFractionDigits: 2 }
-                )}</p>
-                
-                ${staffRecord.department ? `<p style="margin: 0 0 8px 0;"><strong>Department:</strong> ${staffRecord.department}</p>` : ''}
-                
-                ${staffRecord.position ? `<p style="margin: 0;"><strong>Position:</strong> ${staffRecord.position}</p>` : ''}
-              </div>
-
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${loginLink}"
-                   style="display: inline-block; background: #2c5530; color: white; padding: 12px 30px;
-                   border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 16px;">
-                  View Payslip
-                </a>
-              </div>
-
-              <div style="border-top: 1px solid #e0e0e0; padding-top: 20px; margin-top: 20px;">
-                <p style="margin: 0 0 8px 0; font-size: 14px; color: #666;">
-                  If the button above doesn't work, copy and paste this link into your browser:
-                </p>
-                <p style="margin: 0; font-size: 14px; color: #2c5530; word-break: break-all;">
-                  ${loginLink}
-                </p>
-              </div>
-
-              <p style="margin: 30px 0 0 0; color: #666; font-size: 14px;">
-                Best regards,<br>
-                <strong>${companyName} HR Department</strong>
-              </p>
-            </div>
-          </div>
-        </body>
-        </html>
-      `,
+    if (!MAILGUN_DOMAIN) {
+      return { 
+        success: false, 
+        message: 'MAILGUN_DOMAIN is not set in environment variables' 
+      }
     }
 
-    await transporter.sendMail(mailOptions)
-    return { success: true }
+    if (!FROM_EMAIL) {
+      return { 
+        success: false, 
+        message: 'FROM_EMAIL is not set in environment variables' 
+      }
+    }
+
+    if (!process.env.JWT_SECRET) {
+      return { 
+        success: false, 
+        message: 'JWT_SECRET is not set in environment variables' 
+      }
+    }
+
+    // Get company name if companyId is provided
+    let companyName = 'Test Company'
+    let fromName = 'Test'
     
+    if (companyId) {
+      try {
+        const company = await prisma.company.findUnique({
+          where: { id: companyId },
+          select: { companyName: true }
+        })
+        
+        if (company) {
+          companyName = company.companyName
+          fromName = companyName
+        }
+      } catch (dbError) {
+        console.error('❌ Failed to fetch company name:', dbError)
+      }
+    }
+
+    // Generate a test token WITH companyId
+    const testToken = sign(
+      {
+        purpose: 'payslip_access_test',
+        sub: 'test-user-id',
+        email: FROM_EMAIL,
+        staffId: 'TEST001',
+        companyId: companyId || 'test-company-id', // ADDED: Company ID
+        isRegistered: false,
+        exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60), // 1 day expiry
+      },
+      process.env.JWT_SECRET
+    )
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+    const testAccessUrl = `${appUrl}/api/auth/payslip-access?token=${testToken}`
+
+    // Test the Mailgun client
+    const testData = await mg.messages.create(MAILGUN_DOMAIN, {
+      from: `${fromName} <${FROM_EMAIL}>`,
+      to: [FROM_EMAIL], // Send to yourself for testing
+      subject: 'Test Email Configuration - Payslip Access',
+      text: `This is a test email to verify your Mailgun configuration.
+
+Company: ${companyName}
+Company ID: ${companyId || 'test-company-id'}
+
+Test Token Generated: Yes (${testToken.substring(0, 20)}...)
+Test Access URL: ${testAccessUrl}
+
+JWT_SECRET configured: ${process.env.JWT_SECRET ? 'Yes' : 'No'}
+NEXT_PUBLIC_APP_URL: ${appUrl}`,
+      html: `
+        <h1>Test Email Configuration</h1>
+        <p>This is a test email to verify your Mailgun configuration.</p>
+        
+        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 6px; margin: 15px 0;">
+          <p><strong>Company:</strong> ${companyName}</p>
+          <p><strong>Company ID:</strong> ${companyId || 'test-company-id'}</p>
+          <p><strong>Test Token Generated:</strong> Yes (${testToken.substring(0, 20)}...)</p>
+          <p><strong>Test Access URL:</strong> <a href="${testAccessUrl}">${testAccessUrl}</a></p>
+          <p><strong>JWT_SECRET configured:</strong> ${process.env.JWT_SECRET ? 'Yes' : 'No'}</p>
+          <p><strong>NEXT_PUBLIC_APP_URL:</strong> ${appUrl}</p>
+        </div>
+      `
+    })
+
+    return { 
+      success: true, 
+      message: 'Email configuration test successful',
+      details: { 
+        messageId: testData.id,
+        companyName,
+        companyId: companyId || 'test-company-id',
+        domain: MAILGUN_DOMAIN,
+        tokenPreview: testToken.substring(0, 20) + '...',
+        accessUrl: testAccessUrl
+      }
+    }
   } catch (error: any) {
-    console.error('Failed to send payroll notification email:', error)
+    console.error('❌ Email configuration test failed:', error)
     return { 
       success: false, 
-      error: error.message || 'Unknown error sending email' 
+      message: `Email configuration test failed: ${error.message}`,
+      details: error
     }
   }
 }

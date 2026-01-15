@@ -95,19 +95,27 @@ export async function sendPayrollNotificationEmail(
     )
 
     // Create access URL based on registration status
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.isurfglobal.com'
     let accessUrl = ''
     let callToAction = ''
 
+    // === UPDATED SECTION ===
     if (staff.isRegistered) {
       // For registered users: Login page with pre-filled email
-      accessUrl = `${appUrl}/login?email=${encodeURIComponent(staff.email)}`
+      // Add redirect to specific payslip if available
+      if (payroll.id) {
+        accessUrl = `${appUrl}/login?email=${encodeURIComponent(staff.email)}&redirect=/profile/payslips/${payroll.id}`
+      } else {
+        accessUrl = `${appUrl}/login?email=${encodeURIComponent(staff.email)}`
+      }
       callToAction = 'Login to view your payslip'
     } else {
-      // For unregistered users: Complete registration with token
+      // For unregistered users: ALWAYS use the payslip-access endpoint
+      // This will handle the redirection to /complete-registration
       accessUrl = `${appUrl}/api/auth/payslip-access?token=${accessToken}`
       callToAction = 'Complete your registration to access your payslip'
     }
+    // === END UPDATED SECTION ===
 
     const subject = payroll.isUpdate 
       ? `📄 Updated Payslip for ${payroll.month} ${payroll.year}`
@@ -259,25 +267,29 @@ export async function sendPayrollNotificationEmail(
               </a>
             </div>
             
+            <!-- UPDATED SECTION -->
             ${!staff.isRegistered ? `
               <div class="warning">
                 <strong>⚠️ Important Notice:</strong><br>
                 You need to complete your registration to access your payslip. 
-                Your Staff ID is: <strong>${staff.staffId}</strong>
+                Your Staff ID is: <strong>${staff.staffId}</strong><br>
+                Your Email: <strong>${staff.email}</strong>
               </div>
               
               <div class="link-box">
-                <strong>Direct Access Link:</strong><br>
-                <a href="${accessUrl}">${accessUrl}</a>
+                <strong>Registration Link:</strong><br>
+                <a href="${accessUrl}">Click here to complete registration and view your payslip</a><br>
+                <small>Or copy this link: ${accessUrl}</small>
               </div>
             ` : `
               <div style="text-align: center; margin-top: 15px;">
                 <p>Already have an account? Click below to login:</p>
-                <a href="${appUrl}/login?email=${encodeURIComponent(staff.email)}" class="secondary-button">
+                <a href="${appUrl}/login?email=${encodeURIComponent(staff.email)}${payroll.id ? `&redirect=/profile/payslips/${payroll.id}` : ''}" class="secondary-button">
                   Login with your registered account
                 </a>
               </div>
             `}
+            <!-- END UPDATED SECTION -->
             
             <p>You can also view your payslip history by logging into your account.</p>
             
@@ -304,7 +316,7 @@ Your net salary: ₦${payroll.netSalary.toLocaleString('en-NG', { minimumFractio
 
 ${staff.isRegistered ? 
 `To view your payslip, please login to your account:
-${appUrl}/login?email=${encodeURIComponent(staff.email)}
+${appUrl}/login?email=${encodeURIComponent(staff.email)}${payroll.id ? `&redirect=/profile/payslips/${payroll.id}` : ''}
 
 Your email address: ${staff.email}` : 
 `To access your payslip, you need to complete your registration:
@@ -313,6 +325,8 @@ Access Link: ${accessUrl}
 
 Your Staff ID: ${staff.staffId}
 Your Email: ${staff.email}
+
+Click the link above to complete registration and view your payslip.
 
 This link will expire in 7 days for security purposes.`}
 
@@ -331,7 +345,6 @@ If you have any questions, please contact your HR department.`
     console.log(`✅ Payroll notification email sent to ${staff.email} from ${companyName}: ${data.id}`)
     console.log(`🔗 Access URL: ${accessUrl}`)
     console.log(`👤 User registration status: ${staff.isRegistered ? 'Registered' : 'Unregistered'}`)
-    //console.log(`🏢 Company ID in token: ${staff.companyId}`) // Log company ID
     
     return { success: true }
   } catch (error: any) {
@@ -458,6 +471,7 @@ export async function testEmailConfig(companyId?: string): Promise<{ success: bo
     )
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+    // Use the payslip-access endpoint for consistency
     const testAccessUrl = `${appUrl}/api/auth/payslip-access?token=${testToken}`
 
     // Test the Mailgun client
@@ -473,6 +487,8 @@ Company ID: ${companyId || 'test-company-id'}
 Test Token Generated: Yes (${testToken.substring(0, 20)}...)
 Test Access URL: ${testAccessUrl}
 
+This link will redirect unregistered users to the registration page.
+
 JWT_SECRET configured: ${process.env.JWT_SECRET ? 'Yes' : 'No'}
 NEXT_PUBLIC_APP_URL: ${appUrl}`,
       html: `
@@ -484,6 +500,7 @@ NEXT_PUBLIC_APP_URL: ${appUrl}`,
           <p><strong>Company ID:</strong> ${companyId || 'test-company-id'}</p>
           <p><strong>Test Token Generated:</strong> Yes (${testToken.substring(0, 20)}...)</p>
           <p><strong>Test Access URL:</strong> <a href="${testAccessUrl}">${testAccessUrl}</a></p>
+          <p><em>This link will redirect unregistered users to the registration page.</em></p>
           <p><strong>JWT_SECRET configured:</strong> ${process.env.JWT_SECRET ? 'Yes' : 'No'}</p>
           <p><strong>NEXT_PUBLIC_APP_URL:</strong> ${appUrl}</p>
         </div>

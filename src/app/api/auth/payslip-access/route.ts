@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     })
 
     // Get app URL from environment
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.isurfglobal.com'
 
     // Find staff record using compound unique constraint (email + companyId)
     let staff = await prisma.staffRecord.findUnique({

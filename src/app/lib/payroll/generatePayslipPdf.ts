@@ -211,7 +211,7 @@ export async function generatePayslipPdf(
           'This is a system-generated payslip. For any discrepancies, please contact HR department.',
           30,
           footerY,
-          { align: 'center', width: doc.page.width - 80 }
+          { align: 'center', width: doc.page.width - 85 }
         )
 
       doc.end()

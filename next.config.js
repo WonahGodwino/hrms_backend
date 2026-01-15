@@ -1,4 +1,5 @@
-﻿/** @type {import('next').NextConfig} */
+﻿// next.config.js - MINIMAL HEADERS VERSION
+/** @type {import('next').NextConfig} */
 const nextConfig = {
   typescript: {
     ignoreBuildErrors: false,
@@ -7,10 +8,32 @@ const nextConfig = {
     ignoreDuringBuilds: false,
   },
 
-  // Allow heavy server-only packages like pdfkit / Prisma adapter / pg
   experimental: {
     serverComponentsExternalPackages: ['pdfkit', '@prisma/adapter-pg', 'pg'],
   },
+
+  // Only add security headers, NOT CORS headers
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff'
+          },
+          {
+            key: 'X-Frame-Options',
+            value: 'DENY'
+          },
+          {
+            key: 'Referrer-Policy',
+            value: 'strict-origin-when-cross-origin'
+          }
+        ]
+      }
+    ]
+  }
 }
 
 module.exports = nextConfig
