@@ -1,4 +1,4 @@
-// src/app/api/auth/payslip-access/route.ts
+// src/app/api/auth/payslip-access/route.ts - UPDATED VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { verify } from 'jsonwebtoken'
@@ -47,8 +47,9 @@ export async function GET(request: NextRequest) {
       hasPayslipId: !!payslipId
     })
 
-    // Get app URL from environment
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.isurfglobal.com'
+    // === CRITICAL FIX: Use frontend URL for redirects, not appUrl ===
+    // This should point to your React app (frontend)
+    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://app.isurfglobal.com'
 
     // Find staff record using compound unique constraint (email + companyId)
     let staff = await prisma.staffRecord.findUnique({
@@ -131,7 +132,7 @@ export async function GET(request: NextRequest) {
           if (payslip && payslip.staffRecord.id === staff.id) {
             // Redirect to specific payslip
             console.log(`📄 Redirecting to specific payslip: ${payslipId}`)
-            const loginUrl = new URL(`${appUrl}/login`, request.url)
+            const loginUrl = new URL(`${frontendUrl}/login`, request.url)
             loginUrl.searchParams.set('email', staff.email)
             loginUrl.searchParams.set('redirect', `/profile/payslips/${payslipId}`)
             return NextResponse.redirect(loginUrl)
@@ -139,7 +140,7 @@ export async function GET(request: NextRequest) {
         }
 
         // Generic login redirect for registered users
-        const loginUrl = new URL(`${appUrl}/login`, request.url)
+        const loginUrl = new URL(`${frontendUrl}/login`, request.url)
         loginUrl.searchParams.set('email', staff.email)
         loginUrl.searchParams.set('message', 'Please login to access your payslips')
         return NextResponse.redirect(loginUrl)
@@ -174,8 +175,8 @@ export async function GET(request: NextRequest) {
       console.log(`✅ Verified payslip ownership: ${payslipId} belongs to ${staff.email}`)
     }
 
-    // Redirect to complete registration
-    const registrationUrl = new URL(`${appUrl}/complete-registration`, request.url)
+    // Redirect to complete registration on FRONTEND
+    const registrationUrl = new URL(`${frontendUrl}/complete-registration`, request.url)
     registrationUrl.searchParams.set('email', staff.email)
     registrationUrl.searchParams.set('staffId', staff.staffId)
     registrationUrl.searchParams.set('companyId', staff.companyId)
@@ -185,7 +186,7 @@ export async function GET(request: NextRequest) {
       registrationUrl.searchParams.set('payslipId', payslipId)
     }
     
-    console.log(`🔗 Redirecting to registration: ${registrationUrl.toString()}`)
+    console.log(`🔗 Redirecting to registration on frontend: ${registrationUrl.toString()}`)
     return NextResponse.redirect(registrationUrl)
 
   } catch (error: any) {
@@ -199,8 +200,9 @@ export async function GET(request: NextRequest) {
       errorMessage = 'Invalid or tampered access link'
     }
     
-    // Redirect to error page with message
-    const errorUrl = new URL('/auth/error', request.url)
+    // Redirect to error page on FRONTEND
+    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://app.isurfglobal.com'
+    const errorUrl = new URL(`${frontendUrl}/auth/error`, request.url)
     errorUrl.searchParams.set('message', errorMessage)
     return NextResponse.redirect(errorUrl)
   }

@@ -1,4 +1,4 @@
-// src/app/lib/email.ts
+// src/app/lib/email.ts - UPDATED VERSION
 import formData from 'form-data'
 import Mailgun from 'mailgun.js'
 import { prisma } from '@/app/lib/db'
@@ -94,28 +94,32 @@ export async function sendPayrollNotificationEmail(
       jwtSecret
     )
 
-    // Create access URL based on registration status
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.isurfglobal.com'
+    // === CRITICAL FIX: Use separate URLs for frontend and backend ===
+    // Frontend URL - where your React app runs (for login/registration pages)
+    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://app.isurfglobal.com'
+    // Backend URL - where your API/HRMS runs (for API endpoints)
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://hrms.isurfglobal.com'
+    
     let accessUrl = ''
     let callToAction = ''
 
-    // === UPDATED SECTION ===
+    console.log(`🌐 Frontend URL: ${frontendUrl}, Backend URL: ${backendUrl}`)
+
     if (staff.isRegistered) {
-      // For registered users: Login page with pre-filled email
-      // Add redirect to specific payslip if available
+      // For registered users: Login page on FRONTEND
       if (payroll.id) {
-        accessUrl = `${appUrl}/login?email=${encodeURIComponent(staff.email)}&redirect=/profile/payslips/${payroll.id}`
+        accessUrl = `${frontendUrl}/login?email=${encodeURIComponent(staff.email)}&redirect=/profile/payslips/${payroll.id}`
       } else {
-        accessUrl = `${appUrl}/login?email=${encodeURIComponent(staff.email)}`
+        accessUrl = `${frontendUrl}/login?email=${encodeURIComponent(staff.email)}`
       }
       callToAction = 'Login to view your payslip'
+      console.log(`✅ Registered user URL (frontend): ${accessUrl}`)
     } else {
-      // For unregistered users: ALWAYS use the payslip-access endpoint
-      // This will handle the redirection to /complete-registration
-      accessUrl = `${appUrl}/api/auth/payslip-access?token=${accessToken}`
+      // For unregistered users: API endpoint on BACKEND
+      accessUrl = `${backendUrl}/api/auth/payslip-access?token=${accessToken}`
       callToAction = 'Complete your registration to access your payslip'
+      console.log(`✅ Unregistered user URL (backend API): ${accessUrl}`)
     }
-    // === END UPDATED SECTION ===
 
     const subject = payroll.isUpdate 
       ? `📄 Updated Payslip for ${payroll.month} ${payroll.year}`
@@ -267,7 +271,6 @@ export async function sendPayrollNotificationEmail(
               </a>
             </div>
             
-            <!-- UPDATED SECTION -->
             ${!staff.isRegistered ? `
               <div class="warning">
                 <strong>⚠️ Important Notice:</strong><br>
@@ -284,12 +287,11 @@ export async function sendPayrollNotificationEmail(
             ` : `
               <div style="text-align: center; margin-top: 15px;">
                 <p>Already have an account? Click below to login:</p>
-                <a href="${appUrl}/login?email=${encodeURIComponent(staff.email)}${payroll.id ? `&redirect=/profile/payslips/${payroll.id}` : ''}" class="secondary-button">
+                <a href="${frontendUrl}/login?email=${encodeURIComponent(staff.email)}${payroll.id ? `&redirect=/profile/payslips/${payroll.id}` : ''}" class="secondary-button">
                   Login with your registered account
                 </a>
               </div>
             `}
-            <!-- END UPDATED SECTION -->
             
             <p>You can also view your payslip history by logging into your account.</p>
             
@@ -316,7 +318,7 @@ Your net salary: ₦${payroll.netSalary.toLocaleString('en-NG', { minimumFractio
 
 ${staff.isRegistered ? 
 `To view your payslip, please login to your account:
-${appUrl}/login?email=${encodeURIComponent(staff.email)}${payroll.id ? `&redirect=/profile/payslips/${payroll.id}` : ''}
+${frontendUrl}/login?email=${encodeURIComponent(staff.email)}${payroll.id ? `&redirect=/profile/payslips/${payroll.id}` : ''}
 
 Your email address: ${staff.email}` : 
 `To access your payslip, you need to complete your registration:
@@ -470,9 +472,12 @@ export async function testEmailConfig(companyId?: string): Promise<{ success: bo
       process.env.JWT_SECRET
     )
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-    // Use the payslip-access endpoint for consistency
-    const testAccessUrl = `${appUrl}/api/auth/payslip-access?token=${testToken}`
+    // Use separate URLs for testing
+    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://app.isurfglobal.com'
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://hrms.isurfglobal.com'
+    
+    // Unregistered user should go to backend API
+    const testAccessUrl = `${backendUrl}/api/auth/payslip-access?token=${testToken}`
 
     // Test the Mailgun client
     const testData = await mg.messages.create(MAILGUN_DOMAIN, {
@@ -487,10 +492,12 @@ Company ID: ${companyId || 'test-company-id'}
 Test Token Generated: Yes (${testToken.substring(0, 20)}...)
 Test Access URL: ${testAccessUrl}
 
+Frontend URL: ${frontendUrl}
+Backend URL: ${backendUrl}
+
 This link will redirect unregistered users to the registration page.
 
-JWT_SECRET configured: ${process.env.JWT_SECRET ? 'Yes' : 'No'}
-NEXT_PUBLIC_APP_URL: ${appUrl}`,
+JWT_SECRET configured: ${process.env.JWT_SECRET ? 'Yes' : 'No'}`,
       html: `
         <h1>Test Email Configuration</h1>
         <p>This is a test email to verify your Mailgun configuration.</p>
@@ -500,9 +507,10 @@ NEXT_PUBLIC_APP_URL: ${appUrl}`,
           <p><strong>Company ID:</strong> ${companyId || 'test-company-id'}</p>
           <p><strong>Test Token Generated:</strong> Yes (${testToken.substring(0, 20)}...)</p>
           <p><strong>Test Access URL:</strong> <a href="${testAccessUrl}">${testAccessUrl}</a></p>
+          <p><strong>Frontend URL:</strong> ${frontendUrl}</p>
+          <p><strong>Backend URL:</strong> ${backendUrl}</p>
           <p><em>This link will redirect unregistered users to the registration page.</em></p>
           <p><strong>JWT_SECRET configured:</strong> ${process.env.JWT_SECRET ? 'Yes' : 'No'}</p>
-          <p><strong>NEXT_PUBLIC_APP_URL:</strong> ${appUrl}</p>
         </div>
       `
     })
@@ -516,7 +524,9 @@ NEXT_PUBLIC_APP_URL: ${appUrl}`,
         companyId: companyId || 'test-company-id',
         domain: MAILGUN_DOMAIN,
         tokenPreview: testToken.substring(0, 20) + '...',
-        accessUrl: testAccessUrl
+        accessUrl: testAccessUrl,
+        frontendUrl,
+        backendUrl
       }
     }
   } catch (error: any) {
