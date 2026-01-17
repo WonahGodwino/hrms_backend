@@ -12,7 +12,7 @@ const mg = mailgun.client({
 })
 
 const MAILGUN_DOMAIN = process.env.MAILGUN_DOMAIN || ''
-const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@yourdomain.com'
+const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@ms.isurfglobal.com'
 
 export async function sendPayrollNotificationEmail(
   staff: {
