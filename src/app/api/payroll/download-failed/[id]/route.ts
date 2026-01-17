@@ -102,7 +102,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN','ADMIN'])
+    const user = requireRole(token, ['HR','SUPER_ADMIN','ADMIN'])
 
     if (!user.companyId && user.role !== 'SUPER_ADMIN') {
       return withCors(
