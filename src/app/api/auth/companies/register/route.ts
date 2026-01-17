@@ -1,8 +1,8 @@
-// src/app/api/auth/company-registration/route.ts
+// src/app/api/companies/register/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { signToken, verifyToken } from '@/app/lib/auth'
+import { verifyToken } from '@/app/lib/auth'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 export async function OPTIONS(request: NextRequest) {
@@ -100,19 +100,27 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    // 7. Create AI Settings for the company
+    // 7. Create default AI Settings for the company
     try {
       await prisma.aISettings.create({
         data: {
           companyId: company.id,
-          isEnabled: true,
-          maxMonthlyRequests: 1000,
-          currentMonthlyRequests: 0,
+          enabled: true,
+          monthlyBudget: 100.00,
+          costPerReview: 0.02,
+          costAlertThreshold: 80,
+          defaultService: 'openai',
+          defaultModel: 'gpt-3.5-turbo',
+          autoShortlistThreshold: 75,
+          useForSeniorRoles: true,
+          useForTechnicalRoles: true,
+          useForManagerRoles: true,
           updatedBy: decoded.email || 'SUPER_ADMIN'
         }
       })
     } catch (aiError) {
       console.warn('⚠️ Could not create AI settings:', aiError)
+      // Continue even if AI settings creation fails
     }
 
     // 8. Return success response
