@@ -217,7 +217,8 @@ export async function GET(request: NextRequest) {
         // Add sample data row (row 3)
         const row3 = worksheet.getRow(3)
         row3.getCell(1).value = 1 // S/N
-        row3.getCell(2).value = 'Active' // Current month status
+        row3.getCell(2).value = 'Month'
+        row3.getCell(3).value = 'Active' // Current month status
         row3.getCell(3).value = 'Active' // Next month status
         row3.getCell(4).value = 'BRC-Okash-9002' // Staff ID
         row3.getCell(5).value = 'Olatubosun Iyabo Victoria' // Name
@@ -282,10 +283,10 @@ export async function GET(request: NextRequest) {
         row3.getCell(64).value = 'Olatubosun Iyabo Victoria' // Bank Name
         row3.getCell(65).value = 'First bank' // Acount Name
         row3.getCell(66).value = 3060940046 // Account Number
-        row3.getCell(67).value = 'Isurf' // HR Agency
-        row3.getCell(68).value = 0 // BA
-        row3.getCell(69).value = 0 // PFA Number
-        row3.getCell(70).value = 'Victoriaiyabo1994@outlook.com' // Email
+        row3.getCell(68).value = 'Isurf' // HR Agency
+        row3.getCell(69).value = 0 // BA
+        row3.getCell(670).value = 0 // PFA Number
+        row3.getCell(71).value = 'Victoriaiyabo1994@outlook.com' // Email
         
         // Style the headers (row 1 and 2)
         const headerRows = [1, 2]
