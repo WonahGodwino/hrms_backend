@@ -54,9 +54,7 @@ export const PAYROLL_TEMPLATES: Record<PayrollTemplateType, TemplateConfig> = {
       'total invoice value': 'Total Invoice Value',
       'email': 'EMAIL',
       'month': 'Month',
-      'month': 'MONTH',
       'year': 'Year',
-      'year': 'YEAR',
     }
   },
   BLUERIDGE: {
