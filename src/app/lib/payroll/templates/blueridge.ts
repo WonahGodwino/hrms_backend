@@ -176,13 +176,9 @@ export const processBlueridgeTemplate = {
       } else {
         const workbook = new ExcelJS.Workbook()
         
-        // Fix: Convert Buffer to ArrayBuffer for ExcelJS
-        const arrayBuffer = buffer.buffer.slice(
-          buffer.byteOffset, 
-          buffer.byteOffset + buffer.byteLength
-        )
+        // FIXED: ExcelJS accepts Buffer directly in Node.js
+        await workbook.xlsx.load(buffer)
         
-        await workbook.xlsx.load(arrayBuffer)
         const worksheet = workbook.worksheets[0]
         if (!worksheet) throw new Error('No worksheet found in Excel file')
 
