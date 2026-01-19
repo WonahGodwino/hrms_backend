@@ -49,17 +49,25 @@ export async function POST(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
+    // Get template type from URL query parameter FIRST
+    const url = new URL(request.url)
+    let templateType = url.searchParams.get('type') as PayrollTemplateType | null
+
     const formData = await request.formData()
     const file = formData.get('file') as File | null
-    const templateType = formData.get('templateType') as PayrollTemplateType | null
     const sendEmails = formData.get('sendEmails') === 'true'
     const companyIdParam = formData.get('companyId') as string | null
     
+    // If templateType not in query params, try form data (for backward compatibility)
+    if (!templateType) {
+      templateType = formData.get('templateType') as PayrollTemplateType | null
+    }
+
     let companyId: string | null = companyIdParam
 
     if (!templateType || !PAYROLL_TEMPLATES[templateType]) {
       return withCors(
-        ApiResponse.error('Valid template type is required', 400),
+        ApiResponse.error('Valid template type is required. Supported types: ISURF_STANDARD, BLUERIDGE', 400),
         origin
       )
     }
