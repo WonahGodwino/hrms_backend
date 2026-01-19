@@ -134,8 +134,9 @@ export const processIsurfStandardTemplate = {
       } else {
         const workbook = new ExcelJS.Workbook()
         
-        // FIXED: ExcelJS accepts Buffer directly in Node.js
-        await workbook.xlsx.load(buffer)
+        // Convert Buffer to Uint8Array which ExcelJS accepts
+        const uint8Array = new Uint8Array(buffer)
+        await workbook.xlsx.load(uint8Array)
         
         const worksheet = workbook.worksheets[0]
         if (!worksheet) throw new Error('No worksheet found in Excel file')

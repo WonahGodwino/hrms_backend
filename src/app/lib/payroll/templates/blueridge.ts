@@ -5,14 +5,6 @@ import { sendPayrollNotificationEmail } from '@/app/lib/email'
 import { generatePayslipPdf } from '@/app/lib/payroll/generatePayslipPdf'
 import type { ParsedPayrollRow } from '@/app/lib/payroll/types'
 import { PAYROLL_TEMPLATES } from './types'
-// At the top of blueridge.ts
-import { 
-  parseMonthFromString, 
-  extractYearFromMonthString, 
-  getMonthName 
-} from '@/app/lib/payroll/utils/monthParser'
-
-// Then replace the inline functions with these imports
 
 function normalizeHeader(h: string) {
   return h
@@ -176,8 +168,9 @@ export const processBlueridgeTemplate = {
       } else {
         const workbook = new ExcelJS.Workbook()
         
-        // FIXED: ExcelJS accepts Buffer directly in Node.js
-        await workbook.xlsx.load(buffer)
+        // Convert Buffer to Uint8Array which ExcelJS accepts
+        const uint8Array = new Uint8Array(buffer)
+        await workbook.xlsx.load(uint8Array)
         
         const worksheet = workbook.worksheets[0]
         if (!worksheet) throw new Error('No worksheet found in Excel file')
