@@ -7,6 +7,11 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { readFile } from 'fs/promises'
 import path from 'path'
 
+// Define a custom error type
+interface SystemError extends Error {
+  code?: string
+}
+
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
@@ -122,7 +127,10 @@ export async function GET(
   } catch (error) {
     console.error('Error downloading original file:', error)
     
-    if (error.code === 'ENOENT') {
+    // Type guard to check if error has a code property
+    const systemError = error as SystemError
+    
+    if (systemError.code === 'ENOENT') {
       return withCors(
         ApiResponse.error('File not found on server', 404),
         origin
