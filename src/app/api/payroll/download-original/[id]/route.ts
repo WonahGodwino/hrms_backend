@@ -124,20 +124,20 @@ export async function GET(
 
     return withCors(response, origin)
 
-  } catch (error) {
-    console.error('Error downloading original file:', error)
-    
-    // Type guard to check if error has a code property
-    const systemError = error as SystemError
-    
-    if (systemError.code === 'ENOENT') {
-      return withCors(
-        ApiResponse.error('File not found on server', 404),
-        origin
-      )
-    }
-
-    const message = formatError(error)
-    return withCors(ApiResponse.error(message, 500), origin)
+   } catch (error) {
+  console.error('Error downloading original file:', error)
+  
+  // Use type assertion
+  const err = error as any
+  
+  if (err.code === 'ENOENT') {
+    return withCors(
+      ApiResponse.error('File not found on server', 404),
+      origin
+    )
   }
+
+  const message = formatError(error)
+  return withCors(ApiResponse.error(message, 500), origin)
+}
 }

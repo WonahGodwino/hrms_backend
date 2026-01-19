@@ -1,4 +1,5 @@
 // src/app/lib/payroll/types.ts
+import type { PayrollTemplateType } from '@/app/lib/payroll/templates/types'
 
 export type ParsedPayrollRow = {
   rowNumber: number
@@ -29,6 +30,10 @@ export type ParsedPayrollRow = {
   daysInMonth: number
   daysWorked: number
   
+  // template-specific fields
+  bonusKPI?: number
+  deductions?: number
+  
   // raw original row (for debugging / failed records)
   rawRow: any
 }
@@ -49,4 +54,8 @@ export type GeneratePayslipInput = {
     companyTaxId?: string
   }
   payroll: ParsedPayrollRow
+  templateType?: PayrollTemplateType
 }
+
+// Export TemplateType alias for compatibility
+export type TemplateType = PayrollTemplateType
