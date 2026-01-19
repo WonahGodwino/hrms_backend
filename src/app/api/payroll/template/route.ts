@@ -120,20 +120,12 @@ export async function GET(request: NextRequest) {
         break
         
       case 'BLUERIDGE':
-        // BLUERIDGE template - matching the exact structure from the uploaded file
-        // First, add the month header rows (merged cells)
-        worksheet.mergeCells('A1:B1')
-        worksheet.mergeCells('C1:D1')
+        // CORRECTED BLUERIDGE template - Month column is just the month name
         
-        const row1 = worksheet.getRow(1)
-        row1.getCell(1).value = `${currentMonth} Payroll; status : New hire, Termination/resigned, active`
-        row1.getCell(3).value = `${currentMonth === 'December' ? 'January' : getNextMonth(currentMonth)} Payroll; status : New hire, Termination/resigned, active`
-        
-        // Add headers row (row 2)
+        // Define the correct headers
         const headers = [
           'S/N',
-          `${currentMonth} Payroll; status : New hire, Termination/resigned, active`,
-          `${currentMonth === 'December' ? 'January' : getNextMonth(currentMonth)} Payroll; status : New hire, Termination/resigned, active`,
+          'Month', // Just "Month" - not combined with status
           'Staff ID',
           'Name',
           'Country',
@@ -195,7 +187,7 @@ export async function GET(request: NextRequest) {
           'OPay Account',
           'BVN',
           'Bank Name',
-          'Acount Name',
+          'Account Name',
           'Account Number',
           'HR Agency',
           'BA',
@@ -203,9 +195,10 @@ export async function GET(request: NextRequest) {
           'Email'
         ]
         
-        const row2 = worksheet.getRow(2)
+        // Add headers row (row 1)
+        const headerRow = worksheet.getRow(1)
         headers.forEach((header, index) => {
-          const cell = row2.getCell(index + 1)
+          const cell = headerRow.getCell(index + 1)
           cell.value = header
           cell.alignment = {
             vertical: 'middle',
@@ -214,111 +207,22 @@ export async function GET(request: NextRequest) {
           }
         })
         
-        // Add sample data row (row 3)
-        const row3 = worksheet.getRow(3)
-        row3.getCell(1).value = 1 // S/N
-        row3.getCell(2).value = 'Month'
-        row3.getCell(3).value = 'Active' // Current month status
-        row3.getCell(4).value = 'Active' // Next month status
-        row3.getCell(5).value = 'BRC-8002' // Staff ID
-        row3.getCell(6).value = 'WGO' // Name
-        row3.getCell(7).value = 'Nigeria' // Country
-        row3.getCell(8).value = 'Lagos' // State
-        row3.getCell(9).value = 'Lagos' // City
-        row3.getCell(10).value = '' // Region
-        row3.getCell(11).value = 'BR Digital Finance' // Business Line
-        row3.getCell(12).value = 'Collection Officer' // Position verify (coe)
-        row3.getCell(13).value = '2025-04-24 00:00:00' // Resumption Date
-        row3.getCell(14).value = 'Active' // Exit Date
-        row3.getCell(15).value = 26 // Working Days
-        row3.getCell(16).value = 26 // Worked Days
-        row3.getCell(17).value = 80000 // Basic Salary before Verify(coe)
-        row3.getCell(18).value = '' // basic Salary adjustment difference
-        row3.getCell(19).value = 120000 // Target Performance Bonus before Verify(coe)
-        row3.getCell(20).value = '' // HMO
-        row3.getCell(21).value = 80000 // This Month's Gross
-        row3.getCell(22).value = 0 // Overtime Income (OI)
-        row3.getCell(23).value = 0 // Communication Allowance (CA)
-        row3.getCell(24).value = 0 // Transportation Allowance (TA)
-        row3.getCell(25).value = 0 // Outstanding Income (OI)
-        row3.getCell(26).value = 0 // Performance Bonus (PB)
-        row3.getCell(27).value = 28000 // Basic
-        row3.getCell(28).value = 20000 // Housing
-        row3.getCell(29).value = 16000 // Transport
-        row3.getCell(30).value = 18000 // Other Allowance
-        row3.getCell(31).value = 26000 // Final Gross This Month (Salary + OI + CA + TA + OI)
-        row3.getCell(32).value = 80000 // Final Gross Perfomance Bonus This Month
-        row3.getCell(33).value = 28000 // Final Gross Income This Month (Salary, OI, CA, TA, OI & PB)
-        row3.getCell(34).value = 108000 // Gross Monthly (Salary, OI, CA, TA, OI) for CRS Purpose
-        row3.getCell(35).value = 75680 // Gross Performance Bonus for CRS Purpose
-        row3.getCell(36).value = 103680 // Consolidated Relief Allowance (Salary, OI, CA, TA, OI)
-        row3.getCell(37).value = 31802.6666666667 // Consolidated Relief Allowance (Salary, OI, CA, TA, OI + Perfomance Bonus)
-        row3.getCell(38).value = 37402.6666666667 // Employee Pension Deduction
-        row3.getCell(39).value = 4320 // Total Non-Taxable Income & Tax Exempt Item
-        row3.getCell(40).value = 4320 // Total Reliefs and Deductions (Salary, OI, CA, TA, OI)
-        row3.getCell(41).value = 36122.6666666667 // Total Reliefs and Deductions (Salary, OI, CA, TA, OI & PB)
-        row3.getCell(42).value = 41722.6666666667 // Taxable Income - (Salary, OI, CA, TA, OI)
-        row3.getCell(43).value = 43877.3333333333 // Taxable Income - (Salary, OI, CA, TA, OI & PB)
-        row3.getCell(44).value = 66277.3333333333 // Tax Payable This Month (Salary, OI, CA, TA OI)
-        row3.getCell(45).value = 3826.50666666667 // Tax Payable This Month (Salary, OI, CA, TA, OI & PB)
-        row3.getCell(46).value = 6941.6 // Performance Bonus Tax
-        row3.getCell(47).value = 3115.09333333333 // Net (Salary, OI, CA, TA, OI)
-        row3.getCell(48).value = 71853.5 // Net Performance Bonus
-        row3.getCell(49).value = 24884.91 // Penalty & Deductions (After Tax)
-        row3.getCell(50).value = 96738.41 // Total Net (Salary, OI, CA, TA, OI & PB)
-        row3.getCell(51).value = 5400 // Employer Pension Contribution
-        row3.getCell(52).value = 1080 // ECA
-        row3.getCell(53).value = 5600 // Management Fees
-        row3.getCell(54).value = 420 // VAT on Management Fees
-        row3.getCell(55).value = 121580 // Total Cost
-        row3.getCell(56).value = 280 // WHT on Management Fee
-        row3.getCell(57).value = 121300 // Sum Payable
-        row3.getCell(58).value = 78.43 // Total Cost($)
-        row3.getCell(59).value = '' // active or not
-        row3.getCell(60).value = 10000 // Pay OPay
-        row3.getCell(61).value = 86738.41 // Bank Payment
-        row3.getCell(62).value = 'Raphael Ihenyen' // Submitter
-        row3.getCell(63).value = '905 744 2834' // OPay Account
-        row3.getCell(64).value = 22362503421 // BVN
-        row3.getCell(65).value = 'WGO' // Bank Name
-        row3.getCell(66).value = 'First bank' // Acount Name
-        row3.getCell(67).value = 3060000000 // Account Number
-        row3.getCell(68).value = 'Isurf' // HR Agency
-        row3.getCell(69).value = 0 // BA
-        row3.getCell(70).value = 0 // PFA Number
-        row3.getCell(71).value = 'wgo@outlook.com' // Email
-        
-        // Style the headers (row 1 and 2)
-        const headerRows = [1, 2]
-        headerRows.forEach(rowNum => {
-          const row = worksheet.getRow(rowNum)
-          row.eachCell((cell) => {
-            cell.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: 'FFFF0000' } // Red color
-            }
-            cell.font = {
-              bold: true,
-              color: { argb: 'FFFFFFFF' } // White text
-            }
-            cell.alignment = { 
-              vertical: 'middle', 
-              horizontal: 'center',
-              wrapText: true
-            }
-            cell.border = {
-              top: { style: 'thin' },
-              left: { style: 'thin' },
-              bottom: { style: 'thin' },
-              right: { style: 'thin' }
-            }
-          })
-        })
-        
-        // Style the sample data row
-        const dataRow = worksheet.getRow(3)
-        dataRow.eachCell((cell) => {
+        // Style the header row
+        headerRow.eachCell((cell) => {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FF4472C4' } // Blue color instead of red
+          }
+          cell.font = {
+            bold: true,
+            color: { argb: 'FFFFFFFF' } // White text
+          }
+          cell.alignment = { 
+            vertical: 'middle', 
+            horizontal: 'center',
+            wrapText: true
+          }
           cell.border = {
             top: { style: 'thin' },
             left: { style: 'thin' },
@@ -327,12 +231,172 @@ export async function GET(request: NextRequest) {
           }
         })
         
-        // Set column widths
-        const columnWidths = [8, 30, 30, 15, 25, 15, 15, 15, 15, 20, 20, 20, 15, 15, 15, 20, 20, 20, 15, 20, 20, 20, 20, 20, 20, 15, 15, 15, 15, 25, 25, 30, 30, 25, 30, 30, 25, 30, 30, 30, 25, 25, 30, 30, 20, 25, 20, 25, 25, 20, 15, 20, 20, 15, 20, 15, 15, 15, 15, 15, 20, 15, 15, 20, 20, 15, 15, 10, 10, 25]
+        // Add sample data row (row 2)
+        const sampleRow = worksheet.getRow(2)
+        sampleRow.getCell(1).value = 1 // S/N
+        sampleRow.getCell(2).value = currentMonth // Just the month name (e.g., "January")
+        sampleRow.getCell(3).value = 'BRC-8002' // Staff ID
+        sampleRow.getCell(4).value = 'WGO' // Name
+        sampleRow.getCell(5).value = 'Nigeria' // Country
+        sampleRow.getCell(6).value = 'Lagos' // State
+        sampleRow.getCell(7).value = 'Lagos' // City
+        sampleRow.getCell(8).value = '' // Region
+        sampleRow.getCell(9).value = 'BR Digital Finance' // Business Line
+        sampleRow.getCell(10).value = 'Collection Officer' // Position verify (coe)
+        sampleRow.getCell(11).value = '2025-04-24 00:00:00' // Resumption Date
+        sampleRow.getCell(12).value = 'Active' // Exit Date
+        sampleRow.getCell(13).value = 26 // Working Days
+        sampleRow.getCell(14).value = 26 // Worked Days
+        sampleRow.getCell(15).value = 80000 // Basic Salary before Verify(coe)
+        sampleRow.getCell(16).value = '' // basic Salary adjustment difference
+        sampleRow.getCell(17).value = 120000 // Target Performance Bonus before Verify(coe)
+        sampleRow.getCell(18).value = '' // HMO
+        sampleRow.getCell(19).value = 80000 // This Month's Gross
+        sampleRow.getCell(20).value = 0 // Overtime Income (OI)
+        sampleRow.getCell(21).value = 0 // Communication Allowance (CA)
+        sampleRow.getCell(22).value = 0 // Transportation Allowance (TA)
+        sampleRow.getCell(23).value = 0 // Outstanding Income (OI)
+        sampleRow.getCell(24).value = 0 // Performance Bonus (PB)
+        sampleRow.getCell(25).value = 28000 // Basic
+        sampleRow.getCell(26).value = 20000 // Housing
+        sampleRow.getCell(27).value = 16000 // Transport
+        sampleRow.getCell(28).value = 18000 // Other Allowance
+        sampleRow.getCell(29).value = 26000 // Final Gross This Month (Salary + OI + CA + TA + OI)
+        sampleRow.getCell(30).value = 80000 // Final Gross Perfomance Bonus This Month
+        sampleRow.getCell(31).value = 28000 // Final Gross Income This Month (Salary, OI, CA, TA, OI & PB)
+        sampleRow.getCell(32).value = 108000 // Gross Monthly (Salary, OI, CA, TA, OI) for CRS Purpose
+        sampleRow.getCell(33).value = 75680 // Gross Performance Bonus for CRS Purpose
+        sampleRow.getCell(34).value = 103680 // Consolidated Relief Allowance (Salary, OI, CA, TA, OI)
+        sampleRow.getCell(35).value = 31802.6666666667 // Consolidated Relief Allowance (Salary, OI, CA, TA, OI + Perfomance Bonus)
+        sampleRow.getCell(36).value = 37402.6666666667 // Employee Pension Deduction
+        sampleRow.getCell(37).value = 4320 // Total Non-Taxable Income & Tax Exempt Item
+        sampleRow.getCell(38).value = 4320 // Total Reliefs and Deductions (Salary, OI, CA, TA, OI)
+        sampleRow.getCell(39).value = 36122.6666666667 // Total Reliefs and Deductions (Salary, OI, CA, TA, OI & PB)
+        sampleRow.getCell(40).value = 41722.6666666667 // Taxable Income - (Salary, OI, CA, TA, OI)
+        sampleRow.getCell(41).value = 43877.3333333333 // Taxable Income - (Salary, OI, CA, TA, OI & PB)
+        sampleRow.getCell(42).value = 66277.3333333333 // Tax Payable This Month (Salary, OI, CA, TA OI)
+        sampleRow.getCell(43).value = 3826.50666666667 // Tax Payable This Month (Salary, OI, CA, TA, OI & PB)
+        sampleRow.getCell(44).value = 6941.6 // Performance Bonus Tax
+        sampleRow.getCell(45).value = 3115.09333333333 // Net (Salary, OI, CA, TA, OI)
+        sampleRow.getCell(46).value = 71853.5 // Net Performance Bonus
+        sampleRow.getCell(47).value = 24884.91 // Penalty & Deductions (After Tax)
+        sampleRow.getCell(48).value = 96738.41 // Total Net (Salary, OI, CA, TA, OI & PB)
+        sampleRow.getCell(49).value = 5400 // Employer Pension Contribution
+        sampleRow.getCell(50).value = 1080 // ECA
+        sampleRow.getCell(51).value = 5600 // Management Fees
+        sampleRow.getCell(52).value = 420 // VAT on Management Fees
+        sampleRow.getCell(53).value = 121580 // Total Cost
+        sampleRow.getCell(54).value = 280 // WHT on Management Fee
+        sampleRow.getCell(55).value = 121300 // Sum Payable
+        sampleRow.getCell(56).value = 78.43 // Total Cost($)
+        sampleRow.getCell(57).value = '' // active or not
+        sampleRow.getCell(58).value = 10000 // Pay OPay
+        sampleRow.getCell(59).value = 86738.41 // Bank Payment
+        sampleRow.getCell(60).value = 'Raphael Ihenyen' // Submitter
+        sampleRow.getCell(61).value = '905 744 2834' // OPay Account
+        sampleRow.getCell(62).value = 22362503421 // BVN
+        sampleRow.getCell(63).value = 'WGO' // Bank Name
+        sampleRow.getCell(64).value = 'First bank' // Account Name
+        sampleRow.getCell(65).value = 3060000000 // Account Number
+        sampleRow.getCell(66).value = 'Isurf' // HR Agency
+        sampleRow.getCell(67).value = 0 // BA
+        sampleRow.getCell(68).value = 0 // PFA Number
+        sampleRow.getCell(69).value = 'wgo@outlook.com' // Email
+        
+        // Style the sample data row
+        sampleRow.eachCell((cell) => {
+          cell.border = {
+            top: { style: 'thin' },
+            left: { style: 'thin' },
+            bottom: { style: 'thin' },
+            right: { style: 'thin' }
+          }
+        })
+        
+        // Set column widths (simplified for cleaner look)
+        const columnWidths = [
+          8,   // A: S/N
+          12,  // B: Month (just month name, so narrower)
+          15,  // C: Staff ID
+          25,  // D: Name
+          12,  // E: Country
+          12,  // F: State
+          12,  // G: City
+          12,  // H: Region
+          15,  // I: Business Line
+          20,  // J: Position verify (coe)
+          18,  // K: Resumption Date
+          15,  // L: Exit Date
+          12,  // M: Working Days
+          12,  // N: Worked Days
+          20,  // O: Basic Salary before Verify(coe)
+          20,  // P: basic Salary adjustment difference
+          20,  // Q: Target Performance Bonus before Verify(coe)
+          12,  // R: HMO
+          15,  // S: This Month's Gross
+          15,  // T: Overtime Income (OI)
+          20,  // U: Communication Allowance (CA)
+          20,  // V: Transportation Allowance (TA)
+          20,  // W: Outstanding Income (OI)
+          20,  // X: Performance Bonus (PB)
+          12,  // Y: Basic
+          12,  // Z: Housing
+          12,  // AA: Transport
+          15,  // AB: Other Allowance
+          25,  // AC: Final Gross This Month (Salary + OI + CA + TA + OI)
+          25,  // AD: Final Gross Performance Bonus This Month
+          30,  // AE: Final Gross Income This Month (Salary, OI, CA, TA, OI & PB)
+          30,  // AF: Gross Monthly (Salary, OI, CA, TA, OI) for CRS Purpose
+          25,  // AG: Gross Performance Bonus for CRS Purpose
+          30,  // AH: Consolidated Relief Allowance (Salary, OI, CA, TA, OI)
+          30,  // AI: Consolidated Relief Allowance (Salary, OI, CA, TA, OI + Performance Bonus)
+          25,  // AJ: Employee Pension Deduction
+          30,  // AK: Total Non-Taxable Income & Tax Exempt Item
+          30,  // AL: Total Reliefs and Deductions (Salary, OI, CA, TA, OI)
+          30,  // AM: Total Reliefs and Deductions (Salary, OI, CA, TA, OI & PB)
+          25,  // AN: Taxable Income - (Salary, OI, CA, TA, OI)
+          25,  // AO: Taxable Income - (Salary, OI, CA, TA, OI & PB)
+          30,  // AP: Tax Payable This Month (Salary, OI, CA, TA OI)
+          30,  // AQ: Tax Payable This Month (Salary, OI, CA, TA, OI & PB)
+          20,  // AR: Performance Bonus Tax
+          20,  // AS: Net (Salary, OI, CA, TA, OI)
+          20,  // AT: Net Performance Bonus
+          25,  // AU: Penalty & Deductions (After Tax)
+          25,  // AV: Total Net (Salary, OI, CA, TA, OI & PB)
+          20,  // AW: Employer Pension Contribution
+          12,  // AX: ECA
+          15,  // AY: Management Fees
+          15,  // AZ: VAT on Management Fees
+          12,  // BA: Total Cost
+          15,  // BB: WHT on Management Fee
+          12,  // BC: Sum Payable
+          12,  // BD: Total Cost($)
+          12,  // BE: active or not
+          12,  // BF: Pay OPay
+          15,  // BG: Bank Payment
+          15,  // BH: Submitter
+          15,  // BI: OPay Account
+          15,  // BJ: BVN
+          15,  // BK: Bank Name
+          15,  // BL: Account Name
+          15,  // BM: Account Number
+          12,  // BN: HR Agency
+          8,   // BO: BA
+          12,  // BP: PFA Number
+          25   // BQ: Email
+        ]
+        
         columnWidths.forEach((width, index) => {
           const column = worksheet.getColumn(index + 1)
           column.width = width
         })
+        
+        // Format numeric columns for better readability
+        const numericColumns = [13, 14, 15, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 58, 59, 62, 65];
+        numericColumns.forEach(colIndex => {
+          const column = worksheet.getColumn(colIndex);
+          column.numFmt = '#,##0.00';
+        });
         
         break
         
@@ -344,7 +408,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Add instructions for both templates
-    const instructionsStartRow = templateType === 'BLUERIDGE' ? 4 : 3
+    const instructionsStartRow = templateType === 'BLUERIDGE' ? 3 : 3
     
     if (templateType === 'ISURF_STANDARD') {
       worksheet.getRow(instructionsStartRow).values = [`${templateType} PAYROLL TEMPLATE INSTRUCTIONS:`]
@@ -369,36 +433,42 @@ export async function GET(request: NextRequest) {
         }
       }
     } else if (templateType === 'BLUERIDGE') {
-      // Add instructions for BLUERIDGE template
+      // Add instructions for BLUERIDGE template - starting at row 3
       const instructionRow = worksheet.getRow(instructionsStartRow)
       instructionRow.getCell(1).value = `${templateType} PAYROLL TEMPLATE INSTRUCTIONS:`
-      instructionRow.getCell(1).font = { bold: true, color: { argb: 'FF0000FF' } } // Blue text
+      instructionRow.getCell(1).font = { bold: true, color: { argb: 'FF2E75B6' } } // Blue text
+      instructionRow.getCell(1).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFF2F2F2' } // Light gray background
+      }
       
       const instructions = [
-        '1. Fill in employee data starting from row 3',
+        '1. Fill in employee data starting from row 2 (below the header)',
         '2. Do not modify column headers or their order',
-        '3. For "Resumption Date" and "Exit Date", use format: YYYY-MM-DD HH:MM:SS',
-        '4. For "Exit Date", use "Active" for current employees',
-        '5. Update "Staff ID" column with correct employee IDs',
-        '6. Save as Excel (.xlsx) format for upload',
-        '7. Delete these instruction rows before uploading the payroll'
+        '3. For "Resumption Date", use format: YYYY-MM-DD HH:MM:SS',
+        '4. For "Exit Date", use "Active" for current employees or date in same format',
+        '5. "Month" column (Column B) should contain just the month name (e.g., "January")',
+        '6. Update "Staff ID" column with correct employee IDs',
+        '7. Required columns: Staff ID, Name, Basic Salary, Housing, Transport, Other Allowance, etc.',
+        '8. Save as Excel (.xlsx) format for upload',
+        '9. Delete these instruction rows before uploading the payroll'
       ]
       
       instructions.forEach((instruction, index) => {
         const row = worksheet.getRow(instructionsStartRow + index + 1)
         row.getCell(1).value = instruction
         row.getCell(1).font = { italic: true }
+        row.getCell(1).fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFF9F9F9' } // Very light gray
+        }
       })
-    }
-
-    // Freeze the header rows
-    if (templateType === 'BLUERIDGE') {
+      
+      // Freeze the header row (row 1)
       worksheet.views = [
-        { state: 'frozen', xSplit: 0, ySplit: 2 } // Freeze first 2 rows
-      ]
-    } else {
-      worksheet.views = [
-        { state: 'frozen', xSplit: 0, ySplit: 1 } // Freeze first row
+        { state: 'frozen', xSplit: 0, ySplit: 1 }
       ]
     }
 
@@ -407,7 +477,7 @@ export async function GET(request: NextRequest) {
 
     // Offer both CSV and Excel formats
     if (format === 'csv') {
-      // Create CSV content - simplified for BLUERIDGE due to complex structure
+      // Create CSV content
       let csvContent = ''
       
       if (templateType === 'ISURF_STANDARD') {
@@ -416,40 +486,152 @@ export async function GET(request: NextRequest) {
         const sampleRow = sampleValues.slice(1).join(',')
         csvContent = `${headers}\n${sampleRow}`
       } else {
-        // For BLUERIDGE, create a simplified CSV with key columns
-        const keyHeaders = [
+        // For BLUERIDGE CSV, include all columns
+        const headers = [
+          'S/N',
+          'Month',
           'Staff ID',
           'Name',
+          'Country',
+          'State',
+          'City',
+          'Region',
+          'Business Line',
+          'Position verify (coe)',
+          'Resumption Date',
+          'Exit Date',
           'Working Days',
           'Worked Days',
           'Basic Salary before Verify(coe)',
+          'basic Salary adjustment difference',
+          'Target Performance Bonus before Verify(coe)',
+          'HMO',
+          'This Month\'s Gross',
+          'Overtime Income (OI)',
+          'Communication Allowance (CA)',
+          'Transportation Allowance (TA)',
+          'Outstanding Income (OI)',
+          'Performance Bonus (PB)',
+          'Basic',
           'Housing',
           'Transport',
           'Other Allowance',
+          'Final Gross This Month (Salary + OI + CA + TA + OI)',
+          'Final Gross Perfomance Bonus This Month',
           'Final Gross Income This Month (Salary, OI, CA, TA, OI & PB)',
-          'Tax Payable This Month (Salary, OI, CA, TA, OI & PB)',
+          'Gross Monthly (Salary, OI, CA, TA, OI) for CRS Purpose',
+          'Gross Performance Bonus for CRS Purpose',
+          'Consolidated Relief Allowance (Salary, OI, CA, TA, OI)',
+          'Consolidated Relief Allowance (Salary, OI, CA, TA, OI + Perfomance Bonus)',
           'Employee Pension Deduction',
+          'Total Non-Taxable Income & Tax Exempt Item',
+          'Total Reliefs and Deductions (Salary, OI, CA, TA, OI)',
+          'Total Reliefs and Deductions (Salary, OI, CA, TA, OI & PB)',
+          'Taxable Income - (Salary, OI, CA, TA, OI)',
+          'Taxable Income - (Salary, OI, CA, TA, OI & PB)',
+          'Tax Payable This Month (Salary, OI, CA, TA OI)',
+          'Tax Payable This Month (Salary, OI, CA, TA, OI & PB)',
+          'Performance Bonus Tax',
+          'Net (Salary, OI, CA, TA, OI)',
+          'Net Performance Bonus',
+          'Penalty & Deductions (After Tax)',
           'Total Net (Salary, OI, CA, TA, OI & PB)',
+          'Employer Pension Contribution',
+          'ECA',
+          'Management Fees',
+          'VAT on Management Fees',
+          'Total Cost',
+          'WHT on Management Fee',
+          'Sum Payable',
+          'Total Cost($)',
+          'active or not',
+          'Pay OPay',
+          'Bank Payment',
+          'Submitter',
+          'OPay Account',
+          'BVN',
+          'Bank Name',
+          'Account Name',
+          'Account Number',
+          'HR Agency',
+          'BA',
+          'PFA Number',
           'Email'
         ]
         
         const sampleData = [
-          'BRC-Okash-9002',
-          'Olatubosun Iyabo Victoria',
+          '1',
+          currentMonth,
+          'BRC-8002',
+          'WGO',
+          'Nigeria',
+          'Lagos',
+          'Lagos',
+          '',
+          'BR Digital Finance',
+          'Collection Officer',
+          '2025-04-24 00:00:00',
+          'Active',
           '26',
           '26',
           '80000',
+          '',
+          '120000',
+          '',
+          '80000',
+          '0',
+          '0',
+          '0',
+          '0',
+          '0',
+          '28000',
           '20000',
           '16000',
           '18000',
+          '26000',
+          '80000',
           '28000',
-          '3826.50666666667',
+          '108000',
+          '75680',
+          '103680',
+          '31802.6666666667',
           '37402.6666666667',
+          '4320',
+          '4320',
+          '36122.6666666667',
+          '41722.6666666667',
+          '43877.3333333333',
+          '66277.3333333333',
+          '3826.50666666667',
+          '6941.6',
+          '3115.09333333333',
+          '71853.5',
+          '24884.91',
           '96738.41',
-          'Victoriaiyabo1994@outlook.com'
+          '5400',
+          '1080',
+          '5600',
+          '420',
+          '121580',
+          '280',
+          '121300',
+          '78.43',
+          '',
+          '10000',
+          '86738.41',
+          'Raphael Ihenyen',
+          '905 744 2834',
+          '22362503421',
+          'WGO',
+          'First bank',
+          '3060000000',
+          'Isurf',
+          '0',
+          '0',
+          'wgo@outlook.com'
         ]
         
-        csvContent = `${keyHeaders.join(',')}\n${sampleData.join(',')}`
+        csvContent = `${headers.join(',')}\n${sampleData.join(',')}`
       }
       
       const response = new NextResponse(csvContent, {
@@ -485,15 +667,4 @@ export async function GET(request: NextRequest) {
     console.error('Error generating payroll template:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }
-}
-
-// Helper function to get next month
-function getNextMonth(currentMonth: string): string {
-  const months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
-  ]
-  const currentIndex = months.indexOf(currentMonth)
-  const nextIndex = (currentIndex + 1) % 12
-  return months[nextIndex]
 }
