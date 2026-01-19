@@ -200,9 +200,13 @@ export const processIsurfStandardTemplate = {
       const row = data[index]
       const displayRowNumber = index + 3
       
+      // Declare variables at the loop level so they're accessible in both try and catch blocks
+      let rawName = ''
+      let rawEmail = ''
+      
       try {
-        const rawName = getCell(row, 'Name', canonicalMap)?.toString().trim() || ''
-        const rawEmail = getCell(row, 'EMAIL', canonicalMap)?.toString().trim() || ''
+        rawName = getCell(row, 'Name', canonicalMap)?.toString().trim() || ''
+        rawEmail = getCell(row, 'EMAIL', canonicalMap)?.toString().trim() || ''
         
         const missingCols = templateConfig.requiredColumns.filter((col) => {
           const v = getCell(row, col, canonicalMap)
@@ -527,6 +531,7 @@ export const processIsurfStandardTemplate = {
           ...row,
           ROW_NUMBER: displayRowNumber,
           ERROR_MESSAGE: message,
+          // Use the rawName and rawEmail variables that are now accessible
           STAFF_NAME: rawName || 'Unknown',
           STAFF_ID: '',
           STAFF_EMAIL: rawEmail || '',
