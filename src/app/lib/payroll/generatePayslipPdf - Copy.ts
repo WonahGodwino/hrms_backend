@@ -1,6 +1,9 @@
 // src/app/lib/payroll/generatePayslipPdf.ts
 import PDFDocument from 'pdfkit'
-import type { GeneratePayslipInput, TemplateType } from './types'
+import { mkdir } from 'fs/promises'
+import fs from 'fs'
+import path from 'path'
+import type { GeneratePayslipInput } from './types'
 
 function formatCurrency(n: number) {
   const safe = Number.isFinite(n) ? n : 0
@@ -15,65 +18,12 @@ function getMonthName(monthNumber: number): string {
   return months[monthNumber - 1] || 'Unknown'
 }
 
-interface PayslipData {
-  basicSalary: number
-  housingAllowance: number
-  transportAllowance: number
-  transportationAllowance: number
-  otherAllowances: number
-  grossPay: number
-  payee: number
-  pension: number
-  netPay: number
-  daysInMonth: number
-  daysWorked: number
-  bonusKPI?: number
-  deductions?: number
-}
-
-function preparePayslipData(payroll: any, templateType: TemplateType = 'ISURF_STANDARD'): PayslipData {
-  if (templateType === 'BLUERIDGE') {
-    return {
-      basicSalary: payroll.basicSalary || 0,
-      housingAllowance: payroll.housingAllowance || 0,
-      transportAllowance: payroll.transportAllowance || 0,
-      transportationAllowance: 0,
-      otherAllowances: payroll.otherAllowances || 0,
-      grossPay: payroll.grossPay || 0,
-      payee: payroll.payee || 0,
-      pension: payroll.pension || 0,
-      netPay: payroll.netPay || 0,
-      daysInMonth: payroll.daysInMonth || 0,
-      daysWorked: payroll.daysWorked || 0,
-      bonusKPI: payroll.bonusKPI || 0,
-      deductions: payroll.deductions || 0
-    }
-  }
-  
-  return {
-    basicSalary: payroll.basicSalary || 0,
-    housingAllowance: payroll.housingAllowance || 0,
-    transportAllowance: payroll.transportAllowance || 0,
-    transportationAllowance: payroll.transportationAllowance || 0,
-    otherAllowances: payroll.otherAllowances || 0,
-    grossPay: payroll.grossPay || 0,
-    payee: payroll.payee || 0,
-    pension: payroll.pension || 0,
-    netPay: payroll.netPay || 0,
-    daysInMonth: payroll.daysInMonth || 0,
-    daysWorked: payroll.daysWorked || 0,
-    bonusKPI: payroll.bonusKPI || 0,
-    deductions: payroll.deductions || 0
-  }
-}
-
 export async function generatePayslipPdf(
   input: GeneratePayslipInput
 ): Promise<{ pdfBuffer: Uint8Array; fileName: string }> {
-  const { staff, payroll, templateType = 'ISURF_STANDARD' } = input
+  const { staff, payroll } = input
 
-  const payslipData = preparePayslipData(payroll, templateType)
-
+  // Generate filename
   const safeMonth = payroll.periodMonth.toString().padStart(2, '0')
   const fileName = `payslip-${staff.staffId}-${safeMonth}-${payroll.periodYear}.pdf`
 
@@ -94,6 +44,7 @@ export async function generatePayslipPdf(
       
       doc.on('error', reject)
 
+      // Header
       doc.rect(0, 0, doc.page.width, 80).fill('#1e3a5f')
       
       doc.fillColor('#ffffff')
@@ -106,14 +57,13 @@ export async function generatePayslipPdf(
         .text('SALARY PAYSLIP', 40, 50)
       
       doc.fillColor('#ffffff')
-        .fontSize(9)
-        .text(`Template: ${templateType === 'BLUERIDGE' ? 'Blueridge' : 'Isurf Standard'}`, 
-              doc.page.width - 220, 25)
+        .fontSize(10)
         .text(`Pay Period: ${getMonthName(payroll.periodMonth)} ${payroll.periodYear}`, 
-              doc.page.width - 220, 40)
+              doc.page.width - 220, 30)
         .text(`Generated: ${new Date().toLocaleDateString('en-NG')}`, 
-              doc.page.width - 220, 55)
+              doc.page.width - 220, 45)
 
+      // Staff Information
       const staffSectionTop = 100
       doc.roundedRect(40, staffSectionTop, doc.page.width - 80, 90, 6)
         .fill('#f3f6fb')
@@ -134,6 +84,7 @@ export async function generatePayslipPdf(
         .text(`Company: ${staff.companyName || 'N/A'}`, 
               doc.page.width / 2 + 10, staffSectionTop + 59)
 
+      // Earnings
       let currentY = staffSectionTop + 115
       
       doc.fontSize(12)
@@ -150,45 +101,24 @@ export async function generatePayslipPdf(
       currentY += 10
 
       const earnings = [
-        { label: 'Basic Salary', value: payslipData.basicSalary },
-        { label: 'Housing Allowance', value: payslipData.housingAllowance },
-        { label: 'Transport Allowance', value: payslipData.transportAllowance },
+        { label: 'Basic Salary', value: payroll.basicSalary },
+        { label: 'Housing Allowance', value: payroll.housingAllowance },
+        { label: 'Transport Allowance', value: payroll.transportAllowance },
+        { label: 'Transportation/Dressing Allowance', value: payroll.transportationAllowance },
+        { label: 'Other Allowances', value: payroll.otherAllowances },
       ]
-
-      if (templateType === 'ISURF_STANDARD' && payslipData.transportationAllowance > 0) {
-        earnings.push({ 
-          label: 'Transportation/Dressing Allowance', 
-          value: payslipData.transportationAllowance 
-        })
-      }
-
-      if (payslipData.otherAllowances > 0) {
-        earnings.push({ 
-          label: templateType === 'BLUERIDGE' ? 'Other Allowances' : 'Other Allowances (Leave, Entertainment, Utility)', 
-          value: payslipData.otherAllowances 
-        })
-      }
-
-      if (payslipData.bonusKPI && payslipData.bonusKPI > 0) {
-        earnings.push({ 
-          label: 'Performance Bonus (KPI)', 
-          value: payslipData.bonusKPI 
-        })
-      }
 
       doc.fontSize(10)
         .fillColor('#000000')
         .font('Helvetica')
 
       earnings.forEach(item => {
-        if (item.value > 0) {
-          doc.text(item.label, 50, currentY)
-          doc.text(formatCurrency(item.value), doc.page.width - 180, currentY, {
-            width: 130,
-            align: 'right'
-          })
-          currentY += 18
-        }
+        doc.text(item.label, 50, currentY)
+        doc.text(formatCurrency(item.value), doc.page.width - 180, currentY, {
+          width: 130,
+          align: 'right'
+        })
+        currentY += 18
       })
 
       currentY += 5
@@ -196,11 +126,12 @@ export async function generatePayslipPdf(
         .font('Helvetica-Bold')
         .fillColor('#0f5132')
         .text('Total Gross Pay', 50, currentY)
-        .text(formatCurrency(payslipData.grossPay), doc.page.width - 180, currentY, {
+        .text(formatCurrency(payroll.grossPay), doc.page.width - 180, currentY, {
           width: 130,
           align: 'right'
         })
 
+      // Deductions
       currentY += 35
       
       doc.fontSize(12)
@@ -217,33 +148,24 @@ export async function generatePayslipPdf(
       currentY += 10
 
       const deductions = [
-        { label: 'PAYE (Tax)', value: payslipData.payee },
-        { label: 'Pension Contribution', value: payslipData.pension },
+        { label: 'PAYE (Tax)', value: payroll.payee },
+        { label: 'Pension Contribution', value: payroll.pension },
       ]
-
-      if (templateType === 'BLUERIDGE' && payslipData.deductions && payslipData.deductions > 0) {
-        deductions.push({ 
-          label: 'Penalty & Other Deductions', 
-          value: payslipData.deductions 
-        })
-      }
 
       doc.fontSize(10)
         .fillColor('#000000')
         .font('Helvetica')
 
       deductions.forEach(item => {
-        if (item.value > 0) {
-          doc.text(item.label, 50, currentY)
-          doc.text(formatCurrency(item.value), doc.page.width - 180, currentY, {
-            width: 130,
-            align: 'right'
-          })
-          currentY += 18
-        }
+        doc.text(item.label, 50, currentY)
+        doc.text(formatCurrency(item.value), doc.page.width - 180, currentY, {
+          width: 130,
+          align: 'right'
+        })
+        currentY += 18
       })
 
-      const totalDeductions = payslipData.payee + payslipData.pension + (payslipData.deductions || 0)
+      const totalDeductions = payroll.payee + payroll.pension
       currentY += 5
       doc.fontSize(11)
         .font('Helvetica-Bold')
@@ -254,6 +176,7 @@ export async function generatePayslipPdf(
           align: 'right'
         })
 
+      // Net Pay
       currentY += 45
       
       doc.roundedRect(40, currentY, doc.page.width - 80, 45, 6)
@@ -264,24 +187,21 @@ export async function generatePayslipPdf(
         .font('Helvetica-Bold')
         .text('NET SALARY PAYABLE', 55, currentY + 13)
       
-      doc.text(formatCurrency(payslipData.netPay), doc.page.width - 200, currentY + 13, {
+      doc.text(formatCurrency(payroll.netPay), doc.page.width - 200, currentY + 13, {
         width: 150,
         align: 'right'
       })
 
+      // Attendance
       currentY += 70
       
       doc.fillColor('#000000')
         .fontSize(10)
         .font('Helvetica')
-        .text(`Working Days in Month: ${payslipData.daysInMonth}`, 50, currentY)
-        .text(`Days Worked: ${payslipData.daysWorked}`, doc.page.width / 2 + 10, currentY)
+        .text(`Working Days in Month: ${payroll.daysInMonth}`, 50, currentY)
+        .text(`Days Worked: ${payroll.daysWorked}`, doc.page.width / 2 + 10, currentY)
 
-      if (payslipData.daysInMonth > 0) {
-        const attendanceRate = (payslipData.daysWorked / payslipData.daysInMonth * 100).toFixed(1)
-        doc.text(`Attendance Rate: ${attendanceRate}%`, doc.page.width - 180, currentY)
-      }
-
+      // Footer
       const footerY = doc.page.height - 40
       
       doc.fontSize(8)
@@ -294,21 +214,11 @@ export async function generatePayslipPdf(
           { align: 'center', width: doc.page.width - 85 }
         )
 
-      doc.fontSize(8)
-        .fillColor('#999999')
-        .text(
-          `Page 1 of 1 • Template: ${templateType}`,
-          30,
-          doc.page.height - 20,
-          { align: 'center', width: doc.page.width - 85 }
-        )
-
       doc.end()
       
-      console.log(`✅ Payslip PDF generated for ${staff.staffId}: ${fileName} (${templateType})`)
+      console.log(`✅ Payslip PDF generated: ${fileName}`)
       
     } catch (error) {
-      console.error('❌ Error generating payslip PDF:', error)
       reject(error)
     }
   })

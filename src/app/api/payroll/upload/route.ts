@@ -3,103 +3,13 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { sendPayrollNotificationEmail } from '@/app/lib/email'
-import ExcelJS from 'exceljs'
+import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
-import { generatePayslipPdf } from '@/app/lib/payroll/generatePayslipPdf'
-import type { ParsedPayrollRow } from '@/app/lib/payroll/types'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
-
-// Helper Functions
-function normalizeHeader(h: string) {
-  return h
-    .toString()
-    .replace(/\s+/g, ' ')
-    .replace(/\n/g, ' ')
-    .trim()
-    .toLowerCase()
-}
-
-function monthNameToNumber(month: string): number {
-  if (!month) return 0
-  const normalized = month.toString().trim().toLowerCase()
-  const months = [
-    'january', 'february', 'march', 'april', 'may', 'june',
-    'july', 'august', 'september', 'october', 'november', 'december'
-  ]
-  const idx = months.indexOf(normalized)
-  if (idx >= 0) return idx + 1
-  const asNumber = Number(normalized)
-  return Number.isFinite(asNumber) ? asNumber : 0
-}
-
-const num = (v: any) =>
-  v === null || v === undefined || v === '' ? 0 : Number(v) || 0
-
-const CANONICAL_HEADERS = [
-  'Name', 'Resumption Date', 'No of Working Days in the Month', 'No of days Worked',
-  'Gross Pay', 'Prorated Gross Pay', 'Basic', 'Housing', 'Transport', 'Dressing',
-  'Leave Allowance', 'Entertainment', 'Utility', 'Salary Of Attendance',
-  "PRORATED GROSS PAY WITH EXTRA ALL'WCE", 'TAXABLE INCOME', 'Consolidated Relief',
-  'Payee', 'Pension', 'Deduction', 'Bonus KPI', 'Net Salary', 'FINAL GROSS',
-  'Medical Contribution', 'Employer Pension', 'NSITF', 'Prorated Sub Total Invoice',
-  'Mgt Fee', 'Vat on Management Fee @7.5%', 'Total Invoice Value', 'EMAIL',
-  'Month', 'MONTH', 'Year', 'YEAR',
-]
-
-const canonicalMap: Record<string, string> = {}
-for (const h of CANONICAL_HEADERS) {
-  canonicalMap[normalizeHeader(h)] = h
-}
-
-const REQUIRED_COLS = [
-  'Gross Pay', 'Basic', 'Housing', 'Transport', 'Dressing', 'Leave Allowance',
-  'Entertainment', 'Utility', 'Payee', 'Pension', 'Deduction', 'Bonus KPI',
-  'Net Salary', 'FINAL GROSS', 'Medical Contribution',
-  'No of Working Days in the Month', 'No of days Worked',
-]
-
-function getCell(row: any, canonical: string) {
-  const normalized = normalizeHeader(canonical)
-  const actualKey = canonicalMap[normalized] || canonical
-  return row[actualKey]
-}
-
-function looksLikePercentageRow(rowObj: any) {
-  for (const col of ['Basic', 'Housing', 'Transport', 'Dressing', 'Leave Allowance', 'Entertainment', 'Utility', 'Medical Contribution']) {
-    const v = getCell(rowObj, col)
-    if (typeof v === 'string' && v.includes('%')) return true
-  }
-  return false
-}
-
-function splitCsvLine(line: string) {
-  const result: string[] = []
-  let cur = ''
-  let inQuotes = false
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
-    if (ch === '"' && line[i + 1] === '"') {
-      cur += '"'
-      i++
-      continue
-    }
-    if (ch === '"') {
-      inQuotes = !inQuotes
-      continue
-    }
-    if (ch === ',' && !inQuotes) {
-      result.push(cur.trim())
-      cur = ''
-      continue
-    }
-    cur += ch
-  }
-  result.push(cur.trim())
-  return result
-}
+import ExcelJS from 'exceljs'
+import { PAYROLL_TEMPLATES, PayrollTemplateType } from '@/app/lib/payroll/templates/types'
+import { processIsurfStandardTemplate } from '@/app/lib/payroll/templates/isurf-standard'
+import { processBlueridgeTemplate } from '@/app/lib/payroll/templates/blueridge'
 
 function getRelativePath(absolutePath: string): string {
   const projectRoot = process.cwd()
@@ -120,17 +30,10 @@ async function ensureUploadDirectories() {
   return { baseDir, uploadsDir, payrollDir }
 }
 
-// Helper function to convert Uint8Array for Prisma
-function toPrismaBytes(data: Uint8Array): any {
-  return data as any
-}
-
-// CORS preflight
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-// POST /api/payroll/upload
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin')
 
@@ -148,12 +51,20 @@ export async function POST(request: NextRequest) {
 
     const formData = await request.formData()
     const file = formData.get('file') as File | null
+    const templateType = formData.get('templateType') as PayrollTemplateType | null
+    const sendEmails = formData.get('sendEmails') === 'true'
+    const companyIdParam = formData.get('companyId') as string | null
     
-    let companyId: string | null = null
+    let companyId: string | null = companyIdParam
 
-    // Determine company based on user role
+    if (!templateType || !PAYROLL_TEMPLATES[templateType]) {
+      return withCors(
+        ApiResponse.error('Valid template type is required', 400),
+        origin
+      )
+    }
+
     if (user.role === 'HR') {
-      // HR can only upload for their own company
       if (!user.companyId) {
         return withCors(
           ApiResponse.error('Company context missing for HR user', 400),
@@ -163,23 +74,18 @@ export async function POST(request: NextRequest) {
       companyId = user.companyId
     } 
     else if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') {
-      // SUPER_ADMIN and ADMIN must select a company
-      const selectedCompanyId = formData.get('companyId') as string | null
-      
-      if (!selectedCompanyId) {
+      if (!companyId) {
         return withCors(
           ApiResponse.error('Company selection is required for administrators', 400),
           origin
         )
       }
-      companyId = selectedCompanyId
 
-      // Validate that user has access to the selected company
       if (user.role === 'ADMIN') {
         const hasAccess = await prisma.userCompany.findFirst({
           where: {
             userId: user.userId,
-            companyId: selectedCompanyId,
+            companyId: companyId,
             role: { in: ['ADMIN', 'ALL'] }
           }
         })
@@ -191,7 +97,6 @@ export async function POST(request: NextRequest) {
           )
         }
       }
-      // SUPER_ADMIN doesn't need access validation - they have access to all companies
     }
 
     if (!companyId) {
@@ -201,7 +106,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Verify company exists and is not archived
     const company = await prisma.company.findFirst({
       where: {
         id: companyId,
@@ -242,572 +146,28 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Parse file into row objects
-    let data: any[] = []
-
-    try {
-      const workbook = new ExcelJS.Workbook()
-
-      if (isCsv) {
-        const csvText = buffer.toString()
-        const lines = csvText.split(/\r?\n/).filter((l) => l.trim())
-        if (!lines.length) throw new Error('Empty CSV file')
-
-        const rawHeaders = splitCsvLine(lines[0])
-        const headers = rawHeaders.map(
-          (h) => canonicalMap[normalizeHeader(h)] || h
+    let processor
+    switch (templateType) {
+      case 'ISURF_STANDARD':
+        processor = processIsurfStandardTemplate
+        break
+      case 'BLUERIDGE':
+        processor = processBlueridgeTemplate
+        break
+      default:
+        return withCors(
+          ApiResponse.error('Unsupported template type', 400),
+          origin
         )
-
-        for (let i = 1; i < lines.length; i++) {
-          const values = splitCsvLine(lines[i])
-          const rowData: any = {}
-          headers.forEach((h, idx) => {
-            rowData[h] = values[idx] ?? ''
-          })
-          data.push(rowData)
-        }
-        if (data[0] && looksLikePercentageRow(data[0])) {
-          data = data.slice(1)
-        }
-      } else {
-        await workbook.xlsx.load(bytes as ArrayBuffer)
-        const worksheet = workbook.worksheets[0]
-        if (!worksheet) throw new Error('No worksheet found in Excel file')
-
-        const headerRow = worksheet.getRow(1)
-        const headers: string[] = []
-        headerRow.eachCell((cell, col) => {
-          const h = String(cell.value || '').trim()
-          headers[col - 1] = canonicalMap[normalizeHeader(h)] || h
-        })
-
-        const row2 = worksheet.getRow(2)
-        const row2Obj: any = {}
-        row2.eachCell((cell, col) => {
-          const header = headers[col - 1]
-          row2Obj[header] = cell.value
-        })
-        const skipRow2 = looksLikePercentageRow(row2Obj)
-
-        worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-          if (rowNumber === 1) return
-          if (skipRow2 && rowNumber === 2) return
-
-          const rowData: any = {}
-          row.eachCell((cell, colNumber) => {
-            const header = headers[colNumber - 1]
-            rowData[header] = cell.value
-          })
-
-          const hasAny = Object.values(rowData).some(
-            (v) => v !== null && v !== ''
-          )
-          if (hasAny) data.push(rowData)
-        })
-      }
-    } catch (err: any) {
-      return withCors(
-        ApiResponse.error(`Error parsing file: ${err.message}`, 400),
-        origin
-      )
     }
 
-    if (!data.length) {
-      return withCors(
-        ApiResponse.error('No payroll data found in the file', 400),
-        origin
-      )
-    }
-
-    // Process rows
-    const results = {
-      successful: 0,
-      failed: 0,
-      payslipsGenerated: 0,
-      payslipsUpdated: 0,
-      emailsSent: 0,
-      emailAttempts: 0,
-      emailFailures: [] as Array<{
-        rowNumber: number
-        email: string
-        error: string
-        staffName: string
-        staffId: string
-      }>,
-      processedRecords: [] as any[],
-      failedRecords: [] as any[],
-      errors: [] as string[],
-    }
-
-    const now = new Date()
-    const defaultMonthName = now.toLocaleString('en-US', { month: 'long' })
-    const defaultYear = now.getFullYear()
-
-    for (let index = 0; index < data.length; index++) {
-      const row = data[index]
-      const displayRowNumber = index + 3
-      let staffRecord = null
-      let payslipFileName = '' // Declare variable at the top level of the loop
-
-      try {
-        const rowData = row as any
-        const rawName = getCell(rowData, 'Name') || ''
-        const name = rawName.toString().trim()
-
-        const rawEmail = getCell(rowData, 'EMAIL') || ''
-        const email = rawEmail.toString().trim()
-
-        if (!name && !email) {
-          const message = 'Missing Name/EMAIL for staff identification'
-          results.failed++
-          results.errors.push(`Row ${displayRowNumber}: ${message}`)
-          results.failedRecords.push({ 
-            ...rowData, 
-            error: message,
-            rowNumber: displayRowNumber,
-            staffName: name || 'Unknown',
-            staffId: '',
-            email: email || '',
-          })
-          continue
-        }
-
-        const missingCols = REQUIRED_COLS.filter((c) => {
-          const v = getCell(rowData, c)
-          return v === undefined || v === null || v === ''
-        })
-
-        if (missingCols.length) {
-          const message = `Missing required column values: ${missingCols.join(', ')}`
-          results.failed++
-          results.errors.push(`Row ${displayRowNumber}: ${message}`)
-          results.failedRecords.push({ 
-            ...rowData, 
-            error: message,
-            rowNumber: displayRowNumber,
-            staffName: name || 'Unknown',
-            staffId: '',
-            email: email || '',
-          })
-          continue
-        }
-
-        // Locate staff record
-        if (email) {
-          staffRecord = await prisma.staffRecord.findUnique({
-            where: {
-              email_companyId: {
-                email,
-                companyId: companyId!,
-              },
-            },
-          })
-        }
-
-        if (!staffRecord && name) {
-          const parts = name.split(' ').filter(Boolean)
-          const firstName = parts[0]
-          const lastName = parts.slice(1).join(' ') || parts[0]
-
-          staffRecord = await prisma.staffRecord.findFirst({
-            where: {
-              companyId: companyId!,
-              isActive: true,
-              OR: [
-                {
-                  AND: [
-                    { firstName: { contains: firstName, mode: 'insensitive' } },
-                    { lastName: { contains: lastName, mode: 'insensitive' } },
-                  ],
-                },
-                {
-                  AND: [
-                    { lastName: { contains: firstName, mode: 'insensitive' } },
-                    { firstName: { contains: lastName, mode: 'insensitive' } },
-                  ],
-                },
-              ],
-            },
-          })
-        }
-
-        if (!staffRecord) {
-          const message = `Staff record not found for ${name || email}. Staff must be pre-registered.`
-          results.failed++
-          results.errors.push(`Row ${displayRowNumber}: ${message}`)
-          results.failedRecords.push({ 
-            ...rowData, 
-            error: message,
-            rowNumber: displayRowNumber,
-            staffName: name || 'Unknown',
-            staffId: '',
-            email: email || '',
-          })
-          continue
-        }
-
-        const monthName = rowData['Month']?.toString() || rowData['MONTH']?.toString() || defaultMonthName
-        const year = parseInt(rowData['Year']?.toString() || rowData['YEAR']?.toString() || defaultYear.toString(), 10)
-        const periodMonth = monthNameToNumber(monthName)
-
-        const grossPay = num(getCell(rowData, 'Gross Pay'))
-        const proratedGrossPay = num(getCell(rowData, 'Prorated Gross Pay'))
-        const basicSalary = num(getCell(rowData, 'Basic'))
-        const housing = num(getCell(rowData, 'Housing'))
-        const transport = num(getCell(rowData, 'Transport'))
-        const dressing = num(getCell(rowData, 'Dressing'))
-        const leaveAllowance = num(getCell(rowData, 'Leave Allowance'))
-        const entertainment = num(getCell(rowData, 'Entertainment'))
-        const utility = num(getCell(rowData, 'Utility'))
-        const payee = num(getCell(rowData, 'Payee'))
-        const pension = num(getCell(rowData, 'Pension'))
-        const deduction = num(getCell(rowData, 'Deduction'))
-        const bonusKPI = num(getCell(rowData, 'Bonus KPI'))
-        const netSalary = num(getCell(rowData, 'Net Salary'))
-        const finalGross = num(getCell(rowData, 'FINAL GROSS'))
-        const medicalContribution = num(getCell(rowData, 'Medical Contribution'))
-        const proratedGrossWithExtra = num(getCell(rowData, "PRORATED GROSS PAY WITH EXTRA ALL'WCE"))
-        const taxableIncome = num(getCell(rowData, 'TAXABLE INCOME'))
-        const consolidatedRelief = num(getCell(rowData, 'Consolidated Relief'))
-        const annualPension = pension * 12
-        const annualGrossPay = grossPay * 12
-        const employerPension = num(getCell(rowData, 'Employer Pension'))
-        const nsitf = num(getCell(rowData, 'NSITF'))
-        const proratedSubTotal = num(getCell(rowData, 'Prorated Sub Total Invoice'))
-        const managementFee = num(getCell(rowData, 'Mgt Fee'))
-        const vatOnManagementFee = num(getCell(rowData, 'Vat on Management Fee @7.5%'))
-        const totalInvoiceValue = num(getCell(rowData, 'Total Invoice Value'))
-        const daysInMonth = num(getCell(rowData, 'No of Working Days in the Month'))
-        const daysWorked = num(getCell(rowData, 'No of days Worked'))
-
-        if (netSalary < 0) {
-          const message = 'Net Salary cannot be negative. Check payroll values.'
-          results.failed++
-          results.errors.push(`Row ${displayRowNumber}: ${message}`)
-          results.failedRecords.push({ 
-            ...rowData, 
-            error: message,
-            rowNumber: displayRowNumber,
-            staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
-            staffId: staffRecord.staffId,
-            email: staffRecord.email,
-          })
-          continue
-        }
-
-        // Get company info
-        const company = await prisma.company.findUnique({
-          where: { id: companyId! },
-          select: { 
-            companyName: true, 
-            email: true, 
-            address: true, 
-            phone: true,
-            logo: true as any,
-            taxId: true as any,
-          }
-        })
-
-        // Create/update payroll record
-        const payrollRecord = await prisma.payroll.upsert({
-          where: {
-            staffRecordId_month_year_companyId: {
-              staffRecordId: staffRecord.id,
-              month: monthName,
-              year,
-              companyId: companyId!,
-            },
-          },
-          update: {
-            companyId: companyId!,
-            month: monthName,
-            year,
-            grossPay,
-            proratedGrossPay,
-            basicSalary,
-            housing,
-            transport,
-            dressing,
-            leaveAllowance,
-            entertainment,
-            utility,
-            proratedGrossWithExtra,
-            annualPension,
-            annualGrossPay,
-            consolidatedRelief,
-            taxableIncome,
-            deductions: deduction,
-            payee,
-            pensionDeduction: pension,
-            bonusKPI,
-            netSalary,
-            finalGross,
-            medicalContribution,
-            employerPension,
-            nsitf,
-            proratedSubTotal,
-            managementFee,
-            vatOnManagementFee,
-            totalInvoiceValue,
-            status: 'PROCESSED',
-            uploadedBy: user.userId,
-            updatedAt: new Date(),
-          },
-          create: {
-            companyId: companyId!,
-            staffRecordId: staffRecord.id,
-            month: monthName,
-            year,
-            grossPay,
-            proratedGrossPay,
-            basicSalary,
-            housing,
-            transport,
-            dressing,
-            leaveAllowance,
-            entertainment,
-            utility,
-            proratedGrossWithExtra,
-            annualPension,
-            annualGrossPay,
-            consolidatedRelief,
-            taxableIncome,
-            deductions: deduction,
-            payee,
-            pensionDeduction: pension,
-            bonusKPI,
-            netSalary,
-            finalGross,
-            medicalContribution,
-            employerPension,
-            nsitf,
-            proratedSubTotal,
-            managementFee,
-            vatOnManagementFee,
-            totalInvoiceValue,
-            status: 'PROCESSED',
-            uploadedBy: user.userId,
-          },
-        })
-
-        // Check if payslip already exists
-        const existingPayslip = await prisma.payslip.findFirst({
-          where: {
-            staffRecordId: staffRecord.id,
-            month: monthName,
-            year,
-            companyId: companyId!,
-          },
-        })
-
-        let payslipId: string = ''
-        let isUpdate = false
-
-        // Prepare data for PDF
-        const parsedRow: ParsedPayrollRow = {
-          rowNumber: displayRowNumber,
-          staffId: staffRecord.staffId,
-          email: staffRecord.email,
-          fullName: `${staffRecord.firstName} ${staffRecord.lastName}`,
-          periodMonth,
-          periodYear: year,
-          basicSalary,
-          housingAllowance: housing,
-          transportAllowance: transport,
-          transportationAllowance: dressing,
-          otherAllowances: leaveAllowance + entertainment + utility,
-          grossPay,
-          payee,
-          pension,
-          netPay: netSalary,
-          daysInMonth,
-          daysWorked,
-          rawRow: rowData,
-        }
-
-        // Generate PDF and save to database
-        try {
-          const pdfResult = await generatePayslipPdf({
-            staff: {
-              staffId: staffRecord.staffId,
-              firstName: staffRecord.firstName,
-              lastName: staffRecord.lastName,
-              email: staffRecord.email,
-              department: staffRecord.department || '',
-              designation: staffRecord.position || '',
-              position: staffRecord.position || '',
-              companyName: company?.companyName || '',
-              companyAddress: company?.address || '',
-              companyPhone: company?.phone || '',
-              companyLogo: company?.logo || '',
-              companyTaxId: company?.taxId || '',
-            },
-            payroll: parsedRow,
-          })
-
-          const pdfBuffer = pdfResult.pdfBuffer
-          payslipFileName = pdfResult.fileName // Assign to the outer variable
-          const fileSize = pdfBuffer.length
-
-          results.payslipsGenerated++
-
-          // Prepare payslip data with proper type casting
-          const payslipData = {
-            payrollId: payrollRecord.id,
-            fileName: payslipFileName,
-            fileData: toPrismaBytes(pdfBuffer),
-            fileType: 'application/pdf',
-            fileSize: fileSize,
-            grossPay,
-            netPay: netSalary,
-            filePath: `/database/payslips/${staffRecord.staffId}/${year}/${monthName}/${payslipFileName}`,
-          }
-
-          if (existingPayslip) {
-            isUpdate = true
-            payslipId = existingPayslip.id
-            
-            await prisma.payslip.update({
-              where: { id: existingPayslip.id },
-              data: {
-                ...payslipData,
-                updatedBy: user.userId,
-                updatedAt: new Date(),
-              },
-            })
-
-            results.payslipsUpdated++
-            console.log(`✅ Updated payslip for ${staffRecord.staffId}: ${payslipFileName} (${fileSize} bytes)`)
-          } else {
-            const newPayslip = await prisma.payslip.create({
-              data: {
-                ...payslipData,
-                staffRecordId: staffRecord.id,
-                companyId: companyId!,
-                month: monthName,
-                year,
-                createdBy: user.userId,
-                updatedBy: user.userId,
-              },
-            })
-            
-            payslipId = newPayslip.id
-            console.log(`✅ Created payslip for ${staffRecord.staffId}: ${payslipFileName} (${fileSize} bytes)`)
-          }
-
-          // Send email notification
-          results.emailAttempts++
-          try {
-            if (!payslipId) {
-              const payslip = await prisma.payslip.findFirst({
-                where: {
-                  staffRecordId: staffRecord.id,
-                  month: monthName,
-                  year,
-                  companyId: companyId!,
-                },
-              })
-              
-              if (payslip) {
-                payslipId = payslip.id
-              } else {
-                throw new Error('Payslip not found for email notification')
-              }
-            }
-
-            const staffDataForEmail = {
-              id: staffRecord.id,
-              companyId: staffRecord.companyId,
-              firstName: staffRecord.firstName,
-              lastName: staffRecord.lastName,
-              email: staffRecord.email,
-              staffId: staffRecord.staffId,
-              department: staffRecord.department || null,
-              position: staffRecord.position || null,
-              isRegistered: staffRecord.isRegistered,
-            }
-
-            const payrollDataForEmail = {
-              id: payslipId,
-              month: monthName,
-              year,
-              netSalary,
-              isUpdate: isUpdate,
-            }
-
-            const emailResult = await sendPayrollNotificationEmail(staffDataForEmail, payrollDataForEmail)
-            
-            if (emailResult.success) {
-              results.emailsSent++
-            } else {
-              throw new Error(emailResult.error || 'Email sending failed')
-            }
-          } catch (err: any) {
-            const msg = `Email sending failed - ${err.message}`
-            results.errors.push(`Row ${displayRowNumber}: ${msg}`)
-            results.emailFailures.push({
-              rowNumber: displayRowNumber,
-              email: staffRecord.email,
-              error: msg,
-              staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
-              staffId: staffRecord.staffId,
-            })
-          }
-
-          results.successful++
-          results.processedRecords.push({
-            staffId: staffRecord.staffId,
-            staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
-            netSalary,
-            status: isUpdate ? 'UPDATED' : 'PROCESSED',
-            emailSent: true,
-            emailStatus: results.emailFailures.some((f) => f.rowNumber === displayRowNumber) ? 'FAILED' : 'SENT',
-            payslipId: payslipId,
-            fileName: payslipFileName,
-          })
-
-        } catch (err: any) { // This catches PDF generation errors
-          const message = `Failed to generate payslip - ${err.message}`
-          console.error(`❌ ${message}`, err)
-          results.failed++
-          results.errors.push(`Row ${displayRowNumber}: ${message}`)
-          results.failedRecords.push({ 
-            ...rowData, 
-            error: message,
-            rowNumber: displayRowNumber,
-            staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
-            staffId: staffRecord.staffId,
-            email: staffRecord.email,
-          })
-          continue
-        }
-
-      } catch (err: any) {
-        const message = err?.message || 'Unknown error'
-        results.failed++
-        results.errors.push(`Row ${displayRowNumber}: ${message}`)
-        results.failedRecords.push({ 
-          ...(row as any), 
-          error: message,
-          rowNumber: displayRowNumber,
-          staffName: staffRecord ? `${staffRecord.firstName} ${staffRecord.lastName}` : 'Unknown',
-          staffId: staffRecord?.staffId || '',
-          email: staffRecord?.email || '',
-        })
-      }
-    }
-
-    console.log('[PAYROLL_UPLOAD] Finished row processing', {
-      successful: results.successful,
-      failed: results.failed,
-      payslipsGenerated: results.payslipsGenerated,
-      payslipsUpdated: results.payslipsUpdated,
-      emailsSent: results.emailsSent,
-      emailAttempts: results.emailAttempts,
-      emailFailures: results.emailFailures.length,
-      userRole: user.role,
-      companyId: companyId,
-    })
+    const results = await processor.processFile(
+      buffer,
+      fileExtension || '',
+      companyId,
+      user,
+      sendEmails
+    )
 
     let processedFilePath: string | null = null
 
@@ -817,18 +177,11 @@ export async function POST(request: NextRequest) {
 
       const headersSet = new Set<string>()
       
-      if (data.length > 0 && data[0]) {
-        Object.keys(data[0]).forEach(k => headersSet.add(k))
-      }
-      
-      headersSet.add('ROW_NUMBER')
-      headersSet.add('ERROR_MESSAGE')
-      headersSet.add('STAFF_NAME')
-      headersSet.add('STAFF_ID')
-      headersSet.add('STAFF_EMAIL')
+      results.failedRecords.forEach(record => {
+        Object.keys(record).forEach(k => headersSet.add(k))
+      })
 
       const headers = Array.from(headersSet)
-
       failedWorksheet.columns = headers.map((h) => ({
         header: h,
         key: h,
@@ -836,15 +189,7 @@ export async function POST(request: NextRequest) {
       }))
 
       results.failedRecords.forEach((record) => {
-        const rowData: any = { ...record }
-        
-        rowData.ROW_NUMBER = record.rowNumber || 'N/A'
-        rowData.ERROR_MESSAGE = record.error || 'Unknown error'
-        rowData.STAFF_NAME = record.staffName || 'Unknown'
-        rowData.STAFF_ID = record.staffId || ''
-        rowData.STAFF_EMAIL = record.email || ''
-
-        failedWorksheet.addRow(rowData)
+        failedWorksheet.addRow(record)
       })
 
       const headerRow = failedWorksheet.getRow(1)
@@ -864,28 +209,28 @@ export async function POST(request: NextRequest) {
       processedFilePath = getRelativePath(failedFilePath)
     }
 
-    // Save original uploaded file
-    const originalFileName = `payroll-upload-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
+    const originalFileName = `payroll-upload-${Date.now()}-${templateType}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
     const originalFilePath = path.join(payrollDir, originalFileName)
     await writeFile(originalFilePath, buffer)
 
     const relativeOriginalPath = getRelativePath(originalFilePath)
 
-    // Create upload record
     const uploadRecord = await prisma.payrollUpload.create({
       data: {
-        companyId: companyId!,
+        companyId: companyId,
         fileName: file.name,
         filePath: relativeOriginalPath,
         processedFilePath: processedFilePath || null,
         processedFileName: processedFilePath ? path.basename(processedFilePath) : null,
-        totalRecords: data.length,
+        templateType: templateType,
+        sendEmails: sendEmails,
+        totalRecords: results.successful + results.failed,
         successful: results.successful,
         failed: results.failed,
         payslipsGenerated: results.payslipsGenerated > 0 ? results.payslipsGenerated : null,
         payslipsUpdated: results.payslipsUpdated > 0 ? results.payslipsUpdated : null,
-        emailsSent: results.emailsSent > 0 ? results.emailsSent : null,
-        emailAttempts: results.emailAttempts > 0 ? results.emailAttempts : null,
+        emailsSent: sendEmails ? results.emailsSent : null,
+        emailAttempts: sendEmails ? results.emailAttempts : null,
         errors: results.errors,
         uploadedBy: user.userId,
       },
@@ -893,14 +238,16 @@ export async function POST(request: NextRequest) {
 
     const responseData = {
       uploadId: uploadRecord.id,
+      templateType: templateType,
+      sendEmails: sendEmails,
       summary: {
-        totalProcessed: data.length,
+        totalProcessed: results.successful + results.failed,
         successful: results.successful,
         failed: results.failed,
         payslipsGenerated: results.payslipsGenerated,
         payslipsUpdated: results.payslipsUpdated,
-        emailsSent: results.emailsSent,
-        emailAttempts: results.emailAttempts,
+        emailsSent: sendEmails ? results.emailsSent : 0,
+        emailAttempts: sendEmails ? results.emailAttempts : 0,
         emailFailures: results.emailFailures.length,
       },
       failedRecordsCount: results.failedRecords.length,
@@ -915,7 +262,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.log('[PAYROLL_UPLOAD] Completed successfully for uploadId', uploadRecord.id)
+    console.log('[PAYROLL_UPLOAD] Completed successfully for uploadId', uploadRecord.id, {
+      templateType,
+      sendEmails,
+      companyId,
+      userId: user.userId
+    })
 
     return withCors(
       ApiResponse.success(
