@@ -1,4 +1,4 @@
-// src/app/lib/payroll/templates/blueridge.ts - Updated with month handling
+// src/app/lib/payroll/templates/blueridge.ts
 import ExcelJS from 'exceljs'
 import { prisma } from '@/app/lib/db'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
@@ -168,9 +168,8 @@ export const processBlueridgeTemplate = {
       } else {
         const workbook = new ExcelJS.Workbook()
         
-        // Convert Buffer to Uint8Array which ExcelJS accepts
-        const uint8Array = new Uint8Array(buffer)
-        await workbook.xlsx.load(uint8Array)
+        // Use type assertion to bypass TypeScript error
+        await workbook.xlsx.load(buffer as any)
         
         const worksheet = workbook.worksheets[0]
         if (!worksheet) throw new Error('No worksheet found in Excel file')
