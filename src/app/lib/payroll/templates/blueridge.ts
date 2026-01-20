@@ -343,7 +343,7 @@ export const processBlueridgeTemplate = {
           throw new Error(`Staff record not found for ${rawName || rawEmail || staffId}`)
         }
 
-        const payrollRecord = await prisma.payroll.upsert({
+        const payrollRecord = await prisma.payrolls.upsert({
           where: {
             staffRecordId_month_year_companyId: {
               staffRecordId: staffRecord.id,

@@ -121,7 +121,7 @@ model Payroll {
   payslips Payslip[]
 
   @@unique([staffRecordId, month, year, companyId])
-  @@map("payroll")
+  @@map("payrolls")
 }
 
 model Payslip {

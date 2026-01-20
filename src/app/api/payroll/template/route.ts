@@ -292,9 +292,9 @@ export async function GET(request: NextRequest) {
         sampleRow.getCell(57).value = '' // active or not
         sampleRow.getCell(58).value = 10000 // Pay OPay
         sampleRow.getCell(59).value = 86738.41 // Bank Payment
-        sampleRow.getCell(60).value = 'Raphael Ihenyen' // Submitter
+        sampleRow.getCell(60).value = 'Wonah G' // Submitter
         sampleRow.getCell(61).value = '905 744 2834' // OPay Account
-        sampleRow.getCell(62).value = 22362503421 // BVN
+        sampleRow.getCell(62).value = 2200000000 // BVN
         sampleRow.getCell(63).value = 'WGO' // Bank Name
         sampleRow.getCell(64).value = 'First bank' // Account Name
         sampleRow.getCell(65).value = 3060000000 // Account Number
