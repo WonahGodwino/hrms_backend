@@ -84,43 +84,60 @@ model Payroll {
   staffRecordId  String
   month          String
   year           Int
-  grossPay       Decimal? @db.Decimal(18, 2)
-  basicSalary    Decimal? @db.Decimal(18, 2)
-  housing        Decimal? @db.Decimal(18, 2)
-  transport      Decimal? @db.Decimal(18, 2)
-  dressing       Decimal? @db.Decimal(18, 2)
-  leaveAllowance Decimal? @db.Decimal(18, 2)
-  entertainment  Decimal? @db.Decimal(18, 2)
-  utility        Decimal? @db.Decimal(18, 2)
-  otherAllowance Decimal? @db.Decimal(18, 2)  // For Blueridge template
-  payee          Decimal? @db.Decimal(18, 2)
-  pensionDeduction Decimal? @db.Decimal(18, 2)
-  deductions     Decimal? @db.Decimal(18, 2)
-  bonusKPI       Decimal? @db.Decimal(18, 2)
-  netSalary      Decimal? @db.Decimal(18, 2)
-  status         String   @default("PROCESSED")
-  templateType   String?  @default("ISURF_STANDARD") // Optional: track template used
   
-  // Additional fields from original template
+  // Basic salary components
+  grossPay         Decimal? @db.Decimal(18, 2)
+  basicSalary      Decimal? @db.Decimal(18, 2)
+  housing          Decimal? @db.Decimal(18, 2)
+  transport        Decimal? @db.Decimal(18, 2)
+  dressing         Decimal? @db.Decimal(18, 2)
+  leaveAllowance   Decimal? @db.Decimal(18, 2)
+  entertainment    Decimal? @db.Decimal(18, 2)
+  utility          Decimal? @db.Decimal(18, 2)
+  otherAllowance   Decimal? @db.Decimal(18, 2)  // For Blueridge template
+  
+  // Additional salary components from first model
   proratedGrossPay    Decimal? @db.Decimal(18, 2)
+  proratedGrossWithExtra Decimal? @db.Decimal(18, 2)
+  annualPension       Decimal? @db.Decimal(18, 2)
+  annualGrossPay      Decimal? @db.Decimal(18, 2)
+  consolidatedRelief  Decimal? @db.Decimal(18, 2)
+  taxableIncome       Decimal? @db.Decimal(18, 2)
+  
+  // Deductions
+  deductions          Decimal? @db.Decimal(18, 2)
+  payee               Decimal? @db.Decimal(18, 2)
+  pensionDeduction    Decimal? @db.Decimal(18, 2)
+  bonusKPI            Decimal? @db.Decimal(18, 2)
+  
+  // Final calculations
+  netSalary           Decimal? @db.Decimal(18, 2)
   finalGross          Decimal? @db.Decimal(18, 2)
   medicalContribution Decimal? @db.Decimal(18, 2)
+  
+  // Employer contributions
   employerPension     Decimal? @db.Decimal(18, 2)
   nsitf               Decimal? @db.Decimal(18, 2)
+  proratedSubTotal    Decimal? @db.Decimal(18, 2)
   managementFee       Decimal? @db.Decimal(18, 2)
   vatOnManagementFee  Decimal? @db.Decimal(18, 2)
   totalInvoiceValue   Decimal? @db.Decimal(18, 2)
   
-  uploadedBy String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @default(now()) @updatedAt
+  // Status and metadata
+  status         String   @default("PROCESSED")
+  templateType   String?  @default("ISURF_STANDARD") // Optional: track template used
+  uploadedBy     String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
+  // Relations
   company     Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   staffRecord StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+  payslips    Payslip[]
 
-  payslips Payslip[]
-
+  // Indexes and constraints
   @@unique([staffRecordId, month, year, companyId])
+  @@index([companyId, year, month])
   @@map("payrolls")
 }
 
