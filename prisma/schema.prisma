@@ -58,6 +58,7 @@ model StaffRecord {
   isRegistered  Boolean  @default(false)
   role          String   @default("STAFF")
   isActive      Boolean  @default(true)
+  encodedId     String? 
   companyId     String
   company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdBy     String?
