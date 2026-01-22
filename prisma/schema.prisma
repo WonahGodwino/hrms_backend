@@ -675,11 +675,12 @@ model UserCompany {
 model PasswordReset {
   id            String   @id @default(cuid())
   email         String
-  companyId     String   // Add this field
+  companyId     String
   otp           String
   otpExpiresAt  DateTime
-  isUsed        Boolean  @default(false) // Add this field
-  attempts      Int      @default(0)     // Add this field
+  isUsed        Boolean  @default(false)
+  attempts      Int      @default(0)
+  notes         String?  // Add this optional field
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   
