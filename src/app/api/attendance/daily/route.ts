@@ -1,18 +1,8 @@
 // src/app/api/attendance/daily/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/app/lib/prisma";
 import { requireRole } from "@/app/lib/auth";
 import { withCors, handleCorsOptions } from "@/app/lib/cors";
 
-let prismas;
-
-try {
-  prismas = require('@/app/lib/prisma').prisma;
-} catch (error) {
-  console.error('Failed to initialize Prisma client:', error);
-  // You might want to create a fallback or throw a more specific error
-  throw new Error('Database connection failed');
-}
 // Utility function to get the start of the day
 function startOfDay(date = new Date()) {
   const d = new Date(date);
@@ -28,6 +18,9 @@ export async function POST(req: NextRequest) {
   const origin = req.headers.get("origin");
 
   try {
+    // Dynamically import Prisma to avoid issues during build
+    const { prisma } = await import("@/app/lib/prisma");
+    
     // 1. Authenticate the ADMIN/HR/SUPER_ADMIN user who is operating the interface
     const authHeader = req.headers.get("authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -273,6 +266,8 @@ function buildIdentifierQuery(identifier: string, method: string) {
 
 // Helper function to validate company access
 async function validateCompanyAccess(user: any, companyId: string): Promise<boolean> {
+  const { prisma } = await import("@/app/lib/prisma");
+  
   if (user.role === 'SUPER_ADMIN') {
     return true;
   }
@@ -299,6 +294,8 @@ async function validateCompanyAccess(user: any, companyId: string): Promise<bool
 // Helper function to suggest similar staff
 async function getSimilarStaff(companyId: string, identifier: string) {
   try {
+    const { prisma } = await import("@/app/lib/prisma");
+    
     const similarStaff = await prisma.staffRecord.findMany({
       where: {
         companyId,
@@ -334,6 +331,8 @@ export async function GET(req: NextRequest) {
   const origin = req.headers.get("origin");
 
   try {
+    const { prisma } = await import("@/app/lib/prisma");
+    
     const authHeader = req.headers.get("authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       const res = NextResponse.json(
