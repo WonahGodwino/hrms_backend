@@ -105,14 +105,14 @@ export async function POST(req: NextRequest) {
     const now = new Date();
 
     // 7. Check for existing attendance record today
-    const existingAttendance = await prisma.attendance.findFirst({
+    const existingAttendance = await prisma.Attendance.findFirst({
       where: {
         companyId,
         staffId: staff.id,
         date: today,
       },
       orderBy: {
-        signInAt: 'desc'
+        signOutTime: 'desc'
       }
     });
 
@@ -120,12 +120,12 @@ export async function POST(req: NextRequest) {
     let action: 'SIGN_IN' | 'SIGN_OUT';
     let message: string;
 
-    if (existingAttendance && existingAttendance.signInAt && !existingAttendance.signOutAt) {
+    if (existingAttendance && existingAttendance.signInTime && !existingAttendance.signOutTime) {
       // 8. Staff is signing OUT (already signed in today)
-      attendanceRecord = await prisma.attendance.update({
+      attendanceRecord = await prisma.Attendance.update({
         where: { id: existingAttendance.id },
         data: {
-          signOutAt: now,
+          signOutTime: now,
           recordedById: adminUser.userId || adminUser.id,
           recordedByRole: adminUser.role,
           method,
@@ -139,21 +139,21 @@ export async function POST(req: NextRequest) {
       // 9. Staff is signing IN (no sign-in today or already signed out)
       
       // Check if there was a sign-in today but staff forgot to sign out yesterday
-      const previousDayAttendance = await prisma.attendance.findFirst({
+      const previousDayAttendance = await prisma.Attendance.findFirst({
         where: {
           companyId,
           staffId: staff.id,
           date: startOfDay(new Date(Date.now() - 24 * 60 * 60 * 1000)), // Yesterday
-          signOutAt: null,
+          signOutTime: null,
         },
       });
 
       if (previousDayAttendance) {
         // Auto-signout from previous day
-        await prisma.attendance.update({
+        await prisma.Attendance.update({
           where: { id: previousDayAttendance.id },
           data: {
-            signOutAt: startOfDay(), // Set to start of today
+            signOutTime: startOfDay(), // Set to start of today
             updatedAt: now,
             notes: "Auto-signed out from previous day",
           },
@@ -161,12 +161,12 @@ export async function POST(req: NextRequest) {
       }
 
       // Create new sign-in record
-      attendanceRecord = await prisma.attendance.create({
+      attendanceRecord = await prisma.Attendance.create({
         data: {
           companyId,
           staffId: staff.id,
           date: today,
-          signInAt: now,
+          signInTime: now,
           recordedById: adminUser.userId || adminUser.id,
           recordedByRole: adminUser.role,
           method,
@@ -186,8 +186,8 @@ export async function POST(req: NextRequest) {
         attendance: {
           id: attendanceRecord.id,
           date: attendanceRecord.date,
-          signInAt: attendanceRecord.signInAt,
-          signOutAt: attendanceRecord.signOutAt,
+          signInTime: attendanceRecord.signInTime,
+          signOutTime: attendanceRecord.signOutTime,
           method: attendanceRecord.method,
         },
         staff: {
@@ -362,7 +362,7 @@ export async function GET(req: NextRequest) {
     const targetDate = startOfDay(new Date(date));
     
     // Get attendance for the day
-    const attendance = await prisma.attendance.findMany({
+    const attendance = await prisma.Attendance.findMany({
       where: {
         companyId,
         date: targetDate,
@@ -380,7 +380,7 @@ export async function GET(req: NextRequest) {
         }
       },
       orderBy: {
-        signInAt: 'desc'
+        signOutTime: 'desc'
       }
     });
 
@@ -392,8 +392,8 @@ export async function GET(req: NextRequest) {
       }
     });
 
-    const signedInToday = attendance.filter(a => a.signInAt && !a.signOutAt).length;
-    const signedOutToday = attendance.filter(a => a.signOutAt).length;
+    const signedInToday = attendance.filter(a => a.signInTime && !a.signOutTime).length;
+    const signedOutToday = attendance.filter(a => a.signOutTime).length;
 
     const res = NextResponse.json({
       success: true,
@@ -407,8 +407,8 @@ export async function GET(req: NextRequest) {
         },
         attendance: attendance.map(record => ({
           id: record.id,
-          signInAt: record.signInAt,
-          signOutAt: record.signOutAt,
+          signInTime: record.signInTime,
+          signOutTime: record.signOutTime,
           method: record.method,
           staff: record.staffRecord,
         }))
