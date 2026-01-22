@@ -15,6 +15,12 @@ interface MailgunResponse {
   error?: any;
 }
 
+interface MailgunApiResponse {
+  message?: string;
+  id?: string;
+  [key: string]: any; // Allow other properties
+}
+
 export async function sendEmail({ to, subject, text, html }: EmailOptions): Promise<MailgunResponse> {
   try {
     // Validate environment variables
@@ -47,11 +53,6 @@ export async function sendEmail({ to, subject, text, html }: EmailOptions): Prom
       formData.append('html', html);
     }
 
-    // Optional: Add tracking (uncomment if needed)
-    // formData.append('o:tracking', 'yes');
-    // formData.append('o:tracking-clicks', 'yes');
-    // formData.append('o:tracking-opens', 'yes');
-
     const response = await fetch(
       `https://api.mailgun.net/v3/${process.env.MAILGUN_DOMAIN}/messages`,
       {
@@ -64,7 +65,7 @@ export async function sendEmail({ to, subject, text, html }: EmailOptions): Prom
       }
     );
 
-    const data = await response.json();
+    const data: MailgunApiResponse = await response.json();
 
     if (!response.ok) {
       console.error('Mailgun API error:', data);
@@ -90,28 +91,41 @@ export async function sendEmail({ to, subject, text, html }: EmailOptions): Prom
       error: data
     };
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error sending email:', error);
+    
+    let errorMessage = 'Failed to send email';
+    let errorDetails: any = error;
+    
+    if (error instanceof Error) {
+      errorMessage = error.message;
+      errorDetails = {
+        name: error.name,
+        message: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      };
+    } else if (typeof error === 'string') {
+      errorMessage = error;
+      errorDetails = error;
+    }
+
     return {
       success: false,
-      message: 'Failed to send email',
-      error: error.message
+      message: errorMessage,
+      error: errorDetails
     };
   }
 }
 
-// Optional: Function to send email using SMTP (alternative)
+// Alternative: Function to send email using SMTP
 export async function sendEmailSMTP({ to, subject, text, html }: EmailOptions): Promise<MailgunResponse> {
   try {
-    // This is if you want to use SMTP directly instead of API
-    // But the API method above is recommended
-    
     const nodemailer = require('nodemailer');
     
     const transporter = nodemailer.createTransport({
       host: process.env.MAILGUN_SMTP_HOST || 'smtp.mailgun.org',
       port: parseInt(process.env.MAILGUN_SMTP_PORT || '587'),
-      secure: false, // true for 465, false for other ports
+      secure: false,
       auth: {
         user: process.env.MAILGUN_SMTP_USER,
         pass: process.env.MAILGUN_SMTP_PASS,
@@ -134,18 +148,26 @@ export async function sendEmailSMTP({ to, subject, text, html }: EmailOptions): 
       id: info.messageId
     };
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('SMTP email error:', error);
+    
+    let errorMessage = 'Failed to send email via SMTP';
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    } else if (typeof error === 'string') {
+      errorMessage = error;
+    }
+
     return {
       success: false,
-      message: 'Failed to send email via SMTP',
-      error: error.message
+      message: errorMessage,
+      error: error
     };
   }
 }
 
 // Function to verify Mailgun configuration
-export async function verifyMailgunConfig(): Promise<{ valid: boolean; message: string }> {
+export async function verifyMailgunConfig(): Promise<{ valid: boolean; message: string; details?: any }> {
   try {
     if (!process.env.MAILGUN_API_KEY) {
       return { valid: false, message: 'MAILGUN_API_KEY is missing' };
@@ -157,20 +179,44 @@ export async function verifyMailgunConfig(): Promise<{ valid: boolean; message: 
       return { valid: false, message: 'FROM_EMAIL is missing' };
     }
 
-    // Test API connection by fetching domains
+    // Test API connection
     const response = await fetch(`https://api.mailgun.net/v3/domains/${process.env.MAILGUN_DOMAIN}`, {
       headers: {
         "Authorization": `Basic ${Buffer.from(`api:${process.env.MAILGUN_API_KEY}`).toString("base64")}`,
       },
     });
 
+    const data: MailgunApiResponse = await response.json();
+
     if (response.ok) {
-      return { valid: true, message: 'Mailgun configuration is valid' };
+      return { 
+        valid: true, 
+        message: 'Mailgun configuration is valid',
+        details: {
+          domain: process.env.MAILGUN_DOMAIN,
+          hasApiKey: !!process.env.MAILGUN_API_KEY,
+          fromEmail: process.env.FROM_EMAIL
+        }
+      };
     } else {
-      const error = await response.json();
-      return { valid: false, message: `Mailgun domain error: ${error.message}` };
+      return { 
+        valid: false, 
+        message: `Mailgun domain error: ${data.message || 'Unknown error'}`,
+        details: data
+      };
     }
-  } catch (error: any) {
-    return { valid: false, message: `Mailgun verification failed: ${error.message}` };
+  } catch (error: unknown) {
+    let errorMessage = 'Mailgun verification failed';
+    if (error instanceof Error) {
+      errorMessage = `Mailgun verification failed: ${error.message}`;
+    } else if (typeof error === 'string') {
+      errorMessage = `Mailgun verification failed: ${error}`;
+    }
+    
+    return { 
+      valid: false, 
+      message: errorMessage,
+      details: error
+    };
   }
 }
