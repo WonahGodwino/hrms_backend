@@ -4,6 +4,15 @@ import { prisma } from "@/app/lib/prisma";
 import { requireRole } from "@/app/lib/auth";
 import { withCors, handleCorsOptions } from "@/app/lib/cors";
 
+let prismas;
+
+try {
+  prismas = require('@/app/lib/prisma').prisma;
+} catch (error) {
+  console.error('Failed to initialize Prisma client:', error);
+  // You might want to create a fallback or throw a more specific error
+  throw new Error('Database connection failed');
+}
 // Utility function to get the start of the day
 function startOfDay(date = new Date()) {
   const d = new Date(date);
