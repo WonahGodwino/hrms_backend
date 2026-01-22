@@ -689,7 +689,11 @@ model Attendance {
   date        DateTime
   signInTime  DateTime?
   signOutTime DateTime?
-
+  recordedById   String?
+  recordedByRole String?
+  method         String?    // "staff_id", "email", "barcode"
+  notes          String?
+  
   company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   staffRecord StaffRecord @relation(fields: [staffId], references: [id], onDelete: Cascade)
 
@@ -699,4 +703,5 @@ model Attendance {
   @@unique([companyId, staffId, date]) // One attendance per day per staff
   @@index([companyId, date])
   @@index([staffId, date])
+  @@map("attendances")
 }
