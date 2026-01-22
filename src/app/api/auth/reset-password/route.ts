@@ -66,9 +66,10 @@ export async function POST(req: NextRequest) {
     const normalizedEmail = email.toLowerCase().trim();
     const normalizedToken = resetToken.trim();
 
-    // Step 4: Find the reset token record
+    // Declare resetRecord variable
     let resetRecord;
-    
+
+    // Step 4: Find the reset token record
     if (companyId) {
       // If companyId is provided, look for specific record
       resetRecord = await prisma.passwordReset.findUnique({
@@ -216,18 +217,15 @@ export async function POST(req: NextRequest) {
         isUsed: false
       },
       data: {
-        isUsed: true,
-        notes: 'Invalidated due to successful password reset'
+        isUsed: true
       }
     });
 
     // Step 12: Get user info for response
     const updatedUser = await prisma.staffRecord.findFirst({
       where: {
-        email_companyId: {
-          email: normalizedEmail,
-          companyId: resetRecord.companyId
-        }
+        email: normalizedEmail,
+        companyId: resetRecord.companyId
       },
       select: {
         firstName: true,

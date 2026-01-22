@@ -177,6 +177,13 @@ export async function POST(req: NextRequest) {
         data: {
           email: normalizedEmail,
           expiresIn: '10 minutes',
+          // If multiple companies, include them for selection
+          ...(staffRecords.length > 1 && {
+            companies: staffRecords.map(s => ({
+              companyId: s.companyId,
+              companyName: s.company.companyName
+            }))
+          }),
           // For development/testing only
           ...(process.env.NODE_ENV === 'development' && { 
             otp,
