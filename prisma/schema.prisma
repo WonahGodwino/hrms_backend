@@ -671,14 +671,21 @@ model UserCompany {
   @@map("user_companies")
 }
 
-// PasswordReset model
+
 model PasswordReset {
   id            String   @id @default(cuid())
-  email         String   @unique
+  email         String
+  companyId     String   // Add this field
   otp           String
   otpExpiresAt  DateTime
+  isUsed        Boolean  @default(false) // Add this field
+  attempts      Int      @default(0)     // Add this field
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  
+  @@unique([email, companyId]) // Composite unique constraint
+  @@index([email])
+  @@index([companyId])
 }
 
 // attendance model
