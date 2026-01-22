@@ -21,6 +21,13 @@ interface MailgunApiResponse {
   [key: string]: any; // Allow other properties
 }
 
+// Type guard function to check if response is MailgunApiResponse
+function isMailgunApiResponse(data: any): data is MailgunApiResponse {
+  return typeof data === 'object' && data !== null && 
+    (typeof data.message === 'string' || typeof data.id === 'string' || 
+     'message' in data || 'id' in data);
+}
+
 export async function sendEmail({ to, subject, text, html }: EmailOptions): Promise<MailgunResponse> {
   try {
     // Validate environment variables
@@ -65,30 +72,43 @@ export async function sendEmail({ to, subject, text, html }: EmailOptions): Prom
       }
     );
 
-    const data: MailgunApiResponse = await response.json();
-
-    if (!response.ok) {
-      console.error('Mailgun API error:', data);
+    // Handle the unknown type safely
+    const data = await response.json();
+    
+    // Type assertion with type guard
+    if (!isMailgunApiResponse(data)) {
+      console.error('Invalid Mailgun API response:', data);
       return {
         success: false,
-        message: data.message || 'Failed to send email',
+        message: 'Invalid response from email service',
         error: data
       };
     }
 
-    if (data.message === "Queued. Thank you." || data.id) {
-      console.log(`Email sent successfully to ${to}. Message ID: ${data.id}`);
+    const typedData: MailgunApiResponse = data;
+
+    if (!response.ok) {
+      console.error('Mailgun API error:', typedData);
+      return {
+        success: false,
+        message: typedData.message || 'Failed to send email',
+        error: typedData
+      };
+    }
+
+    if (typedData.message === "Queued. Thank you." || typedData.id) {
+      console.log(`Email sent successfully to ${to}. Message ID: ${typedData.id}`);
       return {
         success: true,
         message: 'Email sent successfully',
-        id: data.id
+        id: typedData.id
       };
     }
 
     return {
       success: false,
-      message: data.message || 'Unknown error from Mailgun',
-      error: data
+      message: typedData.message || 'Unknown error from Mailgun',
+      error: typedData
     };
 
   } catch (error: unknown) {
@@ -186,7 +206,18 @@ export async function verifyMailgunConfig(): Promise<{ valid: boolean; message: 
       },
     });
 
-    const data: MailgunApiResponse = await response.json();
+    const data = await response.json();
+    
+    // Type assertion for verification function
+    if (!isMailgunApiResponse(data)) {
+      return { 
+        valid: false, 
+        message: 'Invalid response from Mailgun API',
+        details: data
+      };
+    }
+
+    const typedData: MailgunApiResponse = data;
 
     if (response.ok) {
       return { 
@@ -201,8 +232,8 @@ export async function verifyMailgunConfig(): Promise<{ valid: boolean; message: 
     } else {
       return { 
         valid: false, 
-        message: `Mailgun domain error: ${data.message || 'Unknown error'}`,
-        details: data
+        message: `Mailgun domain error: ${typedData.message || 'Unknown error'}`,
+        details: typedData
       };
     }
   } catch (error: unknown) {
