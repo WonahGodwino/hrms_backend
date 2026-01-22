@@ -1,4 +1,3 @@
-// src/app/lib/auth.ts
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/app/lib/db'
@@ -65,7 +64,6 @@ export async function getUserFromToken(token: string): Promise<AuthUser | null> 
       })
       companyIds = allCompanies.map(c => c.id)
       
-      // If no companyId in token, use first company
       if (!currentCompanyId && companyIds.length > 0) {
         currentCompanyId = companyIds[0]
       }
@@ -114,8 +112,6 @@ export async function getUserFromToken(token: string): Promise<AuthUser | null> 
 export const requireAuth = (token: string | null): AuthUser => {
   if (!token) throw new Error('Authentication required')
 
-  // Note: This is synchronous, but our new getUserFromToken is async
-  // We'll create a separate async version below
   const user = getUserFromTokenSync(token)
   if (!user) throw new Error('Invalid or expired token')
 
@@ -210,7 +206,6 @@ export async function createAuthPayloadWithCompanies(
     
     companyIds = userCompanies.map(uc => uc.companyId)
     
-    // If no companyId provided, use first assigned company
     if (!finalCompanyId && companyIds.length > 0) {
       finalCompanyId = companyIds[0]
     }
@@ -282,4 +277,15 @@ export const requirePermission = (token: string | null, requiredPermission: stri
   }
   
   return user
+}
+
+// ** New Functions for OTP and Attendance **
+
+// Helper function to generate OTP
+export function generateOtp() {
+  return Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
+}
+
+export async function verifyPassword(storedPassword: string, enteredPassword: string) {
+  return bcrypt.compare(enteredPassword, storedPassword);
 }

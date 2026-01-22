@@ -34,16 +34,13 @@ model Company {
   interviews         Interview[] // One-to-many relation with Interview
   candidateDocuments CandidateDocument[] // One-to-many relation with CandidateDocument
   candidateFiles     CandidateFile[] // One-to-many relation with CandidateFile
-  
-  // NEW: AI Settings relations (one-to-one and one-to-many)
   aiSettings  AISettings? // One-to-one relation with AISettings
   aiUsageLogs AIUsageLog[] // One-to-many relation with AIUsageLog
-
-   // NEW: UserCompany relation
-  userCompanies UserCompany[] // Add this line
-
+  userCompanies UserCompany[] 
+  attendances        Attendance[]      // One-to-many relation with Attendance
   @@map("companies")
 }
+
 
 model StaffRecord {
   id            String   @id @default(cuid())
@@ -72,6 +69,9 @@ model StaffRecord {
   payslips    Payslip[]
   onboardings Onboarding[]
   userCompanies UserCompany[] // Add this line to complete the relation
+  // Add reverse relation to Attendance
+  attendances   Attendance[] // New field to hold all the attendance records for the staff
+
 
   @@unique([staffId, companyId])
   @@unique([email, companyId])
@@ -668,4 +668,34 @@ model UserCompany {
   @@index([companyId])
   @@index([role])
   @@map("user_companies")
+}
+
+// PasswordReset model
+model PasswordReset {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  otp           String
+  otpExpiresAt  DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// attendance model
+model Attendance {
+  id          String   @id @default(cuid())
+  companyId   String
+  staffId     String
+  date        DateTime
+  signInTime  DateTime?
+  signOutTime DateTime?
+
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staffRecord StaffRecord @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([companyId, staffId, date]) // One attendance per day per staff
+  @@index([companyId, date])
+  @@index([staffId, date])
 }

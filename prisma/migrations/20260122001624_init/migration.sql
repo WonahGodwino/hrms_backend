@@ -73,39 +73,41 @@ CREATE TABLE "staff_records" (
 -- CreateTable
 CREATE TABLE "payrolls" (
     "id" TEXT NOT NULL,
+    "companyId" TEXT NOT NULL,
+    "staffRecordId" TEXT NOT NULL,
     "month" TEXT NOT NULL,
     "year" INTEGER NOT NULL,
-    "staffRecordId" TEXT NOT NULL,
-    "companyId" TEXT NOT NULL,
-    "grossPay" DECIMAL(18,2) NOT NULL,
-    "proratedGrossPay" DECIMAL(18,2) NOT NULL,
-    "basicSalary" DECIMAL(18,2) NOT NULL,
-    "housing" DECIMAL(18,2) NOT NULL,
-    "transport" DECIMAL(18,2) NOT NULL,
-    "dressing" DECIMAL(18,2) NOT NULL,
-    "leaveAllowance" DECIMAL(18,2) NOT NULL,
-    "entertainment" DECIMAL(18,2) NOT NULL,
-    "utility" DECIMAL(18,2) NOT NULL,
-    "proratedGrossWithExtra" DECIMAL(18,2) NOT NULL,
-    "annualPension" DECIMAL(18,2) NOT NULL,
-    "annualGrossPay" DECIMAL(18,2) NOT NULL,
-    "consolidatedRelief" DECIMAL(18,2) NOT NULL,
-    "taxableIncome" DECIMAL(18,2) NOT NULL,
-    "deductions" DECIMAL(18,2) NOT NULL,
-    "payee" DECIMAL(18,2) NOT NULL,
-    "pensionDeduction" DECIMAL(18,2) NOT NULL,
-    "bonusKPI" DECIMAL(18,2) NOT NULL,
-    "netSalary" DECIMAL(18,2) NOT NULL,
-    "finalGross" DECIMAL(18,2) NOT NULL,
-    "medicalContribution" DECIMAL(18,2) NOT NULL,
-    "employerPension" DECIMAL(18,2) NOT NULL,
-    "nsitf" DECIMAL(18,2) NOT NULL,
-    "proratedSubTotal" DECIMAL(18,2) NOT NULL,
-    "managementFee" DECIMAL(18,2) NOT NULL,
-    "vatOnManagementFee" DECIMAL(18,2) NOT NULL,
-    "totalInvoiceValue" DECIMAL(18,2) NOT NULL,
-    "status" "PayrollStatus" NOT NULL DEFAULT 'PROCESSED',
-    "uploadedBy" TEXT,
+    "grossPay" DECIMAL(18,2),
+    "basicSalary" DECIMAL(18,2),
+    "housing" DECIMAL(18,2),
+    "transport" DECIMAL(18,2),
+    "dressing" DECIMAL(18,2),
+    "leaveAllowance" DECIMAL(18,2),
+    "entertainment" DECIMAL(18,2),
+    "utility" DECIMAL(18,2),
+    "otherAllowance" DECIMAL(18,2),
+    "proratedGrossPay" DECIMAL(18,2),
+    "proratedGrossWithExtra" DECIMAL(18,2),
+    "annualPension" DECIMAL(18,2),
+    "annualGrossPay" DECIMAL(18,2),
+    "consolidatedRelief" DECIMAL(18,2),
+    "taxableIncome" DECIMAL(18,2),
+    "deductions" DECIMAL(18,2),
+    "payee" DECIMAL(18,2),
+    "pensionDeduction" DECIMAL(18,2),
+    "bonusKPI" DECIMAL(18,2),
+    "netSalary" DECIMAL(18,2),
+    "finalGross" DECIMAL(18,2),
+    "medicalContribution" DECIMAL(18,2),
+    "employerPension" DECIMAL(18,2),
+    "nsitf" DECIMAL(18,2),
+    "proratedSubTotal" DECIMAL(18,2),
+    "managementFee" DECIMAL(18,2),
+    "vatOnManagementFee" DECIMAL(18,2),
+    "totalInvoiceValue" DECIMAL(18,2),
+    "status" TEXT NOT NULL DEFAULT 'PROCESSED',
+    "templateType" TEXT DEFAULT 'ISURF_STANDARD',
+    "uploadedBy" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -159,6 +161,8 @@ CREATE TABLE "payroll_uploads" (
     "filePath" TEXT NOT NULL,
     "processedFilePath" TEXT,
     "processedFileName" TEXT,
+    "templateType" TEXT NOT NULL DEFAULT 'ISURF_STANDARD',
+    "sendEmails" BOOLEAN NOT NULL DEFAULT true,
     "totalRecords" INTEGER NOT NULL,
     "successful" INTEGER NOT NULL,
     "failed" INTEGER NOT NULL,
@@ -422,6 +426,32 @@ CREATE TABLE "user_companies" (
     CONSTRAINT "user_companies_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "PasswordReset" (
+    "id" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "otp" TEXT NOT NULL,
+    "otpExpiresAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "PasswordReset_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Attendance" (
+    "id" TEXT NOT NULL,
+    "companyId" TEXT NOT NULL,
+    "staffId" TEXT NOT NULL,
+    "date" TIMESTAMP(3) NOT NULL,
+    "signInTime" TIMESTAMP(3),
+    "signOutTime" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Attendance_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "staff_records_staffId_companyId_key" ON "staff_records"("staffId", "companyId");
 
@@ -520,6 +550,18 @@ CREATE INDEX "user_companies_role_idx" ON "user_companies"("role");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "user_companies_userId_companyId_key" ON "user_companies"("userId", "companyId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PasswordReset_email_key" ON "PasswordReset"("email");
+
+-- CreateIndex
+CREATE INDEX "Attendance_companyId_date_idx" ON "Attendance"("companyId", "date");
+
+-- CreateIndex
+CREATE INDEX "Attendance_staffId_date_idx" ON "Attendance"("staffId", "date");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Attendance_companyId_staffId_date_key" ON "Attendance"("companyId", "staffId", "date");
 
 -- AddForeignKey
 ALTER TABLE "staff_records" ADD CONSTRAINT "staff_records_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -625,3 +667,9 @@ ALTER TABLE "user_companies" ADD CONSTRAINT "user_companies_companyId_fkey" FORE
 
 -- AddForeignKey
 ALTER TABLE "user_companies" ADD CONSTRAINT "user_companies_userId_fkey" FOREIGN KEY ("userId") REFERENCES "staff_records"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Attendance" ADD CONSTRAINT "Attendance_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Attendance" ADD CONSTRAINT "Attendance_staffId_fkey" FOREIGN KEY ("staffId") REFERENCES "staff_records"("id") ON DELETE CASCADE ON UPDATE CASCADE;
