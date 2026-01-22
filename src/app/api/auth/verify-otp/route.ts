@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { email, otp } = body;
+    const { email, otp, companyId } = body; // Add optional companyId
 
     // Validate input
     if (!email || !email.trim()) {
@@ -43,18 +43,131 @@ export async function POST(req: NextRequest) {
 
     // Normalize email
     const normalizedEmail = email.toLowerCase().trim();
+    const normalizedOtp = otp.trim();
 
-    // Step 1: Retrieve OTP from DB
-    const record = await prisma.passwordReset.findUnique({
-      where: { email: normalizedEmail }
-    });
+    // Step 1: Find matching OTP records
+    let otpRecord;
+    let matchingCompanies = [];
 
-    if (!record) {
+    if (companyId) {
+      // If companyId is provided, find specific OTP record
+      otpRecord = await prisma.passwordReset.findUnique({
+        where: {
+          email_companyId: {
+            email: normalizedEmail,
+            companyId: companyId
+          }
+        }
+      });
+
+      if (otpRecord) {
+        // Get company info
+        const staff = await prisma.staffRecord.findFirst({
+          where: {
+            email: normalizedEmail,
+            companyId: companyId,
+            isActive: true
+          },
+          select: {
+            company: {
+              select: {
+                id: true,
+                companyName: true
+              }
+            }
+          }
+        });
+
+        if (staff) {
+          matchingCompanies.push({
+            companyId: staff.company.id,
+            companyName: staff.company.companyName
+          });
+        }
+      }
+    } else {
+      // If no companyId provided, find all active OTPs for this email
+      const otpRecords = await prisma.passwordReset.findMany({
+        where: {
+          email: normalizedEmail,
+          isUsed: false,
+          otpExpiresAt: { gt: new Date() }
+        },
+        orderBy: {
+          updatedAt: 'desc'
+        }
+      });
+
+      // Find which OTP matches
+      for (const record of otpRecords) {
+        if (record.otp === normalizedOtp) {
+          otpRecord = record;
+          
+          // Get company info for this OTP
+          const staff = await prisma.staffRecord.findFirst({
+            where: {
+              email: normalizedEmail,
+              companyId: record.companyId,
+              isActive: true
+            },
+            select: {
+              company: {
+                select: {
+                  id: true,
+                  companyName: true
+                }
+              }
+            }
+          });
+
+          if (staff) {
+            matchingCompanies.push({
+              companyId: staff.company.id,
+              companyName: staff.company.companyName
+            });
+          }
+          break; // Stop after first match
+        }
+      }
+
+      // If OTP matches multiple records (same OTP sent to multiple companies)
+      if (otpRecord && otpRecords.filter(r => r.otp === normalizedOtp).length > 1) {
+        // Get all companies with this OTP
+        const allMatchingRecords = otpRecords.filter(r => r.otp === normalizedOtp);
+        
+        for (const record of allMatchingRecords) {
+          const staff = await prisma.staffRecord.findFirst({
+            where: {
+              email: normalizedEmail,
+              companyId: record.companyId,
+              isActive: true
+            },
+            select: {
+              company: {
+                select: {
+                  id: true,
+                  companyName: true
+                }
+              }
+            }
+          });
+
+          if (staff) {
+            matchingCompanies.push({
+              companyId: staff.company.id,
+              companyName: staff.company.companyName
+            });
+          }
+        }
+      }
+    }
+
+    if (!otpRecord) {
       return withCors(
         NextResponse.json(
           {
             success: false,
-            message: 'No password reset request found for this email'
+            message: 'No valid OTP found for this email'
           },
           { status: 404 }
         ),
@@ -63,7 +176,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Step 2: Check if OTP has already been used
-    if (record.isUsed) {
+    if (otpRecord.isUsed) {
       return withCors(
         NextResponse.json(
           {
@@ -78,12 +191,12 @@ export async function POST(req: NextRequest) {
 
     // Step 3: Check if OTP has expired
     const currentTime = new Date();
-    const otpExpiryTime = new Date(record.otpExpiresAt);
+    const otpExpiryTime = new Date(otpRecord.otpExpiresAt);
 
     if (currentTime > otpExpiryTime) {
       // Mark as used to prevent reuse
       await prisma.passwordReset.update({
-        where: { email: normalizedEmail },
+        where: { id: otpRecord.id },
         data: { isUsed: true }
       });
 
@@ -100,22 +213,22 @@ export async function POST(req: NextRequest) {
     }
 
     // Step 4: Check if OTP matches
-    if (record.otp !== otp.trim()) {
+    if (otpRecord.otp !== normalizedOtp) {
       // Increment failed attempts
-      const newAttempts = (record.attempts || 0) + 1;
+      const newAttempts = (otpRecord.attempts || 0) + 1;
       
       await prisma.passwordReset.update({
-        where: { email: normalizedEmail },
+        where: { id: otpRecord.id },
         data: { 
           attempts: newAttempts,
-          // Lock after 3 failed attempts
-          ...(newAttempts >= 3 ? { isUsed: true } : {})
+          // Lock after 5 failed attempts
+          ...(newAttempts >= 5 ? { isUsed: true } : {})
         }
       });
 
-      const attemptsLeft = 3 - newAttempts;
+      const attemptsLeft = 5 - newAttempts;
       
-      if (newAttempts >= 3) {
+      if (newAttempts >= 5) {
         return withCors(
           NextResponse.json(
             {
@@ -140,9 +253,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Step 5: OTP is valid - mark as used
+    // Step 5: Handle multiple companies with same OTP
+    if (matchingCompanies.length > 1) {
+      // Return success but with companies for selection
+      return withCors(
+        NextResponse.json({
+          success: true,
+          message: 'OTP verified. Please select which company account to reset.',
+          data: {
+            email: normalizedEmail,
+            otpValid: true,
+            requiresCompanySelection: true,
+            companies: matchingCompanies
+          }
+        }),
+        origin
+      );
+    }
+
+    // Step 6: OTP is valid for single company - mark as used
     await prisma.passwordReset.update({
-      where: { email: normalizedEmail },
+      where: { id: otpRecord.id },
       data: { 
         isUsed: true,
         updatedAt: new Date()
@@ -155,24 +286,34 @@ export async function POST(req: NextRequest) {
     const tokenExpiresAt = new Date();
     tokenExpiresAt.setMinutes(tokenExpiresAt.getMinutes() + 15);
 
-    // Store reset token in the same record
+    // Store reset token (reuse otp field)
     await prisma.passwordReset.update({
-      where: { email: normalizedEmail },
+      where: { id: otpRecord.id },
       data: {
-        otp: resetToken, // Reuse otp field for reset token
+        otp: resetToken,
         otpExpiresAt: tokenExpiresAt,
         isUsed: false, // Reset for the token usage
         attempts: 0, // Reset attempts
       }
     });
 
-    // Get user info for response
-    const user = await prisma.staffRecord.findUnique({
-      where: { email: normalizedEmail },
+    // Get user info
+    const user = await prisma.staffRecord.findFirst({
+      where: {
+        email: normalizedEmail,
+        companyId: matchingCompanies[0]?.companyId || otpRecord.companyId,
+        isActive: true
+      },
       select: {
         id: true,
         firstName: true,
         lastName: true,
+        companyId: true,
+        company: {
+          select: {
+            companyName: true
+          }
+        }
       }
     });
 
@@ -183,6 +324,9 @@ export async function POST(req: NextRequest) {
         data: {
           resetToken,
           expiresAt: tokenExpiresAt.toISOString(),
+          email: normalizedEmail,
+          companyId: user?.companyId || otpRecord.companyId,
+          companyName: user?.company?.companyName,
           user: user ? {
             id: user.id,
             name: `${user.firstName} ${user.lastName}`
