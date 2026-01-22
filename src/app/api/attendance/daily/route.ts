@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
         date: today,
       },
       orderBy: {
-        signOutTime: 'desc'
+        signInTime: 'desc'
       }
     });
 
@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
         where: { id: existingAttendance.id },
         data: {
           signOutTime: now,
-          recordedById: adminUser.userId || adminUser.id,
+          recordedById: adminUser.userId,
           recordedByRole: adminUser.role,
           method,
           updatedAt: now,
@@ -167,7 +167,7 @@ export async function POST(req: NextRequest) {
           staffId: staff.id,
           date: today,
           signInTime: now,
-          recordedById: adminUser.userId || adminUser.id,
+          recordedById: adminUser.userId,
           recordedByRole: adminUser.role,
           method,
         },
@@ -186,8 +186,8 @@ export async function POST(req: NextRequest) {
         attendance: {
           id: attendanceRecord.id,
           date: attendanceRecord.date,
-          signInTime: attendanceRecord.signInTime,
-          signOutTime: attendanceRecord.signOutTime,
+          signInAt: attendanceRecord.signInTime,
+          signOutAt: attendanceRecord.signOutTime,
           method: attendanceRecord.method,
         },
         staff: {
@@ -199,9 +199,9 @@ export async function POST(req: NextRequest) {
           department: staff.department,
         },
         recordedBy: {
-          id: adminUser.userId || adminUser.id,
+          id: adminUser.userId,
           role: adminUser.role,
-          name: adminUser.name || adminUser.email,
+          name: adminUser.email, // Using email since name doesn't exist in AuthUser
         },
         companyId,
       },
@@ -276,7 +276,7 @@ async function validateCompanyAccess(user: any, companyId: string): Promise<bool
     // Check if admin has access to this company
     const userCompany = await prisma.userCompany.findFirst({
       where: {
-        userId: user.userId || user.id,
+        userId: user.userId,
         companyId,
         role: { in: ['ADMIN', 'ALL'] }
       }
@@ -380,7 +380,7 @@ export async function GET(req: NextRequest) {
         }
       },
       orderBy: {
-        signOutTime: 'desc'
+        signInTime: 'desc'
       }
     });
 
@@ -407,8 +407,8 @@ export async function GET(req: NextRequest) {
         },
         attendance: attendance.map(record => ({
           id: record.id,
-          signInTime: record.signInTime,
-          signOutTime: record.signOutTime,
+          signInAt: record.signInTime,
+          signOutAt: record.signOutTime,
           method: record.method,
           staff: record.staffRecord,
         }))
