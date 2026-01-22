@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
     const now = new Date();
 
     // 7. Check for existing attendance record today
-    const existingAttendance = await prisma.Attendance.findFirst({
+    const existingAttendance = await prisma.attendance.findFirst({
       where: {
         companyId,
         staffId: staff.id,
@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
 
     if (existingAttendance && existingAttendance.signInTime && !existingAttendance.signOutTime) {
       // 8. Staff is signing OUT (already signed in today)
-      attendanceRecord = await prisma.Attendance.update({
+      attendanceRecord = await prisma.attendance.update({
         where: { id: existingAttendance.id },
         data: {
           signOutTime: now,
@@ -139,7 +139,7 @@ export async function POST(req: NextRequest) {
       // 9. Staff is signing IN (no sign-in today or already signed out)
       
       // Check if there was a sign-in today but staff forgot to sign out yesterday
-      const previousDayAttendance = await prisma.Attendance.findFirst({
+      const previousDayAttendance = await prisma.attendance.findFirst({
         where: {
           companyId,
           staffId: staff.id,
@@ -150,7 +150,7 @@ export async function POST(req: NextRequest) {
 
       if (previousDayAttendance) {
         // Auto-signout from previous day
-        await prisma.Attendance.update({
+        await prisma.attendance.update({
           where: { id: previousDayAttendance.id },
           data: {
             signOutTime: startOfDay(), // Set to start of today
@@ -161,7 +161,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Create new sign-in record
-      attendanceRecord = await prisma.Attendance.create({
+      attendanceRecord = await prisma.attendance.create({
         data: {
           companyId,
           staffId: staff.id,
@@ -362,7 +362,7 @@ export async function GET(req: NextRequest) {
     const targetDate = startOfDay(new Date(date));
     
     // Get attendance for the day
-    const attendance = await prisma.Attendance.findMany({
+    const attendance = await prisma.attendance.findMany({
       where: {
         companyId,
         date: targetDate,
