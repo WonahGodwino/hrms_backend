@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    requireRole(token, ['HR', 'SUPER_ADMIN'])
+    requireRole(token, ['HR', 'SUPER_ADMIN','ADMIN'])
 
     const workbook = new ExcelJS.Workbook()
     const worksheet = workbook.addWorksheet('Staff Records')
