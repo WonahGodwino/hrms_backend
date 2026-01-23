@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN'])
+    const user = requireRole(token, ['HR', 'SUPER_ADMIN','ADMIN'])
 
     // Get template type from query parameter
     const templateType = request.nextUrl.searchParams.get('type') as PayrollTemplateType
