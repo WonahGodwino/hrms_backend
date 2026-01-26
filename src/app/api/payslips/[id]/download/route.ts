@@ -28,9 +28,30 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR','ADMIN','SUPER_ADMIN', 'STAFF'])
+    
+    // First, let's debug the authentication
+    console.log('Auth token received for payslip download:', token.substring(0, 20) + '...')
+    
+    // Authenticate user and get their role
+    let user
+    try {
+      user = requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN', 'STAFF'])
+      console.log('User authenticated:', { 
+        id: user.id, 
+        email: user.email, 
+        role: user.role,
+        companyId: user.companyId || 'No company ID'
+      })
+    } catch (authError) {
+      console.error('Authentication error:', authError)
+      return withCors(
+        ApiResponse.error('Invalid or expired token', 401),
+        origin
+      )
+    }
 
     const { id } = params
+    console.log('Fetching payslip ID:', id)
 
     // First fetch payslip with minimal data for authorization
     const payslip = await prisma.payslip.findUnique({
@@ -51,6 +72,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             lastName: true,
             email: true,
             staffId: true,
+            userId: true, // Add this to compare with authenticated user's ID
           }
         },
       },
@@ -63,51 +85,123 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       )
     }
 
+    console.log('Payslip found:', {
+      id: payslip.id,
+      staffRecordId: payslip.staffRecordId,
+      companyId: payslip.companyId,
+      staffEmail: payslip.staffRecord.email,
+      staffUserId: payslip.staffRecord.userId
+    })
+
     // Permission checks based on role
     switch (user.role) {
       case 'STAFF':
         // STAFF can only download their own payslips
-        // We use email comparison since AuthUser only has userId and email
+        console.log('STAFF user check:', {
+          userId: user.id,
+          staffRecordUserId: payslip.staffRecord.userId,
+          userEmail: user.email,
+          staffEmail: payslip.staffRecord.email
+        })
         
-        // First, verify the user has an email in their token
-        if (!user.email) {
-          return withCors(
-            ApiResponse.error('Email not found in authentication token', 403),
-            origin
-          )
+        // Check by userId first (most reliable)
+        if (user.id && payslip.staffRecord.userId) {
+          if (user.id !== payslip.staffRecord.userId) {
+            console.log('STAFF authorization failed: User ID mismatch')
+            return withCors(
+              ApiResponse.error('Forbidden: You can only download your own payslips', 403),
+              origin
+            )
+          }
+        } else {
+          // Fallback to email comparison if userId is not available
+          if (!user.email) {
+            console.log('STAFF authorization failed: No email in token')
+            return withCors(
+              ApiResponse.error('Email not found in authentication token', 403),
+              origin
+            )
+          }
+          
+          if (payslip.staffRecord.email.toLowerCase() !== user.email.toLowerCase()) {
+            console.log('STAFF authorization failed: Email mismatch')
+            return withCors(
+              ApiResponse.error('Forbidden: You can only download your own payslips', 403),
+              origin
+            )
+          }
         }
-        
-        // Check if the staff record email matches the authenticated user's email
-        if (payslip.staffRecord.email.toLowerCase() !== user.email.toLowerCase()) {
-          return withCors(
-            ApiResponse.error('Forbidden: You can only download your own payslips', 403),
-            origin
-          )
-        }
+        console.log('STAFF authorization passed')
         break
 
       case 'HR':
         // HR can download any payslip within their company
+        console.log('HR user check:', {
+          userCompanyId: user.companyId,
+          payslipCompanyId: payslip.companyId
+        })
+        
+        // Get HR's company assignments if companyId is not in token
+        let hrCompanyIds = []
         if (!user.companyId) {
+          const hrAssignments = await prisma.userCompany.findMany({
+            where: {
+              userId: user.id,
+              role: 'HR'
+            },
+            select: { companyId: true }
+          })
+          hrCompanyIds = hrAssignments.map(a => a.companyId)
+          console.log('HR company assignments:', hrCompanyIds)
+        } else {
+          hrCompanyIds = [user.companyId]
+        }
+        
+        // Check if HR has access to this company
+        if (hrCompanyIds.length === 0 || !hrCompanyIds.includes(payslip.companyId)) {
+          console.log('HR authorization failed: Company access denied')
           return withCors(
-            ApiResponse.error('Company context missing for HR user', 400),
+            ApiResponse.error('Forbidden: HR can only download payslips within their assigned company', 403),
             origin
           )
         }
-        if (payslip.companyId !== user.companyId) {
+        console.log('HR authorization passed')
+        break
+
+      case 'ADMIN':
+        // ADMIN can download payslips from companies they're assigned to
+        console.log('ADMIN user check:', { userId: user.id })
+        
+        // Get ADMIN's company assignments
+        const adminAssignments = await prisma.userCompany.findMany({
+          where: {
+            userId: user.id,
+            role: 'ADMIN'
+          },
+          select: { companyId: true }
+        })
+        const adminCompanyIds = adminAssignments.map(a => a.companyId)
+        
+        console.log('ADMIN company assignments:', adminCompanyIds)
+        
+        // Check if ADMIN has access to this company
+        if (adminCompanyIds.length === 0 || !adminCompanyIds.includes(payslip.companyId)) {
+          console.log('ADMIN authorization failed: Company access denied')
           return withCors(
-            ApiResponse.error('Forbidden: HR can only download payslips within their company', 403),
+            ApiResponse.error('Forbidden: ADMIN can only download payslips within their assigned companies', 403),
             origin
           )
         }
+        console.log('ADMIN authorization passed')
         break
 
       case 'SUPER_ADMIN':
         // SUPER_ADMIN can download any payslip from any company
-        // No additional checks needed
+        console.log('SUPER_ADMIN authorization passed')
         break
 
       default:
+        console.log('Unauthorized role:', user.role)
         return withCors(
           ApiResponse.error('Unauthorized role', 403),
           origin
@@ -168,6 +262,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         'Pragma': 'no-cache',
         'Expires': '0',
         'X-Content-Type-Options': 'nosniff',
+        'Access-Control-Expose-Headers': 'Content-Disposition, X-Payslip-Info',
       },
     })
 
