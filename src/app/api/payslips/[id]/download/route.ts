@@ -47,17 +47,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const payslip = await prisma.payslip.findUnique({
       where: { id },
       include: {
-        staffRecord: {
-          select: {
-            id: true,
-            companyId: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            staffId: true,
-            userId: true,
-          }
-        },
+        staffRecord: true, // Include all fields from StaffRecord
       },
     })
 
@@ -72,16 +62,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     switch (user.role) {
       case 'STAFF':
         // STAFF can only download their own payslips
-        // First try to match by userId (most reliable)
-        if (payslip.staffRecord.userId && user.userId) {
-          if (payslip.staffRecord.userId !== user.userId) {
-            return withCors(
-              ApiResponse.error('Forbidden: You can only download your own payslips', 403),
-              origin
-            )
-          }
-        } else {
-          // Fallback to email comparison if userId is not available
+        // The user.userId from AuthUser should match the staffRecord.id
+        if (!user.userId) {
+          return withCors(
+            ApiResponse.error('User information not found in authentication token', 403),
+            origin
+          )
+        }
+        
+        // Compare the AuthUser.userId with StaffRecord.id
+        if (payslip.staffRecord.id !== user.userId) {
+          // Fallback to email comparison
           if (!user.email) {
             return withCors(
               ApiResponse.error('User information not found in authentication token', 403),
