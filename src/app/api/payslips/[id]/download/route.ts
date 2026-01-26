@@ -28,7 +28,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'STAFF'])
+    const user = requireRole(token, ['HR','ADMIN','SUPER_ADMIN', 'STAFF'])
 
     const { id } = params
 
