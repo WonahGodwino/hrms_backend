@@ -13,7 +13,7 @@ model Company {
   companyName String
   address     String?
   phone       String?
-  email       String?
+  email       String
   logo        String?
   taxId       String?
   archived    Int      @default(0)
@@ -61,7 +61,7 @@ model StaffRecord {
   encodedId     String? 
   companyId     String
   company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdBy     String?
+  createdBy     String
   createdAt     DateTime @default(now())
   updatedBy     String?
   updatedAt     DateTime @updatedAt
