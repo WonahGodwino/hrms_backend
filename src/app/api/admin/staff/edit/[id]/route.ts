@@ -628,7 +628,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const currentUser = requireRole(token, ['SUPER_ADMIN', 'ADMIN'])
+    const currentUser = requireRole(token, ['SUPER_ADMIN', 'ADMIN','HR'])
 
     const { id } = params
 
