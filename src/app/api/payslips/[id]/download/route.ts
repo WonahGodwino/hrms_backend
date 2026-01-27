@@ -43,11 +43,29 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const { id } = params
 
-    // Fetch payslip with all necessary data including staff record
+    // Fetch payslip with only necessary data including specific staff record fields
     const payslip = await prisma.payslip.findUnique({
       where: { id },
-      include: {
-        staffRecord: true, // Include all fields from StaffRecord
+      select: {
+        id: true,
+        staffRecordId: true,
+        companyId: true,
+        fileName: true,
+        fileType: true,
+        fileSize: true,
+        fileData: true,
+        month: true,
+        year: true,
+        // Only select necessary staff record fields
+        staffRecord: {
+          select: {
+            id: true, // For STAFF authorization (compare with user.userId)
+            email: true, // For fallback authorization and X-Payslip-Info
+            firstName: true, // For X-Payslip-Info
+            lastName: true, // For X-Payslip-Info
+            companyId: true, // For company context
+          }
+        },
       },
     })
 
@@ -62,25 +80,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     switch (user.role) {
       case 'STAFF':
         // STAFF can only download their own payslips
-        // The user.userId from AuthUser should match the staffRecord.id
-        if (!user.userId) {
+        if (!user.userId && !user.email) {
           return withCors(
             ApiResponse.error('User information not found in authentication token', 403),
             origin
           )
         }
         
-        // Compare the AuthUser.userId with StaffRecord.id
-        if (payslip.staffRecord.id !== user.userId) {
+        // Check by userId first (most reliable)
+        if (user.userId && payslip.staffRecord.id !== user.userId) {
           // Fallback to email comparison
-          if (!user.email) {
-            return withCors(
-              ApiResponse.error('User information not found in authentication token', 403),
-              origin
-            )
-          }
-          
-          if (payslip.staffRecord.email.toLowerCase() !== user.email.toLowerCase()) {
+          if (!user.email || payslip.staffRecord.email.toLowerCase() !== user.email.toLowerCase()) {
             return withCors(
               ApiResponse.error('Forbidden: You can only download your own payslips', 403),
               origin
@@ -91,7 +101,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
       case 'HR':
         // HR can download any payslip within their assigned company
-        // Get HR's company assignments from UserCompany table
         const hrAssignments = await prisma.userCompany.findMany({
           where: {
             userId: user.userId,
