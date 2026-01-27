@@ -63,8 +63,8 @@ model StaffRecord {
   company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdBy     String?
   createdAt     DateTime @default(now())
+  updatedBy     String?
   updatedAt     DateTime @updatedAt
-
   // Relations
   payrolls    Payroll[]
   payslips    Payslip[]
