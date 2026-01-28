@@ -53,6 +53,10 @@ export async function GET(request: NextRequest) {
     const year = searchParams.get('year')
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '50')
+    
+    // NEW: Get toggle parameter (defaults to false)
+    const showOnlyMine = searchParams.get('showOnlyMine') === 'true'
+    
     const skip = (page - 1) * limit
 
     // Get user's assigned companies from UserCompany table
@@ -71,7 +75,7 @@ export async function GET(request: NextRequest) {
       
       if (userAssignedCompanyIds.length === 0) {
         return withCors(
-          ApiResponse.error(`${user.role} user is not assigned to any company`, 403),
+          ApiResponse.error(`${user.role} user is not assigned to any company yet`, 403),
           origin
         )
       }
@@ -79,6 +83,12 @@ export async function GET(request: NextRequest) {
 
     // Build base where clause
     const whereClause: any = {}
+
+    //Add filter for createdBy when toggle is ON
+    if (showOnlyMine) {
+      // Only show payslips created by the current user
+      whereClause.createdBy = user.userId
+    }
 
     // Company filtering based on role
     if (user.role === 'HR' || user.role === 'ADMIN') {
@@ -145,7 +155,7 @@ export async function GET(request: NextRequest) {
       
       if (!staffRecord) {
         return withCors(
-          ApiResponse.error('Staff record not found or you do not have access', 404),
+          ApiResponse.error('Staff record not found, you may Contact Support for more help', 404),
           origin
         )
       }
@@ -249,6 +259,10 @@ export async function GET(request: NextRequest) {
             limit,
             totalPages: Math.ceil(totalCount / limit),
           },
+          // Return toggle state in response
+          filter: {
+            showOnlyMine,
+          }
         },
         'Payslips fetched successfully'
       ),
