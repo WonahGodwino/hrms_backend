@@ -38,9 +38,11 @@ model Company {
   aiUsageLogs AIUsageLog[] // One-to-many relation with AIUsageLog
   userCompanies UserCompany[] 
   attendances        Attendance[]      // One-to-many relation with Attendance
+  // LEAVE MANAGEMENT RELATIONS
+  leavePolicies   LeavePolicy[]
+  publicHolidays  PublicHoliday[]
   @@map("companies")
 }
-
 
 model StaffRecord {
   id            String   @id @default(cuid())
@@ -72,7 +74,17 @@ model StaffRecord {
   userCompanies UserCompany[] // Add this line to complete the relation
   // Add reverse relation to Attendance
   attendances   Attendance[] // New field to hold all the attendance records for the staff
-
+  // LEAVE MANAGEMENT RELATIONS
+  leaveBalances   StaffLeaveBalance[]
+  leaveRequests   LeaveRequest[] // As requester
+  
+  // Manager approval chain (REQUIRED for 2-step approval)
+  managerId       String?
+  manager         StaffRecord? @relation("StaffManagers", fields: [managerId], references: [id])
+  directReports   StaffRecord[] @relation("StaffManagers")
+  
+  // Manager approval requests
+  leaveRequestsToApproveAsManager LeaveRequest[] @relation("ManagerApprovals")
 
   @@unique([staffId, companyId])
   @@unique([email, companyId])
@@ -712,4 +724,161 @@ model Attendance {
   @@index([companyId, date])
   @@index([staffId, date])
   @@map("attendances")
+}
+
+// ============ LEAVE MANAGEMENT MODELS ============
+
+/// ============ LEAVE MANAGEMENT MODELS ============
+
+// Leave Policy Model
+model LeavePolicy {
+  id           String   @id @default(cuid())
+  companyId    String
+  name         String   // e.g., "Annual Leave", "Sick Leave", "Maternity Leave"
+  description  String?
+  maxDays      Int      // Maximum days allowed per year
+  carryOver    Int      @default(0) // Days that can be carried to next year
+  isPaid       Boolean  @default(true)
+  accrualRate  Float?   // e.g., 1.67 days per month (20/12)
+  minEmploymentMonths Int @default(0) // Minimum months before eligible
+  requiresApproval Boolean @default(true)
+  approvalWorkflow String @default("MANAGER_THEN_HR") // "MANAGER_THEN_HR", "MANAGER_ONLY", "HR_ONLY"
+  noticePeriod  Int      @default(7)    // Days notice required
+  documentationRequired Boolean @default(false)
+  
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leaveTypes   LeaveType[]
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  @@unique([companyId, name])
+  @@index([companyId])
+  @@map("leave_policies")
+}
+
+// Leave Type Model
+model LeaveType {
+  id          String   @id @default(cuid())
+  policyId    String
+  name        String   // e.g., "Vacation", "Medical", "Bereavement", "Study"
+  code        String   // e.g., "AL", "SL", "ML"
+  description String?
+  color       String?  // For UI display
+  isActive    Boolean  @default(true)
+  
+  policy      LeavePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  leaveRequests LeaveRequest[]
+  staffLeaveBalances StaffLeaveBalance[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@unique([policyId, name])
+  @@index([policyId])
+  @@map("leave_types")
+}
+
+// Staff Leave Balance Model
+model StaffLeaveBalance {
+  id          String   @id @default(cuid())
+  staffRecordId String
+  leaveTypeId String
+  year        Int      // The year this balance applies to
+  totalDays   Int      // Total days entitled for the year
+  usedDays    Int      @default(0) // Days used so far
+  pendingDays Int      @default(0) // Days in pending requests
+  carriedOver Int      @default(0) // Days carried from previous year
+  expiresAt   DateTime? // When unused balance expires
+  
+  staffRecord StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@unique([staffRecordId, leaveTypeId, year])
+  @@index([staffRecordId, year])
+  @@index([leaveTypeId])
+  @@map("staff_leave_balances")
+}
+
+// Leave Request Model
+model LeaveRequest {
+  id           String   @id @default(cuid())
+  staffRecordId String
+  leaveTypeId  String
+  startDate    DateTime
+  endDate      DateTime
+  totalDays    Decimal  @db.Decimal(5, 1) // e.g., 2.5 days
+  reason       String
+  emergencyContact String?
+  contactPhone     String?
+  
+  // Approval Workflow Fields
+  status       String   @default("PENDING") // "PENDING", "MANAGER_APPROVED", "HR_APPROVED", "APPROVED", "REJECTED", "CANCELLED"
+  currentStep  String   @default("MANAGER") // "MANAGER", "HR", "COMPLETED"
+  
+  // Manager Approval
+  managerApproverId   String?   // StaffRecord ID of manager approver
+  managerApprovedAt   DateTime?
+  managerApprovedBy   String?   // Name/email of manager approver
+  managerComments    String?
+  
+  // HR/ADMIN/SUPER_ADMIN Approval
+  hrApproverUserId   String?   // User ID (from AuthUser) of HR/Admin approver
+  hrApproverRole     String?   // Role of HR/Admin approver: "HR", "ADMIN", "SUPER_ADMIN"
+  hrApprovedAt       DateTime?
+  hrApprovedBy       String?   // Name/email of HR/Admin approver
+  hrComments         String?
+  
+  // Rejection (can happen at either step)
+  rejectionReason    String?
+  rejectedByStep     String?   // "MANAGER" or "HR"
+  rejectedById       String?
+  
+  // Handover information
+  handoverTo         String?   // StaffRecord ID
+  handoverNotes      String?
+  
+  // Attachment support
+  attachmentUrl      String?
+  fileName           String?
+  
+  // Track changes
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  createdBy          String   // StaffRecord ID who created
+  updatedBy          String?
+  
+  staffRecord        StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+  leaveType          LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  managerApprover    StaffRecord? @relation("ManagerApprovals", fields: [managerApproverId], references: [id])
+  
+  @@index([staffRecordId, startDate])
+  @@index([status, startDate])
+  @@index([managerApproverId, status])
+  @@index([hrApproverUserId, status])
+  @@map("leave_requests")
+}
+
+// Public Holiday Model
+model PublicHoliday {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  date        DateTime
+  description String?
+  isRecurring Boolean  @default(false) // Repeats every year
+  country     String?  // For country-specific holidays
+  state       String?  // For state-specific holidays
+  
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@unique([companyId, date, name])
+  @@index([companyId, date])
+  @@map("public_holidays")
 }
