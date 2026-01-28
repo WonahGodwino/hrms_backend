@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
     // Parse query parameters
     const { searchParams } = new URL(request.url)
     const year = searchParams.get('year') || new Date().getFullYear().toString()
-    const month = searchParams.get('month') || new Date().getMonth() + 1 // Current month (1-12)
+    const month = searchParams.get('month') // Can be null or string
     const companyId = searchParams.get('companyId')
 
     // Initialize response object
@@ -36,14 +36,14 @@ export async function GET(request: NextRequest) {
       userRole: user.role,
       period: {
         year: parseInt(year),
-        month: parseInt(month),
+        month: month ? parseInt(month) : null, // Handle null case
         currentDate: new Date().toISOString().split('T')[0]
       }
     }
 
     // COMMON STATISTICS (for all roles)
     let accessibleCompanyIds: string[] = []
-    let currentMonth = parseInt(month)
+    let currentMonth = month ? parseInt(month) : new Date().getMonth() + 1
     let currentYear = parseInt(year)
     
     // Get accessible companies based on role
