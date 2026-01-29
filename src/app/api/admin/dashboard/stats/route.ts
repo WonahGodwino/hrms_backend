@@ -118,7 +118,7 @@ export async function GET(request: NextRequest) {
 
 // ==================== STATISTICS FUNCTIONS ====================
 
-// SUPER_ADMIN Statistics
+// SUPER_ADMIN Statistics (no changes needed)
 async function getSuperAdminStats(companyIds: string[], year: number, month: number) {
   const currentDate = new Date()
   const currentMonthStart = new Date(year, month - 1, 1)
@@ -334,7 +334,7 @@ async function getSuperAdminStats(companyIds: string[], year: number, month: num
   }
 }
 
-// ADMIN Statistics
+// ADMIN Statistics (no changes needed)
 async function getAdminStats(userId: string, companyIds: string[], year: number, month: number) {
   const currentMonthStart = new Date(year, month - 1, 1)
   const currentMonthEnd = new Date(year, month, 0)
@@ -562,7 +562,7 @@ async function getAdminStats(userId: string, companyIds: string[], year: number,
   }
 }
 
-// HR Statistics
+// HR Statistics - FIXED VERSION with correct enum values
 async function getHRStats(userId: string, companyIds: string[], year: number, month: number) {
   const currentDate = new Date()
   const currentMonthStart = new Date(year, month - 1, 1)
@@ -597,12 +597,9 @@ async function getHRStats(userId: string, companyIds: string[], year: number, mo
     attendanceThisMonth,
     lateArrivalsThisMonth,
     
-    // Onboarding statistics
+    // Onboarding statistics - Using correct enum values
     onboardingPending,
-    onboardingCompleted,
-    
-    // Today's attendance breakdown
-    todaysAttendance
+    onboardingCompleted
     
   ] = await Promise.all([
     // More staff counts
@@ -709,65 +706,67 @@ async function getHRStats(userId: string, companyIds: string[], year: number, mo
       }
     }),
     
-    // Onboarding counts
+    // Onboarding counts - Using correct enum values
     prisma.onboarding.count({
       where: {
         staffRecord: {
           companyId: { in: companyIds }
         },
-        status: 'PENDING'
+        status: 'NOT_STARTED' // Correct enum value from your schema
       }
     }),
+    
+    // Completed onboarding this month
     prisma.onboarding.count({
       where: {
         staffRecord: {
           companyId: { in: companyIds }
         },
-        status: 'COMPLETED',
+        status: 'COMPLETED', // Correct enum value from your schema
         updatedAt: {
           gte: currentMonthStart,
           lte: currentMonthEnd
         }
       }
-    }),
-    
-    // Detailed today's attendance
-    (async () => {
-      const attendance = await prisma.attendance.findMany({
-        where: {
-          staffRecord: {
-            companyId: { in: companyIds }
-          },
-          date: today
+    })
+  ])
+
+  // Get today's attendance details
+  const todaysAttendance = await (async () => {
+    const attendance = await prisma.attendance.findMany({
+      where: {
+        staffRecord: {
+          companyId: { in: companyIds }
         },
-        include: {
-          staffRecord: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              department: true
-            }
+        date: today
+      },
+      include: {
+        staffRecord: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            department: true
           }
         }
-      })
-      
-      return {
-        total: attendance.length,
-        present: attendance.filter(a => a.signInTime !== null).length,
-        absent: totalStaffCount - attendance.filter(a => a.signInTime !== null).length,
-        late: attendance.filter(a => a.status === 'LATE').length,
-        onLeave: attendance.filter(a => a.status === 'LEAVE').length,
-        details: attendance.map(a => ({
-          name: `${a.staffRecord.firstName} ${a.staffRecord.lastName}`,
-          department: a.staffRecord.department,
-          status: a.status || (a.signInTime ? 'PRESENT' : 'ABSENT'),
-          signInTime: a.signInTime,
-          signOutTime: a.signOutTime
-        }))
       }
-    })()
-  ])
+    })
+    
+    return {
+      total: attendance.length,
+      present: attendance.filter(a => a.signInTime !== null).length,
+      absent: totalStaffCount - attendance.filter(a => a.signInTime !== null).length,
+      late: attendance.filter(a => a.status === 'LATE').length,
+      onLeave: attendance.filter(a => a.status === 'LEAVE').length,
+      details: attendance.map(a => ({
+        name: `${a.staffRecord.firstName} ${a.staffRecord.lastName}`,
+        department: a.staffRecord.department,
+        status: a.status || (a.signInTime ? 'PRESENT' : 'ABSENT'),
+        signInTime: a.signInTime,
+        signOutTime: a.signOutTime
+      }))
+    }
+  })()
 
   // Calculate rates
   const attendanceRate = totalStaffCount > 0 ? Math.round((attendanceToday / totalStaffCount) * 100) : 0
@@ -810,7 +809,7 @@ async function getHRStats(userId: string, companyIds: string[], year: number, mo
   }
 }
 
-// STAFF Statistics
+// STAFF Statistics (no changes needed)
 async function getStaffStats(userId: string, year: number, month: number) {
   // Get staff record for the user
   const staffRecord = await prisma.staffRecord.findFirst({
