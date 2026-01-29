@@ -709,6 +709,7 @@ model Attendance {
   date        DateTime
   signInTime  DateTime?
   signOutTime DateTime?
+  status      String?   @default("PRESENT") // "PRESENT", "ABSENT", "LATE", "LEAVE", "HALF_DAY"
   recordedById   String?
   recordedByRole String?
   method         String?    // "staff_id", "email", "barcode"
@@ -723,9 +724,9 @@ model Attendance {
   @@unique([companyId, staffId, date]) // One attendance per day per staff
   @@index([companyId, date])
   @@index([staffId, date])
+  @@index([status, date])
   @@map("attendances")
 }
-
 // ============ LEAVE MANAGEMENT MODELS ============
 
 /// ============ LEAVE MANAGEMENT MODELS ============
