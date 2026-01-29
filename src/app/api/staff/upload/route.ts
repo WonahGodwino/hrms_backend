@@ -385,9 +385,11 @@ export async function POST(request: NextRequest) {
         }
 
         // Check for duplicate staffId or email within this company
+        // ONLY consider staff with isActive = true as duplicates
         const existingStaff = await prisma.staffRecord.findFirst({
           where: {
             companyId: companyId!,
+            isActive: true, // Only check active records
             OR: [{ staffId }, { email }],
           },
         })
@@ -395,7 +397,7 @@ export async function POST(request: NextRequest) {
         if (existingStaff) {
           results.failed++
           results.errors.push(
-            `Row ${displayRow}: Staff with ID ${staffId} or email ${email} already exists`
+            `Row ${displayRow}: Active staff with ID ${staffId} or email ${email} already exists`
           )
           continue
         }
@@ -415,6 +417,7 @@ export async function POST(request: NextRequest) {
             bvn: bvn ? bvn.trim() : undefined,
             companyId: companyId!,
             createdBy: authUser.userId,
+            isActive: true,
           },
         })
 
