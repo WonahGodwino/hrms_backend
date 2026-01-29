@@ -340,12 +340,20 @@ async function getAdminStats(userId: string, companyIds: string[], year: number,
   const currentMonthEnd = new Date(year, month, 0)
   const last30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
   
+  // First get staff count separately
+  const staffCount = await prisma.staffRecord.count({
+    where: {
+      companyId: { in: companyIds },
+      isActive: true,
+      role: { not: 'HR' }
+    }
+  })
+
   const [
     // Company assignments
     myCompanies,
     
-    // Staff statistics
-    totalStaff,
+    // More staff statistics
     activeStaff,
     newStaffThisMonth,
     
@@ -381,14 +389,7 @@ async function getAdminStats(userId: string, companyIds: string[], year: number,
       }
     }),
     
-    // Staff counts
-    prisma.staffRecord.count({
-      where: {
-        companyId: { in: companyIds },
-        isActive: true,
-        role: { not: 'HR' }
-      }
-    }),
+    // More staff counts
     prisma.staffRecord.count({
       where: {
         companyId: { in: companyIds },
@@ -524,7 +525,7 @@ async function getAdminStats(userId: string, companyIds: string[], year: number,
     myCompanies: myCompanies,
     
     // Staff metrics
-    totalStaff: totalStaff,
+    totalStaff: staffCount,
     activeStaff: activeStaff,
     newStaffThisMonth: newStaffThisMonth,
     
@@ -553,7 +554,7 @@ async function getAdminStats(userId: string, companyIds: string[], year: number,
     totalAttendanceDays: attendanceStats.total,
     
     // Calculated metrics
-    averageStaffPerCompany: companyIds.length > 0 ? Math.round(totalStaff / companyIds.length) : 0,
+    averageStaffPerCompany: companyIds.length > 0 ? Math.round(staffCount / companyIds.length) : 0,
     payrollCompletionRate: (pendingPayrolls + processedPayrolls) > 0 ? 
       Math.round((processedPayrolls / (pendingPayrolls + processedPayrolls)) * 100) : 0,
     uploadSuccessRate: uploadStats._sum.totalRecords ? 
@@ -568,9 +569,17 @@ async function getHRStats(userId: string, companyIds: string[], year: number, mo
   const currentMonthEnd = new Date(year, month, 0)
   const today = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate())
   
+  // Get total staff count first
+  const totalStaffCount = await prisma.staffRecord.count({
+    where: {
+      companyId: { in: companyIds },
+      isActive: true,
+      role: 'STAFF'
+    }
+  })
+
   const [
-    // Staff statistics
-    totalStaff,
+    // More staff statistics
     activeStaff,
     
     // Payroll statistics
@@ -596,14 +605,7 @@ async function getHRStats(userId: string, companyIds: string[], year: number, mo
     todaysAttendance
     
   ] = await Promise.all([
-    // Staff counts
-    prisma.staffRecord.count({
-      where: {
-        companyId: { in: companyIds },
-        isActive: true,
-        role: 'STAFF'
-      }
-    }),
+    // More staff counts
     prisma.staffRecord.count({
       where: {
         companyId: { in: companyIds },
@@ -753,7 +755,7 @@ async function getHRStats(userId: string, companyIds: string[], year: number, mo
       return {
         total: attendance.length,
         present: attendance.filter(a => a.signInTime !== null).length,
-        absent: totalStaff - attendance.filter(a => a.signInTime !== null).length,
+        absent: totalStaffCount - attendance.filter(a => a.signInTime !== null).length,
         late: attendance.filter(a => a.status === 'LATE').length,
         onLeave: attendance.filter(a => a.status === 'LEAVE').length,
         details: attendance.map(a => ({
@@ -768,14 +770,14 @@ async function getHRStats(userId: string, companyIds: string[], year: number, mo
   ])
 
   // Calculate rates
-  const attendanceRate = totalStaff > 0 ? Math.round((attendanceToday / totalStaff) * 100) : 0
+  const attendanceRate = totalStaffCount > 0 ? Math.round((attendanceToday / totalStaffCount) * 100) : 0
   const monthlyAttendanceRate = activeStaff > 0 ? Math.round((attendanceThisMonth / (activeStaff * 30)) * 100) : 0
   const processedPercentage = (processedPayrolls + pendingPayslips) > 0 ? 
     Math.round((processedPayrolls / (processedPayrolls + pendingPayslips)) * 100) : 0
 
   return {
     // Staff metrics
-    totalStaff: totalStaff,
+    totalStaff: totalStaffCount,
     activeStaff: activeStaff,
     
     // Payroll metrics
@@ -802,7 +804,7 @@ async function getHRStats(userId: string, companyIds: string[], year: number, mo
     onboardingCompleted: onboardingCompleted,
     
     // Calculated metrics
-    staffPresentToday: `${attendanceToday}/${totalStaff}`,
+    staffPresentToday: `${attendanceToday}/${totalStaffCount}`,
     leaveApprovalRate: (pendingManagerApprovals + pendingHRApprovals + approvedLeavesThisMonth) > 0 ?
       Math.round((approvedLeavesThisMonth / (pendingManagerApprovals + pendingHRApprovals + approvedLeavesThisMonth)) * 100) : 0
   }
@@ -849,9 +851,9 @@ async function getStaffStats(userId: string, year: number, month: number) {
 
   const currentDate = new Date()
   const currentYear = currentDate.getFullYear()
-  const currentMonth = currentDate.getMonth() + 1
-  const currentMonthStart = new Date(currentYear, currentMonth - 1, 1)
-  const currentMonthEnd = new Date(currentYear, currentMonth, 0)
+  const currentMonthNum = currentDate.getMonth() + 1
+  const currentMonthStart = new Date(currentYear, currentMonthNum - 1, 1)
+  const currentMonthEnd = new Date(currentYear, currentMonthNum, 0)
   
   const [
     // Payment information
@@ -902,7 +904,7 @@ async function getStaffStats(userId: string, year: number, month: number) {
       where: {
         staffRecordId: staffRecord.id,
         year: currentYear,
-        month: currentMonth.toString()
+        month: currentMonthNum.toString()
       },
       select: {
         id: true,
@@ -932,7 +934,7 @@ async function getStaffStats(userId: string, year: number, month: number) {
           { 
             AND: [
               { year: currentYear },
-              { month: { gt: currentMonth.toString() } }
+              { month: { gt: currentMonthNum.toString() } }
             ]
           }
         ]
