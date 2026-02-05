@@ -1,8 +1,7 @@
 // src/app/api/leaves/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { requireRole } from '@/app/lib/auth'
+import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
@@ -114,147 +113,109 @@ function parseSheetData(sheet: ExcelJS.Worksheet, expectedHeaders: string[]): an
   return data
 }
 
-// Interfaces
-interface FailedRecord {
-  sheet: 'policies' | 'leaveTypes' | 'holidays' | 'blackoutPeriods'
-  rowData: any
-  error: string
-  rowNumber: number
-  suggestion?: string
-}
-
-interface UploadSession {
-  id: string
-  failedRecords: FailedRecord[]
-  originalData: {
-    policies: any[]
-    leaveTypes: any[]
-    holidays: any[]
-    blackoutPeriods: any[]
-  }
-  companyId: string
-  uploadedBy: string
-  createdAt: Date
-}
-
-// Store upload sessions in memory with expiration
-const uploadSessions = new Map<string, UploadSession>()
-
-// Clean up expired sessions every hour
-setInterval(() => {
-  const now = new Date()
-  for (const [sessionId, session] of uploadSessions.entries()) {
-    const sessionAge = now.getTime() - session.createdAt.getTime()
-    if (sessionAge > 24 * 60 * 60 * 1000) { // 24 hours
-      uploadSessions.delete(sessionId)
-    }
-  }
-}, 60 * 60 * 1000)
-
 // -----------------------------
 // OPTIONS - CORS preflight
 // -----------------------------
 export async function OPTIONS(request: NextRequest) {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-    },
-  })
+  return handleCorsOptions(request)
 }
 
 // -----------------------------
 // GET - Download Template or Failed Records
 // -----------------------------
 export async function GET(request: NextRequest) {
+  const origin = request.headers.get('origin')
+  
   try {
-    const session = await getServerSession(authOptions)
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      const response = NextResponse.json(
+        { success: false, message: 'Authorization header missing' },
         { status: 401 }
       )
+      return withCors(response, origin)
     }
-
+    
+    const token = authHeader.replace('Bearer ', '')
+    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
+    
     const { searchParams } = new URL(request.url)
     const companyId = searchParams.get('companyId')
     const action = searchParams.get('action')
-    const sessionId = searchParams.get('sessionId')
+    const uploadId = searchParams.get('uploadId')
     const format = searchParams.get('format') || 'excel'
 
     // Handle failed records download
-    if (action === 'failed' && sessionId) {
-      return await downloadFailedRecords(sessionId, format, session.user.id)
+    if (action === 'failed' && uploadId) {
+      return await downloadFailedRecords(uploadId, format, user.userId, origin)
     }
 
     // Template download
     if (!companyId) {
-      return NextResponse.json(
-        { error: 'Company ID is required' },
+      const response = NextResponse.json(
+        { success: false, message: 'Company ID is required' },
         { status: 400 }
       )
+      return withCors(response, origin)
     }
 
     // Verify company exists
+    const { prisma } = await import('@/app/lib/prisma')
     const company = await prisma.company.findFirst({
       where: { id: companyId, archived: 0 }
     })
 
     if (!company) {
-      return NextResponse.json(
-        { error: 'Company not found or is archived' },
+      const response = NextResponse.json(
+        { success: false, message: 'Company not found or is archived' },
         { status: 404 }
       )
+      return withCors(response, origin)
     }
 
-    // Check user access
-    const userCompanies = await prisma.userCompany.findMany({
-      where: { userId: session.user.id }
-    })
-
-    const userRecord = await prisma.staffRecord.findUnique({
-      where: { id: session.user.id },
-      select: { role: true }
-    })
-
-    const isSuperAdmin = userRecord?.role === 'SUPER_ADMIN'
-    const isHRAdmin = userCompanies.some(uc => ['HR', 'ADMIN'].includes(uc.role))
+    // Check user access based on role
+    let hasAccess = false
     
-    if (!isSuperAdmin && !isHRAdmin) {
-      return NextResponse.json(
-        { error: 'You do not have permission to download templates' },
+    if (user.role === 'SUPER_ADMIN') {
+      hasAccess = true
+    } else if (user.role === 'HR') {
+      hasAccess = user.companyId === companyId
+    } else if (user.role === 'ADMIN') {
+      const userCompany = await prisma.userCompany.findFirst({
+        where: {
+          userId: user.userId,
+          companyId,
+          role: { in: ['ADMIN', 'ALL'] }
+        }
+      })
+      hasAccess = !!userCompany
+    }
+    
+    if (!hasAccess) {
+      const response = NextResponse.json(
+        { success: false, message: 'You do not have permission to download templates' },
         { status: 403 }
       )
-    }
-
-    // Check company access for HR/ADMIN
-    if (isHRAdmin && !isSuperAdmin) {
-      const hasAccess = userCompanies.some(uc => uc.companyId === companyId)
-      if (!hasAccess) {
-        return NextResponse.json(
-          { error: 'You do not have access to this company' },
-          { status: 403 }
-        )
-      }
+      return withCors(response, origin)
     }
 
     if (action === 'template') {
-      return await downloadTemplate(company, format)
+      return await downloadTemplate(company, format, origin)
     }
 
-    return NextResponse.json(
-      { error: 'Invalid action' },
+    const response = NextResponse.json(
+      { success: false, message: 'Invalid action' },
       { status: 400 }
     )
+    return withCors(response, origin)
 
   } catch (error) {
     console.error('Error in GET /api/leaves/upload:', error)
-    return NextResponse.json(
-      { error: 'Failed to process request' },
+    const response = NextResponse.json(
+      { success: false, message: 'Failed to process request' },
       { status: 500 }
     )
+    return withCors(response, origin)
   }
 }
 
@@ -262,28 +223,35 @@ export async function GET(request: NextRequest) {
 // POST - Upload and Process Leave Management Data
 // -----------------------------
 export async function POST(request: NextRequest) {
+  const origin = request.headers.get('origin')
+  
   try {
-    const session = await getServerSession(authOptions)
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      const response = NextResponse.json(
+        { success: false, message: 'Authorization header missing' },
         { status: 401 }
       )
+      return withCors(response, origin)
     }
+    
+    const token = authHeader.replace('Bearer ', '')
+    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
     const formData = await request.formData()
     const file = formData.get('file') as File
     const companyId = formData.get('companyId') as string
-    const sessionId = formData.get('sessionId') as string
 
     if (!companyId) {
-      return NextResponse.json(
-        { error: 'Company ID is required' },
+      const response = NextResponse.json(
+        { success: false, message: 'Company ID is required' },
         { status: 400 }
       )
+      return withCors(response, origin)
     }
 
     // Verify company exists
+    const { prisma } = await import('@/app/lib/prisma')
     const company = await prisma.company.findFirst({
       where: {
         id: companyId,
@@ -292,48 +260,45 @@ export async function POST(request: NextRequest) {
     })
 
     if (!company) {
-      return NextResponse.json(
-        { error: 'Company not found or is archived' },
+      const response = NextResponse.json(
+        { success: false, message: 'Company not found or is archived' },
         { status: 404 }
       )
+      return withCors(response, origin)
     }
 
-    // Check user access
-    const userCompanies = await prisma.userCompany.findMany({
-      where: { userId: session.user.id }
-    })
-
-    const userRecord = await prisma.staffRecord.findUnique({
-      where: { id: session.user.id },
-      select: { role: true }
-    })
-
-    const isSuperAdmin = userRecord?.role === 'SUPER_ADMIN'
-    const isHRAdmin = userCompanies.some(uc => ['HR', 'ADMIN'].includes(uc.role))
+    // Check user access based on role
+    let hasAccess = false
     
-    if (!isSuperAdmin && !isHRAdmin) {
-      return NextResponse.json(
-        { error: 'You do not have permission to upload leave data' },
+    if (user.role === 'SUPER_ADMIN') {
+      hasAccess = true
+    } else if (user.role === 'HR') {
+      hasAccess = user.companyId === companyId
+    } else if (user.role === 'ADMIN') {
+      const userCompany = await prisma.userCompany.findFirst({
+        where: {
+          userId: user.userId,
+          companyId,
+          role: { in: ['ADMIN', 'ALL'] }
+        }
+      })
+      hasAccess = !!userCompany
+    }
+    
+    if (!hasAccess) {
+      const response = NextResponse.json(
+        { success: false, message: 'You do not have access to upload leave data for this company' },
         { status: 403 }
       )
-    }
-
-    // Check company access for HR/ADMIN
-    if (isHRAdmin && !isSuperAdmin) {
-      const hasAccess = userCompanies.some(uc => uc.companyId === companyId)
-      if (!hasAccess) {
-        return NextResponse.json(
-          { error: 'You do not have access to this company' },
-          { status: 403 }
-        )
-      }
+      return withCors(response, origin)
     }
 
     if (!file) {
-      return NextResponse.json(
-        { error: 'No file uploaded' },
+      const response = NextResponse.json(
+        { success: false, message: 'No file uploaded' },
         { status: 400 }
       )
+      return withCors(response, origin)
     }
 
     // Validate file type
@@ -342,10 +307,11 @@ export async function POST(request: NextRequest) {
     const isExcel = ['xlsx', 'xls'].includes(fileExtension || '')
 
     if (!isCsv && !isExcel) {
-      return NextResponse.json(
-        { error: 'Invalid file type. Please upload Excel (.xlsx, .xls) or CSV files.' },
+      const response = NextResponse.json(
+        { success: false, message: 'Invalid file type. Please upload Excel (.xlsx, .xls) or CSV files.' },
         { status: 400 }
       )
+      return withCors(response, origin)
     }
 
     // Read and parse file
@@ -363,19 +329,97 @@ export async function POST(request: NextRequest) {
       await workbook.xlsx.load(bytes)
     }
 
+    // Create upload record in database first
+    const { uploadsDir } = await ensureUploadDirectories()
+    const leavesDir = path.join(uploadsDir, 'leaves')
+    await mkdir(leavesDir, { recursive: true })
+
+    const fileName = `leave-upload-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
+    const savedFilePath = path.join(leavesDir, fileName)
+    const relativeFilePath = getRelativePath(savedFilePath)
+
+    // Save the original file
+    await writeFile(savedFilePath, buffer)
+
+    // Create initial upload record
+    const leaveUpload = await prisma.leaveUpload.create({
+      data: {
+        companyId: companyId,
+        fileName: file.name,
+        filePath: relativeFilePath,
+        uploadedBy: user.userId,
+        status: 'PROCESSING',
+        policiesCreated: 0,
+        policiesUpdated: 0,
+        policiesFailed: 0,
+        leaveTypesCreated: 0,
+        leaveTypesUpdated: 0,
+        leaveTypesFailed: 0,
+        holidaysCreated: 0,
+        holidaysUpdated: 0,
+        holidaysFailed: 0,
+        blackoutPeriodsCreated: 0,
+        blackoutPeriodsUpdated: 0,
+        blackoutPeriodsFailed: 0
+      }
+    })
+
     const results = {
-      policies: { created: 0, updated: 0, failed: 0, errors: [] as string[], failedRecords: [] as FailedRecord[] },
-      leaveTypes: { created: 0, updated: 0, failed: 0, errors: [] as string[], failedRecords: [] as FailedRecord[] },
-      holidays: { created: 0, updated: 0, failed: 0, errors: [] as string[], failedRecords: [] as FailedRecord[] },
-      blackoutPeriods: { created: 0, updated: 0, failed: 0, errors: [] as string[], failedRecords: [] as FailedRecord[] }
+      policies: { 
+        created: 0, 
+        updated: 0, 
+        failed: 0, 
+        errors: [] as string[], 
+        failedRecords: [] as Array<{
+          rowData: any
+          error: string
+          rowNumber: number
+          suggestion?: string
+        }> 
+      },
+      leaveTypes: { 
+        created: 0, 
+        updated: 0, 
+        failed: 0, 
+        errors: [] as string[], 
+        failedRecords: [] as Array<{
+          rowData: any
+          error: string
+          rowNumber: number
+        }> 
+      },
+      holidays: { 
+        created: 0, 
+        updated: 0, 
+        failed: 0, 
+        errors: [] as string[], 
+        failedRecords: [] as Array<{
+          rowData: any
+          error: string
+          rowNumber: number
+        }> 
+      },
+      blackoutPeriods: { 
+        created: 0, 
+        updated: 0, 
+        failed: 0, 
+        errors: [] as string[], 
+        failedRecords: [] as Array<{
+          rowData: any
+          error: string
+          rowNumber: number
+        }> 
+      }
     }
 
-    const originalData = {
-      policies: [] as any[],
-      leaveTypes: [] as any[],
-      holidays: [] as any[],
-      blackoutPeriods: [] as any[]
-    }
+    const failedRecordsToSave: Array<{
+      uploadId: string
+      sheetType: string
+      rowNumber: number
+      rowData: string
+      error: string
+      suggestion?: string
+    }> = []
 
     // ============ PROCESS LEAVE POLICIES ============
     try {
@@ -400,8 +444,6 @@ export async function POST(request: NextRequest) {
           'seasonalRestrictions',
           'requireManagerComments'
         ])
-
-        originalData.policies = policiesData
 
         for (let i = 0; i < policiesData.length; i++) {
           const rowNumber = i + 2
@@ -491,12 +533,15 @@ export async function POST(request: NextRequest) {
           } catch (error: any) {
             results.policies.failed++
             results.policies.errors.push(`Row ${rowNumber}: ${error.message}`)
-            results.policies.failedRecords.push({
-              sheet: 'policies',
-              rowData: policyData,
+            
+            const suggestion = getPolicyErrorSuggestion(error.message, policyData)
+            failedRecordsToSave.push({
+              uploadId: leaveUpload.id,
+              sheetType: 'POLICIES',
+              rowNumber,
+              rowData: JSON.stringify(policyData),
               error: error.message,
-              rowNumber: rowNumber,
-              suggestion: getPolicyErrorSuggestion(error.message, policyData)
+              suggestion
             })
           }
         }
@@ -520,8 +565,6 @@ export async function POST(request: NextRequest) {
           'color',
           'isActive'
         ])
-
-        originalData.leaveTypes = typesData
 
         // Get all policies for this company
         const policies = await prisma.leavePolicy.findMany({
@@ -590,11 +633,13 @@ export async function POST(request: NextRequest) {
           } catch (error: any) {
             results.leaveTypes.failed++
             results.leaveTypes.errors.push(`Row ${rowNumber}: ${error.message}`)
-            results.leaveTypes.failedRecords.push({
-              sheet: 'leaveTypes',
-              rowData: typeData,
-              error: error.message,
-              rowNumber: rowNumber
+            
+            failedRecordsToSave.push({
+              uploadId: leaveUpload.id,
+              sheetType: 'LEAVE_TYPES',
+              rowNumber,
+              rowData: JSON.stringify(typeData),
+              error: error.message
             })
           }
         }
@@ -618,8 +663,6 @@ export async function POST(request: NextRequest) {
           'country',
           'state'
         ])
-
-        originalData.holidays = holidaysData
 
         for (let i = 0; i < holidaysData.length; i++) {
           const rowNumber = i + 2
@@ -693,11 +736,13 @@ export async function POST(request: NextRequest) {
           } catch (error: any) {
             results.holidays.failed++
             results.holidays.errors.push(`Row ${rowNumber}: ${error.message}`)
-            results.holidays.failedRecords.push({
-              sheet: 'holidays',
-              rowData: holidayData,
-              error: error.message,
-              rowNumber: rowNumber
+            
+            failedRecordsToSave.push({
+              uploadId: leaveUpload.id,
+              sheetType: 'HOLIDAYS',
+              rowNumber,
+              rowData: JSON.stringify(holidayData),
+              error: error.message
             })
           }
         }
@@ -719,8 +764,6 @@ export async function POST(request: NextRequest) {
           'appliesToAllLeaveTypes',
           'policyName'
         ])
-
-        originalData.blackoutPeriods = blackoutData
 
         // Get all policies for mapping
         const policies = await prisma.leavePolicy.findMany({
@@ -796,11 +839,13 @@ export async function POST(request: NextRequest) {
           } catch (error: any) {
             results.blackoutPeriods.failed++
             results.blackoutPeriods.errors.push(`Row ${rowNumber}: ${error.message}`)
-            results.blackoutPeriods.failedRecords.push({
-              sheet: 'blackoutPeriods',
-              rowData: periodData,
-              error: error.message,
-              rowNumber: rowNumber
+            
+            failedRecordsToSave.push({
+              uploadId: leaveUpload.id,
+              sheetType: 'BLACKOUT_PERIODS',
+              rowNumber,
+              rowData: JSON.stringify(periodData),
+              error: error.message
             })
           }
         }
@@ -810,74 +855,52 @@ export async function POST(request: NextRequest) {
       results.blackoutPeriods.errors.push(`Error processing blackout periods sheet: ${error.message}`)
     }
 
-    // Create upload session for failed records
-    const uploadSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    
-    const uploadSession: UploadSession = {
-      id: uploadSessionId,
-      failedRecords: [
-        ...results.policies.failedRecords,
-        ...results.leaveTypes.failedRecords,
-        ...results.holidays.failedRecords,
-        ...results.blackoutPeriods.failedRecords
-      ],
-      originalData,
-      companyId,
-      uploadedBy: session.user.id,
-      createdAt: new Date()
+    // Save all failed records to database
+    if (failedRecordsToSave.length > 0) {
+      await prisma.leaveUploadFailedRecord.createMany({
+        data: failedRecordsToSave
+      })
     }
-    
-    uploadSessions.set(uploadSessionId, uploadSession)
 
-    // Save upload record
-    const { uploadsDir } = await ensureUploadDirectories()
-    const leavesDir = path.join(uploadsDir, 'leaves')
-    await mkdir(leavesDir, { recursive: true })
-
-    const fileName = `leave-upload-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
-    const savedFilePath = path.join(leavesDir, fileName)
-    const relativeFilePath = getRelativePath(savedFilePath)
-
-    // Save the original file
-    await writeFile(savedFilePath, buffer)
-
-    // Create upload record in database
-    const leaveUpload = await prisma.leaveUpload.create({
+    // Update upload record with final results
+    const updatedUpload = await prisma.leaveUpload.update({
+      where: { id: leaveUpload.id },
       data: {
-        companyId: companyId,
-        fileName: file.name,
-        filePath: relativeFilePath,
-        policiesCreated: results.policies.created + results.policies.updated,
+        status: 'COMPLETED',
+        policiesCreated: results.policies.created,
+        policiesUpdated: results.policies.updated,
         policiesFailed: results.policies.failed,
-        leaveTypesCreated: results.leaveTypes.created + results.leaveTypes.updated,
+        leaveTypesCreated: results.leaveTypes.created,
+        leaveTypesUpdated: results.leaveTypes.updated,
         leaveTypesFailed: results.leaveTypes.failed,
-        holidaysCreated: results.holidays.created + results.holidays.updated,
+        holidaysCreated: results.holidays.created,
+        holidaysUpdated: results.holidays.updated,
         holidaysFailed: results.holidays.failed,
-        blackoutPeriodsCreated: results.blackoutPeriods.created + results.blackoutPeriods.updated,
+        blackoutPeriodsCreated: results.blackoutPeriods.created,
+        blackoutPeriodsUpdated: results.blackoutPeriods.updated,
         blackoutPeriodsFailed: results.blackoutPeriods.failed,
         errors: [
           ...results.policies.errors,
           ...results.leaveTypes.errors,
           ...results.holidays.errors,
           ...results.blackoutPeriods.errors
-        ],
-        uploadedBy: session.user.id,
-        sessionId: uploadSessionId
+        ]
       }
     })
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: 'Leave management data processing completed',
       data: {
         summary: {
+          uploadId: updatedUpload.id,
           companyId: companyId,
           companyName: company.companyName,
           totalProcessed: {
-            policies: originalData.policies.length,
-            leaveTypes: originalData.leaveTypes.length,
-            holidays: originalData.holidays.length,
-            blackoutPeriods: originalData.blackoutPeriods.length
+            policies: results.policies.created + results.policies.updated + results.policies.failed,
+            leaveTypes: results.leaveTypes.created + results.leaveTypes.updated + results.leaveTypes.failed,
+            holidays: results.holidays.created + results.holidays.updated + results.holidays.failed,
+            blackoutPeriods: results.blackoutPeriods.created + results.blackoutPeriods.updated + results.blackoutPeriods.failed
           },
           successful: {
             policies: results.policies.created + results.policies.updated,
@@ -893,8 +916,7 @@ export async function POST(request: NextRequest) {
           },
           hasFailedRecords: results.policies.failed > 0 || results.leaveTypes.failed > 0 || 
                            results.holidays.failed > 0 || results.blackoutPeriods.failed > 0,
-          sessionId: uploadSessionId,
-          downloadFailedUrl: `/api/leaves/upload?action=failed&sessionId=${uploadSessionId}&format=excel`
+          downloadFailedUrl: `/api/leaves/upload?action=failed&uploadId=${updatedUpload.id}&format=excel`
         },
         details: {
           policies: results.policies,
@@ -904,22 +926,26 @@ export async function POST(request: NextRequest) {
         }
       }
     })
+    
+    return withCors(response, origin)
 
   } catch (error) {
     console.error('Error in POST /api/leaves/upload:', error)
-    return NextResponse.json(
+    const response = NextResponse.json(
       { 
-        error: 'Failed to process leave upload',
+        success: false,
+        message: 'Failed to process leave upload',
         details: error instanceof Error ? error.message : 'Unknown error'
       },
       { status: 500 }
     )
+    return withCors(response, origin)
   }
 }
 
 // ============ HELPER FUNCTIONS ============
 
-async function downloadTemplate(company: any, format: string) {
+async function downloadTemplate(company: any, format: string, origin: string | null) {
   const workbook = new ExcelJS.Workbook()
   
   // Sheet 1: Leave Policies
@@ -960,6 +986,25 @@ async function downloadTemplate(company: any, format: string) {
   policyHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
   policyHeaderRow.alignment = { vertical: 'middle', horizontal: 'center' }
   
+  // Add sample data
+  policiesSheet.addRow({
+    policyName: 'Annual Leave',
+    description: 'Paid time off for vacation',
+    maxDays: '20',
+    carryOver: '5',
+    isPaid: 'YES',
+    accrualRate: '1.67',
+    minEmploymentMonths: '3',
+    requiresApproval: 'YES',
+    approvalWorkflow: 'MANAGER_THEN_HR',
+    noticePeriod: '14',
+    documentationRequired: 'NO',
+    allowHalfDays: 'YES',
+    maxConsecutiveDays: '15',
+    seasonalRestrictions: '12,1',
+    requireManagerComments: 'YES'
+  })
+  
   // Sheet 2: Leave Types
   const typesSheet = workbook.addWorksheet('Leave Types')
   
@@ -983,6 +1028,16 @@ async function downloadTemplate(company: any, format: string) {
   typeHeaderRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 }
   typeHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
   typeHeaderRow.alignment = { vertical: 'middle', horizontal: 'center' }
+  
+  // Add sample data
+  typesSheet.addRow({
+    policyName: 'Annual Leave',
+    typeName: 'Vacation Leave',
+    code: 'VL',
+    description: 'Regular vacation time off',
+    color: '#3B82F6',
+    isActive: 'YES'
+  })
   
   // Sheet 3: Public Holidays
   const holidaysSheet = workbook.addWorksheet('Public Holidays')
@@ -1008,6 +1063,16 @@ async function downloadTemplate(company: any, format: string) {
   holidayHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
   holidayHeaderRow.alignment = { vertical: 'middle', horizontal: 'center' }
   
+  // Add sample data
+  holidaysSheet.addRow({
+    holidayName: 'New Year\'s Day',
+    dateOrPattern: '01-01',
+    description: 'Celebration of new year',
+    isRecurring: 'YES',
+    country: 'NG',
+    state: 'All'
+  })
+  
   // Sheet 4: Blackout Periods (Optional)
   const blackoutSheet = workbook.addWorksheet('Blackout Periods')
   
@@ -1032,77 +1097,122 @@ async function downloadTemplate(company: any, format: string) {
   blackoutHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
   blackoutHeaderRow.alignment = { vertical: 'middle', horizontal: 'center' }
   
+  // Add sample data
+  blackoutSheet.addRow({
+    periodName: 'Year-End Shutdown',
+    startDate: '2024-12-20',
+    endDate: '2024-12-31',
+    reason: 'Company-wide holiday shutdown',
+    appliesToAllLeaveTypes: 'YES',
+    policyName: ''
+  })
+  
+  // Style all sheets
+  const sheets = [policiesSheet, typesSheet, holidaysSheet, blackoutSheet]
+  sheets.forEach((sheet, index) => {
+    const startRow = index === 0 ? 12 : (index === 1 ? 8 : (index === 2 ? 8 : 9))
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber >= startRow) {
+        row.alignment = { vertical: 'middle', horizontal: 'left' }
+        row.font = { size: 11 }
+        if ((rowNumber - startRow) % 2 === 0) {
+          row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } }
+        }
+      }
+    })
+  })
+
   if (format === 'csv') {
     // Create CSV for all sheets
     let csvContent = ''
     
     csvContent += 'LEAVE POLICIES\n'
     csvContent += 'policyName*,description,maxDays*,carryOver,isPaid,accrualRate,minEmploymentMonths,requiresApproval,approvalWorkflow*,noticePeriod,documentationRequired,allowHalfDays,maxConsecutiveDays,seasonalRestrictions,requireManagerComments\n'
+    csvContent += 'Annual Leave,Paid time off for vacation,20,5,YES,1.67,3,YES,MANAGER_THEN_HR,14,NO,YES,15,12;1,YES\n'
     csvContent += '\n\n'
     
     csvContent += 'LEAVE TYPES\n'
     csvContent += 'policyName*,typeName*,code*,description,color,isActive\n'
+    csvContent += 'Annual Leave,Vacation Leave,VL,Regular vacation time off,#3B82F6,YES\n'
     csvContent += '\n\n'
     
     csvContent += 'PUBLIC HOLIDAYS\n'
     csvContent += 'holidayName*,dateOrPattern*,description,isRecurring,country,state\n'
+    csvContent += 'New Year\'s Day,01-01,Celebration of new year,YES,NG,All\n'
     csvContent += '\n\n'
     
     csvContent += 'BLACKOUT PERIODS\n'
     csvContent += 'periodName*,startDate*,endDate*,reason,appliesToAllLeaveTypes,policyName\n'
+    csvContent += 'Year-End Shutdown,2024-12-20,2024-12-31,Company-wide holiday shutdown,YES,\n'
     
-    return new NextResponse(csvContent, {
+    const response = new NextResponse(csvContent, {
       headers: {
         'Content-Type': 'text/csv',
         'Content-Disposition': `attachment; filename="leave-template-${company.companyName}.csv"`,
         'Cache-Control': 'no-cache',
       },
     })
+    
+    return withCors(response, origin)
   } else {
     const buffer = await workbook.xlsx.writeBuffer()
 
-    return new NextResponse(buffer, {
+    const response = new NextResponse(buffer, {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': `attachment; filename="leave-template-${company.companyName}.xlsx"`,
         'Cache-Control': 'no-cache',
       },
     })
+    
+    return withCors(response, origin)
   }
 }
 
-async function downloadFailedRecords(sessionId: string, format: string, userId: string) {
-  const session = uploadSessions.get(sessionId)
+async function downloadFailedRecords(uploadId: string, format: string, userId: string, origin: string | null) {
+  const { prisma } = await import('@/app/lib/prisma')
   
-  if (!session) {
-    return NextResponse.json(
-      { error: 'Session expired or not found. Please upload again.' },
+  // Verify upload exists and user has access
+  const upload = await prisma.leaveUpload.findFirst({
+    where: {
+      id: uploadId,
+      uploadedBy: userId
+    },
+    include: {
+      failedRecords: true
+    }
+  })
+  
+  if (!upload) {
+    const response = NextResponse.json(
+      { success: false, message: 'Upload not found or you do not have access' },
       { status: 404 }
     )
+    return withCors(response, origin)
   }
   
-  // Verify user has access to this session
-  if (session.uploadedBy !== userId) {
-    return NextResponse.json(
-      { error: 'You do not have access to this session' },
-      { status: 403 }
+  if (upload.failedRecords.length === 0) {
+    const response = NextResponse.json(
+      { success: false, message: 'No failed records found for this upload' },
+      { status: 404 }
     )
+    return withCors(response, origin)
   }
 
   const workbook = new ExcelJS.Workbook()
   
-  // Group failed records by sheet
-  const sheets = {
-    policies: session.failedRecords.filter(r => r.sheet === 'policies'),
-    leaveTypes: session.failedRecords.filter(r => r.sheet === 'leaveTypes'),
-    holidays: session.failedRecords.filter(r => r.sheet === 'holidays'),
-    blackoutPeriods: session.failedRecords.filter(r => r.sheet === 'blackoutPeriods')
-  }
+  // Group failed records by sheet type
+  const policiesRecords = upload.failedRecords.filter(r => r.sheetType === 'POLICIES')
+  const leaveTypesRecords = upload.failedRecords.filter(r => r.sheetType === 'LEAVE_TYPES')
+  const holidaysRecords = upload.failedRecords.filter(r => r.sheetType === 'HOLIDAYS')
+  const blackoutRecords = upload.failedRecords.filter(r => r.sheetType === 'BLACKOUT_PERIODS')
 
   // Policies sheet
-  if (sheets.policies.length > 0) {
+  if (policiesRecords.length > 0) {
     const policiesSheet = workbook.addWorksheet('Failed Policies')
     policiesSheet.addRow(['FAILED POLICIES - Correct and re-upload'])
+    policiesSheet.addRow(['Original upload date:', upload.createdAt.toISOString()])
+    policiesSheet.addRow(['Company:', upload.companyId])
     policiesSheet.addRow([''])
     
     policiesSheet.columns = [
@@ -1125,9 +1235,15 @@ async function downloadFailedRecords(sessionId: string, format: string, userId: 
       { header: 'SUGGESTION', key: 'suggestion', width: 50 }
     ]
     
-    sheets.policies.forEach(record => {
+    const policyHeaderRow = policiesSheet.getRow(5)
+    policyHeaderRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 }
+    policyHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
+    policyHeaderRow.alignment = { vertical: 'middle', horizontal: 'center' }
+    
+    policiesRecords.forEach(record => {
+      const rowData = JSON.parse(record.rowData)
       policiesSheet.addRow({
-        ...record.rowData,
+        ...rowData,
         error: record.error,
         suggestion: record.suggestion || ''
       })
@@ -1135,9 +1251,11 @@ async function downloadFailedRecords(sessionId: string, format: string, userId: 
   }
 
   // Leave Types sheet
-  if (sheets.leaveTypes.length > 0) {
+  if (leaveTypesRecords.length > 0) {
     const typesSheet = workbook.addWorksheet('Failed Leave Types')
     typesSheet.addRow(['FAILED LEAVE TYPES - Correct and re-upload'])
+    typesSheet.addRow(['Original upload date:', upload.createdAt.toISOString()])
+    typesSheet.addRow(['Company:', upload.companyId])
     typesSheet.addRow([''])
     
     typesSheet.columns = [
@@ -1150,18 +1268,26 @@ async function downloadFailedRecords(sessionId: string, format: string, userId: 
       { header: 'ERROR', key: 'error', width: 50 }
     ]
     
-    sheets.leaveTypes.forEach(record => {
+    const typeHeaderRow = typesSheet.getRow(5)
+    typeHeaderRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 }
+    typeHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
+    typeHeaderRow.alignment = { vertical: 'middle', horizontal: 'center' }
+    
+    leaveTypesRecords.forEach(record => {
+      const rowData = JSON.parse(record.rowData)
       typesSheet.addRow({
-        ...record.rowData,
+        ...rowData,
         error: record.error
       })
     })
   }
 
   // Holidays sheet
-  if (sheets.holidays.length > 0) {
+  if (holidaysRecords.length > 0) {
     const holidaysSheet = workbook.addWorksheet('Failed Holidays')
     holidaysSheet.addRow(['FAILED HOLIDAYS - Correct and re-upload'])
+    holidaysSheet.addRow(['Original upload date:', upload.createdAt.toISOString()])
+    holidaysSheet.addRow(['Company:', upload.companyId])
     holidaysSheet.addRow([''])
     
     holidaysSheet.columns = [
@@ -1174,18 +1300,26 @@ async function downloadFailedRecords(sessionId: string, format: string, userId: 
       { header: 'ERROR', key: 'error', width: 50 }
     ]
     
-    sheets.holidays.forEach(record => {
+    const holidayHeaderRow = holidaysSheet.getRow(5)
+    holidayHeaderRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 }
+    holidayHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
+    holidayHeaderRow.alignment = { vertical: 'middle', horizontal: 'center' }
+    
+    holidaysRecords.forEach(record => {
+      const rowData = JSON.parse(record.rowData)
       holidaysSheet.addRow({
-        ...record.rowData,
+        ...rowData,
         error: record.error
       })
     })
   }
 
   // Blackout Periods sheet
-  if (sheets.blackoutPeriods.length > 0) {
+  if (blackoutRecords.length > 0) {
     const blackoutSheet = workbook.addWorksheet('Failed Blackout Periods')
     blackoutSheet.addRow(['FAILED BLACKOUT PERIODS - Correct and re-upload'])
+    blackoutSheet.addRow(['Original upload date:', upload.createdAt.toISOString()])
+    blackoutSheet.addRow(['Company:', upload.companyId])
     blackoutSheet.addRow([''])
     
     blackoutSheet.columns = [
@@ -1198,48 +1332,148 @@ async function downloadFailedRecords(sessionId: string, format: string, userId: 
       { header: 'ERROR', key: 'error', width: 50 }
     ]
     
-    sheets.blackoutPeriods.forEach(record => {
+    const blackoutHeaderRow = blackoutSheet.getRow(5)
+    blackoutHeaderRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 }
+    blackoutHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
+    blackoutHeaderRow.alignment = { vertical: 'middle', horizontal: 'center' }
+    
+    blackoutRecords.forEach(record => {
+      const rowData = JSON.parse(record.rowData)
       blackoutSheet.addRow({
-        ...record.rowData,
+        ...rowData,
         error: record.error
       })
     })
   }
 
+  // Style all sheets with alternating row colors
+  workbook.eachWorksheet((worksheet) => {
+    const dataStartRow = 5 // All sheets have header at row 5
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber >= dataStartRow) {
+        row.alignment = { vertical: 'middle', horizontal: 'left' }
+        row.font = { size: 11 }
+        if ((rowNumber - dataStartRow) % 2 === 0) {
+          row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } }
+        }
+      }
+    })
+  })
+
   if (format === 'csv') {
     // Create CSV for all failed records
     let csvContent = ''
     
-    // Add each sheet's data
-    if (sheets.policies.length > 0) {
+    // Policies
+    if (policiesRecords.length > 0) {
       csvContent += 'FAILED POLICIES\n'
       csvContent += 'policyName,description,maxDays,carryOver,isPaid,accrualRate,minEmploymentMonths,requiresApproval,approvalWorkflow,noticePeriod,documentationRequired,allowHalfDays,maxConsecutiveDays,seasonalRestrictions,requireManagerComments,ERROR,SUGGESTION\n'
-      sheets.policies.forEach(record => {
-        const row = Object.values(record.rowData).concat([record.error, record.suggestion || '']).join(',')
+      policiesRecords.forEach(record => {
+        const rowData = JSON.parse(record.rowData)
+        const row = [
+          rowData.policyName || '',
+          rowData.description || '',
+          rowData.maxDays || '',
+          rowData.carryOver || '',
+          rowData.isPaid || '',
+          rowData.accrualRate || '',
+          rowData.minEmploymentMonths || '',
+          rowData.requiresApproval || '',
+          rowData.approvalWorkflow || '',
+          rowData.noticePeriod || '',
+          rowData.documentationRequired || '',
+          rowData.allowHalfDays || '',
+          rowData.maxConsecutiveDays || '',
+          rowData.seasonalRestrictions || '',
+          rowData.requireManagerComments || '',
+          record.error,
+          record.suggestion || ''
+        ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(',')
         csvContent += row + '\n'
       })
       csvContent += '\n\n'
     }
     
-    // Similar for other sheets...
+    // Leave Types
+    if (leaveTypesRecords.length > 0) {
+      csvContent += 'FAILED LEAVE TYPES\n'
+      csvContent += 'policyName,typeName,code,description,color,isActive,ERROR\n'
+      leaveTypesRecords.forEach(record => {
+        const rowData = JSON.parse(record.rowData)
+        const row = [
+          rowData.policyName || '',
+          rowData.typeName || '',
+          rowData.code || '',
+          rowData.description || '',
+          rowData.color || '',
+          rowData.isActive || '',
+          record.error
+        ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(',')
+        csvContent += row + '\n'
+      })
+      csvContent += '\n\n'
+    }
     
-    return new NextResponse(csvContent, {
+    // Holidays
+    if (holidaysRecords.length > 0) {
+      csvContent += 'FAILED HOLIDAYS\n'
+      csvContent += 'holidayName,dateOrPattern,description,isRecurring,country,state,ERROR\n'
+      holidaysRecords.forEach(record => {
+        const rowData = JSON.parse(record.rowData)
+        const row = [
+          rowData.holidayName || '',
+          rowData.dateOrPattern || '',
+          rowData.description || '',
+          rowData.isRecurring || '',
+          rowData.country || '',
+          rowData.state || '',
+          record.error
+        ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(',')
+        csvContent += row + '\n'
+      })
+      csvContent += '\n\n'
+    }
+    
+    // Blackout Periods
+    if (blackoutRecords.length > 0) {
+      csvContent += 'FAILED BLACKOUT PERIODS\n'
+      csvContent += 'periodName,startDate,endDate,reason,appliesToAllLeaveTypes,policyName,ERROR\n'
+      blackoutRecords.forEach(record => {
+        const rowData = JSON.parse(record.rowData)
+        const row = [
+          rowData.periodName || '',
+          rowData.startDate || '',
+          rowData.endDate || '',
+          rowData.reason || '',
+          rowData.appliesToAllLeaveTypes || '',
+          rowData.policyName || '',
+          record.error
+        ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(',')
+        csvContent += row + '\n'
+      })
+    }
+    
+    const response = new NextResponse(csvContent, {
       headers: {
         'Content-Type': 'text/csv',
-        'Content-Disposition': `attachment; filename="failed-records-${sessionId}.csv"`,
+        'Content-Disposition': `attachment; filename="failed-records-${uploadId}.csv"`,
         'Cache-Control': 'no-cache',
       },
     })
+    
+    return withCors(response, origin)
   } else {
     const buffer = await workbook.xlsx.writeBuffer()
 
-    return new NextResponse(buffer, {
+    const response = new NextResponse(buffer, {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="failed-records-${sessionId}.xlsx"`,
+        'Content-Disposition': `attachment; filename="failed-records-${uploadId}.xlsx"`,
         'Cache-Control': 'no-cache',
       },
     })
+    
+    return withCors(response, origin)
   }
 }
 
