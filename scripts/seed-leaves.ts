@@ -1,11 +1,34 @@
-// scripts/seed-leaves-simple.ts - MINIMAL WORKING VERSION
-const { PrismaClient } = require('@prisma/client')
+// scripts/seed-leaves.ts
+import 'dotenv/config'
+import { PrismaPg } from '@prisma/adapter-pg'
+import { Pool } from 'pg'
+import { PrismaClient } from '@prisma/client'
+
+// Load environment variables from .env.production if available
+// Otherwise fall back to .env
+const loadEnv = () => {
+  try {
+    require('dotenv').config({ path: '.env.production' })
+  } catch {
+    // Fallback to default .env
+    require('dotenv').config()
+  }
+}
+loadEnv()
+
+// Aiven-compatible PG pool with SSL
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false,
+  },
+})
+
+const adapter = new PrismaPg(pool)
+const prisma = new PrismaClient({ adapter })
 
 async function seedLeaves() {
   console.log('Starting leave management seeding...')
-  
-  // Initialize PrismaClient without any special configuration
-  const prisma = new PrismaClient()
   
   try {
     // Test connection with a simple query
@@ -56,11 +79,45 @@ async function seedLeaves() {
     })
     
     console.log('✅ Successfully created leave policy:', policy.name)
-    console.log('🎉 Seed completed successfully!')
+    
+    // Also create leave balances for existing staff
+    console.log('Creating leave balances for existing staff...')
+    
+    const staffRecords = await prisma.staffRecord.findMany({
+      where: {
+        companyId: company.id,
+        isActive: true
+      },
+      take: 5 // Just seed for first 5 staff
+    })
+    
+    console.log(`Found ${staffRecords.length} active staff members`)
+    
+    for (const staff of staffRecords) {
+      await prisma.staffLeaveBalance.create({
+        data: {
+          staffRecordId: staff.id,
+          leaveTypeId: policy.leaveTypes[0].id, // Assuming first leave type
+          year: new Date().getFullYear(),
+          totalDays: 20,
+          usedDays: 0,
+          pendingDays: 0,
+          carriedOverDays: 0
+        }
+      })
+    }
+    
+    console.log('✅ Created leave balances for staff')
+    console.log('🎉 Leave management seed completed successfully!')
     
   } catch (error) {
-    console.error('❌ Error during seeding:', error.message)
-    console.error('Full error:', error)
+    // Handle TypeScript error by checking error type
+    if (error instanceof Error) {
+      console.error('❌ Error during seeding:', error.message)
+      console.error('Error stack:', error.stack)
+    } else {
+      console.error('❌ Unknown error during seeding:', error)
+    }
   } finally {
     await prisma.$disconnect()
     console.log('Database connection closed')

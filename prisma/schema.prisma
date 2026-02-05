@@ -16,6 +16,7 @@ model Company {
   email       String
   logo        String?
   taxId       String?
+  workWeekPattern String? @db.VarChar(20) // Store as string like "12345" or "23456"
   archived    Int      @default(0)
   createdBy   String
   createdAt   DateTime @default(now())
@@ -41,6 +42,8 @@ model Company {
   // LEAVE MANAGEMENT RELATIONS
   leavePolicies   LeavePolicy[]
   publicHolidays  PublicHoliday[]
+  leaveUploads    LeaveUpload[]    // ADD THIS LINE
+  blackoutPeriods LeaveBlackoutPeriod[]  // Add this line
   @@map("companies")
 }
 
@@ -746,13 +749,17 @@ model LeavePolicy {
   approvalWorkflow String @default("MANAGER_THEN_HR") // "MANAGER_THEN_HR", "MANAGER_ONLY", "HR_ONLY"
   noticePeriod  Int      @default(7)    // Days notice required
   documentationRequired Boolean @default(false)
-  
+  // NEW FIELDS FOR ADVANCED VALIDATION
+  allowHalfDays     Boolean @default(true)      // Whether half-day leaves are allowed
+  maxConsecutiveDays Int?                       // Maximum consecutive days allowed
+  seasonalRestrictions String?                  // Comma-separated restricted months (e.g., "1,2,12")
+  requireManagerComments Boolean @default(false) // Whether manager must provide comments
   company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   leaveTypes   LeaveType[]
-  
+  blackoutPeriods LeaveBlackoutPeriod[]
+  //blackoutPeriods LeaveBlackoutPeriod[]  // Add this line
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
-  
   @@unique([companyId, name])
   @@index([companyId])
   @@map("leave_policies")
@@ -882,4 +889,51 @@ model PublicHoliday {
   @@unique([companyId, date, name])
   @@index([companyId, date])
   @@map("public_holidays")
+}
+
+model LeaveUpload {
+  id                  String   @id @default(cuid())
+  companyId           String
+  fileName            String
+  filePath            String
+  
+  // Counts
+  policiesCreated     Int      @default(0)
+  policiesFailed      Int      @default(0)
+  policiesUpdated     Int      @default(0)  
+  leaveTypesCreated   Int      @default(0)
+  leaveTypesFailed    Int      @default(0)
+  leaveTypesUpdated   Int      @default(0)  
+  holidaysCreated     Int      @default(0)
+  holidaysFailed      Int      @default(0)
+  holidaysUpdated     Int      @default(0)  
+  blackoutPeriodsCreated Int   @default(0)  
+  blackoutPeriodsFailed Int    @default(0)  
+  blackoutPeriodsUpdated Int   @default(0)  
+  // Store failed records as JSON for persistence
+  failedRecords       Json?    @db.JsonB
+  uploadedBy          String
+  createdAt           DateTime @default(now())
+  company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  @@map("leave_uploads")
+}
+model LeaveBlackoutPeriod {
+  id          String   @id @default(cuid())
+  companyId   String
+  policyId    String?
+  name        String
+  startDate   DateTime
+  endDate     DateTime
+  reason      String?
+  appliesToAllLeaveTypes Boolean @default(true)
+  
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  policy      LeavePolicy? @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([companyId, startDate, endDate])
+  @@index([policyId])
+  @@map("leave_blackout_periods")
 }
