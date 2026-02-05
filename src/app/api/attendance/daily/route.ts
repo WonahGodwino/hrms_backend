@@ -1,7 +1,7 @@
 // src/app/api/attendance/daily/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/app/lib/auth";
-import { withCors, handleCorsOptions } from "@/app/lib/cors";
+import { withCors, handleCorsOptions, getCorsHeaders } from "@/app/lib/cors";
 
 // Utility function to get the start of the day
 function startOfDay(date = new Date()) {
@@ -24,11 +24,11 @@ export async function POST(req: NextRequest) {
     // 1. Authenticate the ADMIN/HR/SUPER_ADMIN user who is operating the interface
     const authHeader = req.headers.get("authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      const res = NextResponse.json(
+      const response = NextResponse.json(
         { success: false, message: "Authorization header missing" }, 
         { status: 401 }
       );
-      return withCors(res, origin);
+      return withCors(response, origin);
     }
     
     const token = authHeader.replace("Bearer ", "");
@@ -48,27 +48,27 @@ export async function POST(req: NextRequest) {
 
     // 3. Validate required fields
     if (!companyId || !identifier) {
-      const res = NextResponse.json(
+      const response = NextResponse.json(
         { 
           success: false, 
           message: "Company ID and staff identifier are required" 
         }, 
         { status: 400 }
       );
-      return withCors(res, origin);
+      return withCors(response, origin);
     }
 
     // 4. Validate admin user has access to this company
     const hasAccess = await validateCompanyAccess(adminUser, companyId);
     if (!hasAccess) {
-      const res = NextResponse.json(
+      const response = NextResponse.json(
         { 
           success: false, 
           message: "You do not have access to record attendance for this company" 
         }, 
         { status: 403 }
       );
-      return withCors(res, origin);
+      return withCors(response, origin);
     }
 
     // 5. Find the staff member who is signing in/out
@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
     });
 
     if (!staff) {
-      const res = NextResponse.json(
+      const response = NextResponse.json(
         { 
           success: false, 
           message: "Staff member not found or inactive",
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
         }, 
         { status: 404 }
       );
-      return withCors(res, origin);
+      return withCors(response, origin);
     }
 
     // 6. Get today's date
@@ -179,7 +179,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 10. Return success response
-    const res = NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message,
       data: {
@@ -209,7 +209,7 @@ export async function POST(req: NextRequest) {
       },
     });
     
-    return withCors(res, origin);
+    return withCors(response, origin);
 
   } catch (error: any) {
     console.error("Attendance recording error:", error);
@@ -226,7 +226,7 @@ export async function POST(req: NextRequest) {
       errorMessage = "Record not found";
     }
 
-    const res = NextResponse.json(
+    const response = NextResponse.json(
       { 
         success: false, 
         message: errorMessage,
@@ -234,7 +234,116 @@ export async function POST(req: NextRequest) {
       }, 
       { status: statusCode }
     );
-    return withCors(res, origin);
+    return withCors(response, origin);
+  }
+}
+
+// GET endpoint to view today's attendance
+export async function GET(req: NextRequest) {
+  const origin = req.headers.get("origin");
+
+  try {
+    const { prisma } = await import("@/app/lib/prisma");
+    
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      const response = NextResponse.json(
+        { success: false, message: "Authorization header missing" }, 
+        { status: 401 }
+      );
+      return withCors(response, origin);
+    }
+    
+    const token = authHeader.replace("Bearer ", "");
+    const user = requireRole(token, ["HR", "SUPER_ADMIN", "ADMIN"]);
+    
+    const { searchParams } = new URL(req.url);
+    const companyId = searchParams.get("companyId");
+    const date = searchParams.get("date") || new Date().toISOString().split('T')[0];
+    
+    if (!companyId) {
+      const response = NextResponse.json(
+        { success: false, message: "Company ID is required" }, 
+        { status: 400 }
+      );
+      return withCors(response, origin);
+    }
+
+    // Validate access
+    const hasAccess = await validateCompanyAccess(user, companyId);
+    if (!hasAccess) {
+      const response = NextResponse.json(
+        { success: false, message: "No access to this company" }, 
+        { status: 403 }
+      );
+      return withCors(response, origin);
+    }
+
+    const targetDate = startOfDay(new Date(date));
+    
+    // Get attendance for the day
+    const attendance = await prisma.attendance.findMany({
+      where: {
+        companyId,
+        date: targetDate,
+      },
+      include: {
+        staffRecord: {
+          select: {
+            staffId: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            position: true,
+            department: true,
+          }
+        }
+      },
+      orderBy: {
+        signInTime: 'desc'
+      }
+    });
+
+    // Get stats
+    const totalStaff = await prisma.staffRecord.count({
+      where: {
+        companyId,
+        isActive: true,
+      }
+    });
+
+    const signedInToday = attendance.filter(a => a.signInTime && !a.signOutTime).length;
+    const signedOutToday = attendance.filter(a => a.signOutTime).length;
+
+    const response = NextResponse.json({
+      success: true,
+      data: {
+        date: targetDate.toISOString().split('T')[0],
+        stats: {
+          totalStaff,
+          signedInToday,
+          signedOutToday,
+          pending: totalStaff - signedInToday - signedOutToday,
+        },
+        attendance: attendance.map(record => ({
+          id: record.id,
+          signInAt: record.signInTime,
+          signOutAt: record.signOutTime,
+          method: record.method,
+          staff: record.staffRecord,
+        }))
+      }
+    });
+    
+    return withCors(response, origin);
+
+  } catch (error: any) {
+    console.error("Attendance fetch error:", error);
+    const response = NextResponse.json(
+      { success: false, message: "Failed to fetch attendance" }, 
+      { status: 500 }
+    );
+    return withCors(response, origin);
   }
 }
 
@@ -323,114 +432,5 @@ async function getSimilarStaff(companyId: string, identifier: string) {
     }));
   } catch {
     return [];
-  }
-}
-
-// GET endpoint to view today's attendance
-export async function GET(req: NextRequest) {
-  const origin = req.headers.get("origin");
-
-  try {
-    const { prisma } = await import("@/app/lib/prisma");
-    
-    const authHeader = req.headers.get("authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      const res = NextResponse.json(
-        { success: false, message: "Authorization header missing" }, 
-        { status: 401 }
-      );
-      return withCors(res, origin);
-    }
-    
-    const token = authHeader.replace("Bearer ", "");
-    const user = requireRole(token, ["HR", "SUPER_ADMIN", "ADMIN"]);
-    
-    const { searchParams } = new URL(req.url);
-    const companyId = searchParams.get("companyId");
-    const date = searchParams.get("date") || new Date().toISOString().split('T')[0];
-    
-    if (!companyId) {
-      const res = NextResponse.json(
-        { success: false, message: "Company ID is required" }, 
-        { status: 400 }
-      );
-      return withCors(res, origin);
-    }
-
-    // Validate access
-    const hasAccess = await validateCompanyAccess(user, companyId);
-    if (!hasAccess) {
-      const res = NextResponse.json(
-        { success: false, message: "No access to this company" }, 
-        { status: 403 }
-      );
-      return withCors(res, origin);
-    }
-
-    const targetDate = startOfDay(new Date(date));
-    
-    // Get attendance for the day
-    const attendance = await prisma.attendance.findMany({
-      where: {
-        companyId,
-        date: targetDate,
-      },
-      include: {
-        staffRecord: {
-          select: {
-            staffId: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            position: true,
-            department: true,
-          }
-        }
-      },
-      orderBy: {
-        signInTime: 'desc'
-      }
-    });
-
-    // Get stats
-    const totalStaff = await prisma.staffRecord.count({
-      where: {
-        companyId,
-        isActive: true,
-      }
-    });
-
-    const signedInToday = attendance.filter(a => a.signInTime && !a.signOutTime).length;
-    const signedOutToday = attendance.filter(a => a.signOutTime).length;
-
-    const res = NextResponse.json({
-      success: true,
-      data: {
-        date: targetDate.toISOString().split('T')[0],
-        stats: {
-          totalStaff,
-          signedInToday,
-          signedOutToday,
-          pending: totalStaff - signedInToday - signedOutToday,
-        },
-        attendance: attendance.map(record => ({
-          id: record.id,
-          signInAt: record.signInTime,
-          signOutAt: record.signOutTime,
-          method: record.method,
-          staff: record.staffRecord,
-        }))
-      }
-    });
-    
-    return withCors(res, origin);
-
-  } catch (error: any) {
-    console.error("Attendance fetch error:", error);
-    const res = NextResponse.json(
-      { success: false, message: "Failed to fetch attendance" }, 
-      { status: 500 }
-    );
-    return withCors(res, origin);
   }
 }
