@@ -144,41 +144,66 @@ async function seedLeaves() {
     let balancesCreated = 0
     for (const staff of staffRecords) {
       try {
-        // Create annual leave balance
-        await prisma.staffLeaveBalance.create({
-          data: {
+        // Check if balance already exists
+        const existingAnnualBalance = await prisma.staffLeaveBalance.findFirst({
+          where: {
             staffRecordId: staff.id,
             leaveTypeId: leaveType.id,
-            year: new Date().getFullYear(),
-            totalDays: 20,
-            usedDays: 0,
-            pendingDays: 0,
-            carriedOver: 0,
-            notes: 'Initial seed balance'
+            year: new Date().getFullYear()
           }
         })
         
-        // Create sick leave balance
-        await prisma.staffLeaveBalance.create({
-          data: {
+        if (!existingAnnualBalance) {
+          // Create annual leave balance
+          await prisma.staffLeaveBalance.create({
+            data: {
+              staffRecordId: staff.id,
+              leaveTypeId: leaveType.id,
+              year: new Date().getFullYear(),
+              totalDays: 20,
+              usedDays: 0,
+              pendingDays: 0,
+              carriedOver: 0
+            }
+          })
+          balancesCreated++
+        } else {
+          console.log(`ℹ️  Annual leave balance already exists for staff ${staff.staffId}`)
+        }
+        
+        // Check if sick leave balance already exists
+        const existingSickBalance = await prisma.staffLeaveBalance.findFirst({
+          where: {
             staffRecordId: staff.id,
             leaveTypeId: sickLeaveType.id,
-            year: new Date().getFullYear(),
-            totalDays: 15,
-            usedDays: 0,
-            pendingDays: 0,
-            carriedOver: 0,
-            notes: 'Initial seed balance'
+            year: new Date().getFullYear()
           }
         })
         
-        balancesCreated += 2
+        if (!existingSickBalance) {
+          // Create sick leave balance
+          await prisma.staffLeaveBalance.create({
+            data: {
+              staffRecordId: staff.id,
+              leaveTypeId: sickLeaveType.id,
+              year: new Date().getFullYear(),
+              totalDays: 15,
+              usedDays: 0,
+              pendingDays: 0,
+              carriedOver: 0
+            }
+          })
+          balancesCreated++
+        } else {
+          console.log(`ℹ️  Sick leave balance already exists for staff ${staff.staffId}`)
+        }
+        
       } catch (error) {
         console.log(`⚠️  Could not create balance for staff ${staff.staffId}:`, error instanceof Error ? error.message : 'Unknown error')
       }
     }
     
-    console.log(`✅ Created ${balancesCreated} leave balances for staff`)
+    console.log(`✅ Created ${balancesCreated} new leave balances for staff`)
     
     // Create some public holidays
     console.log('Creating public holidays...')
@@ -210,21 +235,78 @@ async function seedLeaves() {
       }
     ]
     
+    let holidaysCreated = 0
     for (const holiday of holidays) {
       try {
-        await prisma.publicHoliday.create({
-          data: {
+        // Check if holiday already exists
+        const existingHoliday = await prisma.publicHoliday.findFirst({
+          where: {
             companyId: company.id,
-            ...holiday
+            name: holiday.name,
+            date: holiday.date
           }
         })
-        console.log(`✅ Created holiday: ${holiday.name}`)
+        
+        if (!existingHoliday) {
+          await prisma.publicHoliday.create({
+            data: {
+              companyId: company.id,
+              ...holiday
+            }
+          })
+          holidaysCreated++
+          console.log(`✅ Created holiday: ${holiday.name}`)
+        } else {
+          console.log(`ℹ️  Holiday already exists: ${holiday.name}`)
+        }
       } catch (error) {
         console.log(`⚠️  Could not create holiday ${holiday.name}:`, error instanceof Error ? error.message : 'Unknown error')
       }
     }
     
+    console.log(`✅ Created ${holidaysCreated} new holidays`)
+    
+    // Create a test blackout period (optional)
+    console.log('Creating test blackout period...')
+    
+    try {
+      const blackoutExists = await prisma.leaveBlackoutPeriod.findFirst({
+        where: {
+          companyId: company.id,
+          name: 'Year-End Shutdown'
+        }
+      })
+      
+      if (!blackoutExists) {
+        await prisma.leaveBlackoutPeriod.create({
+          data: {
+            companyId: company.id,
+            name: 'Year-End Shutdown',
+            startDate: new Date(new Date().getFullYear(), 11, 20), // Dec 20
+            endDate: new Date(new Date().getFullYear(), 11, 31), // Dec 31
+            reason: 'Company-wide holiday shutdown',
+            appliesToAllLeaveTypes: true
+          }
+        })
+        console.log('✅ Created blackout period: Year-End Shutdown')
+      } else {
+        console.log('ℹ️  Blackout period already exists: Year-End Shutdown')
+      }
+    } catch (error) {
+      console.log('⚠️  Could not create blackout period:', error instanceof Error ? error.message : 'Unknown error')
+    }
+    
     console.log('🎉 Leave management seed completed successfully!')
+    
+    // Summary
+    console.log('\n=== SEED SUMMARY ===')
+    console.log(`Company: ${company.companyName}`)
+    console.log(`Leave Policies Created: 2 (Annual Leave, Sick Leave)`)
+    console.log(`Leave Types Created: 2 (VL, SL)`)
+    console.log(`New Staff Leave Balances Created: ${balancesCreated}`)
+    console.log(`New Public Holidays Created: ${holidaysCreated}`)
+    console.log(`Blackout Periods Created: 1`)
+    console.log('====================')
     
   } catch (error) {
     // Handle TypeScript error by checking error type
