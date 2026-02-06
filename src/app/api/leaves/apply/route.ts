@@ -619,32 +619,41 @@ export async function POST(request: NextRequest) {
         currentStep = 'MANAGER'
       }
 
-      // Create leave request without metadata field
+      // Create leave request using only fields that exist in your schema
+      const leaveRequestData: any = {
+        staffRecordId: staff.id,
+        leaveTypeId: data.leaveTypeId,
+        startDate,
+        endDate,
+        totalDays: requestedDays,
+        reason: data.reason,
+        emergencyContact: data.emergencyContact,
+        contactPhone: data.contactPhone,
+        handoverTo: data.handoverTo,
+        handoverNotes: data.handoverNotes,
+        attachmentUrl: data.attachmentUrl,
+        fileName: data.fileName,
+        status,
+        currentStep,
+        managerApproverId: staff.manager?.id || null,
+        createdBy: staff.id,
+        updatedBy: staff.id,
+      }
+
+      // Add medical certificate info to the reason field if provided
+      if (data.medicalCertificateNumber) {
+        const medicalInfo = `\n\nMedical Certificate Details:\n- Number: ${data.medicalCertificateNumber}\n- Issuer: ${data.medicalCertificateIssuer}\n- Date: ${data.medicalCertificateDate}`
+        leaveRequestData.reason = data.reason + medicalInfo
+      }
+
+      // Add half-day info to reason if applicable
+      if (data.isHalfDay) {
+        const halfDayInfo = `\n\nLeave Type: Half Day (${data.halfDayPart || 'First Half'})`
+        leaveRequestData.reason = (leaveRequestData.reason || data.reason) + halfDayInfo
+      }
+
       const leaveRequest = await tx.leaveRequest.create({
-        data: {
-          staffRecordId: staff.id,
-          leaveTypeId: data.leaveTypeId,
-          startDate,
-          endDate,
-          totalDays: requestedDays,
-          reason: data.reason,
-          emergencyContact: data.emergencyContact,
-          contactPhone: data.contactPhone,
-          handoverTo: data.handoverTo,
-          handoverNotes: data.handoverNotes,
-          attachmentUrl: data.attachmentUrl,
-          fileName: data.fileName,
-          status,
-          currentStep,
-          managerApproverId: staff.manager?.id || null,
-          createdBy: staff.id,
-          updatedBy: staff.id,
-          // Remove metadata field and store additional info in notes or separate fields
-          notes: `Leave application submitted for ${leaveType.name}. Policy: ${policy.name}. Requested days: ${requestedDays}. ${data.isHalfDay ? 'Half day leave.' : ''} ${data.halfDayPart ? `Half day part: ${data.halfDayPart}` : ''}`,
-          documentation: data.medicalCertificateNumber ? 
-            `Medical Certificate: ${data.medicalCertificateNumber} issued by ${data.medicalCertificateIssuer} on ${data.medicalCertificateDate}` : 
-            null
-        }
+        data: leaveRequestData
       })
 
       // Handle auto-approval
