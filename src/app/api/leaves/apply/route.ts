@@ -1,8 +1,7 @@
 // app/api/leaves/apply/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { requireRole } from '@/app/lib/auth'
+import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { z } from 'zod'
 
 // Validation schema for leave application
@@ -77,6 +76,7 @@ async function calculateWorkingDays(
   const end = new Date(endDate)
   
   // Get company's work week configuration
+  const { prisma } = await import('@/app/lib/prisma')
   const company = await prisma.company.findUnique({
     where: { id: companyId },
     select: { workWeekPattern: true }
@@ -147,7 +147,7 @@ async function validateAgainstCompanyPolicy(
   medicalData: any
 ): Promise<{ 
   isValid: boolean; 
-  errors: string[]; 
+  errors: string[]; S
   warnings: string[];
   policyDetails: any;
 }> {
@@ -246,37 +246,134 @@ async function validateAgainstCompanyPolicy(
   }
 }
 
-// Main POST handler
+// Helper function to describe work week
+function getWorkWeekDescription(workDays: number[]): string {
+  const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+  const sortedDays = [...workDays].sort((a, b) => a - b)
+  const dayNamesList = sortedDays.map(day => dayNames[day - 1])
+  
+  if (dayNamesList.length === 0) return 'No work days defined'
+  if (dayNamesList.length === 1) return dayNamesList[0]
+  
+  const lastDay = dayNamesList.pop()
+  return `${dayNamesList.join(', ')} and ${lastDay}`
+}
+
+// Helper function for next steps
+function getNextSteps(status: string, currentStep: string, policy: any): string[] {
+  const steps = []
+  
+  if (status === 'APPROVED') {
+    steps.push('✓ Leave automatically approved per company policy')
+    steps.push('• Balance updated: Pending → Used')
+    steps.push('• You may proceed with your leave plans')
+    return steps
+  }
+  
+  if (currentStep === 'MANAGER') {
+    if (policy.approvalWorkflow === 'MANAGER_ONLY') {
+      steps.push('⏳ Waiting for manager approval')
+      steps.push('• Manager will review your request')
+    } else if (policy.approvalWorkflow === 'MANAGER_THEN_HR') {
+      steps.push('⏳ Waiting for manager approval (first step)')
+      steps.push('• After manager approval, request moves to HR')
+    }
+  }
+  
+  if (currentStep === 'HR') {
+    steps.push('⏳ Waiting for HR approval')
+    steps.push('• HR will review your request')
+  }
+  
+  steps.push('• You will be notified at each approval stage')
+  steps.push('• Pending days reserved in your balance')
+  
+  return steps
+}
+
+// Get important policy notes
+function getImportantNotes(policy: any): string[] {
+  const notes = []
+  
+  notes.push(`Policy: ${policy.name}`)
+  
+  if (!policy.isPaid) {
+    notes.push('⚠️ Unpaid leave')
+  }
+  
+  if (policy.documentationRequired) {
+    notes.push('📋 Documentation required')
+  }
+  
+  if (policy.carryOver > 0) {
+    notes.push(`♻️ Up to ${policy.carryOver} days can be carried over`)
+  }
+  
+  if (policy.accrualRate) {
+    notes.push(`📊 Accrual rate: ${policy.accrualRate} days/month`)
+  }
+  
+  if (policy.minEmploymentMonths > 0) {
+    notes.push(`⏳ Minimum employment: ${policy.minEmploymentMonths} months`)
+  }
+  
+  if (policy.noticePeriod > 0) {
+    notes.push(`📅 Advance notice: ${policy.noticePeriod} days`)
+  }
+  
+  notes.push(`✅ Maximum days per request: ${policy.maxDays}`)
+  
+  return notes
+}
+
+// -----------------------------
+// OPTIONS - CORS preflight
+// -----------------------------
+export async function OPTIONS(request: NextRequest) {
+  return handleCorsOptions(request)
+}
+
+// -----------------------------
+// POST - Apply for leave
+// -----------------------------
 export async function POST(request: NextRequest) {
+  const origin = request.headers.get('origin')
+  
   try {
-    const session = await getServerSession(authOptions)
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { error: 'Unauthorized. Please log in.' },
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      const response = NextResponse.json(
+        { success: false, message: 'Authorization header missing' },
         { status: 401 }
       )
+      return withCors(response, origin)
     }
+    
+    const token = authHeader.replace('Bearer ', '')
+    const user = requireRole(token, ['STAFF', 'HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
 
     const body = await request.json()
     const validationResult = leaveApplicationSchema.safeParse(body)
     
     if (!validationResult.success) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { 
-          error: 'Validation failed', 
+          success: false,
+          message: 'Validation failed', 
           details: validationResult.error.format() 
         },
         { status: 400 }
       )
+      return withCors(response, origin)
     }
 
     const data = validationResult.data
-    const userId = session.user.id
 
-    // Get staff record
+    // Get staff record - user must be an employee applying for themselves
+    const { prisma } = await import('@/app/lib/prisma')
     const staff = await prisma.staffRecord.findUnique({
       where: { 
-        id: userId,
+        id: user.userId,
         isActive: true 
       },
       include: {
@@ -298,10 +395,11 @@ export async function POST(request: NextRequest) {
     })
 
     if (!staff || !staff.companyId) {
-      return NextResponse.json(
-        { error: 'Staff record not found or not associated with a company' },
+      const response = NextResponse.json(
+        { success: false, message: 'Staff record not found or not associated with a company' },
         { status: 404 }
       )
+      return withCors(response, origin)
     }
 
     // Validate leave type
@@ -319,10 +417,11 @@ export async function POST(request: NextRequest) {
     })
 
     if (!leaveType) {
-      return NextResponse.json(
-        { error: 'Invalid or inactive leave type' },
+      const response = NextResponse.json(
+        { success: false, message: 'Invalid or inactive leave type' },
         { status: 400 }
       )
+      return withCors(response, origin)
     }
 
     const policy = leaveType.policy
@@ -335,17 +434,19 @@ export async function POST(request: NextRequest) {
 
     // Basic date validation
     if (startDate >= endDate) {
-      return NextResponse.json(
-        { error: 'End date must be after start date' },
+      const response = NextResponse.json(
+        { success: false, message: 'End date must be after start date' },
         { status: 400 }
       )
+      return withCors(response, origin)
     }
 
     if (startDate < today) {
-      return NextResponse.json(
-        { error: 'Start date must be today or in the future' },
+      const response = NextResponse.json(
+        { success: false, message: 'Start date must be today or in the future' },
         { status: 400 }
       )
+      return withCors(response, origin)
     }
 
     // Calculate requested days
@@ -357,10 +458,11 @@ export async function POST(request: NextRequest) {
     )
 
     if (requestedDays <= 0) {
-      return NextResponse.json(
-        { error: 'No working days selected. Check weekends and public holidays.' },
+      const response = NextResponse.json(
+        { success: false, message: 'No working days selected. Check weekends and public holidays.' },
         { status: 400 }
       )
+      return withCors(response, origin)
     }
 
     // Validate against company policy
@@ -380,9 +482,10 @@ export async function POST(request: NextRequest) {
     )
 
     if (!policyValidation.isValid) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { 
-          error: 'Leave policy validation failed',
+          success: false,
+          message: 'Leave policy validation failed',
           details: {
             errors: policyValidation.errors,
             warnings: policyValidation.warnings,
@@ -391,6 +494,7 @@ export async function POST(request: NextRequest) {
         },
         { status: 400 }
       )
+      return withCors(response, origin)
     }
 
     // Check leave balance
@@ -404,18 +508,20 @@ export async function POST(request: NextRequest) {
     })
 
     if (!leaveBalance) {
-      return NextResponse.json(
-        { error: `No ${leaveType.name} balance found for this year. Contact HR.` },
+      const response = NextResponse.json(
+        { success: false, message: `No ${leaveType.name} balance found for this year. Contact HR.` },
         { status: 400 }
       )
+      return withCors(response, origin)
     }
 
     const availableBalance = leaveBalance.totalDays - leaveBalance.usedDays - leaveBalance.pendingDays
     
     if (availableBalance < requestedDays) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { 
-          error: `Insufficient ${leaveType.name} balance`,
+          success: false,
+          message: `Insufficient ${leaveType.name} balance`,
           details: {
             requested: requestedDays,
             available: availableBalance,
@@ -428,6 +534,7 @@ export async function POST(request: NextRequest) {
         },
         { status: 400 }
       )
+      return withCors(response, origin)
     }
 
     // Check overlapping leave requests
@@ -448,9 +555,10 @@ export async function POST(request: NextRequest) {
     })
 
     if (overlappingLeaves.length > 0) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { 
-          error: 'Overlapping leave requests found',
+          success: false,
+          message: 'Overlapping leave requests found',
           overlappingLeaves: overlappingLeaves.map(l => ({
             id: l.id,
             leaveType: l.leaveType.name,
@@ -462,6 +570,7 @@ export async function POST(request: NextRequest) {
         },
         { status: 400 }
       )
+      return withCors(response, origin)
     }
 
     // Check handover staff
@@ -475,10 +584,11 @@ export async function POST(request: NextRequest) {
       })
       
       if (!handoverStaff) {
-        return NextResponse.json(
-          { error: 'Handover staff not found or inactive' },
+        const response = NextResponse.json(
+          { success: false, message: 'Handover staff not found or inactive' },
           { status: 400 }
         )
+        return withCors(response, origin)
       }
     }
 
@@ -611,7 +721,7 @@ export async function POST(request: NextRequest) {
     })
 
     // Return success response
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: 'Leave application submitted successfully',
       data: {
@@ -652,117 +762,44 @@ export async function POST(request: NextRequest) {
         importantNotes: getImportantNotes(result.policy)
       }
     })
+    
+    return withCors(response, origin)
 
   } catch (error: any) {
     console.error('Leave application error:', error)
     
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: 'Validation error', details: error.errors },
+      const response = NextResponse.json(
+        { success: false, message: 'Validation error', details: error.errors },
         { status: 400 }
       )
+      return withCors(response, origin)
     }
 
     if (error.code === 'P2002') {
-      return NextResponse.json(
-        { error: 'Duplicate request detected' },
+      const response = NextResponse.json(
+        { success: false, message: 'Duplicate request detected' },
         { status: 409 }
       )
+      return withCors(response, origin)
     }
 
     if (error.code === 'P2025') {
-      return NextResponse.json(
-        { error: 'Record not found. Please refresh and try again.' },
+      const response = NextResponse.json(
+        { success: false, message: 'Record not found. Please refresh and try again.' },
         { status: 404 }
       )
+      return withCors(response, origin)
     }
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       { 
-        error: 'Failed to process leave application',
+        success: false,
+        message: 'Failed to process leave application',
         details: error.message 
       },
       { status: 500 }
     )
+    return withCors(response, origin)
   }
-}
-
-// Helper function to describe work week
-function getWorkWeekDescription(workDays: number[]): string {
-  const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-  const sortedDays = [...workDays].sort((a, b) => a - b)
-  const dayNamesList = sortedDays.map(day => dayNames[day - 1])
-  
-  if (dayNamesList.length === 0) return 'No work days defined'
-  if (dayNamesList.length === 1) return dayNamesList[0]
-  
-  const lastDay = dayNamesList.pop()
-  return `${dayNamesList.join(', ')} and ${lastDay}`
-}
-
-// Helper function for next steps
-function getNextSteps(status: string, currentStep: string, policy: any): string[] {
-  const steps = []
-  
-  if (status === 'APPROVED') {
-    steps.push('✓ Leave automatically approved per company policy')
-    steps.push('• Balance updated: Pending → Used')
-    steps.push('• You may proceed with your leave plans')
-    return steps
-  }
-  
-  if (currentStep === 'MANAGER') {
-    if (policy.approvalWorkflow === 'MANAGER_ONLY') {
-      steps.push('⏳ Waiting for manager approval')
-      steps.push('• Manager will review your request')
-    } else if (policy.approvalWorkflow === 'MANAGER_THEN_HR') {
-      steps.push('⏳ Waiting for manager approval (first step)')
-      steps.push('• After manager approval, request moves to HR')
-    }
-  }
-  
-  if (currentStep === 'HR') {
-    steps.push('⏳ Waiting for HR approval')
-    steps.push('• HR will review your request')
-  }
-  
-  steps.push('• You will be notified at each approval stage')
-  steps.push('• Pending days reserved in your balance')
-  
-  return steps
-}
-
-// Get important policy notes
-function getImportantNotes(policy: any): string[] {
-  const notes = []
-  
-  notes.push(`Policy: ${policy.name}`)
-  
-  if (!policy.isPaid) {
-    notes.push('⚠️ Unpaid leave')
-  }
-  
-  if (policy.documentationRequired) {
-    notes.push('📋 Documentation required')
-  }
-  
-  if (policy.carryOver > 0) {
-    notes.push(`♻️ Up to ${policy.carryOver} days can be carried over`)
-  }
-  
-  if (policy.accrualRate) {
-    notes.push(`📊 Accrual rate: ${policy.accrualRate} days/month`)
-  }
-  
-  if (policy.minEmploymentMonths > 0) {
-    notes.push(`⏳ Minimum employment: ${policy.minEmploymentMonths} months`)
-  }
-  
-  if (policy.noticePeriod > 0) {
-    notes.push(`📅 Advance notice: ${policy.noticePeriod} days`)
-  }
-  
-  notes.push(`✅ Maximum days per request: ${policy.maxDays}`)
-  
-  return notes
 }
