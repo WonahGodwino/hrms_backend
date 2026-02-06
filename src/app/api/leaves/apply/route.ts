@@ -147,7 +147,7 @@ async function validateAgainstCompanyPolicy(
   medicalData: any
 ): Promise<{ 
   isValid: boolean; 
-  errors: string[]; S
+  errors: string[];
   warnings: string[];
   policyDetails: any;
 }> {
