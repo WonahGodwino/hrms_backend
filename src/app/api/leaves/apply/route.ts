@@ -619,7 +619,7 @@ export async function POST(request: NextRequest) {
         currentStep = 'MANAGER'
       }
 
-      // Create leave request
+      // Create leave request without metadata field
       const leaveRequest = await tx.leaveRequest.create({
         data: {
           staffRecordId: staff.id,
@@ -639,34 +639,11 @@ export async function POST(request: NextRequest) {
           managerApproverId: staff.manager?.id || null,
           createdBy: staff.id,
           updatedBy: staff.id,
-          metadata: {
-            policyValidation: {
-              passed: true,
-              warnings: policyValidation.warnings,
-              policyName: policy.name,
-              maxDays: policy.maxDays,
-              noticePeriod: policy.noticePeriod,
-              requiresApproval: policy.requiresApproval,
-              approvalWorkflow: policy.approvalWorkflow,
-              documentationRequired: policy.documentationRequired,
-              isPaid: policy.isPaid,
-              carryOver: policy.carryOver,
-              accrualRate: policy.accrualRate,
-              minEmploymentMonths: policy.minEmploymentMonths
-            },
-            documentation: {
-              medicalCertificateNumber: data.medicalCertificateNumber,
-              medicalCertificateDate: data.medicalCertificateDate,
-              medicalCertificateIssuer: data.medicalCertificateIssuer,
-              requiredByPolicy: policy.documentationRequired
-            },
-            calculatedDays: {
-              requested: requestedDays,
-              workingDaysExcludingHolidays: requestedDays,
-              isHalfDay: data.isHalfDay,
-              halfDayPart: data.halfDayPart
-            }
-          }
+          // Remove metadata field and store additional info in notes or separate fields
+          notes: `Leave application submitted for ${leaveType.name}. Policy: ${policy.name}. Requested days: ${requestedDays}. ${data.isHalfDay ? 'Half day leave.' : ''} ${data.halfDayPart ? `Half day part: ${data.halfDayPart}` : ''}`,
+          documentation: data.medicalCertificateNumber ? 
+            `Medical Certificate: ${data.medicalCertificateNumber} issued by ${data.medicalCertificateIssuer} on ${data.medicalCertificateDate}` : 
+            null
         }
       })
 
@@ -689,14 +666,14 @@ export async function POST(request: NextRequest) {
             type: 'LEAVE_REQUEST',
             title: 'New Leave Request for Approval',
             message: `${staff.firstName} ${staff.lastName} has requested ${requestedDays} day(s) of ${leaveType.name} leave`,
-            data: {
+            data: JSON.stringify({
               leaveRequestId: leaveRequest.id,
               staffName: `${staff.firstName} ${staff.lastName}`,
               leaveType: leaveType.name,
               startDate: startDate.toISOString(),
               endDate: endDate.toISOString(),
               days: requestedDays
-            },
+            }),
             companyId: staff.companyId,
             read: false
           }
@@ -759,7 +736,16 @@ export async function POST(request: NextRequest) {
           hr: result.policy.approvalWorkflow.includes('HR') ? 'Awaiting HR approval' : null
         },
         warnings: result.warnings.length > 0 ? result.warnings : undefined,
-        importantNotes: getImportantNotes(result.policy)
+        importantNotes: getImportantNotes(result.policy),
+        additionalInfo: {
+          isHalfDay: data.isHalfDay,
+          halfDayPart: data.halfDayPart,
+          medicalCertificate: data.medicalCertificateNumber ? {
+            number: data.medicalCertificateNumber,
+            date: data.medicalCertificateDate,
+            issuer: data.medicalCertificateIssuer
+          } : null
+        }
       }
     })
     
