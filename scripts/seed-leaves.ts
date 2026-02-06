@@ -53,32 +53,80 @@ async function seedLeaves() {
     const company = companies[0]
     console.log(`Creating leave policy for ${company.companyName}...`)
     
+    // First create the policy
     const policy = await prisma.leavePolicy.create({
       data: {
         companyId: company.id,
         name: 'Annual Leave',
-        description: 'Test annual leave',
+        description: 'Annual paid vacation leave for employees',
         maxDays: 20,
         carryOver: 5,
         isPaid: true,
+        accrualRate: 1.67, // 20 days / 12 months
+        minEmploymentMonths: 3,
         requiresApproval: true,
         approvalWorkflow: 'MANAGER_THEN_HR',
         noticePeriod: 14,
         documentationRequired: false,
-        leaveTypes: {
-          create: [
-            {
-              name: 'Vacation',
-              code: 'AL',
-              color: '#10B981',
-              isActive: true
-            }
-          ]
-        }
+        allowHalfDays: true,
+        maxConsecutiveDays: 15,
+        seasonalRestrictions: '12,1', // December and January restrictions
+        requireManagerComments: true
       }
     })
     
     console.log('✅ Successfully created leave policy:', policy.name)
+    
+    // Then create the leave type
+    const leaveType = await prisma.leaveType.create({
+      data: {
+        policyId: policy.id,
+        name: 'Vacation Leave',
+        code: 'VL',
+        description: 'Regular vacation time off',
+        color: '#10B981',
+        isActive: true
+      }
+    })
+    
+    console.log('✅ Successfully created leave type:', leaveType.name)
+    
+    // Create another leave policy and type
+    const sickLeavePolicy = await prisma.leavePolicy.create({
+      data: {
+        companyId: company.id,
+        name: 'Sick Leave',
+        description: 'Paid sick leave for medical reasons',
+        maxDays: 15,
+        carryOver: 0,
+        isPaid: true,
+        accrualRate: 1.25, // 15 days / 12 months
+        minEmploymentMonths: 0,
+        requiresApproval: false,
+        approvalWorkflow: 'NONE',
+        noticePeriod: 0,
+        documentationRequired: true,
+        allowHalfDays: true,
+        maxConsecutiveDays: 5,
+        seasonalRestrictions: null,
+        requireManagerComments: false
+      }
+    })
+    
+    console.log('✅ Successfully created sick leave policy:', sickLeavePolicy.name)
+    
+    const sickLeaveType = await prisma.leaveType.create({
+      data: {
+        policyId: sickLeavePolicy.id,
+        name: 'Sick Leave',
+        code: 'SL',
+        description: 'Medical leave with documentation',
+        color: '#EF4444',
+        isActive: true
+      }
+    })
+    
+    console.log('✅ Successfully created sick leave type:', sickLeaveType.name)
     
     // Also create leave balances for existing staff
     console.log('Creating leave balances for existing staff...')
@@ -88,26 +136,94 @@ async function seedLeaves() {
         companyId: company.id,
         isActive: true
       },
-      take: 5 // Just seed for first 5 staff
+      take: 10 // Seed for first 10 staff
     })
     
     console.log(`Found ${staffRecords.length} active staff members`)
     
+    let balancesCreated = 0
     for (const staff of staffRecords) {
-      await prisma.staffLeaveBalance.create({
-        data: {
-          staffRecordId: staff.id,
-          leaveTypeId: policy.leaveTypes[0].id, // Assuming first leave type
-          year: new Date().getFullYear(),
-          totalDays: 20,
-          usedDays: 0,
-          pendingDays: 0,
-          carriedOverDays: 0
-        }
-      })
+      try {
+        // Create annual leave balance
+        await prisma.staffLeaveBalance.create({
+          data: {
+            staffRecordId: staff.id,
+            leaveTypeId: leaveType.id,
+            year: new Date().getFullYear(),
+            totalDays: 20,
+            usedDays: 0,
+            pendingDays: 0,
+            carriedOver: 0,
+            notes: 'Initial seed balance'
+          }
+        })
+        
+        // Create sick leave balance
+        await prisma.staffLeaveBalance.create({
+          data: {
+            staffRecordId: staff.id,
+            leaveTypeId: sickLeaveType.id,
+            year: new Date().getFullYear(),
+            totalDays: 15,
+            usedDays: 0,
+            pendingDays: 0,
+            carriedOver: 0,
+            notes: 'Initial seed balance'
+          }
+        })
+        
+        balancesCreated += 2
+      } catch (error) {
+        console.log(`⚠️  Could not create balance for staff ${staff.staffId}:`, error instanceof Error ? error.message : 'Unknown error')
+      }
     }
     
-    console.log('✅ Created leave balances for staff')
+    console.log(`✅ Created ${balancesCreated} leave balances for staff`)
+    
+    // Create some public holidays
+    console.log('Creating public holidays...')
+    
+    const holidays = [
+      {
+        name: 'New Year\'s Day',
+        date: new Date(new Date().getFullYear(), 0, 1), // Jan 1
+        isRecurring: true,
+        description: 'Celebration of new year',
+        country: 'NG',
+        state: 'All'
+      },
+      {
+        name: 'Independence Day',
+        date: new Date(new Date().getFullYear(), 9, 1), // Oct 1
+        isRecurring: true,
+        description: 'Nigeria Independence Day',
+        country: 'NG',
+        state: 'All'
+      },
+      {
+        name: 'Christmas Day',
+        date: new Date(new Date().getFullYear(), 11, 25), // Dec 25
+        isRecurring: true,
+        description: 'Christmas celebration',
+        country: 'NG',
+        state: 'All'
+      }
+    ]
+    
+    for (const holiday of holidays) {
+      try {
+        await prisma.publicHoliday.create({
+          data: {
+            companyId: company.id,
+            ...holiday
+          }
+        })
+        console.log(`✅ Created holiday: ${holiday.name}`)
+      } catch (error) {
+        console.log(`⚠️  Could not create holiday ${holiday.name}:`, error instanceof Error ? error.message : 'Unknown error')
+      }
+    }
+    
     console.log('🎉 Leave management seed completed successfully!')
     
   } catch (error) {
@@ -118,6 +234,7 @@ async function seedLeaves() {
     } else {
       console.error('❌ Unknown error during seeding:', error)
     }
+    process.exit(1)
   } finally {
     await prisma.$disconnect()
     console.log('Database connection closed')
