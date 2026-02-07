@@ -1,4 +1,4 @@
-// src/app/lib/email.ts - UPDATED VERSION
+// src/app/lib/email.ts
 import formData from 'form-data'
 import Mailgun from 'mailgun.js'
 import { prisma } from '@/app/lib/db'
@@ -13,6 +13,343 @@ const mg = mailgun.client({
 
 const MAILGUN_DOMAIN = process.env.MAILGUN_DOMAIN || ''
 const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@ms.isurfglobal.com'
+
+// ========== NEW: Generic sendEmail function ==========
+export async function sendEmail(options: {
+  to: string | string[]
+  subject: string
+  html: string
+  text: string
+  from?: string
+  cc?: string | string[]
+  bcc?: string | string[]
+}): Promise<{ success: boolean; error?: string; data?: any }> {
+  try {
+    // Validate required environment variables
+    if (!process.env.MAILGUN_API_KEY) {
+      console.error('❌ MAILGUN_API_KEY is not set')
+      return { success: false, error: 'Email service not configured' }
+    }
+
+    if (!MAILGUN_DOMAIN) {
+      console.error('❌ MAILGUN_DOMAIN is not set')
+      return { success: false, error: 'Email domain not configured' }
+    }
+
+    if (!FROM_EMAIL) {
+      console.error('❌ FROM_EMAIL is not set')
+      return { success: false, error: 'Sender email not configured' }
+    }
+
+    const mailOptions: any = {
+      from: options.from || FROM_EMAIL,
+      to: Array.isArray(options.to) ? options.to : [options.to],
+      subject: options.subject,
+      html: options.html,
+      text: options.text
+    }
+
+    if (options.cc) {
+      mailOptions.cc = Array.isArray(options.cc) ? options.cc : [options.cc]
+    }
+
+    if (options.bcc) {
+      mailOptions.bcc = Array.isArray(options.bcc) ? options.bcc : [options.bcc]
+    }
+
+    const data = await mg.messages.create(MAILGUN_DOMAIN, mailOptions)
+    
+    console.log(`✅ Email sent successfully: ${data.id} to ${options.to}`)
+    return { success: true, data }
+  } catch (error: any) {
+    console.error('❌ Failed to send email:', error)
+    return { 
+      success: false, 
+      error: error.message || 'Failed to send email' 
+    }
+  }
+}
+
+// ========== NEW: Leave notification email function ==========
+export async function sendLeaveNotificationEmail(
+  staff: {
+    id: string
+    companyId: string
+    firstName: string
+    lastName: string
+    email: string
+    staffId: string
+    department: string | null
+    position: string | null
+    isRegistered: boolean
+  },
+  leaveRequest: {
+    id: string
+    referenceNumber?: string
+    leaveType: string
+    startDate: Date
+    endDate: Date
+    totalDays: number
+    status: string
+    currentStep: string
+  },
+  notificationType: 'SUBMITTED' | 'MANAGER_APPROVAL' | 'HR_APPROVAL' | 'APPROVED' | 'REJECTED' | 'CANCELLED'
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Get company info
+    const company = await prisma.company.findUnique({
+      where: { id: staff.companyId },
+      select: { companyName: true }
+    })
+
+    const companyName = company?.companyName || 'Your Company'
+    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://app.isurfglobal.com'
+    
+    let subject: string
+    let message: string
+    let actionText: string
+    let detailsHtml = ''
+
+    const formatDate = (date: Date) => new Date(date).toLocaleDateString('en-US', {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+
+    const daysText = leaveRequest.totalDays === 0.5 
+      ? 'Half Day'
+      : `${leaveRequest.totalDays} ${leaveRequest.totalDays === 1 ? 'day' : 'days'}`
+
+    switch (notificationType) {
+      case 'SUBMITTED':
+        subject = `✅ Leave Application Submitted Successfully`
+        message = `Your ${leaveRequest.leaveType} leave request has been submitted successfully.`
+        actionText = 'View Your Leave Request'
+        detailsHtml = `
+          <div style="background-color: #f8f9fa; padding: 15px; border-radius: 6px; margin: 15px 0;">
+            <p><strong>Reference:</strong> ${leaveRequest.referenceNumber || 'Pending'}</p>
+            <p><strong>Dates:</strong> ${formatDate(leaveRequest.startDate)} to ${formatDate(leaveRequest.endDate)}</p>
+            <p><strong>Duration:</strong> ${daysText}</p>
+            <p><strong>Status:</strong> ${leaveRequest.status}</p>
+            <p><strong>Current Step:</strong> ${leaveRequest.currentStep}</p>
+          </div>
+        `
+        break
+        
+      case 'MANAGER_APPROVAL':
+        subject = `📋 New Leave Request Requires Your Approval`
+        message = `${staff.firstName} ${staff.lastName} has submitted a ${leaveRequest.leaveType} leave request that requires your approval.`
+        actionText = 'Review Leave Request'
+        detailsHtml = `
+          <div style="background-color: #f8f9fa; padding: 15px; border-radius: 6px; margin: 15px 0;">
+            <p><strong>Employee:</strong> ${staff.firstName} ${staff.lastName}</p>
+            <p><strong>Leave Type:</strong> ${leaveRequest.leaveType}</p>
+            <p><strong>Dates:</strong> ${formatDate(leaveRequest.startDate)} to ${formatDate(leaveRequest.endDate)}</p>
+            <p><strong>Duration:</strong> ${daysText}</p>
+            <p><strong>Reference:</strong> ${leaveRequest.referenceNumber || 'Pending'}</p>
+          </div>
+        `
+        break
+        
+      case 'HR_APPROVAL':
+        subject = `📋 Leave Request Pending HR Approval`
+        message = `A ${leaveRequest.leaveType} leave request from ${staff.firstName} ${staff.lastName} is pending HR approval.`
+        actionText = 'Review Leave Request'
+        detailsHtml = `
+          <div style="background-color: #f8f9fa; padding: 15px; border-radius: 6px; margin: 15px 0;">
+            <p><strong>Employee:</strong> ${staff.firstName} ${staff.lastName}</p>
+            <p><strong>Leave Type:</strong> ${leaveRequest.leaveType}</p>
+            <p><strong>Dates:</strong> ${formatDate(leaveRequest.startDate)} to ${formatDate(leaveRequest.endDate)}</p>
+            <p><strong>Duration:</strong> ${daysText}</p>
+            <p><strong>Reference:</strong> ${leaveRequest.referenceNumber || 'Pending'}</p>
+          </div>
+        `
+        break
+        
+      case 'APPROVED':
+        subject = `🎉 Your Leave Request Has Been Approved!`
+        message = `Your ${leaveRequest.leaveType} leave request has been approved.`
+        actionText = 'View Approved Leave'
+        detailsHtml = `
+          <div style="background-color: #e7f6e7; padding: 15px; border-radius: 6px; margin: 15px 0;">
+            <p><strong>Reference:</strong> ${leaveRequest.referenceNumber || 'N/A'}</p>
+            <p><strong>Dates:</strong> ${formatDate(leaveRequest.startDate)} to ${formatDate(leaveRequest.endDate)}</p>
+            <p><strong>Duration:</strong> ${daysText}</p>
+            <p><strong>Status:</strong> <span style="color: #2e7d32; font-weight: bold;">APPROVED</span></p>
+          </div>
+        `
+        break
+        
+      case 'REJECTED':
+        subject = `❌ Your Leave Request Has Been Declined`
+        message = `Your ${leaveRequest.leaveType} leave request has been declined.`
+        actionText = 'View Leave Request Details'
+        detailsHtml = `
+          <div style="background-color: #ffe6e6; padding: 15px; border-radius: 6px; margin: 15px 0;">
+            <p><strong>Reference:</strong> ${leaveRequest.referenceNumber || 'N/A'}</p>
+            <p><strong>Dates:</strong> ${formatDate(leaveRequest.startDate)} to ${formatDate(leaveRequest.endDate)}</p>
+            <p><strong>Duration:</strong> ${daysText}</p>
+            <p><strong>Status:</strong> <span style="color: #c62828; font-weight: bold;">REJECTED</span></p>
+          </div>
+        `
+        break
+        
+      case 'CANCELLED':
+        subject = `🚫 Your Leave Request Has Been Cancelled`
+        message = `Your ${leaveRequest.leaveType} leave request has been cancelled.`
+        actionText = 'View Leave Request Details'
+        detailsHtml = `
+          <div style="background-color: #fff3cd; padding: 15px; border-radius: 6px; margin: 15px 0;">
+            <p><strong>Reference:</strong> ${leaveRequest.referenceNumber || 'N/A'}</p>
+            <p><strong>Dates:</strong> ${formatDate(leaveRequest.startDate)} to ${formatDate(leaveRequest.endDate)}</p>
+            <p><strong>Duration:</strong> ${daysText}</p>
+            <p><strong>Status:</strong> <span style="color: #856404; font-weight: bold;">CANCELLED</span></p>
+          </div>
+        `
+        break
+    }
+
+    const loginUrl = `${frontendUrl}/login?email=${encodeURIComponent(staff.email)}&redirect=/leave/requests/${leaveRequest.id}`
+    
+    // HTML email template
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${subject}</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+          }
+          .container {
+            background-color: #ffffff;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+          }
+          .header {
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #2c5530;
+            padding-bottom: 20px;
+          }
+          .company-name {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c5530;
+            margin-bottom: 10px;
+          }
+          .subject {
+            font-size: 18px;
+            color: #666;
+          }
+          .content {
+            margin-bottom: 30px;
+          }
+          .button {
+            display: inline-block;
+            padding: 12px 30px;
+            background-color: #2c5530;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            text-align: center;
+            margin: 20px 0;
+          }
+          .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #dee2e6;
+            color: #666;
+            font-size: 12px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <div class="company-name">${companyName}</div>
+            <div class="subject">${subject}</div>
+          </div>
+          
+          <div class="content">
+            <p>Dear ${staff.firstName} ${staff.lastName},</p>
+            
+            <p>${message}</p>
+            
+            ${detailsHtml}
+            
+            <div style="text-align: center;">
+              <a href="${loginUrl}" class="button">
+                ${actionText}
+              </a>
+            </div>
+            
+            <div style="margin-top: 20px;">
+              <p>Best regards,<br>
+              <strong>${companyName} HR Team</strong></p>
+            </div>
+          </div>
+          
+          <div class="footer">
+            <p>This is an automated message from ${companyName}. Please do not reply to this email.</p>
+            <p>If you have any questions, please contact your HR department.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `
+
+    // Plain text version
+    const textContent = `Dear ${staff.firstName} ${staff.lastName},
+
+${message}
+
+Reference: ${leaveRequest.referenceNumber || 'Pending'}
+Dates: ${formatDate(leaveRequest.startDate)} to ${formatDate(leaveRequest.endDate)}
+Duration: ${daysText}
+Status: ${leaveRequest.status}
+Current Step: ${leaveRequest.currentStep}
+
+To view details, please click: ${loginUrl}
+
+Best regards,
+${companyName} HR Team
+
+This is an automated message. Please do not reply to this email.
+If you have any questions, please contact your HR department.`
+
+    // Send email
+    const result = await sendEmail({
+      to: staff.email,
+      subject: subject,
+      html: htmlContent,
+      text: textContent,
+      from: `${companyName} HR <${FROM_EMAIL}>`
+    })
+
+    return result
+  } catch (error: any) {
+    console.error(`Error sending ${notificationType} notification email:`, error)
+    return { 
+      success: false, 
+      error: error.message || 'Failed to send email' 
+    }
+  }
+}
+
+// ========== EXISTING FUNCTIONS (Maintained for backward compatibility) ==========
 
 export async function sendPayrollNotificationEmail(
   staff: {
@@ -231,7 +568,7 @@ export async function sendPayrollNotificationEmail(
             padding: 15px;
             border-radius: 6px;
             margin: 20px 0;
-            font-size: 14px;
+            font-size: 14px
           }
           .link-box {
             background-color: #f8f9fa;
@@ -335,20 +672,24 @@ This link will expire in 7 days for security purposes.`}
 This is an automated message from ${companyName}. Please do not reply to this email.
 If you have any questions, please contact your HR department.`
 
-    // Send email using Mailgun
-    const data = await mg.messages.create(MAILGUN_DOMAIN, {
-      from: `${companyName} <${FROM_EMAIL}>`,
-      to: [staff.email],
+    // Send email using Mailgun (using the new sendEmail function)
+    const result = await sendEmail({
+      to: staff.email,
       subject: subject,
       html: htmlContent,
-      text: textContent
+      text: textContent,
+      from: `${companyName} <${FROM_EMAIL}>`
     })
 
-    console.log(`✅ Payroll notification email sent to ${staff.email} from ${companyName}: ${data.id}`)
-    console.log(`🔗 Access URL: ${accessUrl}`)
-    console.log(`👤 User registration status: ${staff.isRegistered ? 'Registered' : 'Unregistered'}`)
+    if (result.success) {
+      console.log(`✅ Payroll notification email sent to ${staff.email} from ${companyName}`)
+      console.log(`🔗 Access URL: ${accessUrl}`)
+      console.log(`👤 User registration status: ${staff.isRegistered ? 'Registered' : 'Unregistered'}`)
+    } else {
+      console.error(`❌ Failed to send payroll email: ${result.error}`)
+    }
     
-    return { success: true }
+    return result
   } catch (error: any) {
     console.error('❌ Failed to send payroll notification email:', error)
     
@@ -369,6 +710,8 @@ If you have any questions, please contact your HR department.`
     }
   }
 }
+
+// ========== EXISTING HELPER FUNCTIONS (Maintained) ==========
 
 // Function to generate a payslip access token (for external use if needed)
 export function generatePayslipAccessToken(staff: {
@@ -479,25 +822,10 @@ export async function testEmailConfig(companyId?: string): Promise<{ success: bo
     // Unregistered user should go to backend API
     const testAccessUrl = `${backendUrl}/api/auth/payslip-access?token=${testToken}`
 
-    // Test the Mailgun client
-    const testData = await mg.messages.create(MAILGUN_DOMAIN, {
-      from: `${fromName} <${FROM_EMAIL}>`,
-      to: [FROM_EMAIL], // Send to yourself for testing
+    // Test the Mailgun client using sendEmail function
+    const result = await sendEmail({
+      to: FROM_EMAIL, // Send to yourself for testing
       subject: 'Test Email Configuration - Payslip Access',
-      text: `This is a test email to verify your Mailgun configuration.
-
-Company: ${companyName}
-Company ID: ${companyId || 'test-company-id'}
-
-Test Token Generated: Yes (${testToken.substring(0, 20)}...)
-Test Access URL: ${testAccessUrl}
-
-Frontend URL: ${frontendUrl}
-Backend URL: ${backendUrl}
-
-This link will redirect unregistered users to the registration page.
-
-JWT_SECRET configured: ${process.env.JWT_SECRET ? 'Yes' : 'No'}`,
       html: `
         <h1>Test Email Configuration</h1>
         <p>This is a test email to verify your Mailgun configuration.</p>
@@ -512,21 +840,42 @@ JWT_SECRET configured: ${process.env.JWT_SECRET ? 'Yes' : 'No'}`,
           <p><em>This link will redirect unregistered users to the registration page.</em></p>
           <p><strong>JWT_SECRET configured:</strong> ${process.env.JWT_SECRET ? 'Yes' : 'No'}</p>
         </div>
-      `
+      `,
+      text: `This is a test email to verify your Mailgun configuration.
+
+Company: ${companyName}
+Company ID: ${companyId || 'test-company-id'}
+
+Test Token Generated: Yes (${testToken.substring(0, 20)}...)
+Test Access URL: ${testAccessUrl}
+
+Frontend URL: ${frontendUrl}
+Backend URL: ${backendUrl}
+
+This link will redirect unregistered users to the registration page.
+
+JWT_SECRET configured: ${process.env.JWT_SECRET ? 'Yes' : 'No'}`
     })
 
-    return { 
-      success: true, 
-      message: 'Email configuration test successful',
-      details: { 
-        messageId: testData.id,
-        companyName,
-        companyId: companyId || 'test-company-id',
-        domain: MAILGUN_DOMAIN,
-        tokenPreview: testToken.substring(0, 20) + '...',
-        accessUrl: testAccessUrl,
-        frontendUrl,
-        backendUrl
+    if (result.success) {
+      return { 
+        success: true, 
+        message: 'Email configuration test successful',
+        details: { 
+          companyName,
+          companyId: companyId || 'test-company-id',
+          domain: MAILGUN_DOMAIN,
+          tokenPreview: testToken.substring(0, 20) + '...',
+          accessUrl: testAccessUrl,
+          frontendUrl,
+          backendUrl
+        }
+      }
+    } else {
+      return { 
+        success: false, 
+        message: `Email configuration test failed: ${result.error}`,
+        details: result.error
       }
     }
   } catch (error: any) {
@@ -537,4 +886,54 @@ JWT_SECRET configured: ${process.env.JWT_SECRET ? 'Yes' : 'No'}`,
       details: error
     }
   }
+}
+
+// ========== NEW HELPER FUNCTIONS ==========
+
+// Helper function to send simple email notifications
+export async function sendSimpleNotificationEmail(
+  to: string | string[],
+  subject: string,
+  message: string,
+  companyName?: string
+): Promise<{ success: boolean; error?: string }> {
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>${subject}</title>
+      <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { text-align: center; padding-bottom: 20px; border-bottom: 2px solid #2c5530; }
+        .company-name { font-size: 24px; font-weight: bold; color: #2c5530; }
+        .content { padding: 20px 0; }
+        .footer { text-align: center; padding-top: 20px; border-top: 1px solid #dee2e6; color: #666; font-size: 12px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        ${companyName ? `<div class="header"><div class="company-name">${companyName}</div></div>` : ''}
+        <div class="content">
+          <p>${message.replace(/\n/g, '<br>')}</p>
+        </div>
+        <div class="footer">
+          <p>This is an automated message${companyName ? ` from ${companyName}` : ''}.</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `
+
+  const textContent = message
+
+  return await sendEmail({
+    to,
+    subject,
+    html: htmlContent,
+    text: textContent,
+    from: companyName ? `${companyName} <${FROM_EMAIL}>` : FROM_EMAIL
+  })
 }
