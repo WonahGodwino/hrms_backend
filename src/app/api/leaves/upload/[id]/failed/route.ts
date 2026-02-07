@@ -4,6 +4,14 @@ import { requireRole } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
 
+// Define the type for failed records based on your JSON structure
+interface FailedRecord {
+  sheetType: 'POLICIES' | 'LEAVE_TYPES' | 'HOLIDAYS' | 'BLACKOUT_PERIODS'
+  rowData: string
+  error: string
+  suggestion?: string
+}
+
 // -----------------------------
 // OPTIONS - CORS preflight
 // -----------------------------
@@ -37,20 +45,14 @@ export async function GET(
     const { searchParams } = new URL(request.url)
     const format = searchParams.get('format') || 'excel'
 
-    // Get the upload record
+    // Get the upload record - NO INCLUDE NEEDED
     const { prisma } = await import('@/app/lib/prisma')
     const upload = await prisma.leaveUpload.findFirst({
       where: {
         id: uploadId,
         uploadedBy: user.userId // Users can only download their own failed records
-      },
-      include: {
-        failedRecords: {
-          orderBy: {
-            sheetType: 'asc'
-          }
-        }
       }
+      // REMOVED: include: { failedRecords: ... } - because failedRecords is JSON, not a relation
     })
     
     if (!upload) {
@@ -61,7 +63,25 @@ export async function GET(
       return withCors(response, origin)
     }
     
-    if (upload.failedRecords.length === 0) {
+    // Parse the failedRecords JSON field from the upload record
+    let failedRecords: FailedRecord[] = []
+    
+    // Check if failedRecords exists and is not null
+    if (upload.failedRecords) {
+      try {
+        // Parse the JSON string stored in the failedRecords field
+        failedRecords = JSON.parse(String(upload.failedRecords))
+      } catch (error) {
+        console.error('Failed to parse failedRecords JSON:', error)
+        const response = NextResponse.json(
+          { success: false, message: 'Failed to parse failed records data' },
+          { status: 500 }
+        )
+        return withCors(response, origin)
+      }
+    }
+    
+    if (failedRecords.length === 0) {
       const response = NextResponse.json(
         { success: false, message: 'No failed records found for this upload' },
         { status: 404 }
@@ -72,10 +92,10 @@ export async function GET(
     const workbook = new ExcelJS.Workbook()
     
     // Group failed records by sheet type
-    const policiesRecords = upload.failedRecords.filter(r => r.sheetType === 'POLICIES')
-    const leaveTypesRecords = upload.failedRecords.filter(r => r.sheetType === 'LEAVE_TYPES')
-    const holidaysRecords = upload.failedRecords.filter(r => r.sheetType === 'HOLIDAYS')
-    const blackoutRecords = upload.failedRecords.filter(r => r.sheetType === 'BLACKOUT_PERIODS')
+    const policiesRecords = failedRecords.filter(r => r.sheetType === 'POLICIES')
+    const leaveTypesRecords = failedRecords.filter(r => r.sheetType === 'LEAVE_TYPES')
+    const holidaysRecords = failedRecords.filter(r => r.sheetType === 'HOLIDAYS')
+    const blackoutRecords = failedRecords.filter(r => r.sheetType === 'BLACKOUT_PERIODS')
 
     // Helper function to parse JSON row data
     function parseRowData(rowData: string): any {
