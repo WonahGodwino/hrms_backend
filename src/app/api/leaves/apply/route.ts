@@ -4,7 +4,7 @@ import { requireRole } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { z } from 'zod'
 import { prisma } from '@/app/lib/prisma'
-import { sendLeaveNotificationEmail } from '@/app/lib/email' // Updated import
+import { sendLeaveNotificationEmail } from '@/app/lib/email'
 
 // Validation schema for leave application
 const leaveApplicationSchema = z.object({
@@ -1123,14 +1123,11 @@ export async function GET(request: NextRequest) {
       }
     })
     
-    // Get notifications for this leave request
+    // Get notifications for this leave request (SIMPLIFIED - FIXED VERSION)
     const notifications = await prisma.notification.findMany({
       where: {
-        OR: [
-          { data: { contains: leaveRequestId } },
-          { type: { contains: 'LEAVE' } }
-        ],
         companyId: leaveRequest.staffRecord.companyId,
+        type: { contains: 'LEAVE' },
         createdAt: {
           gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // Last 30 days
         }
