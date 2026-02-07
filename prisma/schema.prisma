@@ -9,41 +9,50 @@ datasource db {
 }
 
 model Company {
- id          String   @id @default(cuid())
+  id          String   @id @default(cuid())
   companyName String
   address     String?
   phone       String?
   email       String
   logo        String?
   taxId       String?
-  workWeekPattern String? @db.VarChar(20) // Store as string like "12345" or "23456"
+  workWeekPattern String? @db.VarChar(20)
   archived    Int      @default(0)
   createdBy   String
   createdAt   DateTime @default(now())
-  updatedAt   DateTime? @updatedAt  // Nullable first
+  updatedAt   DateTime? @updatedAt
+  
   // Relations
-  staff              StaffRecord[] // One-to-many relation with StaffRecord
-  payrolls           Payroll[] // One-to-many relation with Payroll
-  payslips           Payslip[] // One-to-many relation with Payslip
-  staffUploads       StaffUpload[] // One-to-many relation with StaffUpload
-  payrollUploads     PayrollUpload[] // One-to-many relation with PayrollUpload
-  jobs               Job[] // One-to-many relation with Job
-  candidates         Candidate[] // One-to-many relation with Candidate
-  applications       JobApplication[] // One-to-many relation with JobApplication
-  offers             Offer[] // One-to-many relation with Offer
-  onboardings        Onboarding[] // One-to-many relation with Onboarding
-  interviews         Interview[] // One-to-many relation with Interview
-  candidateDocuments CandidateDocument[] // One-to-many relation with CandidateDocument
-  candidateFiles     CandidateFile[] // One-to-many relation with CandidateFile
-  aiSettings  AISettings? // One-to-one relation with AISettings
-  aiUsageLogs AIUsageLog[] // One-to-many relation with AIUsageLog
-  userCompanies UserCompany[] 
-  attendances        Attendance[]      // One-to-many relation with Attendance
+  staff              StaffRecord[]
+  payrolls           Payroll[]
+  payslips           Payslip[]
+  staffUploads       StaffUpload[]
+  payrollUploads     PayrollUpload[]
+  jobs               Job[]
+  candidates         Candidate[]
+  applications       JobApplication[]
+  offers             Offer[]
+  onboardings        Onboarding[]
+  interviews         Interview[]
+  candidateDocuments CandidateDocument[]
+  candidateFiles     CandidateFile[]
+  aiSettings  AISettings?
+  aiUsageLogs AIUsageLog[]
+  userCompanies UserCompany[]
+  attendances        Attendance[]
+  
   // LEAVE MANAGEMENT RELATIONS
   leavePolicies   LeavePolicy[]
   publicHolidays  PublicHoliday[]
-  leaveUploads    LeaveUpload[]    // ADD THIS LINE
-  blackoutPeriods LeaveBlackoutPeriod[]  // Add this line
+  leaveUploads    LeaveUpload[]
+  blackoutPeriods LeaveBlackoutPeriod[]
+  
+  // NOTIFICATIONS
+  notifications Notification[]
+  
+  // LEAVE REQUESTS
+  leaveRequests LeaveRequest[] 
+
   @@map("companies")
 }
 
@@ -70,24 +79,31 @@ model StaffRecord {
   createdAt     DateTime @default(now())
   updatedBy     String?
   updatedAt     DateTime @updatedAt
+  
   // Relations
   payrolls    Payroll[]
   payslips    Payslip[]
   onboardings Onboarding[]
-  userCompanies UserCompany[] // Add this line to complete the relation
-  // Add reverse relation to Attendance
-  attendances   Attendance[] // New field to hold all the attendance records for the staff
+  userCompanies UserCompany[]
+  attendances   Attendance[]
+  
   // LEAVE MANAGEMENT RELATIONS
   leaveBalances   StaffLeaveBalance[]
   leaveRequests   LeaveRequest[] // As requester
   
-  // Manager approval chain (REQUIRED for 2-step approval)
+  // Manager approval chain
   managerId       String?
   manager         StaffRecord? @relation("StaffManagers", fields: [managerId], references: [id])
   directReports   StaffRecord[] @relation("StaffManagers")
   
   // Manager approval requests
   leaveRequestsToApproveAsManager LeaveRequest[] @relation("ManagerApprovals")
+  
+  // HANDOVER REQUESTS 
+  handoverRequests LeaveRequest[] @relation("HandoverStaff") 
+  
+  // NOTIFICATIONS
+  notifications Notification[] 
 
   @@unique([staffId, companyId])
   @@unique([email, companyId])
@@ -813,61 +829,48 @@ model StaffLeaveBalance {
 
 // Leave Request Model
 model LeaveRequest {
-  id           String   @id @default(cuid())
-  staffRecordId String
-  leaveTypeId  String
-  startDate    DateTime
-  endDate      DateTime
-  totalDays    Decimal  @db.Decimal(5, 1) // e.g., 2.5 days
-  reason       String
-  emergencyContact String?
-  contactPhone     String?
+  id                String    @id @default(cuid())
+  referenceNumber   String?   @unique
+  staffRecordId     String
+  leaveTypeId       String
+  startDate         DateTime
+  endDate           DateTime
+  totalDays         Float
+  reason            String
+  emergencyContact  String?
+  contactPhone      String?
+  handoverTo        String?
+  handoverNotes     String?
+  attachmentUrl     String?
+  fileName          String?
+  status            String
+  currentStep       String
+  managerApproverId String?
+  createdBy         String
+  updatedBy         String?
+  managerApprovedAt DateTime?
+  hrApprovedAt      DateTime?
+  rejectedAt        DateTime?
+  cancelledAt        DateTime?
+  managerComments   String?
+  hrComments        String?
+  rejectComments    String?
+  cancelComments    String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  companyId         String?   
   
-  // Approval Workflow Fields
-  status       String   @default("PENDING") // "PENDING", "MANAGER_APPROVED", "HR_APPROVED", "APPROVED", "REJECTED", "CANCELLED"
-  currentStep  String   @default("MANAGER") // "MANAGER", "HR", "COMPLETED"
-  
-  // Manager Approval
-  managerApproverId   String?   // StaffRecord ID of manager approver
-  managerApprovedAt   DateTime?
-  managerApprovedBy   String?   // Name/email of manager approver
-  managerComments    String?
-  
-  // HR/ADMIN/SUPER_ADMIN Approval
-  hrApproverUserId   String?   // User ID (from AuthUser) of HR/Admin approver
-  hrApproverRole     String?   // Role of HR/Admin approver: "HR", "ADMIN", "SUPER_ADMIN"
-  hrApprovedAt       DateTime?
-  hrApprovedBy       String?   // Name/email of HR/Admin approver
-  hrComments         String?
-  
-  // Rejection (can happen at either step)
-  rejectionReason    String?
-  rejectedByStep     String?   // "MANAGER" or "HR"
-  rejectedById       String?
-  
-  // Handover information
-  handoverTo         String?   // StaffRecord ID
-  handoverNotes      String?
-  
-  // Attachment support
-  attachmentUrl      String?
-  fileName           String?
-  
-  // Track changes
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  createdBy          String   // StaffRecord ID who created
-  updatedBy          String?
-  
-  staffRecord        StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
-  leaveType          LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
-  managerApprover    StaffRecord? @relation("ManagerApprovals", fields: [managerApproverId], references: [id])
-  
-  @@index([staffRecordId, startDate])
-  @@index([status, startDate])
+  // Relations
+  staffRecord   StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+  leaveType     LeaveType   @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  managerApprover StaffRecord? @relation("ManagerApprovals", fields: [managerApproverId], references: [id])
+  handoverStaff StaffRecord? @relation("HandoverStaff", fields: [handoverTo], references: [id])
+  company       Company?    @relation(fields: [companyId], references: [id])  // Relation to Company
+
+  @@index([staffRecordId, status])
   @@index([managerApproverId, status])
-  @@index([hrApproverUserId, status])
-  @@map("leave_requests")
+  @@index([companyId, createdAt])
+  @@index([status, currentStep])
 }
 
 // Public Holiday Model
@@ -938,18 +941,24 @@ model LeaveBlackoutPeriod {
   @@map("leave_blackout_periods")
 }
 
-//model Notification {
-//  id        String   @id @default(cuid())
-  //userId    String
- // type      String
-  //title     String
-  //message   String
-  //data      Json?
-  //read      Boolean  @default(false)
-  //companyId String
- // createdAt DateTime @default(now())
- // updatedAt DateTime @updatedAt
-  
- // @@index([userId, read])
- // @@index([companyId, createdAt])
-//}
+//leave notification model
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String
+  type        String
+  title       String
+  message     String
+  data        Json?
+  read        Boolean  @default(false)
+  companyId   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user    StaffRecord @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@index([companyId, createdAt])
+  @@index([type, companyId])
+}
