@@ -4,7 +4,7 @@ import { requireRole } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { z } from 'zod'
 import { prisma } from '@/app/lib/prisma'
-import { sendEmail } from '@/app/lib/email' // Your email service
+import { sendLeaveNotificationEmail } from '@/app/lib/email' // Updated import
 
 // Validation schema for leave application
 const leaveApplicationSchema = z.object({
@@ -300,239 +300,251 @@ async function createNotification(
   }
 }
 
-async function sendLeaveEmailNotification(
-  toEmail: string,
-  toName: string,
-  subject: string,
-  templateData: any
-) {
+async function notifyLeaveSubmission(leaveRequest: any, staff: any, leaveType: any, manager: any = null) {
   try {
-    // Your email template implementation
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head><meta charset="UTF-8"><title>${subject}</title></head>
-      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: #fff; border-radius: 8px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-          <div style="text-align: center; margin-bottom: 30px; border-bottom: 2px solid #2c5530; padding-bottom: 20px;">
-            <div style="font-size: 24px; font-weight: bold; color: #2c5530; margin-bottom: 10px;">${templateData.companyName}</div>
-            <div style="font-size: 18px; color: #666;">${subject}</div>
-          </div>
-          <div style="margin-bottom: 30px;">
-            <p>Dear ${toName},</p>
-            <p>${templateData.message}</p>
-            ${templateData.details ? `<div style="background: #f8f9fa; padding: 15px; border-radius: 6px; margin: 15px 0;">${templateData.details}</div>` : ''}
-            ${templateData.actionUrl ? `
-            <div style="text-align: center; margin: 20px 0;">
-              <a href="${templateData.actionUrl}" style="display: inline-block; padding: 12px 30px; background: #2c5530; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">
-                ${templateData.actionText || 'View Details'}
-              </a>
-            </div>` : ''}
-            <p>Best regards,<br><strong>${templateData.companyName} HR Team</strong></p>
-          </div>
-          <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6; color: #666; font-size: 12px;">
-            <p>This is an automated message. Please do not reply to this email.</p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `
-
-    const textContent = `Dear ${toName},\n\n${templateData.message}\n\nBest regards,\n${templateData.companyName} HR Team`
-
-    await sendEmail({
-      to: toEmail,
-      subject,
-      html: htmlContent,
-      text: textContent,
-      from: `${templateData.companyName} HR <noreply@yourdomain.com>`
-    })
-
-    console.log(`✅ Email sent to ${toEmail}`)
-  } catch (error) {
-    console.error('Error sending email:', error)
-  }
-}
-
-async function notifyLeaveSubmission(leaveRequest: any, staff: any, leaveType: any, company: any) {
-  // 1. Notify Applicant
-  await createNotification(
-    staff.id,
-    'LEAVE_REQUEST_SUBMITTED',
-    'Leave Application Submitted',
-    `Your ${leaveType.name} leave request has been submitted successfully`,
-    {
-      leaveRequestId: leaveRequest.id,
-      referenceNumber: leaveRequest.referenceNumber,
-      leaveType: leaveType.name,
-      startDate: leaveRequest.startDate,
-      endDate: leaveRequest.endDate,
-      days: leaveRequest.totalDays,
-      status: leaveRequest.status
-    },
-    staff.companyId
-  )
-
-  // Email to applicant
-  await sendLeaveEmailNotification(
-    staff.email,
-    `${staff.firstName} ${staff.lastName}`,
-    'Leave Application Submitted',
-    {
-      companyName: company.companyName,
-      message: `Your ${leaveType.name} leave request has been submitted successfully.`,
-      details: `Reference: ${leaveRequest.referenceNumber}<br>Dates: ${new Date(leaveRequest.startDate).toLocaleDateString()} to ${new Date(leaveRequest.endDate).toLocaleDateString()}<br>Duration: ${leaveRequest.totalDays} days<br>Status: ${leaveRequest.status}`,
-      actionUrl: `${process.env.NEXT_PUBLIC_FRONTEND_URL}/leave/requests/${leaveRequest.id}`,
-      actionText: 'View Leave Request'
-    }
-  )
-
-  // 2. Notify Manager (if required)
-  if (staff.manager && leaveRequest.status === 'PENDING' && leaveRequest.currentStep === 'MANAGER') {
+    // 1. Notify Applicant
     await createNotification(
-      staff.manager.id,
-      'LEAVE_APPROVAL_NEEDED',
-      'Leave Request Requires Approval',
-      `${staff.firstName} ${staff.lastName} has submitted a ${leaveType.name} leave request`,
+      staff.id,
+      'LEAVE_REQUEST_SUBMITTED',
+      'Leave Application Submitted',
+      `Your ${leaveType.name} leave request has been submitted successfully`,
       {
         leaveRequestId: leaveRequest.id,
         referenceNumber: leaveRequest.referenceNumber,
-        staffName: `${staff.firstName} ${staff.lastName}`,
         leaveType: leaveType.name,
-        startDate: leaveRequest.startDate,
-        endDate: leaveRequest.endDate,
+        startDate: leaveRequest.startDate.toISOString(),
+        endDate: leaveRequest.endDate.toISOString(),
         days: leaveRequest.totalDays,
-        reason: leaveRequest.reason.substring(0, 100) + (leaveRequest.reason.length > 100 ? '...' : '')
+        status: leaveRequest.status,
+        currentStep: leaveRequest.currentStep
       },
       staff.companyId
     )
 
-    // Email to manager
-    await sendLeaveEmailNotification(
-      staff.manager.email,
-      `${staff.manager.firstName} ${staff.manager.lastName}`,
-      'Leave Request Requires Your Approval',
+    // Email to applicant
+    await sendLeaveNotificationEmail(
       {
-        companyName: company.companyName,
-        message: `${staff.firstName} ${staff.lastName} has submitted a ${leaveType.name} leave request that requires your approval.`,
-        details: `Employee: ${staff.firstName} ${staff.lastName}<br>Leave Type: ${leaveType.name}<br>Dates: ${new Date(leaveRequest.startDate).toLocaleDateString()} to ${new Date(leaveRequest.endDate).toLocaleDateString()}<br>Duration: ${leaveRequest.totalDays} days<br>Reference: ${leaveRequest.referenceNumber}`,
-        actionUrl: `${process.env.NEXT_PUBLIC_FRONTEND_URL}/leave/approvals/${leaveRequest.id}`,
-        actionText: 'Review Leave Request'
-      }
-    )
-  }
-
-  // 3. Notify HR (if HR approval workflow)
-  if (leaveRequest.currentStep === 'HR' || leaveRequest.leaveType?.policy?.approvalWorkflow?.includes('HR')) {
-    const hrUsers = await prisma.staffRecord.findMany({
-      where: {
+        id: staff.id,
         companyId: staff.companyId,
-        role: { in: ['HR', 'SUPER_ADMIN', 'ADMIN'] },
-        isActive: true
+        firstName: staff.firstName,
+        lastName: staff.lastName,
+        email: staff.email,
+        staffId: staff.staffId,
+        department: staff.department,
+        position: staff.position,
+        isRegistered: staff.isRegistered
       },
-      select: { id: true, firstName: true, lastName: true, email: true }
-    })
+      {
+        id: leaveRequest.id,
+        referenceNumber: leaveRequest.referenceNumber,
+        leaveType: leaveType.name,
+        startDate: leaveRequest.startDate,
+        endDate: leaveRequest.endDate,
+        totalDays: leaveRequest.totalDays,
+        status: leaveRequest.status,
+        currentStep: leaveRequest.currentStep
+      },
+      'SUBMITTED'
+    )
 
-    for (const hrUser of hrUsers) {
+    // 2. Notify Manager (if required)
+    if (manager && (leaveRequest.status === 'PENDING' || leaveRequest.currentStep === 'MANAGER')) {
       await createNotification(
-        hrUser.id,
-        'LEAVE_HR_APPROVAL_NEEDED',
-        'Leave Request Pending HR Approval',
+        manager.id,
+        'LEAVE_APPROVAL_NEEDED',
+        'Leave Request Requires Approval',
         `${staff.firstName} ${staff.lastName} has submitted a ${leaveType.name} leave request`,
         {
           leaveRequestId: leaveRequest.id,
           referenceNumber: leaveRequest.referenceNumber,
           staffName: `${staff.firstName} ${staff.lastName}`,
           leaveType: leaveType.name,
-          startDate: leaveRequest.startDate,
-          endDate: leaveRequest.endDate,
+          startDate: leaveRequest.startDate.toISOString(),
+          endDate: leaveRequest.endDate.toISOString(),
           days: leaveRequest.totalDays
         },
         staff.companyId
       )
 
-      // Email to HR
-      await sendLeaveEmailNotification(
-        hrUser.email,
-        `${hrUser.firstName} ${hrUser.lastName}`,
-        'Leave Request Pending HR Approval',
+      // Email to manager
+      await sendLeaveNotificationEmail(
         {
-          companyName: company.companyName,
-          message: `${staff.firstName} ${staff.lastName} has submitted a ${leaveType.name} leave request that requires HR approval.`,
-          details: `Employee: ${staff.firstName} ${staff.lastName}<br>Leave Type: ${leaveType.name}<br>Dates: ${new Date(leaveRequest.startDate).toLocaleDateString()} to ${new Date(leaveRequest.endDate).toLocaleDateString()}<br>Duration: ${leaveRequest.totalDays} days<br>Reference: ${leaveRequest.referenceNumber}`,
-          actionUrl: `${process.env.NEXT_PUBLIC_FRONTEND_URL}/leave/approvals/${leaveRequest.id}`,
-          actionText: 'Review Leave Request'
-        }
+          id: manager.id,
+          companyId: staff.companyId,
+          firstName: manager.firstName,
+          lastName: manager.lastName,
+          email: manager.email,
+          staffId: manager.staffId || '',
+          department: manager.department,
+          position: manager.position,
+          isRegistered: manager.isRegistered || true
+        },
+        {
+          id: leaveRequest.id,
+          referenceNumber: leaveRequest.referenceNumber,
+          leaveType: leaveType.name,
+          startDate: leaveRequest.startDate,
+          endDate: leaveRequest.endDate,
+          totalDays: leaveRequest.totalDays,
+          status: leaveRequest.status,
+          currentStep: leaveRequest.currentStep
+        },
+        'MANAGER_APPROVAL'
       )
     }
+
+    // 3. Notify HR (if HR approval workflow)
+    if (leaveRequest.currentStep === 'HR') {
+      const hrUsers = await prisma.staffRecord.findMany({
+        where: {
+          companyId: staff.companyId,
+          role: { in: ['HR', 'SUPER_ADMIN', 'ADMIN'] },
+          isActive: true
+        },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          staffId: true,
+          department: true,
+          position: true,
+          isRegistered: true
+        }
+      })
+
+      for (const hrUser of hrUsers) {
+        await createNotification(
+          hrUser.id,
+          'LEAVE_HR_APPROVAL_NEEDED',
+          'Leave Request Pending HR Approval',
+          `${staff.firstName} ${staff.lastName} has submitted a ${leaveType.name} leave request`,
+          {
+            leaveRequestId: leaveRequest.id,
+            referenceNumber: leaveRequest.referenceNumber,
+            staffName: `${staff.firstName} ${staff.lastName}`,
+            leaveType: leaveType.name,
+            startDate: leaveRequest.startDate.toISOString(),
+            endDate: leaveRequest.endDate.toISOString(),
+            days: leaveRequest.totalDays
+          },
+          staff.companyId
+        )
+
+        // Email to HR
+        await sendLeaveNotificationEmail(
+          {
+            id: hrUser.id,
+            companyId: staff.companyId,
+            firstName: hrUser.firstName,
+            lastName: hrUser.lastName,
+            email: hrUser.email,
+            staffId: hrUser.staffId,
+            department: hrUser.department,
+            position: hrUser.position,
+            isRegistered: hrUser.isRegistered
+          },
+          {
+            id: leaveRequest.id,
+            referenceNumber: leaveRequest.referenceNumber,
+            leaveType: leaveType.name,
+            startDate: leaveRequest.startDate,
+            endDate: leaveRequest.endDate,
+            totalDays: leaveRequest.totalDays,
+            status: leaveRequest.status,
+            currentStep: leaveRequest.currentStep
+          },
+          'HR_APPROVAL'
+        )
+      }
+    }
+
+    console.log('✅ Notifications sent successfully for leave request:', leaveRequest.id)
+  } catch (error) {
+    console.error('Error sending notifications:', error)
+    // Don't fail the whole request if notifications fail
   }
 }
 
-async function notifyLeaveStatusChange(leaveRequest: any, staff: any, leaveType: any, company: any, action: string, actionBy: any) {
-  const actionByUser = await prisma.staffRecord.findUnique({
-    where: { id: actionBy.userId },
-    select: { firstName: true, lastName: true, role: true }
-  })
+async function notifyLeaveStatusChange(leaveRequest: any, staff: any, leaveType: any, action: string, actionBy: any) {
+  try {
+    const actionByUser = await prisma.staffRecord.findUnique({
+      where: { id: actionBy.userId },
+      select: { firstName: true, lastName: true, role: true }
+    })
 
-  const actionByName = actionByUser ? `${actionByUser.firstName} ${actionByUser.lastName} (${actionByUser.role})` : 'System'
+    const actionByName = actionByUser ? `${actionByUser.firstName} ${actionByUser.lastName} (${actionByUser.role})` : 'System'
 
-  // Notify Applicant
-  let notificationType = ''
-  let emailSubject = ''
-  let emailMessage = ''
+    let notificationType = ''
+    let emailNotificationType: 'APPROVED' | 'REJECTED' | 'CANCELLED'
 
-  switch (action) {
-    case 'APPROVED':
-      notificationType = 'LEAVE_APPROVED'
-      emailSubject = 'Leave Request Approved'
-      emailMessage = `Your ${leaveType.name} leave request has been approved by ${actionByName}.`
-      break
-    case 'REJECTED':
-      notificationType = 'LEAVE_REJECTED'
-      emailSubject = 'Leave Request Declined'
-      emailMessage = `Your ${leaveType.name} leave request has been declined by ${actionByName}.`
-      break
-    case 'CANCELLED':
-      notificationType = 'LEAVE_CANCELLED'
-      emailSubject = 'Leave Request Cancelled'
-      emailMessage = `Your ${leaveType.name} leave request has been cancelled by ${actionByName}.`
-      break
-    default:
-      return
-  }
-
-  await createNotification(
-    staff.id,
-    notificationType,
-    emailSubject,
-    emailMessage,
-    {
-      leaveRequestId: leaveRequest.id,
-      referenceNumber: leaveRequest.referenceNumber,
-      leaveType: leaveType.name,
-      startDate: leaveRequest.startDate,
-      endDate: leaveRequest.endDate,
-      days: leaveRequest.totalDays,
-      status: leaveRequest.status,
-      actionBy: actionByName,
-      actionAt: new Date().toISOString()
-    },
-    staff.companyId
-  )
-
-  // Email to applicant
-  await sendLeaveEmailNotification(
-    staff.email,
-    `${staff.firstName} ${staff.lastName}`,
-    emailSubject,
-    {
-      companyName: company.companyName,
-      message: emailMessage,
-      details: `Reference: ${leaveRequest.referenceNumber}<br>Dates: ${new Date(leaveRequest.startDate).toLocaleDateString()} to ${new Date(leaveRequest.endDate).toLocaleDateString()}<br>Duration: ${leaveRequest.totalDays} days<br>Status: ${leaveRequest.status}`,
-      actionUrl: `${process.env.NEXT_PUBLIC_FRONTEND_URL}/leave/requests/${leaveRequest.id}`,
-      actionText: 'View Leave Request'
+    switch (action) {
+      case 'APPROVE':
+        notificationType = 'LEAVE_APPROVED'
+        emailNotificationType = 'APPROVED'
+        break
+      case 'REJECT':
+        notificationType = 'LEAVE_REJECTED'
+        emailNotificationType = 'REJECTED'
+        break
+      case 'CANCEL':
+        notificationType = 'LEAVE_CANCELLED'
+        emailNotificationType = 'CANCELLED'
+        break
+      default:
+        return
     }
-  )
+
+    // Notify Applicant
+    await createNotification(
+      staff.id,
+      notificationType,
+      `Leave Request ${action}`,
+      `Your ${leaveType.name} leave request has been ${action.toLowerCase()}ed by ${actionByName}`,
+      {
+        leaveRequestId: leaveRequest.id,
+        referenceNumber: leaveRequest.referenceNumber,
+        leaveType: leaveType.name,
+        startDate: leaveRequest.startDate.toISOString(),
+        endDate: leaveRequest.endDate.toISOString(),
+        days: leaveRequest.totalDays,
+        status: leaveRequest.status,
+        actionBy: actionByName,
+        actionAt: new Date().toISOString()
+      },
+      staff.companyId
+    )
+
+    // Email to applicant
+    await sendLeaveNotificationEmail(
+      {
+        id: staff.id,
+        companyId: staff.companyId,
+        firstName: staff.firstName,
+        lastName: staff.lastName,
+        email: staff.email,
+        staffId: staff.staffId,
+        department: staff.department,
+        position: staff.position,
+        isRegistered: staff.isRegistered
+      },
+      {
+        id: leaveRequest.id,
+        referenceNumber: leaveRequest.referenceNumber,
+        leaveType: leaveType.name,
+        startDate: leaveRequest.startDate,
+        endDate: leaveRequest.endDate,
+        totalDays: leaveRequest.totalDays,
+        status: leaveRequest.status,
+        currentStep: leaveRequest.currentStep
+      },
+      emailNotificationType
+    )
+
+    console.log(`✅ Status change notification sent for leave request: ${leaveRequest.id}, action: ${action}`)
+  } catch (error) {
+    console.error('Error sending status change notifications:', error)
+  }
 }
 
 // ================= API ENDPOINTS =================
@@ -586,8 +598,7 @@ export async function POST(request: NextRequest) {
         company: {
           select: {
             id: true,
-            companyName: true,
-            workWeekPattern: true
+            companyName: true
           }
         },
         manager: {
@@ -595,7 +606,11 @@ export async function POST(request: NextRequest) {
             id: true,
             firstName: true,
             lastName: true,
-            email: true
+            email: true,
+            staffId: true,
+            department: true,
+            position: true,
+            isRegistered: true
           }
         }
       }
@@ -843,6 +858,7 @@ export async function POST(request: NextRequest) {
         managerApproverId: staff.manager?.id || null,
         createdBy: staff.id,
         updatedBy: staff.id,
+        companyId: staff.companyId
       }
 
       // Add medical certificate info
@@ -898,8 +914,14 @@ export async function POST(request: NextRequest) {
       result.leaveRequest,
       result.staff,
       result.leaveType,
-      result.staff.company
+      result.manager
     )
+
+    // Get company work week pattern for response
+    const company = await prisma.company.findUnique({
+      where: { id: staff.companyId },
+      select: { workWeekPattern: true }
+    })
 
     // Return success response
     const response = NextResponse.json({
@@ -926,9 +948,9 @@ export async function POST(request: NextRequest) {
           carriedOver: result.balance.carriedOver
         },
         workWeekInfo: {
-          pattern: result.staff.company.workWeekPattern || "12345",
-          workDays: parseWorkWeekPattern(result.staff.company.workWeekPattern || null),
-          description: getWorkWeekDescription(parseWorkWeekPattern(result.staff.company.workWeekPattern || null))
+          pattern: company?.workWeekPattern || "12345",
+          workDays: parseWorkWeekPattern(company?.workWeekPattern || null),
+          description: getWorkWeekDescription(parseWorkWeekPattern(company?.workWeekPattern || null))
         },
         nextSteps: getNextSteps(result.leaveRequest.status, result.leaveRequest.currentStep, result.policy),
         approvers: {
@@ -938,6 +960,11 @@ export async function POST(request: NextRequest) {
             email: result.manager.email
           } : null,
           hr: result.policy.approvalWorkflow.includes('HR') ? 'Awaiting HR approval' : null
+        },
+        notifications: {
+          sentToApplicant: true,
+          sentToManager: !!result.manager,
+          sentToHR: result.policy.approvalWorkflow.includes('HR')
         },
         warnings: result.warnings.length > 0 ? result.warnings : undefined,
         importantNotes: getImportantNotes(result.policy),
@@ -1030,8 +1057,7 @@ export async function GET(request: NextRequest) {
           select: {
             id: true,
             name: true,
-            code: true,
-            policy: true
+            code: true
           }
         },
         staffRecord: {
@@ -1247,11 +1273,10 @@ export async function PUT(request: NextRequest) {
             lastName: true,
             email: true,
             companyId: true,
-            company: {
-              select: {
-                companyName: true
-              }
-            }
+            staffId: true,
+            department: true,
+            position: true,
+            isRegistered: true
           }
         }
       }
@@ -1424,7 +1449,6 @@ export async function PUT(request: NextRequest) {
         updatedLeaveRequest,
         leaveRequest.staffRecord,
         leaveRequest.leaveType,
-        leaveRequest.staffRecord.company,
         action,
         { userId: user.userId, role: user.role }
       )
@@ -1437,7 +1461,16 @@ export async function PUT(request: NextRequest) {
             role: { in: ['HR', 'SUPER_ADMIN', 'ADMIN'] },
             isActive: true
           },
-          select: { id: true, firstName: true, lastName: true, email: true }
+          select: { 
+            id: true, 
+            firstName: true, 
+            lastName: true, 
+            email: true,
+            staffId: true,
+            department: true,
+            position: true,
+            isRegistered: true
+          }
         })
         
         for (const hrUser of hrUsers) {
@@ -1454,10 +1487,35 @@ export async function PUT(request: NextRequest) {
               startDate: leaveRequest.startDate,
               endDate: leaveRequest.endDate,
               days: leaveRequest.totalDays,
-              managerApproved: true,
-              managerName: user.name || 'Manager'
+              managerApproved: true
             },
             leaveRequest.staffRecord.companyId
+          )
+
+          // Email to HR
+          await sendLeaveNotificationEmail(
+            {
+              id: hrUser.id,
+              companyId: leaveRequest.staffRecord.companyId,
+              firstName: hrUser.firstName,
+              lastName: hrUser.lastName,
+              email: hrUser.email,
+              staffId: hrUser.staffId,
+              department: hrUser.department,
+              position: hrUser.position,
+              isRegistered: hrUser.isRegistered
+            },
+            {
+              id: leaveRequest.id,
+              referenceNumber: leaveRequest.referenceNumber,
+              leaveType: leaveRequest.leaveType.name,
+              startDate: leaveRequest.startDate,
+              endDate: leaveRequest.endDate,
+              totalDays: leaveRequest.totalDays,
+              status: updatedLeaveRequest.status,
+              currentStep: updatedLeaveRequest.currentStep
+            },
+            'HR_APPROVAL'
           )
         }
       }
