@@ -321,7 +321,7 @@ async function notifyLeaveSubmission(leaveRequest: any, staff: any, leaveType: a
       staff.companyId
     )
 
-    // Email to applicant
+    // Email to applicant - FIXED: referenceNumber || undefined
     await sendLeaveNotificationEmail(
       {
         id: staff.id,
@@ -336,7 +336,7 @@ async function notifyLeaveSubmission(leaveRequest: any, staff: any, leaveType: a
       },
       {
         id: leaveRequest.id,
-        referenceNumber: leaveRequest.referenceNumber,
+        referenceNumber: leaveRequest.referenceNumber || undefined,
         leaveType: leaveType.name,
         startDate: leaveRequest.startDate,
         endDate: leaveRequest.endDate,
@@ -366,7 +366,7 @@ async function notifyLeaveSubmission(leaveRequest: any, staff: any, leaveType: a
         staff.companyId
       )
 
-      // Email to manager
+      // Email to manager - FIXED: referenceNumber || undefined
       await sendLeaveNotificationEmail(
         {
           id: manager.id,
@@ -381,7 +381,7 @@ async function notifyLeaveSubmission(leaveRequest: any, staff: any, leaveType: a
         },
         {
           id: leaveRequest.id,
-          referenceNumber: leaveRequest.referenceNumber,
+          referenceNumber: leaveRequest.referenceNumber || undefined,
           leaveType: leaveType.name,
           startDate: leaveRequest.startDate,
           endDate: leaveRequest.endDate,
@@ -431,7 +431,7 @@ async function notifyLeaveSubmission(leaveRequest: any, staff: any, leaveType: a
           staff.companyId
         )
 
-        // Email to HR
+        // Email to HR - FIXED: referenceNumber || undefined
         await sendLeaveNotificationEmail(
           {
             id: hrUser.id,
@@ -446,7 +446,7 @@ async function notifyLeaveSubmission(leaveRequest: any, staff: any, leaveType: a
           },
           {
             id: leaveRequest.id,
-            referenceNumber: leaveRequest.referenceNumber,
+            referenceNumber: leaveRequest.referenceNumber || undefined,
             leaveType: leaveType.name,
             startDate: leaveRequest.startDate,
             endDate: leaveRequest.endDate,
@@ -515,7 +515,7 @@ async function notifyLeaveStatusChange(leaveRequest: any, staff: any, leaveType:
       staff.companyId
     )
 
-    // Email to applicant
+    // Email to applicant - FIXED: referenceNumber || undefined
     await sendLeaveNotificationEmail(
       {
         id: staff.id,
@@ -530,7 +530,7 @@ async function notifyLeaveStatusChange(leaveRequest: any, staff: any, leaveType:
       },
       {
         id: leaveRequest.id,
-        referenceNumber: leaveRequest.referenceNumber,
+        referenceNumber: leaveRequest.referenceNumber || undefined,
         leaveType: leaveType.name,
         startDate: leaveRequest.startDate,
         endDate: leaveRequest.endDate,
@@ -1524,7 +1524,7 @@ export async function PUT(request: NextRequest) {
             leaveRequest.staffRecord.companyId
           )
 
-          // Email to HR
+          // Email to HR - FIXED: referenceNumber || undefined
           await sendLeaveNotificationEmail(
             {
               id: hrUser.id,
@@ -1539,7 +1539,7 @@ export async function PUT(request: NextRequest) {
             },
             {
               id: leaveRequest.id,
-              referenceNumber: leaveRequest.referenceNumber,
+              referenceNumber: leaveRequest.referenceNumber || undefined,
               leaveType: leaveRequest.leaveType.name,
               startDate: leaveRequest.startDate,
               endDate: leaveRequest.endDate,
