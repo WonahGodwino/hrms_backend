@@ -1307,8 +1307,9 @@ export async function PUT(request: NextRequest) {
       return withCors(response, origin)
     }
     
-    let updatedLeaveRequest
-    let balanceUpdates = {}
+    // FIXED: Add proper TypeScript types
+    let updatedLeaveRequest: any = null
+    let balanceUpdates: Record<string, any> = {}
     
     // Process the action in transaction
     updatedLeaveRequest = await prisma.$transaction(async (tx) => {
@@ -1320,7 +1321,7 @@ export async function PUT(request: NextRequest) {
           
           const newStatus = nextStep === 'COMPLETED' ? 'APPROVED' : 'MANAGER_APPROVED'
           
-          updatedLeaveRequest = await tx.leaveRequest.update({
+          const result = await tx.leaveRequest.update({
             where: { id: leaveRequestId },
             data: {
               status: newStatus,
@@ -1331,8 +1332,36 @@ export async function PUT(request: NextRequest) {
             }
           })
           
+          // If manager-only approval, update balance immediately
+          if (nextStep === 'COMPLETED') {
+            const leaveBalance = await tx.staffLeaveBalance.findFirst({
+              where: {
+                staffRecordId: leaveRequest.staffRecordId,
+                leaveTypeId: leaveRequest.leaveTypeId,
+                year: new Date().getFullYear()
+              }
+            })
+            
+            if (leaveBalance) {
+              await tx.staffLeaveBalance.update({
+                where: { id: leaveBalance.id },
+                data: {
+                  pendingDays: { decrement: leaveRequest.totalDays },
+                  usedDays: { increment: leaveRequest.totalDays }
+                }
+              })
+              
+              balanceUpdates = {
+                pendingDecreased: leaveRequest.totalDays,
+                usedIncreased: leaveRequest.totalDays
+              }
+            }
+          }
+          
+          return result
+          
         } else if (leaveRequest.currentStep === 'HR') {
-          updatedLeaveRequest = await tx.leaveRequest.update({
+          const result = await tx.leaveRequest.update({
             where: { id: leaveRequestId },
             data: {
               status: 'APPROVED',
@@ -1366,10 +1395,12 @@ export async function PUT(request: NextRequest) {
               usedIncreased: leaveRequest.totalDays
             }
           }
+          
+          return result
         }
         
       } else if (action === 'REJECT') {
-        updatedLeaveRequest = await tx.leaveRequest.update({
+        const result = await tx.leaveRequest.update({
           where: { id: leaveRequestId },
           data: {
             status: 'REJECTED',
@@ -1402,8 +1433,10 @@ export async function PUT(request: NextRequest) {
           }
         }
         
+        return result
+        
       } else if (action === 'CANCEL') {
-        updatedLeaveRequest = await tx.leaveRequest.update({
+        const result = await tx.leaveRequest.update({
           where: { id: leaveRequestId },
           data: {
             status: 'CANCELLED',
@@ -1435,9 +1468,11 @@ export async function PUT(request: NextRequest) {
             pendingDecreased: leaveRequest.totalDays
           }
         }
+        
+        return result
       }
       
-      return updatedLeaveRequest
+      throw new Error('Invalid action or workflow state')
     })
     
     // Send notifications after transaction
