@@ -920,6 +920,7 @@ model LeaveUpload {
   company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   @@map("leave_uploads")
 }
+
 model LeaveBlackoutPeriod {
   id          String   @id @default(cuid())
   companyId   String

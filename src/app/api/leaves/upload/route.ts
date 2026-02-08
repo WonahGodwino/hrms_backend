@@ -543,8 +543,8 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
             // Validate seasonal restrictions format
             let seasonalRestrictions = null
             if (policyData.seasonalRestrictions) {
-              const months = policyData.seasonalRestrictions.split(',').map(m => parseInt(m.trim()))
-              if (months.some(m => isNaN(m) || m < 1 || m > 12)) {
+              const months = policyData.seasonalRestrictions.split(',').map((m: string) => parseInt(m.trim()))
+              if (months.some((m: number) => isNaN(m) || m < 1 || m > 12)) {
                 throw new Error('seasonalRestrictions must be comma-separated months (1-12)')
               }
               seasonalRestrictions = months.join(',')
