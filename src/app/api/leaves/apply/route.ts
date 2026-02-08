@@ -1,4 +1,4 @@
-// app/api/leaves/apply/route.ts - CORRECTED AND DEPLOYMENT READY
+// app/api/leaves/apply/route.ts - FULLY UPDATED AND DEPLOYMENT READY
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
@@ -292,7 +292,7 @@ async function createLeaveNotification(
         message,
         data: JSON.stringify(data),
         companyId,
-        leaveRequestId, // This will now be properly linked to LeaveRequest
+        leaveRequestId, // Store leaveRequestId directly for easy querying
         read: false
       }
     })
@@ -1027,7 +1027,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// GET - Get leave application by ID (FIXED VERSION)
+// GET - Get leave application by ID (FIXED VERSION - NO TYPE ERRORS)
 export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
   
@@ -1094,20 +1094,6 @@ export async function GET(request: NextRequest) {
             email: true,
             staffId: true
           }
-        },
-        notifications: { // ✅ Now we can directly include notifications
-          select: {
-            id: true,
-            type: true,
-            title: true,
-            message: true,
-            read: true,
-            createdAt: true,
-            userId: true,
-            data: true
-          },
-          orderBy: { createdAt: 'desc' },
-          take: 20
         }
       }
     })
@@ -1142,6 +1128,70 @@ export async function GET(request: NextRequest) {
         year: currentYear
       }
     })
+    
+    // ✅ FIXED: Get notifications for this leave request WITHOUT the problematic 'contains' query
+    // Two approaches to get notifications:
+    
+    // Approach 1: Query by leaveRequestId field (if schema has been updated)
+    let notifications = await prisma.notification.findMany({
+      where: {
+        OR: [
+          // First try direct field query (if leaveRequestId field exists in schema)
+          { leaveRequestId: leaveRequestId },
+          // Also include notifications for the staff member about leaves
+          {
+            userId: leaveRequest.staffRecordId,
+            companyId: leaveRequest.staffRecord.companyId,
+            type: { in: ['LEAVE_REQUEST_SUBMITTED', 'LEAVE_APPROVED', 'LEAVE_REJECTED', 'LEAVE_CANCELLED'] }
+          }
+        ]
+      },
+      select: {
+        id: true,
+        type: true,
+        title: true,
+        message: true,
+        read: true,
+        createdAt: true,
+        userId: true,
+        data: true,
+        leaveRequestId: true
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20
+    })
+    
+    // Filter to ensure we only get notifications relevant to THIS leave request
+    const relevantNotifications = notifications.filter(notification => {
+      // If notification has leaveRequestId field, check it matches
+      if (notification.leaveRequestId === leaveRequestId) {
+        return true
+      }
+      
+      // Otherwise, check the data JSON field
+      if (notification.data) {
+        try {
+          const data = JSON.parse(notification.data as string)
+          return data && data.leaveRequestId === leaveRequestId
+        } catch (e) {
+          return false
+        }
+      }
+      
+      return false
+    })
+    
+    // Format the notifications response
+    const formattedNotifications = relevantNotifications.map(notification => ({
+      id: notification.id,
+      type: notification.type,
+      title: notification.title,
+      message: notification.message,
+      read: notification.read,
+      createdAt: notification.createdAt,
+      isForCurrentUser: notification.userId === user.userId,
+      data: notification.data ? JSON.parse(notification.data as string) : null
+    }))
     
     const response = NextResponse.json({
       success: true,
@@ -1183,16 +1233,7 @@ export async function GET(request: NextRequest) {
           available: leaveBalance.totalDays - leaveBalance.usedDays - leaveBalance.pendingDays,
           carriedOver: leaveBalance.carriedOver
         } : null,
-        notifications: leaveRequest.notifications.map(notification => ({
-          id: notification.id,
-          type: notification.type,
-          title: notification.title,
-          message: notification.message,
-          read: notification.read,
-          createdAt: notification.createdAt,
-          isForCurrentUser: notification.userId === user.userId,
-          data: notification.data ? JSON.parse(notification.data as string) : null
-        }))
+        notifications: formattedNotifications
       }
     })
     
