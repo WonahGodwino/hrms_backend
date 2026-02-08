@@ -647,7 +647,7 @@ export async function POST(request: NextRequest) {
         `Your ${result.leaveType.name} leave request has been submitted successfully`,
         result.leaveRequest.id,
         {
-          referenceNumber: result.leaveRequest.referenceNumber,
+          referenceNumber: result.leaveRequest.referenceNumber || undefined,
           leaveType: result.leaveType.name,
           startDate: result.leaveRequest.startDate.toISOString(),
           endDate: result.leaveRequest.endDate.toISOString(),
@@ -673,7 +673,7 @@ export async function POST(request: NextRequest) {
         },
         {
           id: result.leaveRequest.id,
-          referenceNumber: result.leaveRequest.referenceNumber,
+          referenceNumber: result.leaveRequest.referenceNumber || undefined,
           leaveType: result.leaveType.name,
           startDate: result.leaveRequest.startDate,
           endDate: result.leaveRequest.endDate,
@@ -693,7 +693,7 @@ export async function POST(request: NextRequest) {
           `${staff.firstName} ${staff.lastName} has submitted a ${result.leaveType.name} leave request`,
           result.leaveRequest.id,
           {
-            referenceNumber: result.leaveRequest.referenceNumber,
+           referenceNumber: result.leaveRequest.referenceNumber || undefined,
             staffName: `${staff.firstName} ${staff.lastName}`,
             leaveType: result.leaveType.name,
             startDate: result.leaveRequest.startDate.toISOString(),
