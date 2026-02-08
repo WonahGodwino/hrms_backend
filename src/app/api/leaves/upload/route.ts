@@ -1,11 +1,11 @@
 // src/app/api/leaves/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { Prisma } from '@prisma/client'
 import { requireRole } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
+import { Prisma } from '@prisma/client'
 
 // Define types for failed records
 interface FailedRecord {
@@ -13,6 +13,37 @@ interface FailedRecord {
   rowData: any
   error: string
   suggestion?: string
+}
+
+interface ProcessResults {
+  policies: {
+    created: number
+    updated: number
+    failed: number
+    errors: string[]
+    failedRecords: FailedRecord[]
+  }
+  leaveTypes: {
+    created: number
+    updated: number
+    failed: number
+    errors: string[]
+    failedRecords: FailedRecord[]
+  }
+  holidays: {
+    created: number
+    updated: number
+    failed: number
+    errors: string[]
+    failedRecords: FailedRecord[]
+  }
+  blackoutPeriods: {
+    created: number
+    updated: number
+    failed: number
+    errors: string[]
+    failedRecords: FailedRecord[]
+  }
 }
 
 // Helper functions
@@ -141,7 +172,7 @@ async function parseCSVToWorkbook(csvText: string): Promise<ExcelJS.Workbook> {
     throw new Error('Empty CSV file')
   }
   
-  lines.forEach((line, rowIndex) => {
+  lines.forEach((line: string, rowIndex: number) => {
     const cells = splitCsvLine(line)
     const row = worksheet.addRow(cells)
     
@@ -331,20 +362,20 @@ async function downloadTemplate(company: any, format: string, origin: string | n
   blackoutHeaderRow.alignment = { vertical: 'middle', horizontal: 'center' }
   
   // Add sample data
+  const currentYear = new Date().getFullYear()
   blackoutSheet.addRow({
     periodName: 'Year-End Shutdown',
-    startDate: new Date().getFullYear() + '-12-20',
-    endDate: new Date().getFullYear() + '-12-31',
+    startDate: `${currentYear}-12-20`,
+    endDate: `${currentYear}-12-31`,
     reason: 'Company-wide holiday shutdown',
     appliesToAllLeaveTypes: 'YES',
     policyName: ''
   })
   
   // Style all sheets
-  const sheets = [policiesSheet, typesSheet, holidaysSheet, blackoutSheet]
-  sheets.forEach((sheet, index) => {
+  workbook.eachSheet((worksheet: ExcelJS.Worksheet, index: number) => {
     const startRow = index === 0 ? 12 : (index === 1 ? 8 : (index === 2 ? 8 : 9))
-    sheet.eachRow((row, rowNumber) => {
+    worksheet.eachRow((row: ExcelJS.Row, rowNumber: number) => {
       if (rowNumber >= startRow) {
         row.alignment = { vertical: 'middle', horizontal: 'left' }
         row.font = { size: 11 }
@@ -376,7 +407,7 @@ async function downloadTemplate(company: any, format: string, origin: string | n
     
     csvContent += 'BLACKOUT PERIODS\n'
     csvContent += 'periodName*,startDate*,endDate*,reason,appliesToAllLeaveTypes,policyName\n'
-    csvContent += `Year-End Shutdown,${new Date().getFullYear()}-12-20,${new Date().getFullYear()}-12-31,Company-wide holiday shutdown,YES,\n`
+    csvContent += `Year-End Shutdown,${currentYear}-12-20,${currentYear}-12-31,Company-wide holiday shutdown,YES,\n`
     
     const response = new NextResponse(csvContent, {
       headers: {
@@ -403,7 +434,12 @@ async function downloadTemplate(company: any, format: string, origin: string | n
 }
 
 // Process leave upload data
-async function processLeaveUpload(companyId: string, file: File, userId: string, fileName: string, filePath: string) {
+async function processLeaveUpload(companyId: string, file: File, userId: string, fileName: string, filePath: string): Promise<{
+  upload: any
+  results: ProcessResults
+  hasFailedRecords: boolean
+  totalFailed: number
+}> {
   const { prisma } = await import('@/app/lib/prisma')
   
   // Create initial upload record
@@ -429,34 +465,34 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
   })
 
   // Process results object
-  const results = {
+  const results: ProcessResults = {
     policies: { 
       created: 0, 
       updated: 0, 
       failed: 0, 
-      errors: [] as string[], 
-      failedRecords: [] as FailedRecord[] 
+      errors: [], 
+      failedRecords: []
     },
     leaveTypes: { 
       created: 0, 
       updated: 0, 
       failed: 0, 
-      errors: [] as string[], 
-      failedRecords: [] as FailedRecord[] 
+      errors: [], 
+      failedRecords: []
     },
     holidays: { 
       created: 0, 
       updated: 0, 
       failed: 0, 
-      errors: [] as string[], 
-      failedRecords: [] as FailedRecord[] 
+      errors: [], 
+      failedRecords: []
     },
     blackoutPeriods: { 
       created: 0, 
       updated: 0, 
       failed: 0, 
-      errors: [] as string[], 
-      failedRecords: [] as FailedRecord[] 
+      errors: [], 
+      failedRecords: []
     }
   }
 
@@ -542,7 +578,7 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
             const maxConsecutiveDays = policyData.maxConsecutiveDays ? parseInt(policyData.maxConsecutiveDays) : null
 
             // Validate seasonal restrictions format
-            let seasonalRestrictions = null
+            let seasonalRestrictions: string | null = null
             if (policyData.seasonalRestrictions) {
               const months = policyData.seasonalRestrictions.split(',').map((m: string) => parseInt(m.trim()))
               if (months.some((m: number) => isNaN(m) || m < 1 || m > 12)) {
@@ -629,7 +665,7 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
           where: { companyId: companyId }
         })
 
-        const policyMap = new Map(policies.map(p => [p.name, p.id]))
+        const policyMap = new Map(policies.map((p: any) => [p.name, p.id]))
 
         for (let i = 0; i < typesData.length; i++) {
           const rowNumber = i + 2
@@ -821,7 +857,7 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
         const policies = await prisma.leavePolicy.findMany({
           where: { companyId: companyId }
         })
-        const policyMap = new Map(policies.map(p => [p.name, p.id]))
+        const policyMap = new Map(policies.map((p: any) => [p.name, p.id]))
 
         for (let i = 0; i < blackoutData.length; i++) {
           const rowNumber = i + 2
@@ -932,7 +968,7 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
       blackoutPeriodsCreated: results.blackoutPeriods.created,
       blackoutPeriodsUpdated: results.blackoutPeriods.updated,
       blackoutPeriodsFailed: results.blackoutPeriods.failed,
-      failedRecords: allFailedRecords.length > 0 ? JSON.stringify(allFailedRecords) : Prisma.JsonNull
+      failedRecords: JSON.stringify(allFailedRecords)
     }
   })
 
@@ -1268,14 +1304,14 @@ async function downloadFailedRecords(
   failedRecords: FailedRecord[], 
   format: string, 
   origin: string | null
-) {
+): Promise<NextResponse> {
   const workbook = new ExcelJS.Workbook()
   
   // Group failed records by sheet type
-  const policiesRecords = failedRecords.filter(r => r.sheetType === 'POLICIES')
-  const leaveTypesRecords = failedRecords.filter(r => r.sheetType === 'LEAVE_TYPES')
-  const holidaysRecords = failedRecords.filter(r => r.sheetType === 'HOLIDAYS')
-  const blackoutRecords = failedRecords.filter(r => r.sheetType === 'BLACKOUT_PERIODS')
+  const policiesRecords = failedRecords.filter((r: FailedRecord) => r.sheetType === 'POLICIES')
+  const leaveTypesRecords = failedRecords.filter((r: FailedRecord) => r.sheetType === 'LEAVE_TYPES')
+  const holidaysRecords = failedRecords.filter((r: FailedRecord) => r.sheetType === 'HOLIDAYS')
+  const blackoutRecords = failedRecords.filter((r: FailedRecord) => r.sheetType === 'BLACKOUT_PERIODS')
 
   // Policies sheet
   if (policiesRecords.length > 0) {
@@ -1310,7 +1346,7 @@ async function downloadFailedRecords(
     policyHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
     policyHeaderRow.alignment = { vertical: 'middle', horizontal: 'center' }
     
-    policiesRecords.forEach(record => {
+    policiesRecords.forEach((record: FailedRecord) => {
       policiesSheet.addRow({
         ...record.rowData,
         error: record.error,
@@ -1342,7 +1378,7 @@ async function downloadFailedRecords(
     typeHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
     typeHeaderRow.alignment = { vertical: 'middle', horizontal: 'center' }
     
-    leaveTypesRecords.forEach(record => {
+    leaveTypesRecords.forEach((record: FailedRecord) => {
       typesSheet.addRow({
         ...record.rowData,
         error: record.error
@@ -1373,7 +1409,7 @@ async function downloadFailedRecords(
     holidayHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
     holidayHeaderRow.alignment = { vertical: 'middle', horizontal: 'center' }
     
-    holidaysRecords.forEach(record => {
+    holidaysRecords.forEach((record: FailedRecord) => {
       holidaysSheet.addRow({
         ...record.rowData,
         error: record.error
@@ -1404,7 +1440,7 @@ async function downloadFailedRecords(
     blackoutHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
     blackoutHeaderRow.alignment = { vertical: 'middle', horizontal: 'center' }
     
-    blackoutRecords.forEach(record => {
+    blackoutRecords.forEach((record: FailedRecord) => {
       blackoutSheet.addRow({
         ...record.rowData,
         error: record.error
@@ -1413,9 +1449,9 @@ async function downloadFailedRecords(
   }
 
   // Style all sheets with alternating row colors
-  workbook.eachWorksheet((worksheet) => {
+  workbook.eachSheet((worksheet: ExcelJS.Worksheet) => {
     const dataStartRow = 5
-    worksheet.eachRow((row, rowNumber) => {
+    worksheet.eachRow((row: ExcelJS.Row, rowNumber: number) => {
       if (rowNumber >= dataStartRow) {
         row.alignment = { vertical: 'middle', horizontal: 'left' }
         row.font = { size: 11 }
@@ -1434,7 +1470,7 @@ async function downloadFailedRecords(
     if (policiesRecords.length > 0) {
       csvContent += 'FAILED POLICIES\n'
       csvContent += 'policyName,description,maxDays,carryOver,isPaid,accrualRate,minEmploymentMonths,requiresApproval,approvalWorkflow,noticePeriod,documentationRequired,allowHalfDays,maxConsecutiveDays,seasonalRestrictions,requireManagerComments,ERROR,SUGGESTION\n'
-      policiesRecords.forEach(record => {
+      policiesRecords.forEach((record: FailedRecord) => {
         const row = [
           record.rowData.policyName || '',
           record.rowData.description || '',
@@ -1453,7 +1489,7 @@ async function downloadFailedRecords(
           record.rowData.requireManagerComments || '',
           record.error,
           record.suggestion || ''
-        ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(',')
+        ].map((field: any) => `"${String(field).replace(/"/g, '""')}"`).join(',')
         csvContent += row + '\n'
       })
       csvContent += '\n\n'
@@ -1463,7 +1499,7 @@ async function downloadFailedRecords(
     if (leaveTypesRecords.length > 0) {
       csvContent += 'FAILED LEAVE TYPES\n'
       csvContent += 'policyName,typeName,code,description,color,isActive,ERROR\n'
-      leaveTypesRecords.forEach(record => {
+      leaveTypesRecords.forEach((record: FailedRecord) => {
         const row = [
           record.rowData.policyName || '',
           record.rowData.typeName || '',
@@ -1472,7 +1508,7 @@ async function downloadFailedRecords(
           record.rowData.color || '',
           record.rowData.isActive || '',
           record.error
-        ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(',')
+        ].map((field: any) => `"${String(field).replace(/"/g, '""')}"`).join(',')
         csvContent += row + '\n'
       })
       csvContent += '\n\n'
@@ -1482,7 +1518,7 @@ async function downloadFailedRecords(
     if (holidaysRecords.length > 0) {
       csvContent += 'FAILED HOLIDAYS\n'
       csvContent += 'holidayName,dateOrPattern,description,isRecurring,country,state,ERROR\n'
-      holidaysRecords.forEach(record => {
+      holidaysRecords.forEach((record: FailedRecord) => {
         const row = [
           record.rowData.holidayName || '',
           record.rowData.dateOrPattern || '',
@@ -1491,7 +1527,7 @@ async function downloadFailedRecords(
           record.rowData.country || '',
           record.rowData.state || '',
           record.error
-        ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(',')
+        ].map((field: any) => `"${String(field).replace(/"/g, '""')}"`).join(',')
         csvContent += row + '\n'
       })
       csvContent += '\n\n'
@@ -1501,7 +1537,7 @@ async function downloadFailedRecords(
     if (blackoutRecords.length > 0) {
       csvContent += 'FAILED BLACKOUT PERIODS\n'
       csvContent += 'periodName,startDate,endDate,reason,appliesToAllLeaveTypes,policyName,ERROR\n'
-      blackoutRecords.forEach(record => {
+      blackoutRecords.forEach((record: FailedRecord) => {
         const row = [
           record.rowData.periodName || '',
           record.rowData.startDate || '',
@@ -1510,7 +1546,7 @@ async function downloadFailedRecords(
           record.rowData.appliesToAllLeaveTypes || '',
           record.rowData.policyName || '',
           record.error
-        ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(',')
+        ].map((field: any) => `"${String(field).replace(/"/g, '""')}"`).join(',')
         csvContent += row + '\n'
       })
     }
