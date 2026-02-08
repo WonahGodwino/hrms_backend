@@ -1,5 +1,6 @@
 // src/app/api/leaves/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { requireRole } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
@@ -931,7 +932,7 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
       blackoutPeriodsCreated: results.blackoutPeriods.created,
       blackoutPeriodsUpdated: results.blackoutPeriods.updated,
       blackoutPeriodsFailed: results.blackoutPeriods.failed,
-      failedRecords: allFailedRecords.length > 0 ? JSON.stringify(allFailedRecords) : null
+      failedRecords: allFailedRecords.length > 0 ? JSON.stringify(allFailedRecords) : Prisma.JsonNull
     }
   })
 
