@@ -1,4 +1,4 @@
-// app/api/leaves/balances/route.ts
+// src/app/api/leaves/balances/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
