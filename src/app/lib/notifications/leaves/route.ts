@@ -1,4 +1,4 @@
-// /src/app/api/notifications/leaves/route.ts - COMPLETE NOTIFICATION SYSTEM
+// /src/app/api/notifications/leaves/route.ts - COMPLETE WORKING VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
@@ -26,13 +26,40 @@ const createNotificationSchema = z.object({
   title: z.string().min(1).max(200),
   message: z.string().min(1).max(1000),
   data: z.record(z.any()).optional(),
-  leaveRequestId: z.string().cuid().optional(),
   companyId: z.string().cuid()
 })
 
+// Helper function to get manager's team staff IDs
+async function getManagedStaffIds(managerId: string, companyId: string) {
+  const managedStaff = await prisma.staffRecord.findMany({
+    where: {
+      managerId,
+      companyId,
+      isActive: true
+    },
+    select: { id: true }
+  })
+  
+  return managedStaff.map(staff => staff.id)
+}
+
+// Helper to get HR/Admin staff IDs
+async function getHRAdminStaffIds(companyId: string) {
+  const hrAdmins = await prisma.staffRecord.findMany({
+    where: {
+      companyId,
+      role: { in: ['HR', 'ADMIN', 'SUPER_ADMIN'] },
+      isActive: true
+    },
+    select: { id: true }
+  })
+  
+  return hrAdmins.map(staff => staff.id)
+}
+
 // ==================== HELPER FUNCTIONS ====================
 
-async function getUserNotifications(userId: string, companyId: string, filters: any) {
+async function getUserNotificationsData(userId: string, companyId: string, filters: any) {
   const { page = 1, limit = 20, read = 'all', type, startDate, endDate } = filters
   
   const where: any = {
@@ -65,38 +92,9 @@ async function getUserNotifications(userId: string, companyId: string, filters: 
         title: true,
         message: true,
         data: true,
-        leaveRequestId: true,
         read: true,
         createdAt: true,
-        updatedAt: true,
-        leaveRequest: {
-          select: {
-            id: true,
-            referenceNumber: true,
-            leaveType: {
-              select: {
-                id: true,
-                name: true,
-                code: true
-              }
-            },
-            staffRecord: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                staffId: true,
-                department: true,
-                position: true
-              }
-            },
-            startDate: true,
-            endDate: true,
-            totalDays: true,
-            status: true,
-            currentStep: true
-          }
-        }
+        updatedAt: true
       },
       orderBy: { createdAt: 'desc' },
       skip,
@@ -121,18 +119,8 @@ async function getUserNotifications(userId: string, companyId: string, filters: 
   }
 }
 
-async function getManagerNotifications(managerId: string, companyId: string, filters: any) {
-  // Get staff managed by this manager
-  const managedStaff = await prisma.staffRecord.findMany({
-    where: {
-      managerId,
-      companyId,
-      isActive: true
-    },
-    select: { id: true }
-  })
-  
-  const managedStaffIds = managedStaff.map(staff => staff.id)
+async function getManagerNotificationsData(managerId: string, companyId: string, filters: any) {
+  const managedStaffIds = await getManagedStaffIds(managerId, companyId)
   
   const where: any = {
     companyId,
@@ -141,13 +129,84 @@ async function getManagerNotifications(managerId: string, companyId: string, fil
       { userId: managerId },
       // Notifications about leave requests from managed staff
       {
-        leaveRequest: {
-          staffRecordId: { in: managedStaffIds }
-        },
+        userId: { in: managedStaffIds },
+        type: { contains: 'LEAVE' }
+      }
+    ]
+  }
+  
+  if (filters.read !== 'all') {
+    where.read = filters.read === 'true'
+  }
+  
+  if (filters.type) {
+    where.type = filters.type
+  }
+  
+  const skip = (filters.page - 1) * filters.limit
+  
+  const [notifications, total] = await Promise.all([
+    prisma.notification.findMany({
+      where,
+      select: {
+        id: true,
+        type: true,
+        title: true,
+        message: true,
+        data: true,
+        read: true,
+        createdAt: true,
+        updatedAt: true,
+        userId: true,
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            staffId: true,
+            department: true,
+            position: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: filters.limit
+    }),
+    prisma.notification.count({ where })
+  ])
+  
+  return {
+    notifications: notifications.map(notification => ({
+      ...notification,
+      data: notification.data ? JSON.parse(notification.data as string) : null,
+      isDirect: notification.userId === managerId
+    })),
+    pagination: {
+      page: filters.page,
+      limit: filters.limit,
+      total,
+      totalPages: Math.ceil(total / filters.limit),
+      hasNext: filters.page * filters.limit < total,
+      hasPrev: filters.page > 1
+    }
+  }
+}
+
+async function getHRNotificationsData(companyId: string, filters: any) {
+  const hrAdminIds = await getHRAdminStaffIds(companyId)
+  
+  const where: any = {
+    companyId,
+    OR: [
+      // Notifications to HR/Admin users
+      { userId: { in: hrAdminIds } },
+      // Leave notifications that HR should see
+      {
         type: {
           in: [
+            'LEAVE_HR_APPROVAL_NEEDED',
             'LEAVE_REQUEST_SUBMITTED',
-            'LEAVE_APPROVAL_NEEDED',
             'LEAVE_APPROVED',
             'LEAVE_REJECTED',
             'LEAVE_CANCELLED'
@@ -176,109 +235,6 @@ async function getManagerNotifications(managerId: string, companyId: string, fil
         title: true,
         message: true,
         data: true,
-        leaveRequestId: true,
-        read: true,
-        createdAt: true,
-        updatedAt: true,
-        userId: true,
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            staffId: true,
-            department: true,
-            position: true
-          }
-        },
-        leaveRequest: {
-          select: {
-            id: true,
-            referenceNumber: true,
-            leaveType: {
-              select: {
-                id: true,
-                name: true,
-                code: true
-              }
-            },
-            staffRecord: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                staffId: true,
-                department: true,
-                position: true
-              }
-            },
-            startDate: true,
-            endDate: true,
-            totalDays: true,
-            status: true,
-            currentStep: true
-          }
-        }
-      },
-      orderBy: { createdAt: 'desc' },
-      skip,
-      take: filters.limit
-    }),
-    prisma.notification.count({ where })
-  ])
-  
-  return {
-    notifications: notifications.map(notification => ({
-      ...notification,
-      data: notification.data ? JSON.parse(notification.data as string) : null,
-      isDirect: notification.userId === managerId
-    })),
-    pagination: {
-      page: filters.page,
-      limit: filters.limit,
-      total,
-      totalPages: Math.ceil(total / filters.limit),
-      hasNext: filters.page * filters.limit < total,
-      hasPrev: filters.page > 1
-    }
-  }
-}
-
-async function getHRNotifications(companyId: string, filters: any) {
-  const where: any = {
-    companyId,
-    type: {
-      in: [
-        'LEAVE_REQUEST_SUBMITTED',
-        'LEAVE_HR_APPROVAL_NEEDED',
-        'LEAVE_APPROVED',
-        'LEAVE_REJECTED',
-        'LEAVE_CANCELLED',
-        'LEAVE_MANAGER_APPROVED'
-      ]
-    }
-  }
-  
-  if (filters.read !== 'all') {
-    where.read = filters.read === 'true'
-  }
-  
-  if (filters.type) {
-    where.type = filters.type
-  }
-  
-  const skip = (filters.page - 1) * filters.limit
-  
-  const [notifications, total] = await Promise.all([
-    prisma.notification.findMany({
-      where,
-      select: {
-        id: true,
-        type: true,
-        title: true,
-        message: true,
-        data: true,
-        leaveRequestId: true,
         read: true,
         createdAt: true,
         updatedAt: true,
@@ -293,44 +249,6 @@ async function getHRNotifications(companyId: string, filters: any) {
             position: true,
             role: true
           }
-        },
-        leaveRequest: {
-          select: {
-            id: true,
-            referenceNumber: true,
-            leaveType: {
-              select: {
-                id: true,
-                name: true,
-                code: true
-              }
-            },
-            staffRecord: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                staffId: true,
-                department: true,
-                position: true,
-                manager: {
-                  select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    email: true
-                  }
-                }
-              }
-            },
-            startDate: true,
-            endDate: true,
-            totalDays: true,
-            status: true,
-            currentStep: true,
-            managerApprovedAt: true,
-            hrApprovedAt: true
-          }
         }
       },
       orderBy: { createdAt: 'desc' },
@@ -343,7 +261,8 @@ async function getHRNotifications(companyId: string, filters: any) {
   return {
     notifications: notifications.map(notification => ({
       ...notification,
-      data: notification.data ? JSON.parse(notification.data as string) : null
+      data: notification.data ? JSON.parse(notification.data as string) : null,
+      isHRAdmin: hrAdminIds.includes(notification.userId)
     })),
     pagination: {
       page: filters.page,
@@ -356,8 +275,8 @@ async function getHRNotifications(companyId: string, filters: any) {
   }
 }
 
-async function getAdminNotifications(companyId: string, filters: any) {
-  // Admins see everything
+async function getAdminNotificationsData(companyId: string, filters: any) {
+  // Admins see all notifications in their company
   const where: any = { companyId }
   
   if (filters.read !== 'all') {
@@ -383,7 +302,6 @@ async function getAdminNotifications(companyId: string, filters: any) {
         title: true,
         message: true,
         data: true,
-        leaveRequestId: true,
         read: true,
         createdAt: true,
         updatedAt: true,
@@ -397,46 +315,6 @@ async function getAdminNotifications(companyId: string, filters: any) {
             department: true,
             position: true,
             role: true
-          }
-        },
-        leaveRequest: {
-          select: {
-            id: true,
-            referenceNumber: true,
-            leaveType: {
-              select: {
-                id: true,
-                name: true,
-                code: true
-              }
-            },
-            staffRecord: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                staffId: true,
-                department: true,
-                position: true,
-                manager: {
-                  select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    email: true
-                  }
-                }
-              }
-            },
-            startDate: true,
-            endDate: true,
-            totalDays: true,
-            status: true,
-            currentStep: true,
-            managerApprovedAt: true,
-            hrApprovedAt: true,
-            rejectedAt: true,
-            cancelledAt: true
           }
         }
       },
@@ -475,38 +353,29 @@ async function getUnreadCount(userId: string, companyId: string, role: string) {
       break
       
     case 'MANAGER':
-      // Get managed staff
-      const managedStaff = await prisma.staffRecord.findMany({
-        where: {
-          managerId: userId,
-          companyId,
-          isActive: true
-        },
-        select: { id: true }
-      })
-      
-      const managedStaffIds = managedStaff.map(staff => staff.id)
-      
+      const managedStaffIds = await getManagedStaffIds(userId, companyId)
       where = {
         companyId,
         read: false,
         OR: [
           { userId },
           {
-            leaveRequest: {
-              staffRecordId: { in: managedStaffIds }
-            },
-            type: {
-              in: ['LEAVE_REQUEST_SUBMITTED', 'LEAVE_APPROVAL_NEEDED']
-            }
+            userId: { in: managedStaffIds },
+            type: { contains: 'LEAVE' }
           }
         ]
       }
       break
       
     case 'HR':
-      where.type = {
-        in: ['LEAVE_HR_APPROVAL_NEEDED', 'LEAVE_REQUEST_SUBMITTED']
+      const hrAdminIds = await getHRAdminStaffIds(companyId)
+      where = {
+        companyId,
+        read: false,
+        OR: [
+          { userId: { in: hrAdminIds } },
+          { type: 'LEAVE_HR_APPROVAL_NEEDED' }
+        ]
       }
       break
       
@@ -590,20 +459,20 @@ export async function GET(request: NextRequest) {
     // Get notifications based on role
     switch (user.role) {
       case 'STAFF':
-        result = await getUserNotifications(user.userId, staff.companyId, filters)
+        result = await getUserNotificationsData(user.userId, staff.companyId, filters)
         break
         
       case 'MANAGER':
-        result = await getManagerNotifications(user.userId, staff.companyId, filters)
+        result = await getManagerNotificationsData(user.userId, staff.companyId, filters)
         break
         
       case 'HR':
-        result = await getHRNotifications(staff.companyId, filters)
+        result = await getHRNotificationsData(staff.companyId, filters)
         break
         
       case 'ADMIN':
       case 'SUPER_ADMIN':
-        result = await getAdminNotifications(staff.companyId, filters)
+        result = await getAdminNotificationsData(staff.companyId, filters)
         break
         
       default:
@@ -619,6 +488,7 @@ export async function GET(request: NextRequest) {
     
     const response = NextResponse.json({
       success: true,
+      message: 'Notifications retrieved successfully',
       data: {
         notifications: result.notifications,
         pagination: result.pagination,
@@ -833,36 +703,24 @@ export async function PUT(request: NextRequest) {
       return withCors(response, origin)
     }
     
-    // Verify leave request if provided
-    if (data.leaveRequestId) {
-      const leaveRequest = await prisma.leaveRequest.findFirst({
-        where: {
-          id: data.leaveRequestId,
-          companyId: data.companyId
-        }
-      })
-      
-      if (!leaveRequest) {
-        const response = NextResponse.json(
-          { success: false, message: 'Leave request not found' },
-          { status: 404 }
-        )
-        return withCors(response, origin)
-      }
+    // Prepare notification data - FIXED: don't include leaveRequestId field
+    const notificationData: any = {
+      userId: data.userId,
+      type: data.type,
+      title: data.title,
+      message: data.message,
+      companyId: data.companyId,
+      read: false
+    }
+    
+    // Only add data field if we have data
+    if (data.data && Object.keys(data.data).length > 0) {
+      notificationData.data = JSON.stringify(data.data)
     }
     
     // Create notification
     const notification = await prisma.notification.create({
-      data: {
-        userId: data.userId,
-        type: data.type,
-        title: data.title,
-        message: data.message,
-        data: data.data ? JSON.stringify(data.data) : null,
-        leaveRequestId: data.leaveRequestId,
-        companyId: data.companyId,
-        read: false
-      },
+      data: notificationData,
       include: {
         user: {
           select: {
@@ -871,18 +729,6 @@ export async function PUT(request: NextRequest) {
             lastName: true,
             email: true,
             staffId: true
-          }
-        },
-        leaveRequest: {
-          select: {
-            id: true,
-            referenceNumber: true,
-            leaveType: {
-              select: {
-                name: true,
-                code: true
-              }
-            }
           }
         }
       }
@@ -1013,7 +859,7 @@ export async function DELETE(request: NextRequest) {
       success: true,
       message: deleteAllRead ? 'All read notifications deleted' : 'Notification deleted',
       data: {
-        deletedCount: deleteAllRead ? deleteResult.count : 1,
+        deletedCount: deleteAllRead ? (deleteResult as any).count : 1,
         deletedAllRead: deleteAllRead,
         timestamp: new Date().toISOString()
       }
