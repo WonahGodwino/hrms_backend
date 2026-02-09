@@ -4,6 +4,32 @@ import { requireRole } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { prisma } from '@/app/lib/prisma'
 
+// Define TypeScript interfaces for the data
+interface LeaveRequestSummary {
+  status: string;
+  totalDays: number;
+  startDate: Date;
+}
+
+interface LeaveBalanceSummary {
+  totalDays: number;
+  usedDays: number;
+  pendingDays: number;
+}
+
+interface UpcomingLeave {
+  id: string;
+  leaveType: {
+    name: string;
+    color: string | null;
+  };
+  startDate: Date;
+  endDate: Date;
+  totalDays: number;
+  isHalfDay: boolean | null;
+  halfDayPart: string | null;
+}
+
 // OPTIONS - CORS preflight
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -31,7 +57,7 @@ export async function GET(request: NextRequest) {
     today.setHours(0, 0, 0, 0)
     
     // Get leave summary statistics
-    const leaveRequests = await prisma.leaveRequest.findMany({
+    const leaveRequests: LeaveRequestSummary[] = await prisma.leaveRequest.findMany({
       where: {
         staffRecordId: user.userId,
         status: {
@@ -45,7 +71,7 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    const balances = await prisma.staffLeaveBalance.findMany({
+    const balances: LeaveBalanceSummary[] = await prisma.staffLeaveBalance.findMany({
       where: {
         staffRecordId: user.userId,
         year: currentYear
@@ -97,7 +123,7 @@ export async function GET(request: NextRequest) {
     const thirtyDaysFromNow = new Date()
     thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30)
 
-    const upcomingLeaves = await prisma.leaveRequest.findMany({
+    const upcomingLeaves: UpcomingLeave[] = await prisma.leaveRequest.findMany({
       where: {
         staffRecordId: user.userId,
         status: {
@@ -115,6 +141,20 @@ export async function GET(request: NextRequest) {
             color: true
           }
         }
+      },
+      select: {
+        id: true,
+        leaveType: {
+          select: {
+            name: true,
+            color: true
+          }
+        },
+        startDate: true,
+        endDate: true,
+        totalDays: true,
+        isHalfDay: true,
+        halfDayPart: true
       },
       orderBy: {
         startDate: 'asc'
@@ -167,6 +207,153 @@ export async function GET(request: NextRequest) {
       { 
         success: false,
         message: 'Failed to fetch leave summary',
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      },
+      { status: 500 }
+    )
+    return withCors(response, origin)
+  }
+}
+
+// POST - Get filtered leave summary by date range
+export async function POST(request: NextRequest) {
+  const origin = request.headers.get('origin')
+  
+  try {
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      const response = NextResponse.json(
+        { success: false, message: 'Authorization header missing' },
+        { status: 401 }
+      )
+      return withCors(response, origin)
+    }
+    
+    const token = authHeader.replace('Bearer ', '')
+    const user = requireRole(token, ['STAFF', 'HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
+
+    const body = await request.json()
+    const { startDate, endDate, year } = body
+
+    // Validate date parameters
+    const filterYear = year || new Date().getFullYear()
+    let dateFilter: any = {}
+
+    if (startDate && endDate) {
+      const start = new Date(startDate)
+      const end = new Date(endDate)
+      
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        throw new Error('Invalid date format. Use YYYY-MM-DD')
+      }
+      
+      dateFilter = {
+        startDate: {
+          gte: start,
+          lte: end
+        }
+      }
+    } else if (year) {
+      dateFilter = {
+        startDate: {
+          gte: new Date(filterYear, 0, 1),
+          lte: new Date(filterYear, 11, 31)
+        }
+      }
+    }
+
+    // Get filtered leave requests
+    const filteredRequests = await prisma.leaveRequest.findMany({
+      where: {
+        staffRecordId: user.userId,
+        ...dateFilter
+      },
+      include: {
+        leaveType: {
+          select: {
+            name: true,
+            color: true
+          }
+        }
+      },
+      orderBy: {
+        startDate: 'asc'
+      }
+    })
+
+    // Get balances for the specified year
+    const filteredBalances = await prisma.staffLeaveBalance.findMany({
+      where: {
+        staffRecordId: user.userId,
+        year: filterYear
+      },
+      include: {
+        leaveType: {
+          select: {
+            name: true,
+            color: true
+          }
+        }
+      }
+    })
+
+    // Format filtered response
+    const formattedRequests = filteredRequests.map((req: any) => ({
+      id: req.id,
+      leaveType: req.leaveType.name,
+      color: req.leaveType.color,
+      startDate: req.startDate,
+      endDate: req.endDate,
+      totalDays: req.totalDays,
+      status: req.status,
+      currentStep: req.currentStep,
+      reason: req.reason?.substring(0, 100) + (req.reason?.length > 100 ? '...' : ''),
+      isHalfDay: req.isHalfDay,
+      halfDayPart: req.halfDayPart
+    }))
+
+    const formattedBalances = filteredBalances.map((balance: any) => ({
+      leaveType: balance.leaveType.name,
+      year: balance.year,
+      totalDays: balance.totalDays,
+      usedDays: balance.usedDays,
+      pendingDays: balance.pendingDays,
+      availableDays: balance.totalDays - balance.usedDays - balance.pendingDays
+    }))
+
+    const response = NextResponse.json({
+      success: true,
+      message: 'Filtered leave summary retrieved successfully',
+      data: {
+        requests: formattedRequests,
+        balances: formattedBalances,
+        filter: {
+          startDate: startDate || null,
+          endDate: endDate || null,
+          year: filterYear
+        },
+        counts: {
+          totalRequests: filteredRequests.length,
+          approved: filteredRequests.filter((req: any) => 
+            req.status === 'APPROVED' || req.status === 'MANAGER_APPROVED' || req.status === 'HR_APPROVED'
+          ).length,
+          pending: filteredRequests.filter((req: any) => req.status === 'PENDING').length,
+          rejected: filteredRequests.filter((req: any) => req.status === 'REJECTED').length,
+          cancelled: filteredRequests.filter((req: any) => req.status === 'CANCELLED').length
+        },
+        lastUpdated: new Date().toISOString()
+      }
+    })
+    
+    return withCors(response, origin)
+
+  } catch (error: any) {
+    console.error('Filtered leave summary error:', error)
+    
+    const response = NextResponse.json(
+      { 
+        success: false,
+        message: 'Failed to fetch filtered leave summary',
         details: process.env.NODE_ENV === 'development' ? error.message : undefined
       },
       { status: 500 }
