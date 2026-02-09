@@ -310,7 +310,7 @@ async function notifyLeaveSubmission(leaveRequest: any, staff: any, leaveType: a
       `Your ${leaveType.name} leave request has been submitted successfully`,
       {
         leaveRequestId: leaveRequest.id,
-        referenceNumber: leaveRequest.referenceNumber,
+        referenceNumber: leaveRequest.referenceNumber || undefined,
         leaveType: leaveType.name,
         startDate: leaveRequest.startDate.toISOString(),
         endDate: leaveRequest.endDate.toISOString(),
@@ -356,7 +356,7 @@ async function notifyLeaveSubmission(leaveRequest: any, staff: any, leaveType: a
         `${staff.firstName} ${staff.lastName} has submitted a ${leaveType.name} leave request`,
         {
           leaveRequestId: leaveRequest.id,
-          referenceNumber: leaveRequest.referenceNumber,
+          referenceNumber: leaveRequest.referenceNumber || undefined,
           staffName: `${staff.firstName} ${staff.lastName}`,
           leaveType: leaveType.name,
           startDate: leaveRequest.startDate.toISOString(),
@@ -421,7 +421,7 @@ async function notifyLeaveSubmission(leaveRequest: any, staff: any, leaveType: a
           `${staff.firstName} ${staff.lastName} has submitted a ${leaveType.name} leave request`,
           {
             leaveRequestId: leaveRequest.id,
-            referenceNumber: leaveRequest.referenceNumber,
+            referenceNumber: leaveRequest.referenceNumber || undefined,
             staffName: `${staff.firstName} ${staff.lastName}`,
             leaveType: leaveType.name,
             startDate: leaveRequest.startDate.toISOString(),
@@ -503,7 +503,7 @@ async function notifyLeaveStatusChange(leaveRequest: any, staff: any, leaveType:
       `Your ${leaveType.name} leave request has been ${action.toLowerCase()}ed by ${actionByName}`,
       {
         leaveRequestId: leaveRequest.id,
-        referenceNumber: leaveRequest.referenceNumber,
+        referenceNumber: leaveRequest.referenceNumber || undefined,
         leaveType: leaveType.name,
         startDate: leaveRequest.startDate.toISOString(),
         endDate: leaveRequest.endDate.toISOString(),
@@ -1150,7 +1150,7 @@ export async function GET(request: NextRequest) {
       data: {
         leaveRequest: {
           id: leaveRequest.id,
-          referenceNumber: leaveRequest.referenceNumber,
+          referenceNumber: leaveRequest.referenceNumber || undefined,
           leaveType: leaveRequest.leaveType,
           startDate: leaveRequest.startDate,
           endDate: leaveRequest.endDate,
@@ -1513,7 +1513,7 @@ export async function PUT(request: NextRequest) {
             `${leaveRequest.staffRecord.firstName} ${leaveRequest.staffRecord.lastName}'s ${leaveRequest.leaveType.name} leave request needs HR approval`,
             {
               leaveRequestId: leaveRequest.id,
-              referenceNumber: leaveRequest.referenceNumber,
+              referenceNumber: leaveRequest.referenceNumber || undefined,
               staffName: `${leaveRequest.staffRecord.firstName} ${leaveRequest.staffRecord.lastName}`,
               leaveType: leaveRequest.leaveType.name,
               startDate: leaveRequest.startDate,
