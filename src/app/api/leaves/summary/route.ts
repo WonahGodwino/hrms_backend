@@ -4,32 +4,6 @@ import { requireRole } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { prisma } from '@/app/lib/prisma'
 
-// Define TypeScript interfaces for the data
-interface LeaveRequestSummary {
-  status: string;
-  totalDays: number;
-  startDate: Date;
-}
-
-interface LeaveBalanceSummary {
-  totalDays: number;
-  usedDays: number;
-  pendingDays: number;
-}
-
-interface UpcomingLeave {
-  id: string;
-  leaveType: {
-    name: string;
-    color: string | null;
-  };
-  startDate: Date;
-  endDate: Date;
-  totalDays: number;
-  isHalfDay: boolean | null;
-  halfDayPart: string | null;
-}
-
 // OPTIONS - CORS preflight
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -86,16 +60,16 @@ export async function GET(request: NextRequest) {
     // Calculate statistics
     const stats = {
       totalRequests: leaveRequests.length,
-      approved: leaveRequests.filter((l: LeaveRequestSummary) => 
+      approved: leaveRequests.filter((l: any) => 
         l.status === 'APPROVED' || l.status === 'MANAGER_APPROVED' || l.status === 'HR_APPROVED'
       ).length,
-      pending: leaveRequests.filter((l: LeaveRequestSummary) => l.status === 'PENDING').length,
-      rejected: leaveRequests.filter((l: LeaveRequestSummary) => l.status === 'REJECTED').length,
-      cancelled: leaveRequests.filter((l: LeaveRequestSummary) => l.status === 'CANCELLED').length,
-      usedDays: balances.reduce((sum: number, b: LeaveBalanceSummary) => sum + b.usedDays, 0),
-      availableDays: balances.reduce((sum: number, b: LeaveBalanceSummary) => 
+      pending: leaveRequests.filter((l: any) => l.status === 'PENDING').length,
+      rejected: leaveRequests.filter((l: any) => l.status === 'REJECTED').length,
+      cancelled: leaveRequests.filter((l: any) => l.status === 'CANCELLED').length,
+      usedDays: balances.reduce((sum: number, b: any) => sum + b.usedDays, 0),
+      availableDays: balances.reduce((sum: number, b: any) => 
         sum + (b.totalDays - b.usedDays - b.pendingDays), 0),
-      pendingDays: balances.reduce((sum: number, b: LeaveBalanceSummary) => sum + b.pendingDays, 0)
+      pendingDays: balances.reduce((sum: number, b: any) => sum + b.pendingDays, 0)
     }
 
     // Get current pending requests
@@ -124,7 +98,7 @@ export async function GET(request: NextRequest) {
     const thirtyDaysFromNow = new Date()
     thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30)
 
-    // Use select to get only the fields we need
+    // Get upcoming leaves - using select for specific fields
     const upcomingLeaves = await prisma.leaveRequest.findMany({
       where: {
         staffRecordId: user.userId,
@@ -146,9 +120,7 @@ export async function GET(request: NextRequest) {
         },
         startDate: true,
         endDate: true,
-        totalDays: true,
-        isHalfDay: true,
-        halfDayPart: true
+        totalDays: true
       },
       orderBy: {
         startDate: 'asc'
@@ -178,8 +150,6 @@ export async function GET(request: NextRequest) {
           startDate: leave.startDate,
           endDate: leave.endDate,
           totalDays: leave.totalDays,
-          isHalfDay: leave.isHalfDay,
-          halfDayPart: leave.halfDayPart,
           daysUntil: Math.ceil((new Date(leave.startDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
         })),
         summary: {
@@ -275,9 +245,7 @@ export async function POST(request: NextRequest) {
         totalDays: true,
         status: true,
         currentStep: true,
-        reason: true,
-        isHalfDay: true,
-        halfDayPart: true
+        reason: true
       },
       orderBy: {
         startDate: 'asc'
@@ -314,9 +282,7 @@ export async function POST(request: NextRequest) {
       totalDays: req.totalDays,
       status: req.status,
       currentStep: req.currentStep,
-      reason: req.reason?.substring(0, 100) + (req.reason?.length > 100 ? '...' : ''),
-      isHalfDay: req.isHalfDay,
-      halfDayPart: req.halfDayPart
+      reason: req.reason?.substring(0, 100) + (req.reason?.length > 100 ? '...' : '')
     }))
 
     const formattedBalances = filteredBalances.map((balance: any) => ({
