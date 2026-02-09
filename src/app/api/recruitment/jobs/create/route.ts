@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
       }
       companyId = user.companyId;
       
-      // HR should NOT send companyId in request - ignore if they do
+      // HR should NOT send companyId in request
       if (body.companyId && body.companyId !== user.companyId) {
         console.warn(`HR ${user.email} attempted to specify companyId ${body.companyId}, using their own ${user.companyId} instead`);
       }

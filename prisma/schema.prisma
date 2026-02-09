@@ -866,7 +866,8 @@ model LeaveRequest {
   managerApprover StaffRecord? @relation("ManagerApprovals", fields: [managerApproverId], references: [id])
   handoverStaff StaffRecord? @relation("HandoverStaff", fields: [handoverTo], references: [id])
   company       Company?    @relation(fields: [companyId], references: [id])  // Relation to Company
-
+  notifications     Notification[]
+  
   @@index([staffRecordId, status])
   @@index([managerApproverId, status])
   @@index([companyId, createdAt])
@@ -945,6 +946,7 @@ model LeaveBlackoutPeriod {
 //leave notification model
 model Notification {
   id          String   @id @default(cuid())
+  leaveRequestId  String?
   userId      String
   type        String
   title       String
@@ -958,8 +960,11 @@ model Notification {
   // Relations
   user    StaffRecord @relation(fields: [userId], references: [id], onDelete: Cascade)
   company Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
+  leaveRequest    LeaveRequest? @relation(fields: [leaveRequestId], references: [id])
   @@index([userId, read])
   @@index([companyId, createdAt])
+  @@index([leaveRequestId])
   @@index([type, companyId])
+  @@index([read])
+  @@index([createdAt])
 }

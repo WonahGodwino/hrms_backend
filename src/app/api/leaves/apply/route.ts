@@ -1,10 +1,15 @@
-// app/api/leaves/apply/route.ts
+// /src/app/api/leaves/apply/route.ts - COMPLETE DEPLOYMENT READY VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { z } from 'zod'
 import { prisma } from '@/app/lib/prisma'
 import { sendLeaveNotificationEmail } from '@/app/lib/email'
+import { 
+  createLeaveNotification, 
+  NOTIFICATION_TYPES,
+  getNotificationsForLeaveRequest 
+} from '@/app/lib/notifications/helpers'
 
 // Validation schema for leave application
 const leaveApplicationSchema = z.object({
@@ -310,7 +315,7 @@ async function notifyLeaveSubmission(leaveRequest: any, staff: any, leaveType: a
       `Your ${leaveType.name} leave request has been submitted successfully`,
       {
         leaveRequestId: leaveRequest.id,
-        referenceNumber: leaveRequest.referenceNumber || undefined,
+        referenceNumber: leaveRequest.referenceNumber,
         leaveType: leaveType.name,
         startDate: leaveRequest.startDate.toISOString(),
         endDate: leaveRequest.endDate.toISOString(),
@@ -356,7 +361,7 @@ async function notifyLeaveSubmission(leaveRequest: any, staff: any, leaveType: a
         `${staff.firstName} ${staff.lastName} has submitted a ${leaveType.name} leave request`,
         {
           leaveRequestId: leaveRequest.id,
-          referenceNumber: leaveRequest.referenceNumber || undefined,
+          referenceNumber: leaveRequest.referenceNumber,
           staffName: `${staff.firstName} ${staff.lastName}`,
           leaveType: leaveType.name,
           startDate: leaveRequest.startDate.toISOString(),
@@ -421,7 +426,7 @@ async function notifyLeaveSubmission(leaveRequest: any, staff: any, leaveType: a
           `${staff.firstName} ${staff.lastName} has submitted a ${leaveType.name} leave request`,
           {
             leaveRequestId: leaveRequest.id,
-            referenceNumber: leaveRequest.referenceNumber || undefined,
+            referenceNumber: leaveRequest.referenceNumber,
             staffName: `${staff.firstName} ${staff.lastName}`,
             leaveType: leaveType.name,
             startDate: leaveRequest.startDate.toISOString(),
@@ -503,7 +508,7 @@ async function notifyLeaveStatusChange(leaveRequest: any, staff: any, leaveType:
       `Your ${leaveType.name} leave request has been ${action.toLowerCase()}ed by ${actionByName}`,
       {
         leaveRequestId: leaveRequest.id,
-        referenceNumber: leaveRequest.referenceNumber || undefined,
+        referenceNumber: leaveRequest.referenceNumber,
         leaveType: leaveType.name,
         startDate: leaveRequest.startDate.toISOString(),
         endDate: leaveRequest.endDate.toISOString(),
@@ -909,13 +914,170 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    // Send notifications (outside transaction for reliability)
-    await notifyLeaveSubmission(
-      result.leaveRequest,
-      result.staff,
-      result.leaveType,
-      result.manager
-    )
+    // Send notifications
+    try {
+      // 1. Notify Applicant
+      await createLeaveNotification(
+        staff.id,
+        NOTIFICATION_TYPES.LEAVE_REQUEST_SUBMITTED,
+        'Leave Application Submitted',
+        `Your ${result.leaveType.name} leave request has been submitted successfully`,
+        result.leaveRequest.id,
+        {
+          referenceNumber: result.leaveRequest.referenceNumber || undefined,
+          leaveType: result.leaveType.name,
+          startDate: result.leaveRequest.startDate.toISOString(),
+          endDate: result.leaveRequest.endDate.toISOString(),
+          days: result.leaveRequest.totalDays,
+          status: result.leaveRequest.status,
+          currentStep: result.leaveRequest.currentStep
+        },
+        staff.companyId
+      )
+
+      // Email to applicant
+      await sendLeaveNotificationEmail(
+        {
+          id: staff.id,
+          companyId: staff.companyId,
+          firstName: staff.firstName,
+          lastName: staff.lastName,
+          email: staff.email,
+          staffId: staff.staffId,
+          department: staff.department,
+          position: staff.position,
+          isRegistered: staff.isRegistered
+        },
+        {
+          id: result.leaveRequest.id,
+          referenceNumber: result.leaveRequest.referenceNumber || undefined,
+          leaveType: result.leaveType.name,
+          startDate: result.leaveRequest.startDate,
+          endDate: result.leaveRequest.endDate,
+          totalDays: result.leaveRequest.totalDays,
+          status: result.leaveRequest.status,
+          currentStep: result.leaveRequest.currentStep
+        },
+        'SUBMITTED'
+      )
+
+      // 2. Notify Manager (if required)
+      if (result.manager && (result.leaveRequest.status === 'PENDING' || result.leaveRequest.currentStep === 'MANAGER')) {
+        await createLeaveNotification(
+          result.manager.id,
+          NOTIFICATION_TYPES.LEAVE_APPROVAL_NEEDED,
+          'Leave Request Requires Approval',
+          `${staff.firstName} ${staff.lastName} has submitted a ${result.leaveType.name} leave request`,
+          result.leaveRequest.id,
+          {
+           referenceNumber: result.leaveRequest.referenceNumber || undefined,
+            staffName: `${staff.firstName} ${staff.lastName}`,
+            leaveType: result.leaveType.name,
+            startDate: result.leaveRequest.startDate.toISOString(),
+            endDate: result.leaveRequest.endDate.toISOString(),
+            days: result.leaveRequest.totalDays
+          },
+          staff.companyId
+        )
+
+        // Email to manager
+        await sendLeaveNotificationEmail(
+          {
+            id: result.manager.id,
+            companyId: staff.companyId,
+            firstName: result.manager.firstName,
+            lastName: result.manager.lastName,
+            email: result.manager.email,
+            staffId: result.manager.staffId || '',
+            department: result.manager.department,
+            position: result.manager.position,
+            isRegistered: result.manager.isRegistered || true
+          },
+          {
+            id: result.leaveRequest.id,
+            referenceNumber: result.leaveRequest.referenceNumber,
+            leaveType: result.leaveType.name,
+            startDate: result.leaveRequest.startDate,
+            endDate: result.leaveRequest.endDate,
+            totalDays: result.leaveRequest.totalDays,
+            status: result.leaveRequest.status,
+            currentStep: result.leaveRequest.currentStep
+          },
+          'MANAGER_APPROVAL'
+        )
+      }
+
+      // 3. Notify HR (if HR approval workflow)
+      if (result.leaveRequest.currentStep === 'HR' || result.policy.approvalWorkflow.includes('HR')) {
+        const hrUsers = await prisma.staffRecord.findMany({
+          where: {
+            companyId: staff.companyId,
+            role: { in: ['HR', 'SUPER_ADMIN', 'ADMIN'] },
+            isActive: true
+          },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            staffId: true,
+            department: true,
+            position: true,
+            isRegistered: true
+          }
+        })
+
+        for (const hrUser of hrUsers) {
+          await createLeaveNotification(
+            hrUser.id,
+            NOTIFICATION_TYPES.LEAVE_HR_APPROVAL_NEEDED,
+            'Leave Request Pending HR Approval',
+            `${staff.firstName} ${staff.lastName} has submitted a ${result.leaveType.name} leave request`,
+            result.leaveRequest.id,
+            {
+              referenceNumber: result.leaveRequest.referenceNumber,
+              staffName: `${staff.firstName} ${staff.lastName}`,
+              leaveType: result.leaveType.name,
+              startDate: result.leaveRequest.startDate.toISOString(),
+              endDate: result.leaveRequest.endDate.toISOString(),
+              days: result.leaveRequest.totalDays
+            },
+            staff.companyId
+          )
+
+          // Email to HR
+          await sendLeaveNotificationEmail(
+            {
+              id: hrUser.id,
+              companyId: staff.companyId,
+              firstName: hrUser.firstName,
+              lastName: hrUser.lastName,
+              email: hrUser.email,
+              staffId: hrUser.staffId,
+              department: hrUser.department,
+              position: hrUser.position,
+              isRegistered: hrUser.isRegistered
+            },
+            {
+              id: result.leaveRequest.id,
+              referenceNumber: result.leaveRequest.referenceNumber,
+              leaveType: result.leaveType.name,
+              startDate: result.leaveRequest.startDate,
+              endDate: result.leaveRequest.endDate,
+              totalDays: result.leaveRequest.totalDays,
+              status: result.leaveRequest.status,
+              currentStep: result.leaveRequest.currentStep
+            },
+            'HR_APPROVAL'
+          )
+        }
+      }
+
+      console.log('✅ Notifications sent successfully for leave request:', result.leaveRequest.id)
+    } catch (notificationError) {
+      console.error('Error sending notifications:', notificationError)
+      // Don't fail the whole request if notifications fail
+    }
 
     // Get company work week pattern for response
     const company = await prisma.company.findUnique({
@@ -1123,30 +1285,12 @@ export async function GET(request: NextRequest) {
       }
     })
     
-    // Get notifications for this leave request (SIMPLIFIED - FIXED VERSION)
-    const notifications = await prisma.notification.findMany({
-      where: {
-        companyId: leaveRequest.staffRecord.companyId,
-        type: { contains: 'LEAVE' },
-        createdAt: {
-          gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // Last 30 days
-        }
-      },
-      select: {
-        id: true,
-        type: true,
-        title: true,
-        message: true,
-        read: true,
-        createdAt: true,
-        userId: true
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 20
-    })
+    // Get notifications for this leave request
+    const notifications = await getNotificationsForLeaveRequest(leaveRequestId, leaveRequest.staffRecord.companyId)
     
     const response = NextResponse.json({
       success: true,
+      message: 'Leave request retrieved successfully',
       data: {
         leaveRequest: {
           id: leaveRequest.id,
@@ -1192,7 +1336,8 @@ export async function GET(request: NextRequest) {
           message: notification.message,
           read: notification.read,
           createdAt: notification.createdAt,
-          isForCurrentUser: notification.userId === user.userId
+          isForCurrentUser: notification.userId === user.userId,
+          data: notification.data
         }))
       }
     })
@@ -1214,7 +1359,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// PUT - Update leave application status (Approval/Rejection)
+// PUT - Update leave application status (Approval/Rejection/Cancellation)
 export async function PUT(request: NextRequest) {
   const origin = request.headers.get('origin')
   
@@ -1307,7 +1452,6 @@ export async function PUT(request: NextRequest) {
       return withCors(response, origin)
     }
     
-    // FIXED: Add proper TypeScript types
     let updatedLeaveRequest: any = null
     let balanceUpdates: Record<string, any> = {}
     
@@ -1476,13 +1620,78 @@ export async function PUT(request: NextRequest) {
     })
     
     // Send notifications after transaction
-    if (updatedLeaveRequest) {
-      await notifyLeaveStatusChange(
-        updatedLeaveRequest,
-        leaveRequest.staffRecord,
-        leaveRequest.leaveType,
-        action,
-        { userId: user.userId, role: user.role }
+    try {
+      const actionByUser = await prisma.staffRecord.findUnique({
+        where: { id: user.userId },
+        select: { firstName: true, lastName: true, role: true }
+      })
+      
+      const actionByName = actionByUser ? `${actionByUser.firstName} ${actionByUser.lastName} (${actionByUser.role})` : 'System'
+      
+      let notificationType: keyof typeof NOTIFICATION_TYPES
+      let emailNotificationType: 'APPROVED' | 'REJECTED' | 'CANCELLED'
+      
+      switch (action) {
+        case 'APPROVE':
+          notificationType = leaveRequest.currentStep === 'HR' ? 'LEAVE_APPROVED' : 'LEAVE_MANAGER_APPROVED'
+          emailNotificationType = 'APPROVED'
+          break
+        case 'REJECT':
+          notificationType = 'LEAVE_REJECTED'
+          emailNotificationType = 'REJECTED'
+          break
+        case 'CANCEL':
+          notificationType = 'LEAVE_CANCELLED'
+          emailNotificationType = 'CANCELLED'
+          break
+        default:
+          throw new Error('Invalid action')
+      }
+      
+      // Notify Applicant
+      await createLeaveNotification(
+        leaveRequest.staffRecord.id,
+        notificationType,
+        `Leave Request ${action}`,
+        `Your ${leaveRequest.leaveType.name} leave request has been ${action.toLowerCase()}ed by ${actionByName}`,
+        leaveRequest.id,
+        {
+          referenceNumber: leaveRequest.referenceNumber,
+          leaveType: leaveRequest.leaveType.name,
+          startDate: leaveRequest.startDate.toISOString(),
+          endDate: leaveRequest.endDate.toISOString(),
+          days: leaveRequest.totalDays,
+          status: updatedLeaveRequest.status,
+          actionBy: actionByName,
+          actionAt: new Date().toISOString()
+        },
+        leaveRequest.staffRecord.companyId
+      )
+      
+      // Email to applicant
+      await sendLeaveNotificationEmail(
+        {
+          id: leaveRequest.staffRecord.id,
+          companyId: leaveRequest.staffRecord.companyId,
+          firstName: leaveRequest.staffRecord.firstName,
+          lastName: leaveRequest.staffRecord.lastName,
+          email: leaveRequest.staffRecord.email,
+          staffId: leaveRequest.staffRecord.staffId,
+          department: leaveRequest.staffRecord.department,
+          position: leaveRequest.staffRecord.position,
+          isRegistered: leaveRequest.staffRecord.isRegistered
+        },
+        {
+          id: leaveRequest.id,
+          referenceNumber: leaveRequest.referenceNumber,
+          leaveType: leaveRequest.leaveType.name,
+          startDate: leaveRequest.startDate,
+          endDate: leaveRequest.endDate,
+          totalDays: leaveRequest.totalDays,
+          status: updatedLeaveRequest.status,
+          currentStep: updatedLeaveRequest.currentStep
+        },
+        emailNotificationType
       )
       
       // If approved by manager and needs HR approval, notify HR
@@ -1506,14 +1715,15 @@ export async function PUT(request: NextRequest) {
         })
         
         for (const hrUser of hrUsers) {
-          await createNotification(
+          await createLeaveNotification(
             hrUser.id,
-            'LEAVE_HR_APPROVAL_NEEDED',
+            NOTIFICATION_TYPES.LEAVE_HR_APPROVAL_NEEDED,
             'Leave Request Pending HR Approval',
             `${leaveRequest.staffRecord.firstName} ${leaveRequest.staffRecord.lastName}'s ${leaveRequest.leaveType.name} leave request needs HR approval`,
+            leaveRequest.id,
             {
               leaveRequestId: leaveRequest.id,
-              referenceNumber: leaveRequest.referenceNumber || undefined,
+              referenceNumber: leaveRequest.referenceNumber,
               staffName: `${leaveRequest.staffRecord.firstName} ${leaveRequest.staffRecord.lastName}`,
               leaveType: leaveRequest.leaveType.name,
               startDate: leaveRequest.startDate,
@@ -1523,8 +1733,8 @@ export async function PUT(request: NextRequest) {
             },
             leaveRequest.staffRecord.companyId
           )
-
-          // Email to HR - FIXED: referenceNumber || undefined
+          
+          // Email to HR
           await sendLeaveNotificationEmail(
             {
               id: hrUser.id,
@@ -1539,7 +1749,7 @@ export async function PUT(request: NextRequest) {
             },
             {
               id: leaveRequest.id,
-              referenceNumber: leaveRequest.referenceNumber || undefined,
+              referenceNumber: leaveRequest.referenceNumber,
               leaveType: leaveRequest.leaveType.name,
               startDate: leaveRequest.startDate,
               endDate: leaveRequest.endDate,
@@ -1551,6 +1761,11 @@ export async function PUT(request: NextRequest) {
           )
         }
       }
+      
+      console.log(`✅ Status change notification sent for leave request: ${leaveRequest.id}, action: ${action}`)
+    } catch (notificationError) {
+      console.error('Error sending status change notifications:', notificationError)
+      // Don't fail the whole request if notifications fail
     }
     
     const response = NextResponse.json({
