@@ -833,8 +833,6 @@ model LeaveRequest {
   referenceNumber   String?   @unique
   staffRecordId     String
   leaveTypeId       String
-  isHalfDay    Boolean?  // Make sure this exists
-  halfDayPart  String?   // Make sure this exists
   startDate         DateTime
   endDate           DateTime
   totalDays         Float
