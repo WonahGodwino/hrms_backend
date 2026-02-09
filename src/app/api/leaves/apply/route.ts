@@ -277,279 +277,9 @@ function getImportantNotes(policy: any): string[] {
   return notes
 }
 
-// ================= NOTIFICATION FUNCTIONS =================
-
-async function createNotification(
-  userId: string,
-  type: string,
-  title: string,
-  message: string,
-  data: any,
-  companyId: string
-) {
-  try {
-    return await prisma.notification.create({
-      data: {
-        userId,
-        type,
-        title,
-        message,
-        data: JSON.stringify(data),
-        companyId,
-        read: false
-      }
-    })
-  } catch (error) {
-    console.error('Error creating notification:', error)
-    return null
-  }
-}
-
-async function notifyLeaveSubmission(leaveRequest: any, staff: any, leaveType: any, manager: any = null) {
-  try {
-    // 1. Notify Applicant
-    await createNotification(
-      staff.id,
-      'LEAVE_REQUEST_SUBMITTED',
-      'Leave Application Submitted',
-      `Your ${leaveType.name} leave request has been submitted successfully`,
-      {
-        leaveRequestId: leaveRequest.id,
-        referenceNumber: leaveRequest.referenceNumber || undefined,
-        leaveType: leaveType.name,
-        startDate: leaveRequest.startDate.toISOString(),
-        endDate: leaveRequest.endDate.toISOString(),
-        days: leaveRequest.totalDays,
-        status: leaveRequest.status,
-        currentStep: leaveRequest.currentStep
-      },
-      staff.companyId
-    )
-
-    // Email to applicant - FIXED: referenceNumber || undefined
-    await sendLeaveNotificationEmail(
-      {
-        id: staff.id,
-        companyId: staff.companyId,
-        firstName: staff.firstName,
-        lastName: staff.lastName,
-        email: staff.email,
-        staffId: staff.staffId,
-        department: staff.department,
-        position: staff.position,
-        isRegistered: staff.isRegistered
-      },
-      {
-        id: leaveRequest.id,
-        referenceNumber: leaveRequest.referenceNumber || undefined,
-        leaveType: leaveType.name,
-        startDate: leaveRequest.startDate,
-        endDate: leaveRequest.endDate,
-        totalDays: leaveRequest.totalDays,
-        status: leaveRequest.status,
-        currentStep: leaveRequest.currentStep
-      },
-      'SUBMITTED'
-    )
-
-    // 2. Notify Manager (if required)
-    if (manager && (leaveRequest.status === 'PENDING' || leaveRequest.currentStep === 'MANAGER')) {
-      await createNotification(
-        manager.id,
-        'LEAVE_APPROVAL_NEEDED',
-        'Leave Request Requires Approval',
-        `${staff.firstName} ${staff.lastName} has submitted a ${leaveType.name} leave request`,
-        {
-          leaveRequestId: leaveRequest.id,
-          referenceNumber: leaveRequest.referenceNumber || undefined,
-          staffName: `${staff.firstName} ${staff.lastName}`,
-          leaveType: leaveType.name,
-          startDate: leaveRequest.startDate.toISOString(),
-          endDate: leaveRequest.endDate.toISOString(),
-          days: leaveRequest.totalDays
-        },
-        staff.companyId
-      )
-
-      // Email to manager - FIXED: referenceNumber || undefined
-      await sendLeaveNotificationEmail(
-        {
-          id: manager.id,
-          companyId: staff.companyId,
-          firstName: manager.firstName,
-          lastName: manager.lastName,
-          email: manager.email,
-          staffId: manager.staffId || '',
-          department: manager.department,
-          position: manager.position,
-          isRegistered: manager.isRegistered || true
-        },
-        {
-          id: leaveRequest.id,
-          referenceNumber: leaveRequest.referenceNumber || undefined,
-          leaveType: leaveType.name,
-          startDate: leaveRequest.startDate,
-          endDate: leaveRequest.endDate,
-          totalDays: leaveRequest.totalDays,
-          status: leaveRequest.status,
-          currentStep: leaveRequest.currentStep
-        },
-        'MANAGER_APPROVAL'
-      )
-    }
-
-    // 3. Notify HR (if HR approval workflow)
-    if (leaveRequest.currentStep === 'HR') {
-      const hrUsers = await prisma.staffRecord.findMany({
-        where: {
-          companyId: staff.companyId,
-          role: { in: ['HR', 'SUPER_ADMIN', 'ADMIN'] },
-          isActive: true
-        },
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-          staffId: true,
-          department: true,
-          position: true,
-          isRegistered: true
-        }
-      })
-
-      for (const hrUser of hrUsers) {
-        await createNotification(
-          hrUser.id,
-          'LEAVE_HR_APPROVAL_NEEDED',
-          'Leave Request Pending HR Approval',
-          `${staff.firstName} ${staff.lastName} has submitted a ${leaveType.name} leave request`,
-          {
-            leaveRequestId: leaveRequest.id,
-            referenceNumber: leaveRequest.referenceNumber || undefined,
-            staffName: `${staff.firstName} ${staff.lastName}`,
-            leaveType: leaveType.name,
-            startDate: leaveRequest.startDate.toISOString(),
-            endDate: leaveRequest.endDate.toISOString(),
-            days: leaveRequest.totalDays
-          },
-          staff.companyId
-        )
-
-        // Email to HR - FIXED: referenceNumber || undefined
-        await sendLeaveNotificationEmail(
-          {
-            id: hrUser.id,
-            companyId: staff.companyId,
-            firstName: hrUser.firstName,
-            lastName: hrUser.lastName,
-            email: hrUser.email,
-            staffId: hrUser.staffId,
-            department: hrUser.department,
-            position: hrUser.position,
-            isRegistered: hrUser.isRegistered
-          },
-          {
-            id: leaveRequest.id,
-            referenceNumber: leaveRequest.referenceNumber || undefined,
-            leaveType: leaveType.name,
-            startDate: leaveRequest.startDate,
-            endDate: leaveRequest.endDate,
-            totalDays: leaveRequest.totalDays,
-            status: leaveRequest.status,
-            currentStep: leaveRequest.currentStep
-          },
-          'HR_APPROVAL'
-        )
-      }
-    }
-
-    console.log('✅ Notifications sent successfully for leave request:', leaveRequest.id)
-  } catch (error) {
-    console.error('Error sending notifications:', error)
-    // Don't fail the whole request if notifications fail
-  }
-}
-
-async function notifyLeaveStatusChange(leaveRequest: any, staff: any, leaveType: any, action: string, actionBy: any) {
-  try {
-    const actionByUser = await prisma.staffRecord.findUnique({
-      where: { id: actionBy.userId },
-      select: { firstName: true, lastName: true, role: true }
-    })
-
-    const actionByName = actionByUser ? `${actionByUser.firstName} ${actionByUser.lastName} (${actionByUser.role})` : 'System'
-
-    let notificationType = ''
-    let emailNotificationType: 'APPROVED' | 'REJECTED' | 'CANCELLED'
-
-    switch (action) {
-      case 'APPROVE':
-        notificationType = 'LEAVE_APPROVED'
-        emailNotificationType = 'APPROVED'
-        break
-      case 'REJECT':
-        notificationType = 'LEAVE_REJECTED'
-        emailNotificationType = 'REJECTED'
-        break
-      case 'CANCEL':
-        notificationType = 'LEAVE_CANCELLED'
-        emailNotificationType = 'CANCELLED'
-        break
-      default:
-        return
-    }
-
-    // Notify Applicant
-    await createNotification(
-      staff.id,
-      notificationType,
-      `Leave Request ${action}`,
-      `Your ${leaveType.name} leave request has been ${action.toLowerCase()}ed by ${actionByName}`,
-      {
-        leaveRequestId: leaveRequest.id,
-        referenceNumber: leaveRequest.referenceNumber || undefined,
-        leaveType: leaveType.name,
-        startDate: leaveRequest.startDate.toISOString(),
-        endDate: leaveRequest.endDate.toISOString(),
-        days: leaveRequest.totalDays,
-        status: leaveRequest.status,
-        actionBy: actionByName,
-        actionAt: new Date().toISOString()
-      },
-      staff.companyId
-    )
-
-    // Email to applicant - FIXED: referenceNumber || undefined
-    await sendLeaveNotificationEmail(
-      {
-        id: staff.id,
-        companyId: staff.companyId,
-        firstName: staff.firstName,
-        lastName: staff.lastName,
-        email: staff.email,
-        staffId: staff.staffId,
-        department: staff.department,
-        position: staff.position,
-        isRegistered: staff.isRegistered
-      },
-      {
-        id: leaveRequest.id,
-        referenceNumber: leaveRequest.referenceNumber || undefined,
-        leaveType: leaveType.name,
-        startDate: leaveRequest.startDate,
-        endDate: leaveRequest.endDate,
-        totalDays: leaveRequest.totalDays,
-        status: leaveRequest.status,
-        currentStep: leaveRequest.currentStep
-      },
-      emailNotificationType
-    )
-
-    console.log(`✅ Status change notification sent for leave request: ${leaveRequest.id}, action: ${action}`)
-  } catch (error) {
-    console.error('Error sending status change notifications:', error)
-  }
+// Safe reference number helper
+function getSafeReferenceNumber(refNumber: string | null): string | undefined {
+  return refNumber || undefined
 }
 
 // ================= API ENDPOINTS =================
@@ -924,7 +654,7 @@ export async function POST(request: NextRequest) {
         `Your ${result.leaveType.name} leave request has been submitted successfully`,
         result.leaveRequest.id,
         {
-          referenceNumber: result.leaveRequest.referenceNumber || undefined,
+          referenceNumber: getSafeReferenceNumber(result.leaveRequest.referenceNumber),
           leaveType: result.leaveType.name,
           startDate: result.leaveRequest.startDate.toISOString(),
           endDate: result.leaveRequest.endDate.toISOString(),
@@ -950,7 +680,7 @@ export async function POST(request: NextRequest) {
         },
         {
           id: result.leaveRequest.id,
-          referenceNumber: result.leaveRequest.referenceNumber || undefined,
+          referenceNumber: getSafeReferenceNumber(result.leaveRequest.referenceNumber),
           leaveType: result.leaveType.name,
           startDate: result.leaveRequest.startDate,
           endDate: result.leaveRequest.endDate,
@@ -970,7 +700,7 @@ export async function POST(request: NextRequest) {
           `${staff.firstName} ${staff.lastName} has submitted a ${result.leaveType.name} leave request`,
           result.leaveRequest.id,
           {
-           referenceNumber: result.leaveRequest.referenceNumber || undefined,
+            referenceNumber: getSafeReferenceNumber(result.leaveRequest.referenceNumber),
             staffName: `${staff.firstName} ${staff.lastName}`,
             leaveType: result.leaveType.name,
             startDate: result.leaveRequest.startDate.toISOString(),
@@ -995,7 +725,7 @@ export async function POST(request: NextRequest) {
           },
           {
             id: result.leaveRequest.id,
-            referenceNumber: result.leaveRequest.referenceNumber,
+            referenceNumber: getSafeReferenceNumber(result.leaveRequest.referenceNumber),
             leaveType: result.leaveType.name,
             startDate: result.leaveRequest.startDate,
             endDate: result.leaveRequest.endDate,
@@ -1008,7 +738,7 @@ export async function POST(request: NextRequest) {
       }
 
       // 3. Notify HR (if HR approval workflow)
-      if (result.leaveRequest.currentStep === 'HR' || result.policy.approvalWorkflow.includes('HR')) {
+      if (result.leaveRequest.currentStep === 'HR' || (result.policy?.approvalWorkflow && result.policy.approvalWorkflow.includes('HR'))) {
         const hrUsers = await prisma.staffRecord.findMany({
           where: {
             companyId: staff.companyId,
@@ -1035,7 +765,7 @@ export async function POST(request: NextRequest) {
             `${staff.firstName} ${staff.lastName} has submitted a ${result.leaveType.name} leave request`,
             result.leaveRequest.id,
             {
-              referenceNumber: result.leaveRequest.referenceNumber,
+              referenceNumber: getSafeReferenceNumber(result.leaveRequest.referenceNumber),
               staffName: `${staff.firstName} ${staff.lastName}`,
               leaveType: result.leaveType.name,
               startDate: result.leaveRequest.startDate.toISOString(),
@@ -1060,7 +790,7 @@ export async function POST(request: NextRequest) {
             },
             {
               id: result.leaveRequest.id,
-              referenceNumber: result.leaveRequest.referenceNumber,
+              referenceNumber: getSafeReferenceNumber(result.leaveRequest.referenceNumber),
               leaveType: result.leaveType.name,
               startDate: result.leaveRequest.startDate,
               endDate: result.leaveRequest.endDate,
@@ -1091,7 +821,7 @@ export async function POST(request: NextRequest) {
       message: 'Leave application submitted successfully',
       data: {
         leaveRequestId: result.leaveRequest.id,
-        referenceNumber: result.leaveRequest.referenceNumber,
+        referenceNumber: getSafeReferenceNumber(result.leaveRequest.referenceNumber),
         status: result.leaveRequest.status,
         currentStep: result.leaveRequest.currentStep,
         requestedDays,
@@ -1099,7 +829,7 @@ export async function POST(request: NextRequest) {
           id: result.leaveType.id,
           name: result.leaveType.name,
           code: result.leaveType.code,
-          policy: result.policy.name
+          policy: result.policy?.name || 'Default'
         },
         policyApplied: result.policyDetails,
         leaveBalance: {
@@ -1121,15 +851,15 @@ export async function POST(request: NextRequest) {
             name: `${result.manager.firstName} ${result.manager.lastName}`,
             email: result.manager.email
           } : null,
-          hr: result.policy.approvalWorkflow.includes('HR') ? 'Awaiting HR approval' : null
+          hr: result.policy?.approvalWorkflow && result.policy.approvalWorkflow.includes('HR') ? 'Awaiting HR approval' : null
         },
         notifications: {
           sentToApplicant: true,
           sentToManager: !!result.manager,
-          sentToHR: result.policy.approvalWorkflow.includes('HR')
+          sentToHR: result.policy?.approvalWorkflow && result.policy.approvalWorkflow.includes('HR')
         },
         warnings: result.warnings.length > 0 ? result.warnings : undefined,
-        importantNotes: getImportantNotes(result.policy),
+        importantNotes: result.policy ? getImportantNotes(result.policy) : ['No policy details available'],
         additionalInfo: {
           isHalfDay: data.isHalfDay,
           halfDayPart: data.halfDayPart,
@@ -1294,7 +1024,7 @@ export async function GET(request: NextRequest) {
       data: {
         leaveRequest: {
           id: leaveRequest.id,
-          referenceNumber: leaveRequest.referenceNumber || undefined,
+          referenceNumber: getSafeReferenceNumber(leaveRequest.referenceNumber),
           leaveType: leaveRequest.leaveType,
           startDate: leaveRequest.startDate,
           endDate: leaveRequest.endDate,
@@ -1656,7 +1386,7 @@ export async function PUT(request: NextRequest) {
         `Your ${leaveRequest.leaveType.name} leave request has been ${action.toLowerCase()}ed by ${actionByName}`,
         leaveRequest.id,
         {
-          referenceNumber: leaveRequest.referenceNumber || undefined,
+          referenceNumber: getSafeReferenceNumber(leaveRequest.referenceNumber),
           leaveType: leaveRequest.leaveType.name,
           startDate: leaveRequest.startDate.toISOString(),
           endDate: leaveRequest.endDate.toISOString(),
@@ -1683,7 +1413,7 @@ export async function PUT(request: NextRequest) {
         },
         {
           id: leaveRequest.id,
-          referenceNumber: leaveRequest.referenceNumber || undefined,
+          referenceNumber: getSafeReferenceNumber(leaveRequest.referenceNumber),
           leaveType: leaveRequest.leaveType.name,
           startDate: leaveRequest.startDate,
           endDate: leaveRequest.endDate,
@@ -1723,7 +1453,7 @@ export async function PUT(request: NextRequest) {
             leaveRequest.id,
             {
               leaveRequestId: leaveRequest.id,
-              referenceNumber: leaveRequest.referenceNumber || undefined,
+              referenceNumber: getSafeReferenceNumber(leaveRequest.referenceNumber),
               staffName: `${leaveRequest.staffRecord.firstName} ${leaveRequest.staffRecord.lastName}`,
               leaveType: leaveRequest.leaveType.name,
               startDate: leaveRequest.startDate,
@@ -1749,7 +1479,7 @@ export async function PUT(request: NextRequest) {
             },
             {
               id: leaveRequest.id,
-              referenceNumber: leaveRequest.referenceNumber || undefined,
+              referenceNumber: getSafeReferenceNumber(leaveRequest.referenceNumber),
               leaveType: leaveRequest.leaveType.name,
               startDate: leaveRequest.startDate,
               endDate: leaveRequest.endDate,
