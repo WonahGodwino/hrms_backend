@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
     today.setHours(0, 0, 0, 0)
     
     // Get leave summary statistics
-    const leaveRequests: LeaveRequestSummary[] = await prisma.leaveRequest.findMany({
+    const leaveRequests = await prisma.leaveRequest.findMany({
       where: {
         staffRecordId: user.userId,
         status: {
@@ -71,7 +71,7 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    const balances: LeaveBalanceSummary[] = await prisma.staffLeaveBalance.findMany({
+    const balances = await prisma.staffLeaveBalance.findMany({
       where: {
         staffRecordId: user.userId,
         year: currentYear
@@ -86,15 +86,16 @@ export async function GET(request: NextRequest) {
     // Calculate statistics
     const stats = {
       totalRequests: leaveRequests.length,
-      approved: leaveRequests.filter(l => 
+      approved: leaveRequests.filter((l: LeaveRequestSummary) => 
         l.status === 'APPROVED' || l.status === 'MANAGER_APPROVED' || l.status === 'HR_APPROVED'
       ).length,
-      pending: leaveRequests.filter(l => l.status === 'PENDING').length,
-      rejected: leaveRequests.filter(l => l.status === 'REJECTED').length,
-      cancelled: leaveRequests.filter(l => l.status === 'CANCELLED').length,
-      usedDays: balances.reduce((sum, b) => sum + b.usedDays, 0),
-      availableDays: balances.reduce((sum, b) => sum + (b.totalDays - b.usedDays - b.pendingDays), 0),
-      pendingDays: balances.reduce((sum, b) => sum + b.pendingDays, 0)
+      pending: leaveRequests.filter((l: LeaveRequestSummary) => l.status === 'PENDING').length,
+      rejected: leaveRequests.filter((l: LeaveRequestSummary) => l.status === 'REJECTED').length,
+      cancelled: leaveRequests.filter((l: LeaveRequestSummary) => l.status === 'CANCELLED').length,
+      usedDays: balances.reduce((sum: number, b: LeaveBalanceSummary) => sum + b.usedDays, 0),
+      availableDays: balances.reduce((sum: number, b: LeaveBalanceSummary) => 
+        sum + (b.totalDays - b.usedDays - b.pendingDays), 0),
+      pendingDays: balances.reduce((sum: number, b: LeaveBalanceSummary) => sum + b.pendingDays, 0)
     }
 
     // Get current pending requests
@@ -123,7 +124,8 @@ export async function GET(request: NextRequest) {
     const thirtyDaysFromNow = new Date()
     thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30)
 
-    const upcomingLeaves: UpcomingLeave[] = await prisma.leaveRequest.findMany({
+    // Use select to get only the fields we need
+    const upcomingLeaves = await prisma.leaveRequest.findMany({
       where: {
         staffRecordId: user.userId,
         status: {
@@ -132,14 +134,6 @@ export async function GET(request: NextRequest) {
         startDate: {
           gte: today,
           lte: thirtyDaysFromNow
-        }
-      },
-      include: {
-        leaveType: {
-          select: {
-            name: true,
-            color: true
-          }
         }
       },
       select: {
@@ -167,7 +161,7 @@ export async function GET(request: NextRequest) {
       data: {
         stats,
         currentYear,
-        pendingRequests: currentPendingRequests.map(req => ({
+        pendingRequests: currentPendingRequests.map((req: any) => ({
           id: req.id,
           leaveType: req.leaveType.name,
           startDate: req.startDate,
@@ -177,7 +171,7 @@ export async function GET(request: NextRequest) {
           currentStep: req.currentStep,
           daysUntil: Math.ceil((new Date(req.startDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
         })),
-        upcomingLeaves: upcomingLeaves.map(leave => ({
+        upcomingLeaves: upcomingLeaves.map((leave: any) => ({
           id: leave.id,
           leaveType: leave.leaveType.name,
           color: leave.leaveType.color,
@@ -191,7 +185,7 @@ export async function GET(request: NextRequest) {
         summary: {
           hasPendingRequests: currentPendingRequests.length > 0,
           hasUpcomingLeaves: upcomingLeaves.length > 0,
-          totalUpcomingDays: upcomingLeaves.reduce((sum, leave) => sum + leave.totalDays, 0),
+          totalUpcomingDays: upcomingLeaves.reduce((sum: number, leave: any) => sum + leave.totalDays, 0),
           nextLeaveDate: upcomingLeaves.length > 0 ? upcomingLeaves[0].startDate : null
         },
         lastUpdated: new Date().toISOString()
@@ -268,13 +262,22 @@ export async function POST(request: NextRequest) {
         staffRecordId: user.userId,
         ...dateFilter
       },
-      include: {
+      select: {
+        id: true,
         leaveType: {
           select: {
             name: true,
             color: true
           }
-        }
+        },
+        startDate: true,
+        endDate: true,
+        totalDays: true,
+        status: true,
+        currentStep: true,
+        reason: true,
+        isHalfDay: true,
+        halfDayPart: true
       },
       orderBy: {
         startDate: 'asc'
@@ -287,13 +290,17 @@ export async function POST(request: NextRequest) {
         staffRecordId: user.userId,
         year: filterYear
       },
-      include: {
+      select: {
         leaveType: {
           select: {
             name: true,
             color: true
           }
-        }
+        },
+        year: true,
+        totalDays: true,
+        usedDays: true,
+        pendingDays: true
       }
     })
 
