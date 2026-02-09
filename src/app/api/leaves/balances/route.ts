@@ -1,8 +1,22 @@
-// src/app/api/leaves/balances/route.ts
+// /src/app/api/leaves/balances/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
-import { prisma } from '@/app/lib/prisma'
+
+// Import prisma safely
+let prisma: any
+
+try {
+  // Dynamic import to ensure Prisma is initialized properly
+  const prismaModule = require('@/app/lib/prisma')
+  prisma = prismaModule.prisma
+  
+  if (!prisma) {
+    throw new Error('Prisma client not initialized')
+  }
+} catch (error) {
+  console.error('Failed to import Prisma:', error)
+}
 
 // OPTIONS - CORS preflight
 export async function OPTIONS(request: NextRequest) {
@@ -14,6 +28,11 @@ export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
   
   try {
+    // Check if Prisma is initialized
+    if (!prisma) {
+      throw new Error('Database connection not initialized')
+    }
+
     const authHeader = request.headers.get('authorization')
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       const response = NextResponse.json(
@@ -54,7 +73,7 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    const formattedBalances = balances.map(balance => ({
+    const formattedBalances = balances.map((balance: any) => ({
       leaveTypeId: balance.leaveTypeId,
       leaveType: {
         id: balance.leaveType.id,
@@ -76,10 +95,10 @@ export async function GET(request: NextRequest) {
       data: {
         balances: formattedBalances,
         summary: {
-          totalEntitled: formattedBalances.reduce((sum, b) => sum + b.totalDays, 0),
-          totalUsed: formattedBalances.reduce((sum, b) => sum + b.usedDays, 0),
-          totalPending: formattedBalances.reduce((sum, b) => sum + b.pendingDays, 0),
-          totalAvailable: formattedBalances.reduce((sum, b) => sum + b.availableDays, 0)
+          totalEntitled: formattedBalances.reduce((sum: number, b: any) => sum + b.totalDays, 0),
+          totalUsed: formattedBalances.reduce((sum: number, b: any) => sum + b.usedDays, 0),
+          totalPending: formattedBalances.reduce((sum: number, b: any) => sum + b.pendingDays, 0),
+          totalAvailable: formattedBalances.reduce((sum: number, b: any) => sum + b.availableDays, 0)
         },
         year: currentYear,
         lastUpdated: new Date().toISOString()
@@ -91,13 +110,28 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error('Leave balances fetch error:', error)
     
+    // Provide more specific error messages
+    let statusCode = 500
+    let errorMessage = 'Failed to fetch leave balances'
+    
+    if (error.message.includes('Authorization')) {
+      statusCode = 401
+      errorMessage = error.message
+    } else if (error.message.includes('Database connection')) {
+      statusCode = 503
+      errorMessage = 'Database service unavailable'
+    } else if (error.message.includes('not found')) {
+      statusCode = 404
+      errorMessage = 'Leave balances not found'
+    }
+    
     const response = NextResponse.json(
       { 
         success: false,
-        message: 'Failed to fetch leave balances',
-        details: error.message 
+        message: errorMessage,
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
       },
-      { status: 500 }
+      { status: statusCode }
     )
     return withCors(response, origin)
   }
