@@ -814,6 +814,7 @@ model StaffLeaveBalance {
 // Leave Request Model
 model LeaveRequest {
   id           String   @id @default(cuid())
+  referenceNumber   String?   @unique
   staffRecordId String
   leaveTypeId  String
   startDate    DateTime
