@@ -831,6 +831,8 @@ model StaffLeaveBalance {
 model LeaveRequest {
   id           String   @id @default(cuid())
   staffRecordId String
+  companyId String
+
   leaveTypeId  String
   startDate    DateTime
   endDate      DateTime
@@ -878,7 +880,9 @@ model LeaveRequest {
   staffRecord        StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
   leaveType          LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
   managerApprover    StaffRecord? @relation("ManagerApprovals", fields: [managerApproverId], references: [id])
-  
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  handoverStaff StaffRecord? @relation("HandoverStaff",fields: [handoverTo],references: [id])
+  notifications Notification[]
   @@index([staffRecordId, startDate])
   @@index([status, startDate])
   @@index([managerApproverId, status])

@@ -3,18 +3,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 
-// Import prisma with error handling
-let prisma: any
-
-try {
-  // Try to import the prisma module
-  const prismaModule = require('@/app/lib/prisma')
-  prisma = prismaModule.prisma
-} catch (error) {
-  console.error('Failed to import Prisma module:', error)
-  // We'll handle this in the endpoints
-}
-
 // OPTIONS - CORS preflight
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -25,32 +13,6 @@ export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
   
   try {
-    // Check if Prisma is initialized, if not try to initialize it
-    if (!prisma) {
-      try {
-        // Try to create a new Prisma client on the fly
-        const { PrismaClient } = require('@prisma/client')
-        prisma = new PrismaClient({
-          datasources: {
-            db: {
-              url: process.env.DATABASE_URL
-            }
-          }
-        })
-      } catch (prismaError) {
-        console.error('Failed to initialize Prisma client:', prismaError)
-        const response = NextResponse.json(
-          { 
-            success: false, 
-            message: 'Database service unavailable',
-            details: process.env.NODE_ENV === 'development' ? String(prismaError) : undefined
-          },
-          { status: 503 }
-        )
-        return withCors(response, origin)
-      }
-    }
-
     const authHeader = request.headers.get('authorization')
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       const response = NextResponse.json(
@@ -62,6 +24,9 @@ export async function GET(request: NextRequest) {
     
     const token = authHeader.replace('Bearer ', '')
     const user = requireRole(token, ['STAFF', 'HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
+
+    // Lazy load Prisma inside the function
+    const { prisma } = await import('@/app/lib/db')
 
     const currentYear = new Date().getFullYear()
     const today = new Date()
@@ -204,14 +169,13 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error('Leave summary fetch error:', error)
     
-    // Handle specific error types
     let statusCode = 500
     let errorMessage = 'Failed to fetch leave summary'
     
     if (error.message?.includes('Authorization') || error.message?.includes('Unauthorized')) {
       statusCode = 401
       errorMessage = 'Authentication failed'
-    } else if (error.message?.includes('Prisma') || error.message?.includes('Database')) {
+    } else if (error.message?.includes('DATABASE_URL') || error.message?.includes('Prisma')) {
       statusCode = 503
       errorMessage = 'Database service unavailable'
     } else if (error.message?.includes('not found')) {
@@ -236,31 +200,6 @@ export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin')
   
   try {
-    // Check if Prisma is initialized
-    if (!prisma) {
-      try {
-        const { PrismaClient } = require('@prisma/client')
-        prisma = new PrismaClient({
-          datasources: {
-            db: {
-              url: process.env.DATABASE_URL
-            }
-          }
-        })
-      } catch (prismaError) {
-        console.error('Failed to initialize Prisma client:', prismaError)
-        const response = NextResponse.json(
-          { 
-            success: false, 
-            message: 'Database service unavailable',
-            details: process.env.NODE_ENV === 'development' ? String(prismaError) : undefined
-          },
-          { status: 503 }
-        )
-        return withCors(response, origin)
-      }
-    }
-
     const authHeader = request.headers.get('authorization')
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       const response = NextResponse.json(
@@ -272,6 +211,9 @@ export async function POST(request: NextRequest) {
     
     const token = authHeader.replace('Bearer ', '')
     const user = requireRole(token, ['STAFF', 'HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
+
+    // Lazy load Prisma inside the function
+    const { prisma } = await import('@/app/lib/db')
 
     const body = await request.json()
     const { startDate, endDate, year } = body
