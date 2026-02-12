@@ -1,9 +1,10 @@
-// src/app/api/leaves/route.ts
+// /src/app/api/leaves/route.ts - Fixed GET endpoint
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { decimalToNumber } from '@/app/lib/prisma-utils'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -116,23 +117,38 @@ export async function GET(request: NextRequest) {
             select: { id: true }
           })
           
-          where.staffRecordId = { 
-            in: staffInCompanies.map(s => s.id) 
+          if (staffInCompanies.length > 0) {
+            where.staffRecordId = { 
+              in: staffInCompanies.map(s => s.id) 
+            }
+          } else {
+            // No accessible staff, return empty result
+            where.id = 'none' // This will return no results
           }
         }
       } else {
         // Get all leaves in accessible companies
-        if (accessibleCompanyIds.length > 0 && user.role !== 'SUPER_ADMIN') {
-          const staffInCompanies = await prisma.staffRecord.findMany({
-            where: { 
-              companyId: { in: accessibleCompanyIds },
-              isActive: true 
-            },
-            select: { id: true }
-          })
-          
-          where.staffRecordId = { 
-            in: staffInCompanies.map(s => s.id) 
+        if (user.role !== 'SUPER_ADMIN') {
+          if (accessibleCompanyIds.length > 0) {
+            const staffInCompanies = await prisma.staffRecord.findMany({
+              where: { 
+                companyId: { in: accessibleCompanyIds },
+                isActive: true 
+              },
+              select: { id: true }
+            })
+            
+            if (staffInCompanies.length > 0) {
+              where.staffRecordId = { 
+                in: staffInCompanies.map(s => s.id) 
+              }
+            } else {
+              // No accessible staff, return empty result
+              where.id = 'none' // This will return no results
+            }
+          } else {
+            // No accessible companies, return empty result
+            where.id = 'none' // This will return no results
           }
         }
       }
@@ -213,18 +229,41 @@ export async function GET(request: NextRequest) {
                 }
               }
             }
+          },
+          managerApprover: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true
+            }
+          },
+          handoverStaff: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              staffId: true
+            }
           }
         }
       }),
       prisma.leaveRequest.count({ where })
     ])
 
+    // Format leaves with decimal conversion
+    const formattedLeaves = leaves.map(leave => ({
+      ...leave,
+      totalDays: decimalToNumber(leave.totalDays)
+    }))
+
     // Calculate leave statistics
     const stats = await calculateLeaveStatistics(user, parseInt(year))
 
     return withCors(
       ApiResponse.success({
-        leaves,
+        leaves: formattedLeaves,
         statistics: stats,
         pagination: {
           page,
@@ -244,356 +283,18 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// POST method redirects to apply endpoint
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin')
-
-  try {
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader) {
-      return withCors(
-        ApiResponse.error('Authorization header missing', 401),
-        origin
-      )
-    }
-
-    const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['STAFF', 'HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER'])
-
-    const body = await request.json()
-    
-    // Validate required fields
-    const requiredFields = ['leaveTypeId', 'startDate', 'endDate', 'reason']
-    for (const field of requiredFields) {
-      if (!body[field]) {
-        return withCors(
-          ApiResponse.error(`${field} is required`, 400),
-          origin
-        )
-      }
-    }
-
-    // Get staff record
-    let staffRecordId = body.staffRecordId
-    
-    // If user is requesting leave for themselves
-    if (!staffRecordId || user.role === 'STAFF' || user.role === 'MANAGER') {
-      const staffRecord = await prisma.staffRecord.findFirst({
-        where: { email: user.email, isActive: true }
-      })
-      
-      if (!staffRecord) {
-        return withCors(
-          ApiResponse.error('Staff record not found', 404),
-          origin
-        )
-      }
-      
-      staffRecordId = staffRecord.id
-    } else {
-      // Only HR/ADMIN/SUPER_ADMIN can create leave for others
-      if (!['HR', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-        return withCors(
-          ApiResponse.error('You are not authorized to create leave for others', 403),
-          origin
-        )
-      }
-    }
-
-    // Validate dates
-    const startDate = new Date(body.startDate)
-    const endDate = new Date(body.endDate)
-    
-    if (startDate >= endDate) {
-      return withCors(
-        ApiResponse.error('End date must be after start date', 400),
-        origin
-      )
-    }
-    
-    // Check if dates are in the past
-    if (startDate < new Date()) {
-      return withCors(
-        ApiResponse.error('Cannot request leave for past dates', 400),
-        origin
-      )
-    }
-
-    // Calculate total days (excluding weekends and holidays)
-    const totalDays = await calculateWorkingDays(
-      staffRecordId,
-      startDate,
-      endDate
-    )
-
-    if (totalDays <= 0) {
-      return withCors(
-        ApiResponse.error('No working days in selected period', 400),
-        origin
-      )
-    }
-
-    // Get leave type with policy
-    const leaveType = await prisma.leaveType.findUnique({
-      where: { id: body.leaveTypeId },
-      include: { policy: true }
-    })
-
-    if (!leaveType) {
-      return withCors(
-        ApiResponse.error('Leave type not found', 404),
-        origin
-      )
-    }
-
-    // Get current year's balance
-    const currentYear = new Date().getFullYear()
-    const balance = await prisma.staffLeaveBalance.findFirst({
-      where: {
-        staffRecordId,
-        leaveTypeId: body.leaveTypeId,
-        year: currentYear
-      }
-    })
-
-    if (!balance) {
-      return withCors(
-        ApiResponse.error('No leave balance found for this leave type', 400),
-        origin
-      )
-    }
-
-    // Check if there's enough balance
-    const availableDays = balance.totalDays - balance.usedDays - balance.pendingDays
-    if (totalDays > availableDays) {
-      return withCors(
-        ApiResponse.error(`Insufficient leave balance. Available: ${availableDays} days`, 400),
-        origin
-      )
-    }
-
-    // Check for overlapping leave requests
-    const overlappingLeaves = await prisma.leaveRequest.findFirst({
-      where: {
-        staffRecordId,
-        status: { in: ['PENDING', 'MANAGER_APPROVED', 'HR_APPROVED', 'APPROVED'] },
-        OR: [
-          {
-            startDate: { lte: endDate },
-            endDate: { gte: startDate }
-          }
-        ]
-      }
-    })
-
-    if (overlappingLeaves) {
-      return withCors(
-        ApiResponse.error('You have overlapping leave during this period', 400),
-        origin
-      )
-    }
-
-    // Get staff's manager for approval
-    const staff = await prisma.staffRecord.findUnique({
-      where: { id: staffRecordId },
-      select: { managerId: true }
-    })
-    
-    // Determine approval workflow
-    const needsApproval = leaveType.policy.requiresApproval
-    const approvalWorkflow = leaveType.policy.approvalWorkflow
-    
-    let managerApproverId = null
-    let initialStatus = 'PENDING'
-    let currentStep = 'MANAGER'
-    
-    if (needsApproval) {
-      if (approvalWorkflow === 'MANAGER_THEN_HR') {
-        // Two-step approval required
-        if (staff?.managerId) {
-          managerApproverId = staff.managerId
-          initialStatus = 'PENDING'
-          currentStep = 'MANAGER'
-        } else {
-          // If no manager, skip to HR approval
-          initialStatus = 'PENDING'
-          currentStep = 'HR'
-        }
-      } else if (approvalWorkflow === 'MANAGER_ONLY') {
-        // Only manager approval required
-        if (staff?.managerId) {
-          managerApproverId = staff.managerId
-          initialStatus = 'PENDING'
-          currentStep = 'MANAGER'
-        } else {
-          // If no manager, auto-approve?
-          initialStatus = 'APPROVED'
-          currentStep = 'COMPLETED'
-        }
-      } else if (approvalWorkflow === 'HR_ONLY') {
-        // Only HR approval required
-        initialStatus = 'PENDING'
-        currentStep = 'HR'
-      }
-    } else {
-      // No approval needed
-      initialStatus = 'APPROVED'
-      currentStep = 'COMPLETED'
-    }
-
-    // Create leave request
-    const leaveRequest = await prisma.$transaction(async (tx) => {
-      // Create the leave request
-      const newLeave = await tx.leaveRequest.create({
-        data: {
-          staffRecordId,
-          leaveTypeId: body.leaveTypeId,
-          startDate,
-          endDate,
-          totalDays,
-          reason: body.reason,
-          emergencyContact: body.emergencyContact,
-          contactPhone: body.contactPhone,
-          handoverTo: body.handoverTo,
-          handoverNotes: body.handoverNotes,
-          // Approval workflow fields
-          status: initialStatus,
-          currentStep: currentStep,
-          managerApproverId: managerApproverId,
-          createdBy: user.email || user.userId
-        },
-        include: {
-          staffRecord: {
-            select: {
-              firstName: true,
-              lastName: true,
-              email: true,
-              company: {
-                select: {
-                  companyName: true
-                }
-              },
-              manager: {
-                select: {
-                  firstName: true,
-                  lastName: true,
-                  email: true
-                }
-              }
-            }
-          },
-          leaveType: {
-            select: {
-              name: true,
-              code: true,
-              policy: {
-                select: {
-                  approvalWorkflow: true
-                }
-              }
-            }
-          }
-        }
-      })
-
-      // Update pending days in balance if approval is needed
-      if (needsApproval && initialStatus === 'PENDING') {
-        await tx.staffLeaveBalance.update({
-          where: { id: balance.id },
-          data: {
-            pendingDays: { increment: totalDays }
-          }
-        })
-      } else if (!needsApproval || initialStatus === 'APPROVED') {
-        // Auto-approved, update used days
-        await tx.staffLeaveBalance.update({
-          where: { id: balance.id },
-          data: {
-            usedDays: { increment: totalDays }
-          }
-        })
-      }
-
-      return newLeave
-    })
-
-    // Determine success message based on workflow
-    let successMessage = 'Leave request submitted successfully.'
-    if (leaveRequest.currentStep === 'MANAGER') {
-      const managerName = leaveRequest.staffRecord.manager 
-        ? `${leaveRequest.staffRecord.manager.firstName} ${leaveRequest.staffRecord.manager.lastName}`
-        : 'your manager'
-      successMessage += ` Awaiting approval from ${managerName}.`
-    } else if (leaveRequest.currentStep === 'HR') {
-      successMessage += ' Awaiting HR/Admin approval.'
-    } else if (leaveRequest.status === 'APPROVED') {
-      successMessage = 'Leave request approved automatically.'
-    }
-
-    return withCors(
-      ApiResponse.success(leaveRequest, successMessage),
-      origin
-    )
-
-  } catch (error) {
-    return withCors(
-      handleApiError(error),
-      origin
-    )
-  }
-}
-
-// Helper functions
-async function calculateWorkingDays(staffRecordId: string, startDate: Date, endDate: Date): Promise<number> {
-  let workingDays = 0
-  const currentDate = new Date(startDate)
   
-  // Get company holidays
-  const staff = await prisma.staffRecord.findUnique({
-    where: { id: staffRecordId },
-    select: { companyId: true }
-  })
-  
-  const holidays = await prisma.publicHoliday.findMany({
-    where: {
-      companyId: staff?.companyId,
-      date: {
-        gte: startDate,
-        lte: endDate
-      }
-    },
-    select: { date: true }
-  })
-  
-  const holidayDates = holidays.map(h => h.date.toDateString())
-  
-  // Iterate through each day
-  while (currentDate <= endDate) {
-    const dayOfWeek = currentDate.getDay()
-    
-    // Skip weekends (Saturday = 6, Sunday = 0)
-    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-      // Skip holidays
-      if (!holidayDates.includes(currentDate.toDateString())) {
-        workingDays += 1
-      }
-    }
-    
-    currentDate.setDate(currentDate.getDate() + 1)
-  }
-  
-  return workingDays
-}
-
-async function checkLeaveAccess(user: any, companyId: string): Promise<boolean> {
-  const userAssignment = await prisma.userCompany.findFirst({
-    where: {
-      userId: user.userId,
-      companyId: companyId,
-      role: { in: ['HR', 'ADMIN', 'ALL'] }
-    }
-  })
-  
-  return !!userAssignment
+  return withCors(
+    ApiResponse.error(
+      'Please use /api/leaves/apply for submitting leave applications. ' +
+      'This endpoint is for listing leaves only.',
+      410 // 410 Gone - indicates resource is no longer available
+    ),
+    origin
+  )
 }
 
 async function calculateLeaveStatistics(user: any, year: number) {
@@ -617,30 +318,119 @@ async function calculateLeaveStatistics(user: any, year: number) {
   }
   
   if (['HR', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    pendingHRApprovals = await prisma.leaveRequest.count({
-      where: {
-        status: 'MANAGER_APPROVED',
-        currentStep: 'HR',
-        // Filter by accessible companies for non-SUPER_ADMIN
-        ...(user.role !== 'SUPER_ADMIN' ? await getCompanyFilter(user) : {})
+    // Build where clause for HR approvals
+    const whereClause: any = {
+      status: 'MANAGER_APPROVED',
+      currentStep: 'HR'
+    }
+    
+    // Add company filter for non-SUPER_ADMIN
+    if (user.role !== 'SUPER_ADMIN') {
+      const accessibleStaffIds = await getAccessibleStaffIds(user)
+      if (accessibleStaffIds) {
+        whereClause.staffRecordId = accessibleStaffIds
+      } else {
+        // No accessible staff, set impossible condition
+        whereClause.id = 'none'
       }
+    }
+    
+    pendingHRApprovals = await prisma.leaveRequest.count({
+      where: whereClause
     })
   }
+  
+  // Get current month stats
+  const now = new Date()
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+  
+  // Build where clause for month stats
+  const monthWhereClause: any = {
+    status: 'APPROVED',
+    startDate: {
+      gte: currentMonthStart,
+      lte: currentMonthEnd
+    }
+  }
+  
+  // Add company filter for non-SUPER_ADMIN
+  if (user.role !== 'SUPER_ADMIN' && user.role !== 'MANAGER' && user.role !== 'STAFF') {
+    const accessibleStaffIds = await getAccessibleStaffIds(user)
+    if (accessibleStaffIds) {
+      monthWhereClause.staffRecordId = accessibleStaffIds
+    } else {
+      monthWhereClause.id = 'none'
+    }
+  }
+  
+  const approvedThisMonth = await prisma.leaveRequest.count({
+    where: monthWhereClause
+  })
+  
+  const rejectedThisMonth = await prisma.leaveRequest.count({
+    where: {
+      status: 'REJECTED',
+      startDate: {
+        gte: currentMonthStart,
+        lte: currentMonthEnd
+      },
+      ...(user.role !== 'SUPER_ADMIN' && user.role !== 'MANAGER' && user.role !== 'STAFF' 
+        ? await getStaffFilter(user) 
+        : {})
+    }
+  })
+  
+  // Get team members currently on leave
+  const today = new Date()
+  const teamOnLeaveWhere: any = {
+    status: 'APPROVED',
+    startDate: { lte: today },
+    endDate: { gte: today }
+  }
+  
+  if (user.role === 'MANAGER') {
+    const staffRecord = await prisma.staffRecord.findFirst({
+      where: { email: user.email, isActive: true }
+    })
+    
+    if (staffRecord) {
+      const directReportIds = await prisma.staffRecord.findMany({
+        where: { managerId: staffRecord.id, isActive: true },
+        select: { id: true }
+      })
+      
+      const teamIds = [staffRecord.id, ...directReportIds.map(dr => dr.id)]
+      teamOnLeaveWhere.staffRecordId = { in: teamIds }
+    }
+  } else if (['HR', 'ADMIN', 'SUPER_ADMIN'].includes(user.role) && user.role !== 'SUPER_ADMIN') {
+    const accessibleStaffIds = await getAccessibleStaffIds(user)
+    if (accessibleStaffIds) {
+      teamOnLeaveWhere.staffRecordId = accessibleStaffIds
+    } else {
+      teamOnLeaveWhere.id = 'none'
+    }
+  }
+  
+  const teamOnLeave = await prisma.leaveRequest.count({
+    where: teamOnLeaveWhere
+  })
   
   return {
     pendingManagerApprovals,
     pendingHRApprovals,
-    approvedThisMonth: 0,
-    rejectedThisMonth: 0,
-    teamOnLeave: 0
+    approvedThisMonth,
+    rejectedThisMonth,
+    teamOnLeave
   }
 }
 
-async function getCompanyFilter(user: any) {
+// Helper function to get accessible staff IDs for HR/Admin
+async function getAccessibleStaffIds(user: any): Promise<{ in: string[] } | null> {
   const accessibleCompanyIds = await getUserAccessibleCompanies(user)
   
   if (accessibleCompanyIds.length === 0) {
-    return {}
+    return null
   }
   
   const staffInCompanies = await prisma.staffRecord.findMany({
@@ -651,11 +441,22 @@ async function getCompanyFilter(user: any) {
     select: { id: true }
   })
   
-  return {
-    staffRecordId: { 
-      in: staffInCompanies.map(s => s.id) 
-    }
+  if (staffInCompanies.length === 0) {
+    return null
   }
+  
+  return { 
+    in: staffInCompanies.map(s => s.id) 
+  }
+}
+
+// Helper function to get staff filter for queries
+async function getStaffFilter(user: any): Promise<any> {
+  const accessibleStaffIds = await getAccessibleStaffIds(user)
+  if (accessibleStaffIds) {
+    return { staffRecordId: accessibleStaffIds }
+  }
+  return { id: 'none' } // Return no results
 }
 
 async function getUserAccessibleCompanies(user: any): Promise<string[]> {

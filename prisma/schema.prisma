@@ -827,41 +827,41 @@ model StaffLeaveBalance {
   @@map("staff_leave_balances")
 }
 
-// Leave Request Model
 model LeaveRequest {
   id           String   @id @default(cuid())
   staffRecordId String
-  companyId String
-
+  companyId    String
+  referenceNumber String  @unique
   leaveTypeId  String
   startDate    DateTime
   endDate      DateTime
   totalDays    Decimal  @db.Decimal(5, 1) // e.g., 2.5 days
   reason       String
   emergencyContact String?
-  contactPhone     String?
+  contactPhone String?
   
   // Approval Workflow Fields
   status       String   @default("PENDING") // "PENDING", "MANAGER_APPROVED", "HR_APPROVED", "APPROVED", "REJECTED", "CANCELLED"
-  currentStep  String   @default("MANAGER") // "MANAGER", "HR", "COMPLETED"
+  currentStep  String   @default("MANAGER") // "MANAGER", "HR", "COMPLETED", "REJECTED", "CANCELLED"
   
   // Manager Approval
   managerApproverId   String?   // StaffRecord ID of manager approver
   managerApprovedAt   DateTime?
-  managerApprovedBy   String?   // Name/email of manager approver
   managerComments    String?
   
   // HR/ADMIN/SUPER_ADMIN Approval
-  hrApproverUserId   String?   // User ID (from AuthUser) of HR/Admin approver
-  hrApproverRole     String?   // Role of HR/Admin approver: "HR", "ADMIN", "SUPER_ADMIN"
   hrApprovedAt       DateTime?
-  hrApprovedBy       String?   // Name/email of HR/Admin approver
   hrComments         String?
   
-  // Rejection (can happen at either step)
-  rejectionReason    String?
-  rejectedByStep     String?   // "MANAGER" or "HR"
-  rejectedById       String?
+  // Rejection
+  rejectedAt         DateTime?
+  rejectComments     String?
+  rejectedBy         String?   // StaffRecord ID who rejected
+  
+  // Cancellation
+  cancelledAt        DateTime?
+  cancelComments     String?
+  cancelledBy        String?   // StaffRecord ID who cancelled
   
   // Handover information
   handoverTo         String?   // StaffRecord ID
@@ -876,18 +876,25 @@ model LeaveRequest {
   updatedAt          DateTime @updatedAt
   createdBy          String   // StaffRecord ID who created
   updatedBy          String?
-  
+  // Relations
   staffRecord        StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
   leaveType          LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
   managerApprover    StaffRecord? @relation("ManagerApprovals", fields: [managerApproverId], references: [id])
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  handoverStaff StaffRecord? @relation("HandoverStaff",fields: [handoverTo],references: [id])
-  notifications Notification[]
+  company            Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  handoverStaff      StaffRecord? @relation("HandoverStaff", fields: [handoverTo], references: [id])
+  notifications      Notification[]
+  // hrApproverUserId   String?   // User ID (from AuthUser) of HR/Admin approver - KEEP FOR NOW
+  // hrApproverRole     String?   // Role of HR/Admin approver: "HR", "ADMIN", "SUPER_ADMIN" - KEEP FOR NOW
+  // hrApprovedBy       String?   // Name/email of HR/Admin approver - KEEP FOR NOW
+  // rejectionReason    String?   // KEEP FOR NOW
+  // rejectedByStep     String?   // "MANAGER" or "HR" - KEEP FOR NOW
+  
   @@index([staffRecordId, startDate])
   @@index([status, startDate])
   @@index([managerApproverId, status])
   @@index([companyId, createdAt])
   @@index([status, currentStep])
+  @@map("leave_requests")
 }
 
 // Public Holiday Model

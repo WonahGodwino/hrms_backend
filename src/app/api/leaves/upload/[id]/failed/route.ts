@@ -4,6 +4,7 @@ import { requireRole } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { prisma } from '@/app/lib/prisma'
 
+
 // OPTIONS - CORS preflight
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)

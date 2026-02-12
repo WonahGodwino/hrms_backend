@@ -1,9 +1,10 @@
-// /src/app/api/leaves/apply/route.ts - COMPLETE DEPLOYMENT READY VERSION
+// /src/app/api/leaves/apply/route.ts - PRIMARY APPLICATION ENDPOINT
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/app/lib/auth'
+import { decimalToNumber } from '@/app/lib/prisma-utils'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { z } from 'zod'
-import { prisma } from '@/app/lib/prisma'
+import { prisma } from '@/app/lib/db'
 import { sendLeaveNotificationEmail } from '@/app/lib/email'
 import { 
   createLeaveNotification, 
@@ -32,6 +33,8 @@ const leaveApplicationSchema = z.object({
   medicalCertificateNumber: z.string().optional(),
   medicalCertificateDate: z.string().optional(),
   medicalCertificateIssuer: z.string().optional(),
+  // Optional: for HR/Admin to apply on behalf of others
+  staffRecordId: z.string().cuid().optional()
 })
 
 // Helper function to parse work week pattern
@@ -282,6 +285,14 @@ function getSafeReferenceNumber(refNumber: string | null): string | undefined {
   return refNumber || undefined
 }
 
+// Generate reference number
+function generateReferenceNumber(companyId: string, leaveRequestId: string): string {
+  const companyPrefix = companyId.substring(0, 4).toUpperCase()
+  const leaveSuffix = leaveRequestId.substring(0, 8).toUpperCase()
+  const timestamp = Date.now().toString(36).toUpperCase().slice(-4)
+  return `LR-${companyPrefix}-${timestamp}-${leaveSuffix}`
+}
+
 // ================= API ENDPOINTS =================
 
 // OPTIONS - CORS preflight
@@ -289,7 +300,7 @@ export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-// POST - Apply for leave
+// POST - Apply for leave (PRIMARY APPLICATION ENDPOINT)
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin')
   
@@ -323,10 +334,24 @@ export async function POST(request: NextRequest) {
 
     const data = validationResult.data
 
+    // Determine which staff record to use
+    let targetStaffId = data.staffRecordId || user.userId
+    
+    // Check permissions for applying on behalf of others
+    if (data.staffRecordId && data.staffRecordId !== user.userId) {
+      if (!['HR', 'SUPER_ADMIN', 'ADMIN'].includes(user.role)) {
+        const response = NextResponse.json(
+          { success: false, message: 'Unauthorized to apply leave on behalf of others' },
+          { status: 403 }
+        )
+        return withCors(response, origin)
+      }
+    }
+
     // Get staff record
     const staff = await prisma.staffRecord.findUnique({
       where: { 
-        id: user.userId,
+        id: targetStaffId,
         isActive: true 
       },
       include: {
@@ -472,7 +497,9 @@ export async function POST(request: NextRequest) {
       return withCors(response, origin)
     }
 
-    const availableBalance = leaveBalance.totalDays - leaveBalance.usedDays - leaveBalance.pendingDays
+    const availableBalance = decimalToNumber(leaveBalance.totalDays) - 
+                           decimalToNumber(leaveBalance.usedDays) - 
+                           decimalToNumber(leaveBalance.pendingDays)
     
     if (availableBalance < requestedDays) {
       const response = NextResponse.json(
@@ -482,10 +509,10 @@ export async function POST(request: NextRequest) {
           details: {
             requested: requestedDays,
             available: availableBalance,
-            totalEntitled: leaveBalance.totalDays,
-            used: leaveBalance.usedDays,
-            pending: leaveBalance.pendingDays,
-            carriedOver: leaveBalance.carriedOver,
+            totalEntitled: decimalToNumber(leaveBalance.totalDays),
+            used: decimalToNumber(leaveBalance.usedDays),
+            pending: decimalToNumber(leaveBalance.pendingDays),
+            carriedOver: decimalToNumber(leaveBalance.carriedOver),
             policyMaxDays: policy.maxDays
           }
         },
@@ -522,7 +549,7 @@ export async function POST(request: NextRequest) {
             startDate: l.startDate,
             endDate: l.endDate,
             status: l.status,
-            totalDays: l.totalDays
+            totalDays: decimalToNumber(l.totalDays)
           }))
         },
         { status: 400 }
@@ -577,6 +604,7 @@ export async function POST(request: NextRequest) {
       // Create leave request
       const leaveRequestData: any = {
         staffRecordId: staff.id,
+        companyId: staff.companyId,
         leaveTypeId: data.leaveTypeId,
         startDate,
         endDate,
@@ -591,9 +619,8 @@ export async function POST(request: NextRequest) {
         status,
         currentStep,
         managerApproverId: staff.manager?.id || null,
-        createdBy: staff.id,
-        updatedBy: staff.id,
-        companyId: staff.companyId
+        createdBy: data.staffRecordId || user.userId, // Track who created it
+        updatedBy: user.userId
       }
 
       // Add medical certificate info
@@ -612,10 +639,8 @@ export async function POST(request: NextRequest) {
         data: leaveRequestData
       })
 
-      // Generate reference number
-      const referenceNumber = `LR-${staff.companyId.slice(0, 4)}-${leaveRequest.id.slice(-6).toUpperCase()}`
-
-      // Update with reference number
+      // Generate and update reference number
+      const referenceNumber = generateReferenceNumber(staff.companyId, leaveRequest.id)
       const updatedLeaveRequest = await tx.leaveRequest.update({
         where: { id: leaveRequest.id },
         data: { referenceNumber }
@@ -658,9 +683,10 @@ export async function POST(request: NextRequest) {
           leaveType: result.leaveType.name,
           startDate: result.leaveRequest.startDate.toISOString(),
           endDate: result.leaveRequest.endDate.toISOString(),
-          days: result.leaveRequest.totalDays,
+          days: decimalToNumber(result.leaveRequest.totalDays),
           status: result.leaveRequest.status,
-          currentStep: result.leaveRequest.currentStep
+          currentStep: result.leaveRequest.currentStep,
+          appliedBy: data.staffRecordId ? 'HR/Admin' : 'Self'
         },
         staff.companyId
       )
@@ -684,7 +710,7 @@ export async function POST(request: NextRequest) {
           leaveType: result.leaveType.name,
           startDate: result.leaveRequest.startDate,
           endDate: result.leaveRequest.endDate,
-          totalDays: result.leaveRequest.totalDays,
+          totalDays: decimalToNumber(result.leaveRequest.totalDays),
           status: result.leaveRequest.status,
           currentStep: result.leaveRequest.currentStep
         },
@@ -705,7 +731,7 @@ export async function POST(request: NextRequest) {
             leaveType: result.leaveType.name,
             startDate: result.leaveRequest.startDate.toISOString(),
             endDate: result.leaveRequest.endDate.toISOString(),
-            days: result.leaveRequest.totalDays
+            days: decimalToNumber(result.leaveRequest.totalDays)
           },
           staff.companyId
         )
@@ -729,7 +755,7 @@ export async function POST(request: NextRequest) {
             leaveType: result.leaveType.name,
             startDate: result.leaveRequest.startDate,
             endDate: result.leaveRequest.endDate,
-            totalDays: result.leaveRequest.totalDays,
+            totalDays: decimalToNumber(result.leaveRequest.totalDays),
             status: result.leaveRequest.status,
             currentStep: result.leaveRequest.currentStep
           },
@@ -770,7 +796,7 @@ export async function POST(request: NextRequest) {
               leaveType: result.leaveType.name,
               startDate: result.leaveRequest.startDate.toISOString(),
               endDate: result.leaveRequest.endDate.toISOString(),
-              days: result.leaveRequest.totalDays
+              days: decimalToNumber(result.leaveRequest.totalDays)
             },
             staff.companyId
           )
@@ -794,7 +820,7 @@ export async function POST(request: NextRequest) {
               leaveType: result.leaveType.name,
               startDate: result.leaveRequest.startDate,
               endDate: result.leaveRequest.endDate,
-              totalDays: result.leaveRequest.totalDays,
+              totalDays: decimalToNumber(result.leaveRequest.totalDays),
               status: result.leaveRequest.status,
               currentStep: result.leaveRequest.currentStep
             },
@@ -833,11 +859,13 @@ export async function POST(request: NextRequest) {
         },
         policyApplied: result.policyDetails,
         leaveBalance: {
-          total: result.balance.totalDays,
-          used: result.balance.usedDays,
-          pending: result.balance.pendingDays,
-          available: result.balance.totalDays - result.balance.usedDays - result.balance.pendingDays,
-          carriedOver: result.balance.carriedOver
+          total: decimalToNumber(result.balance.totalDays),
+          used: decimalToNumber(result.balance.usedDays),
+          pending: decimalToNumber(result.balance.pendingDays),
+          available: decimalToNumber(result.balance.totalDays) - 
+                    decimalToNumber(result.balance.usedDays) - 
+                    decimalToNumber(result.balance.pendingDays),
+          carriedOver: decimalToNumber(result.balance.carriedOver)
         },
         workWeekInfo: {
           pattern: company?.workWeekPattern || "12345",
@@ -867,6 +895,10 @@ export async function POST(request: NextRequest) {
             number: data.medicalCertificateNumber,
             date: data.medicalCertificateDate,
             issuer: data.medicalCertificateIssuer
+          } : null,
+          appliedBy: data.staffRecordId ? {
+            userId: user.userId,
+            role: user.role
           } : null
         }
       }
@@ -905,630 +937,6 @@ export async function POST(request: NextRequest) {
       { 
         success: false,
         message: 'Failed to process leave application',
-        details: error.message 
-      },
-      { status: 500 }
-    )
-    return withCors(response, origin)
-  }
-}
-
-// GET - Get leave application by ID
-export async function GET(request: NextRequest) {
-  const origin = request.headers.get('origin')
-  
-  try {
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      const response = NextResponse.json(
-        { success: false, message: 'Authorization header missing' },
-        { status: 401 }
-      )
-      return withCors(response, origin)
-    }
-    
-    const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['STAFF', 'HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
-    
-    const { searchParams } = new URL(request.url)
-    const leaveRequestId = searchParams.get('id')
-    
-    if (!leaveRequestId) {
-      const response = NextResponse.json(
-        { success: false, message: 'Leave request ID is required' },
-        { status: 400 }
-      )
-      return withCors(response, origin)
-    }
-    
-    // Get leave request with details
-    const leaveRequest = await prisma.leaveRequest.findUnique({
-      where: { id: leaveRequestId },
-      include: {
-        leaveType: {
-          select: {
-            id: true,
-            name: true,
-            code: true
-          }
-        },
-        staffRecord: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            department: true,
-            position: true,
-            staffId: true,
-            companyId: true
-          }
-        },
-        managerApprover: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true
-          }
-        },
-        handoverStaff: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            staffId: true
-          }
-        }
-      }
-    })
-    
-    if (!leaveRequest) {
-      const response = NextResponse.json(
-        { success: false, message: 'Leave request not found' },
-        { status: 404 }
-      )
-      return withCors(response, origin)
-    }
-    
-    // Check permissions
-    const isOwner = leaveRequest.staffRecordId === user.userId
-    const isManager = user.role === 'MANAGER'
-    const isHR = ['HR', 'SUPER_ADMIN', 'ADMIN'].includes(user.role)
-    
-    if (!isOwner && !isManager && !isHR) {
-      const response = NextResponse.json(
-        { success: false, message: 'Unauthorized to view this leave request' },
-        { status: 403 }
-      )
-      return withCors(response, origin)
-    }
-    
-    // Get leave balance
-    const currentYear = new Date().getFullYear()
-    const leaveBalance = await prisma.staffLeaveBalance.findFirst({
-      where: {
-        staffRecordId: leaveRequest.staffRecordId,
-        leaveTypeId: leaveRequest.leaveTypeId,
-        year: currentYear
-      }
-    })
-    
-    // Get notifications for this leave request
-    const notifications = await getNotificationsForLeaveRequest(leaveRequestId, leaveRequest.staffRecord.companyId)
-    
-    const response = NextResponse.json({
-      success: true,
-      message: 'Leave request retrieved successfully',
-      data: {
-        leaveRequest: {
-          id: leaveRequest.id,
-          referenceNumber: getSafeReferenceNumber(leaveRequest.referenceNumber),
-          leaveType: leaveRequest.leaveType,
-          startDate: leaveRequest.startDate,
-          endDate: leaveRequest.endDate,
-          totalDays: leaveRequest.totalDays,
-          reason: leaveRequest.reason,
-          status: leaveRequest.status,
-          currentStep: leaveRequest.currentStep,
-          emergencyContact: leaveRequest.emergencyContact,
-          contactPhone: leaveRequest.contactPhone,
-          handoverTo: leaveRequest.handoverTo,
-          handoverStaff: leaveRequest.handoverStaff,
-          handoverNotes: leaveRequest.handoverNotes,
-          attachmentUrl: leaveRequest.attachmentUrl,
-          fileName: leaveRequest.fileName,
-          managerApprover: leaveRequest.managerApprover,
-          managerApprovedAt: leaveRequest.managerApprovedAt,
-          hrApprovedAt: leaveRequest.hrApprovedAt,
-          rejectedAt: leaveRequest.rejectedAt,
-          cancelledAt: leaveRequest.cancelledAt,
-          managerComments: leaveRequest.managerComments,
-          hrComments: leaveRequest.hrComments,
-          rejectComments: leaveRequest.rejectComments,
-          cancelComments: leaveRequest.cancelComments,
-          createdAt: leaveRequest.createdAt,
-          updatedAt: leaveRequest.updatedAt
-        },
-        staff: leaveRequest.staffRecord,
-        leaveBalance: leaveBalance ? {
-          total: leaveBalance.totalDays,
-          used: leaveBalance.usedDays,
-          pending: leaveBalance.pendingDays,
-          available: leaveBalance.totalDays - leaveBalance.usedDays - leaveBalance.pendingDays,
-          carriedOver: leaveBalance.carriedOver
-        } : null,
-        notifications: notifications.map(notification => ({
-          id: notification.id,
-          type: notification.type,
-          title: notification.title,
-          message: notification.message,
-          read: notification.read,
-          createdAt: notification.createdAt,
-          isForCurrentUser: notification.userId === user.userId,
-          data: notification.data
-        }))
-      }
-    })
-    
-    return withCors(response, origin)
-    
-  } catch (error: any) {
-    console.error('Get leave request error:', error)
-    
-    const response = NextResponse.json(
-      { 
-        success: false,
-        message: 'Failed to fetch leave request',
-        details: error.message 
-      },
-      { status: 500 }
-    )
-    return withCors(response, origin)
-  }
-}
-
-// PUT - Update leave application status (Approval/Rejection/Cancellation)
-export async function PUT(request: NextRequest) {
-  const origin = request.headers.get('origin')
-  
-  try {
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      const response = NextResponse.json(
-        { success: false, message: 'Authorization header missing' },
-        { status: 401 }
-      )
-      return withCors(response, origin)
-    }
-    
-    const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
-    
-    const body = await request.json()
-    const { leaveRequestId, action, comments } = body
-    
-    if (!leaveRequestId || !action) {
-      const response = NextResponse.json(
-        { success: false, message: 'Leave request ID and action are required' },
-        { status: 400 }
-      )
-      return withCors(response, origin)
-    }
-    
-    // Validate action
-    const validActions = ['APPROVE', 'REJECT', 'CANCEL']
-    if (!validActions.includes(action)) {
-      const response = NextResponse.json(
-        { success: false, message: 'Invalid action. Use APPROVE, REJECT, or CANCEL' },
-        { status: 400 }
-      )
-      return withCors(response, origin)
-    }
-    
-    // Get leave request with details
-    const leaveRequest = await prisma.leaveRequest.findUnique({
-      where: { id: leaveRequestId },
-      include: {
-        leaveType: {
-          select: {
-            id: true,
-            name: true,
-            policy: true
-          }
-        },
-        staffRecord: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            companyId: true,
-            staffId: true,
-            department: true,
-            position: true,
-            isRegistered: true
-          }
-        }
-      }
-    })
-    
-    if (!leaveRequest) {
-      const response = NextResponse.json(
-        { success: false, message: 'Leave request not found' },
-        { status: 404 }
-      )
-      return withCors(response, origin)
-    }
-    
-    // Check permissions
-    const canApproveAsManager = user.role === 'MANAGER' && 
-                               leaveRequest.currentStep === 'MANAGER' &&
-                               leaveRequest.managerApproverId === user.userId
-    
-    const canApproveAsHR = ['HR', 'SUPER_ADMIN', 'ADMIN'].includes(user.role) &&
-                          leaveRequest.currentStep === 'HR'
-    
-    const canCancel = (user.userId === leaveRequest.staffRecordId && 
-                      leaveRequest.status === 'PENDING') ||
-                     ['HR', 'SUPER_ADMIN', 'ADMIN'].includes(user.role)
-    
-    if (!canApproveAsManager && !canApproveAsHR && !canCancel) {
-      const response = NextResponse.json(
-        { success: false, message: 'Unauthorized to perform this action' },
-        { status: 403 }
-      )
-      return withCors(response, origin)
-    }
-    
-    let updatedLeaveRequest: any = null
-    let balanceUpdates: Record<string, any> = {}
-    
-    // Process the action in transaction
-    updatedLeaveRequest = await prisma.$transaction(async (tx) => {
-      if (action === 'APPROVE') {
-        if (leaveRequest.currentStep === 'MANAGER') {
-          const nextStep = leaveRequest.leaveType.policy?.approvalWorkflow === 'MANAGER_THEN_HR' 
-            ? 'HR' 
-            : 'COMPLETED'
-          
-          const newStatus = nextStep === 'COMPLETED' ? 'APPROVED' : 'MANAGER_APPROVED'
-          
-          const result = await tx.leaveRequest.update({
-            where: { id: leaveRequestId },
-            data: {
-              status: newStatus,
-              currentStep: nextStep,
-              managerApprovedAt: new Date(),
-              managerComments: comments,
-              updatedBy: user.userId
-            }
-          })
-          
-          // If manager-only approval, update balance immediately
-          if (nextStep === 'COMPLETED') {
-            const leaveBalance = await tx.staffLeaveBalance.findFirst({
-              where: {
-                staffRecordId: leaveRequest.staffRecordId,
-                leaveTypeId: leaveRequest.leaveTypeId,
-                year: new Date().getFullYear()
-              }
-            })
-            
-            if (leaveBalance) {
-              await tx.staffLeaveBalance.update({
-                where: { id: leaveBalance.id },
-                data: {
-                  pendingDays: { decrement: leaveRequest.totalDays },
-                  usedDays: { increment: leaveRequest.totalDays }
-                }
-              })
-              
-              balanceUpdates = {
-                pendingDecreased: leaveRequest.totalDays,
-                usedIncreased: leaveRequest.totalDays
-              }
-            }
-          }
-          
-          return result
-          
-        } else if (leaveRequest.currentStep === 'HR') {
-          const result = await tx.leaveRequest.update({
-            where: { id: leaveRequestId },
-            data: {
-              status: 'APPROVED',
-              currentStep: 'COMPLETED',
-              hrApprovedAt: new Date(),
-              hrComments: comments,
-              updatedBy: user.userId
-            }
-          })
-          
-          // Update leave balance when fully approved
-          const leaveBalance = await tx.staffLeaveBalance.findFirst({
-            where: {
-              staffRecordId: leaveRequest.staffRecordId,
-              leaveTypeId: leaveRequest.leaveTypeId,
-              year: new Date().getFullYear()
-            }
-          })
-          
-          if (leaveBalance) {
-            await tx.staffLeaveBalance.update({
-              where: { id: leaveBalance.id },
-              data: {
-                pendingDays: { decrement: leaveRequest.totalDays },
-                usedDays: { increment: leaveRequest.totalDays }
-              }
-            })
-            
-            balanceUpdates = {
-              pendingDecreased: leaveRequest.totalDays,
-              usedIncreased: leaveRequest.totalDays
-            }
-          }
-          
-          return result
-        }
-        
-      } else if (action === 'REJECT') {
-        const result = await tx.leaveRequest.update({
-          where: { id: leaveRequestId },
-          data: {
-            status: 'REJECTED',
-            currentStep: 'REJECTED',
-            rejectedAt: new Date(),
-            rejectComments: comments,
-            updatedBy: user.userId
-          }
-        })
-        
-        // Return pending days to available balance
-        const leaveBalance = await tx.staffLeaveBalance.findFirst({
-          where: {
-            staffRecordId: leaveRequest.staffRecordId,
-            leaveTypeId: leaveRequest.leaveTypeId,
-            year: new Date().getFullYear()
-          }
-        })
-        
-        if (leaveBalance) {
-          await tx.staffLeaveBalance.update({
-            where: { id: leaveBalance.id },
-            data: {
-              pendingDays: { decrement: leaveRequest.totalDays }
-            }
-          })
-          
-          balanceUpdates = {
-            pendingDecreased: leaveRequest.totalDays
-          }
-        }
-        
-        return result
-        
-      } else if (action === 'CANCEL') {
-        const result = await tx.leaveRequest.update({
-          where: { id: leaveRequestId },
-          data: {
-            status: 'CANCELLED',
-            currentStep: 'CANCELLED',
-            cancelledAt: new Date(),
-            cancelComments: comments,
-            updatedBy: user.userId
-          }
-        })
-        
-        // Return pending days to available balance
-        const leaveBalance = await tx.staffLeaveBalance.findFirst({
-          where: {
-            staffRecordId: leaveRequest.staffRecordId,
-            leaveTypeId: leaveRequest.leaveTypeId,
-            year: new Date().getFullYear()
-          }
-        })
-        
-        if (leaveBalance) {
-          await tx.staffLeaveBalance.update({
-            where: { id: leaveBalance.id },
-            data: {
-              pendingDays: { decrement: leaveRequest.totalDays }
-            }
-          })
-          
-          balanceUpdates = {
-            pendingDecreased: leaveRequest.totalDays
-          }
-        }
-        
-        return result
-      }
-      
-      throw new Error('Invalid action or workflow state')
-    })
-    
-    // Send notifications after transaction
-    try {
-      const actionByUser = await prisma.staffRecord.findUnique({
-        where: { id: user.userId },
-        select: { firstName: true, lastName: true, role: true }
-      })
-      
-      const actionByName = actionByUser ? `${actionByUser.firstName} ${actionByUser.lastName} (${actionByUser.role})` : 'System'
-      
-      let notificationType: keyof typeof NOTIFICATION_TYPES
-      let emailNotificationType: 'APPROVED' | 'REJECTED' | 'CANCELLED'
-      
-      switch (action) {
-        case 'APPROVE':
-          notificationType = leaveRequest.currentStep === 'HR' ? 'LEAVE_APPROVED' : 'LEAVE_MANAGER_APPROVED'
-          emailNotificationType = 'APPROVED'
-          break
-        case 'REJECT':
-          notificationType = 'LEAVE_REJECTED'
-          emailNotificationType = 'REJECTED'
-          break
-        case 'CANCEL':
-          notificationType = 'LEAVE_CANCELLED'
-          emailNotificationType = 'CANCELLED'
-          break
-        default:
-          throw new Error('Invalid action')
-      }
-      
-      // Notify Applicant
-      await createLeaveNotification(
-        leaveRequest.staffRecord.id,
-        notificationType,
-        `Leave Request ${action}`,
-        `Your ${leaveRequest.leaveType.name} leave request has been ${action.toLowerCase()}ed by ${actionByName}`,
-        leaveRequest.id,
-        {
-          referenceNumber: getSafeReferenceNumber(leaveRequest.referenceNumber),
-          leaveType: leaveRequest.leaveType.name,
-          startDate: leaveRequest.startDate.toISOString(),
-          endDate: leaveRequest.endDate.toISOString(),
-          days: leaveRequest.totalDays,
-          status: updatedLeaveRequest.status,
-          actionBy: actionByName,
-          actionAt: new Date().toISOString()
-        },
-        leaveRequest.staffRecord.companyId
-      )
-      
-      // Email to applicant
-      await sendLeaveNotificationEmail(
-        {
-          id: leaveRequest.staffRecord.id,
-          companyId: leaveRequest.staffRecord.companyId,
-          firstName: leaveRequest.staffRecord.firstName,
-          lastName: leaveRequest.staffRecord.lastName,
-          email: leaveRequest.staffRecord.email,
-          staffId: leaveRequest.staffRecord.staffId,
-          department: leaveRequest.staffRecord.department,
-          position: leaveRequest.staffRecord.position,
-          isRegistered: leaveRequest.staffRecord.isRegistered
-        },
-        {
-          id: leaveRequest.id,
-          referenceNumber: getSafeReferenceNumber(leaveRequest.referenceNumber),
-          leaveType: leaveRequest.leaveType.name,
-          startDate: leaveRequest.startDate,
-          endDate: leaveRequest.endDate,
-          totalDays: leaveRequest.totalDays,
-          status: updatedLeaveRequest.status,
-          currentStep: updatedLeaveRequest.currentStep
-        },
-        emailNotificationType
-      )
-      
-      // If approved by manager and needs HR approval, notify HR
-      if (action === 'APPROVE' && updatedLeaveRequest.currentStep === 'HR') {
-        const hrUsers = await prisma.staffRecord.findMany({
-          where: {
-            companyId: leaveRequest.staffRecord.companyId,
-            role: { in: ['HR', 'SUPER_ADMIN', 'ADMIN'] },
-            isActive: true
-          },
-          select: { 
-            id: true, 
-            firstName: true, 
-            lastName: true, 
-            email: true,
-            staffId: true,
-            department: true,
-            position: true,
-            isRegistered: true
-          }
-        })
-        
-        for (const hrUser of hrUsers) {
-          await createLeaveNotification(
-            hrUser.id,
-            NOTIFICATION_TYPES.LEAVE_HR_APPROVAL_NEEDED,
-            'Leave Request Pending HR Approval',
-            `${leaveRequest.staffRecord.firstName} ${leaveRequest.staffRecord.lastName}'s ${leaveRequest.leaveType.name} leave request needs HR approval`,
-            leaveRequest.id,
-            {
-              leaveRequestId: leaveRequest.id,
-              referenceNumber: getSafeReferenceNumber(leaveRequest.referenceNumber),
-              staffName: `${leaveRequest.staffRecord.firstName} ${leaveRequest.staffRecord.lastName}`,
-              leaveType: leaveRequest.leaveType.name,
-              startDate: leaveRequest.startDate,
-              endDate: leaveRequest.endDate,
-              days: leaveRequest.totalDays,
-              managerApproved: true
-            },
-            leaveRequest.staffRecord.companyId
-          )
-          
-          // Email to HR
-          await sendLeaveNotificationEmail(
-            {
-              id: hrUser.id,
-              companyId: leaveRequest.staffRecord.companyId,
-              firstName: hrUser.firstName,
-              lastName: hrUser.lastName,
-              email: hrUser.email,
-              staffId: hrUser.staffId,
-              department: hrUser.department,
-              position: hrUser.position,
-              isRegistered: hrUser.isRegistered
-            },
-            {
-              id: leaveRequest.id,
-              referenceNumber: getSafeReferenceNumber(leaveRequest.referenceNumber),
-              leaveType: leaveRequest.leaveType.name,
-              startDate: leaveRequest.startDate,
-              endDate: leaveRequest.endDate,
-              totalDays: leaveRequest.totalDays,
-              status: updatedLeaveRequest.status,
-              currentStep: updatedLeaveRequest.currentStep
-            },
-            'HR_APPROVAL'
-          )
-        }
-      }
-      
-      console.log(`✅ Status change notification sent for leave request: ${leaveRequest.id}, action: ${action}`)
-    } catch (notificationError) {
-      console.error('Error sending status change notifications:', notificationError)
-      // Don't fail the whole request if notifications fail
-    }
-    
-    const response = NextResponse.json({
-      success: true,
-      message: `Leave request ${action.toLowerCase()}d successfully`,
-      data: {
-        leaveRequest: updatedLeaveRequest,
-        balanceUpdates,
-        actionPerformedBy: {
-          id: user.userId,
-          role: user.role,
-          timestamp: new Date().toISOString()
-        }
-      }
-    })
-    
-    return withCors(response, origin)
-    
-  } catch (error: any) {
-    console.error('Update leave request error:', error)
-    
-    if (error.code === 'P2025') {
-      const response = NextResponse.json(
-        { success: false, message: 'Record not found' },
-        { status: 404 }
-      )
-      return withCors(response, origin)
-    }
-    
-    const response = NextResponse.json(
-      { 
-        success: false,
-        message: 'Failed to update leave request',
         details: error.message 
       },
       { status: 500 }
