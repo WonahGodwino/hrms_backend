@@ -6,6 +6,8 @@ import ExcelJS from 'exceljs'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import { Prisma } from '@prisma/client'
+import { prisma } from '@/app/lib/prisma'
+import { randomUUID } from 'crypto'
 
 // Define types for failed records
 interface FailedRecord {
@@ -440,11 +442,10 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
   hasFailedRecords: boolean
   totalFailed: number
 }> {
-  const { prisma } = await import('@/app/lib/prisma')
-  
-  // Create initial upload record
-  const leaveUpload = await prisma.leaveUpload.create({
+  // Create initial upload record - FIXED: use leave_uploads model with required fields
+  const leaveUpload = await prisma.leave_uploads.create({
     data: {
+      id: randomUUID(), // Required field - generate UUID
       companyId: companyId,
       fileName: fileName,
       filePath: filePath,
@@ -460,7 +461,10 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
       holidaysUpdated: 0,
       blackoutPeriodsCreated: 0,
       blackoutPeriodsFailed: 0,
-      blackoutPeriodsUpdated: 0
+      blackoutPeriodsUpdated: 0,
+      createdAt: new Date(),
+      // For Json fields, use Prisma.DbNull for null values (not JsonNull)
+      failedRecords: Prisma.DbNull
     }
   })
 
@@ -891,8 +895,8 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
               }
             }
 
-            // Check if blackout period exists
-            const existingPeriod = await prisma.leaveBlackoutPeriod.findFirst({
+            // Check if blackout period exists - FIXED: use leave_blackout_periods model
+            const existingPeriod = await prisma.leave_blackout_periods.findFirst({
               where: {
                 companyId: companyId,
                 name: periodData.periodName,
@@ -901,24 +905,36 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
               }
             })
 
+            // Prepare data with required fields for leave_blackout_periods
             const periodDataToSave = {
+              id: randomUUID(), // Required field - generate UUID
               companyId: companyId,
               name: periodData.periodName,
               startDate: startDate,
               endDate: endDate,
               reason: periodData.reason || null,
               appliesToAllLeaveTypes: appliesToAllLeaveTypes,
-              policyId: policyId
+              policyId: policyId,
+              createdAt: new Date(),
+              updatedAt: new Date()
             }
 
             if (existingPeriod) {
-              await prisma.leaveBlackoutPeriod.update({
+              await prisma.leave_blackout_periods.update({
                 where: { id: existingPeriod.id },
-                data: periodDataToSave
+                data: {
+                  name: periodData.periodName,
+                  startDate: startDate,
+                  endDate: endDate,
+                  reason: periodData.reason || null,
+                  appliesToAllLeaveTypes: appliesToAllLeaveTypes,
+                  policyId: policyId,
+                  updatedAt: new Date()
+                }
               })
               results.blackoutPeriods.updated++
             } else {
-              await prisma.leaveBlackoutPeriod.create({
+              await prisma.leave_blackout_periods.create({
                 data: periodDataToSave
               })
               results.blackoutPeriods.created++
@@ -952,8 +968,8 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
     ...results.blackoutPeriods.failedRecords
   ]
 
-  // Update upload record with final results
-  const updatedUpload = await prisma.leaveUpload.update({
+  // Update upload record with final results - FIXED: use leave_uploads model
+  const updatedUpload = await prisma.leave_uploads.update({
     where: { id: leaveUpload.id },
     data: {
       policiesCreated: results.policies.created,
@@ -968,7 +984,10 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
       blackoutPeriodsCreated: results.blackoutPeriods.created,
       blackoutPeriodsUpdated: results.blackoutPeriods.updated,
       blackoutPeriodsFailed: results.blackoutPeriods.failed,
-      failedRecords: JSON.stringify(allFailedRecords)
+      // Use Prisma.DbNull for null JSON values (not JsonNull)
+      failedRecords: allFailedRecords.length > 0 
+        ? JSON.stringify(allFailedRecords) 
+        : Prisma.DbNull
     }
   })
 
@@ -1014,10 +1033,8 @@ export async function GET(request: NextRequest) {
 
     // Handle failed records download
     if (action === 'failed' && uploadId) {
-      const { prisma } = await import('@/app/lib/prisma')
-      
-      // Verify upload exists and user has access
-      const upload = await prisma.leaveUpload.findFirst({
+      // Verify upload exists and user has access - FIXED: use leave_uploads model
+      const upload = await prisma.leave_uploads.findFirst({
         where: {
           id: uploadId,
           uploadedBy: user.userId
@@ -1040,11 +1057,35 @@ export async function GET(request: NextRequest) {
         return withCors(response, origin)
       }
 
-      // Parse failed records
+      // Parse failed records robustly (handles string, JsonArray, DbNull)
       let failedRecords: FailedRecord[] = []
       try {
-        failedRecords = JSON.parse(upload.failedRecords as string)
-      } catch {
+        const fr = upload.failedRecords
+
+        if (!fr) {
+          failedRecords = []
+        } else if (typeof fr === 'string') {
+          const parsed = JSON.parse(fr)
+          if (Array.isArray(parsed)) {
+            failedRecords = (parsed as any[]).filter(Boolean).map((r: any) => ({
+              sheetType: r?.sheetType,
+              rowData: r?.rowData,
+              error: r?.error,
+              suggestion: r?.suggestion
+            } as FailedRecord))
+          }
+        } else if (Array.isArray(fr)) {
+          failedRecords = (fr as any[]).filter(Boolean).map((r: any) => ({
+            sheetType: r?.sheetType,
+            rowData: r?.rowData,
+            error: r?.error,
+            suggestion: r?.suggestion
+          } as FailedRecord))
+        } else {
+          // Handle Prisma.DbNull or other object-like values by treating as empty
+          failedRecords = []
+        }
+      } catch (e) {
         const response = NextResponse.json(
           { success: false, message: 'Failed to parse failed records' },
           { status: 500 }
@@ -1073,7 +1114,6 @@ export async function GET(request: NextRequest) {
     }
 
     // Verify company exists
-    const { prisma } = await import('@/app/lib/prisma')
     const company = await prisma.company.findFirst({
       where: { id: companyId, archived: 0 }
     })
@@ -1168,7 +1208,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify company exists
-    const { prisma } = await import('@/app/lib/prisma')
     const company = await prisma.company.findFirst({
       where: {
         id: companyId,

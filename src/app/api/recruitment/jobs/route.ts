@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN'])
+    const user = requireRole(token, ['HR', 'ADMIN','SUPER_ADMIN'])
 
     if (!user.companyId) {
       return withCors(

@@ -1,15 +1,99 @@
-// /src/app/api/leaves/admin/route.ts
+// src/app/api/leaves/admin/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { requireRole } from '@/app/lib/auth'
+import { requireRoleAsync, AuthUser } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { decimalToNumber } from '@/app/lib/prisma-utils'
-import { 
-  getAccessibleCompanyIds, 
-  getAccessibleStaffIds,
-  UserContext 
-} from '@/app/lib/access-control'
+import { LeaveStatusEnum, ApprovalStepEnum } from '@/app/lib/types/leave'
+
+// Define a type for the API response that matches what we return
+interface LeaveRequestAdminResponse {
+  id: string;
+  referenceNumber: string | null;
+  staffRecordId: string;
+  leaveTypeId: string;
+  startDate: Date;
+  endDate: Date;
+  totalDays: number;
+  reason: string;
+  emergencyContact: string | null;
+  contactPhone: string | null;
+  status: string;
+  currentStep: string;
+  managerApproverId: string | null;
+  managerApprovedAt: Date | null;
+  managerApprovedBy: string | null;
+  managerComments: string | null;
+  hrApproverUserId: string | null;
+  hrApproverRole: string | null;
+  hrApprovedAt: Date | null;
+  hrApprovedBy: string | null;
+  hrComments: string | null;
+  rejectionReason: string | null;
+  rejectedByStep: string | null;
+  rejectedById: string | null;
+  handoverTo: string | null;
+  handoverStaffId: string | null;
+  handoverNotes: string | null;
+  attachmentUrl: string | null;
+  fileName: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy: string;
+  updatedBy: string | null;
+  staffRecord: {
+    id: string;
+    staffId: string;
+    firstName: string;
+    lastName: string;
+    department: string;
+    position: string;
+    email: string;
+    company: {
+      id: string;
+      companyName: string;
+    };
+    manager: {
+      id: string;
+      firstName: string;
+      lastName: string;
+      email: string;
+    } | null;
+  };
+  leaveType: {
+    id: string;
+    name: string;
+    code: string;
+    color: string | null;
+    policy: {
+      id: string;
+      name: string;
+      approvalWorkflow: string;
+      requiresApproval: boolean;
+      maxDays: number;
+      noticePeriod: number;
+      minEmploymentMonths: number;
+      isPaid: boolean;
+      documentationRequired: boolean;
+      carryOver: number;
+      accrualRate: number | null;
+    } | null;
+  };
+  managerApprover: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+  } | null;
+  handoverStaff: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    staffId: string;
+  } | null;
+}
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -18,7 +102,7 @@ export async function OPTIONS(request: NextRequest) {
 /**
  * GET /api/leaves/admin
  * For HR, ADMIN, SUPER_ADMIN to view and manage leave requests
- * Access is strictly controlled via UserCompany table
+ * Access is strictly controlled via user_companies table
  */
 export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
@@ -33,7 +117,9 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN']) as UserContext
+    
+    // Use requireRoleAsync to get full user with company assignments
+    const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const { searchParams } = new URL(request.url)
     const page = parseInt(searchParams.get('page') || '1', 10)
@@ -54,8 +140,34 @@ export async function GET(request: NextRequest) {
 
     const skip = (page - 1) * limit
 
-    // ============ CRITICAL: GET ACCESSIBLE COMPANIES VIA UserCompany ============
-    const accessibleCompanyIds = await getAccessibleCompanyIds(user)
+    // ============ GET USER'S STAFF RECORD ============
+    // Get the staff record using userId from auth
+    const staffRecord = await prisma.staffRecord.findFirst({
+      where: { 
+        id: user.userId // AuthUser has userId, not id
+      },
+      select: { id: true, companyId: true }
+    })
+
+    if (!staffRecord) {
+      return withCors(
+        ApiResponse.error('Staff record not found', 404),
+        origin
+      )
+    }
+
+    // ============ GET ACCESSIBLE COMPANIES VIA user_companies ============
+    // Use the companyIds from the auth user (already populated by requireRoleAsync)
+    let accessibleCompanyIds = user.companyIds || []
+    
+    // If user is SUPER_ADMIN but companyIds not populated, fetch all companies
+    if (user.role === 'SUPER_ADMIN' && accessibleCompanyIds.length === 0) {
+      const allCompanies = await prisma.company.findMany({
+        where: { archived: 0 },
+        select: { id: true }
+      })
+      accessibleCompanyIds = allCompanies.map(c => c.id)
+    }
     
     if (accessibleCompanyIds.length === 0) {
       return withCors(
@@ -83,7 +195,15 @@ export async function GET(request: NextRequest) {
     }
 
     // ============ GET ALL STAFF IN ACCESSIBLE COMPANIES ============
-    const accessibleStaffIds = await getAccessibleStaffIds(user)
+    const accessibleStaffRecords = await prisma.staffRecord.findMany({
+      where: {
+        companyId: { in: accessibleCompanyIds },
+        isActive: true
+      },
+      select: { id: true }
+    })
+
+    const accessibleStaffIds = accessibleStaffRecords.map(s => s.id)
 
     if (accessibleStaffIds.length === 0) {
       return withCors(
@@ -117,13 +237,13 @@ export async function GET(request: NextRequest) {
 
     // Apply approval queue filters
     if (pendingManagerApproval) {
-      where.status = 'PENDING'
-      where.currentStep = 'MANAGER'
+      where.status = LeaveStatusEnum.PENDING
+      where.currentStep = ApprovalStepEnum.MANAGER
     }
     
     if (pendingHRApproval) {
-      where.status = 'MANAGER_APPROVED'
-      where.currentStep = 'HR'
+      where.status = LeaveStatusEnum.MANAGER_APPROVED
+      where.currentStep = ApprovalStepEnum.HR
     }
 
     // Apply status filter
@@ -141,9 +261,9 @@ export async function GET(request: NextRequest) {
       where.leaveTypeId = leaveTypeId
     }
     
-    // ============ COMPANY FILTER - VERIFY ACCESS FIRST ============
+    // ============ COMPANY FILTER - VERIFY ACCESS VIA user_companies ============
     if (companyId) {
-      // Verify this company is accessible via UserCompany
+      // Verify this company is accessible
       if (accessibleCompanyIds.includes(companyId)) {
         const staffInCompany = await prisma.staffRecord.findMany({
           where: { 
@@ -207,88 +327,93 @@ export async function GET(request: NextRequest) {
     }
 
     // ============ FETCH LEAVES ============
-    const [leaves, totalCount] = await Promise.all([
-      prisma.leaveRequest.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: [
-          { status: 'asc' },
-          { createdAt: 'desc' }
-        ],
-        include: {
-          staffRecord: {
-            select: {
-              id: true,
-              staffId: true,
-              firstName: true,
-              lastName: true,
-              department: true,
-              position: true,
-              email: true,
-              company: {
-                select: {
-                  id: true,
-                  companyName: true
-                }
-              },
-              manager: {
-                select: {
-                  id: true,
-                  firstName: true,
-                  lastName: true,
-                  email: true
-                }
+    const leaves = await prisma.leaveRequest.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: [
+        { status: 'asc' },
+        { createdAt: 'desc' }
+      ],
+      include: {
+        staffRecord: {
+          select: {
+            id: true,
+            staffId: true,
+            firstName: true,
+            lastName: true,
+            department: true,
+            position: true,
+            email: true,
+            company: {
+              select: {
+                id: true,
+                companyName: true
               }
-            }
-          },
-          leaveType: {
-            select: {
-              id: true,
-              name: true,
-              code: true,
-              color: true,
-              policy: {
-                select: {
-                  name: true,
-                  approvalWorkflow: true,
-                  requiresApproval: true
-                }
+            },
+            manager: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true
               }
-            }
-          },
-          managerApprover: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true
-            }
-          },
-          handoverStaff: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-              staffId: true
-            }
-          },
-          company: {
-            select: {
-              id: true,
-              companyName: true
             }
           }
+        },
+        leaveType: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            color: true,
+            policy: {
+              select: {
+                id: true,
+                name: true,
+                approvalWorkflow: true,
+                requiresApproval: true,
+                maxDays: true,
+                noticePeriod: true,
+                minEmploymentMonths: true,
+                isPaid: true,
+                documentationRequired: true,
+                carryOver: true,
+                accrualRate: true
+              }
+            }
+          }
+        },
+        managerApprover: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true
+          }
+        },
+        handoverStaff: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            staffId: true
+          }
         }
-      }),
-      prisma.leaveRequest.count({ where })
-    ])
+      }
+    })
 
-    // Format leaves with decimal conversion
-    const formattedLeaves = leaves.map(leave => ({
+    const totalCount = await prisma.leaveRequest.count({ where })
+
+    // Format leaves with decimal conversion - properly typed
+    const formattedLeaves: LeaveRequestAdminResponse[] = leaves.map(leave => ({
       ...leave,
-      totalDays: decimalToNumber(leave.totalDays)
+      totalDays: decimalToNumber(leave.totalDays),
+      staffRecord: leave.staffRecord,
+      leaveType: leave.leaveType,
+      managerApprover: leave.managerApprover,
+      handoverStaff: leave.handoverStaff
     }))
 
     // ============ CALCULATE SUMMARY STATISTICS ============
@@ -297,23 +422,23 @@ export async function GET(request: NextRequest) {
       prisma.leaveRequest.count({
         where: {
           staffRecordId: { in: accessibleStaffIds },
-          status: 'PENDING',
-          currentStep: 'MANAGER'
+          status: LeaveStatusEnum.PENDING,
+          currentStep: ApprovalStepEnum.MANAGER
         }
       }),
       // Pending HR approvals
       prisma.leaveRequest.count({
         where: {
           staffRecordId: { in: accessibleStaffIds },
-          status: 'MANAGER_APPROVED',
-          currentStep: 'HR'
+          status: LeaveStatusEnum.MANAGER_APPROVED,
+          currentStep: ApprovalStepEnum.HR
         }
       }),
       // Approved this month
       prisma.leaveRequest.count({
         where: {
           staffRecordId: { in: accessibleStaffIds },
-          status: 'APPROVED',
+          status: { in: [LeaveStatusEnum.APPROVED, LeaveStatusEnum.HR_APPROVED] },
           startDate: {
             gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
             lt: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0)
@@ -324,7 +449,7 @@ export async function GET(request: NextRequest) {
       prisma.leaveRequest.count({
         where: {
           staffRecordId: { in: accessibleStaffIds },
-          status: 'REJECTED',
+          status: LeaveStatusEnum.REJECTED,
           startDate: {
             gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
             lt: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0)
@@ -341,9 +466,9 @@ export async function GET(request: NextRequest) {
       })
     ])
 
-    const totalPending = totalStats.find(s => s.status === 'PENDING')?._count || 0
-    const totalApproved = totalStats.find(s => s.status === 'APPROVED')?._count || 0
-    const totalRejected = totalStats.find(s => s.status === 'REJECTED')?._count || 0
+    const totalPending = totalStats.find(s => s.status === LeaveStatusEnum.PENDING)?._count || 0
+    const totalApproved = totalStats.find(s => [LeaveStatusEnum.APPROVED, LeaveStatusEnum.HR_APPROVED].includes(s.status as any))?._count || 0
+    const totalRejected = totalStats.find(s => s.status === LeaveStatusEnum.REJECTED)?._count || 0
 
     // Get accessible companies list for the response
     const accessibleCompaniesList = await getAccessibleCompaniesList(accessibleCompanyIds)

@@ -1,109 +1,89 @@
-// prisma/schema.prisma
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
-  // url      = env("DATABASE_URL")
 }
 
 model Company {
-  id          String   @id @default(cuid())
-  companyName String
-  address     String?
-  phone       String?
-  email       String
-  logo        String?
-  taxId       String?
-  workWeekPattern String? @db.VarChar(20)
-  archived    Int      @default(0)
-  createdBy   String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime? @updatedAt
+  id                     String                   @id @default(cuid())
+  companyName            String
+  address                String?
+  phone                  String?
+  email                  String
+  logo                   String?
+  taxId                  String?
+  archived               Int                      @default(0)
+  createdBy              String
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime?                @updatedAt
+  workWeekPattern        String?                  @db.VarChar(20)
+  aiSettings             AISettings?
+  aiUsageLogs            AIUsageLog[]
+  attendances            Attendance[]
+  candidateDocuments     CandidateDocument[]
+  candidateFiles         CandidateFile[]
+  candidates             Candidate[]
+  interviews             Interview[]
+  applications           JobApplication[]
+  jobs                   Job[]
+  notifications          Notification[]
+  leave_blackout_periods leave_blackout_periods[]
+  leavePolicies          LeavePolicy[]
+  leave_uploads          leave_uploads[]
+  offers                 Offer[]
+  onboardings            Onboarding[]
+  payrollUploads         PayrollUpload[]
+  payrolls               Payroll[]
+  payslips               Payslip[]
+  publicHolidays         PublicHoliday[]
+  staff                  StaffRecord[]
+  staffUploads           StaffUpload[]
+  userCompanies          UserCompany[]
   
-  // Relations
-  staff              StaffRecord[]
-  payrolls           Payroll[]
-  payslips           Payslip[]
-  staffUploads       StaffUpload[]
-  payrollUploads     PayrollUpload[]
-  jobs               Job[]
-  candidates         Candidate[]
-  applications       JobApplication[]
-  offers             Offer[]
-  onboardings        Onboarding[]
-  interviews         Interview[]
-  candidateDocuments CandidateDocument[]
-  candidateFiles     CandidateFile[]
-  aiSettings  AISettings?
-  aiUsageLogs AIUsageLog[]
-  userCompanies UserCompany[]
-  attendances        Attendance[]
-  
-  // LEAVE MANAGEMENT RELATIONS
-  leavePolicies   LeavePolicy[]
-  publicHolidays  PublicHoliday[]
-  leaveUploads    LeaveUpload[]
-  blackoutPeriods LeaveBlackoutPeriod[]
-  
-  // NOTIFICATIONS
-  notifications Notification[]
-  
-  // LEAVE REQUESTS
-  leaveRequests LeaveRequest[] 
 
   @@map("companies")
 }
 
 model StaffRecord {
-  id            String   @id @default(cuid())
-  staffId       String
-  email         String
-  firstName     String
-  lastName      String
-  department    String
-  position      String
-  phone         String?
-  bankName      String?
-  accountNumber String?
-  bvn           String?
-  password      String?
-  isRegistered  Boolean  @default(false)
-  role          String   @default("STAFF")
-  isActive      Boolean  @default(true)
-  encodedId     String? 
-  companyId     String
-  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdBy     String
-  createdAt     DateTime @default(now())
-  updatedBy     String?
-  updatedAt     DateTime @updatedAt
+  id                              String              @id @default(cuid())
+  staffId                         String
+  email                           String
+  firstName                       String
+  lastName                        String
+  department                      String
+  position                        String
+  phone                           String?
+  bankName                        String?
+  accountNumber                   String?
+  bvn                             String?
+  password                        String?
+  isRegistered                    Boolean             @default(false)
+  role                            String              @default("STAFF")
+  isActive                        Boolean             @default(true)
+  companyId                       String
+  createdBy                       String
+  createdAt                       DateTime            @default(now())
+  updatedAt                       DateTime            @updatedAt
+  encodedId                       String?
+  updatedBy                       String?
+  managerId                       String?
   
-  // Relations
-  payrolls    Payroll[]
-  payslips    Payslip[]
-  onboardings Onboarding[]
-  userCompanies UserCompany[]
-  attendances   Attendance[]
-  
-  // LEAVE MANAGEMENT RELATIONS
-  leaveBalances   StaffLeaveBalance[]
-  leaveRequests   LeaveRequest[] // As requester
-  
-  // Manager approval chain
-  managerId       String?
-  manager         StaffRecord? @relation("StaffManagers", fields: [managerId], references: [id])
-  directReports   StaffRecord[] @relation("StaffManagers")
-  
-  // Manager approval requests
-  leaveRequestsToApproveAsManager LeaveRequest[] @relation("ManagerApprovals")
-  
-  // HANDOVER REQUESTS 
-  handoverRequests LeaveRequest[] @relation("HandoverStaff") 
-  
-  // NOTIFICATIONS
-  notifications Notification[] 
+  // Relations with matching relation names
+  attendances                     Attendance[]
+  leaveRequestsToApproveAsManager LeaveRequest[]      @relation("LeaveRequestManagerApprover")
+  leaveRequests                   LeaveRequest[]      @relation("LeaveRequestStaff")
+  leaveRequestsAsHandover         LeaveRequest[]      @relation("LeaveRequestHandover")
+  onboardings                     Onboarding[]
+  payrolls                        Payroll[]
+  payslips                        Payslip[]
+  leaveBalances                   StaffLeaveBalance[]
+  company                         Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  manager                         StaffRecord?        @relation("StaffManagers", fields: [managerId], references: [id])
+  directReports                   StaffRecord[]       @relation("StaffManagers")
+  userCompanies                   UserCompany[]
+  notifications                    Notification[]
 
   @@unique([staffId, companyId])
   @@unique([email, companyId])
@@ -111,107 +91,82 @@ model StaffRecord {
 }
 
 model Payroll {
-  id             String   @id @default(cuid())
-  companyId      String
-  staffRecordId  String
-  month          String
-  year           Int
-  
-  // Basic salary components
-  grossPay         Decimal? @db.Decimal(18, 2)
-  basicSalary      Decimal? @db.Decimal(18, 2)
-  housing          Decimal? @db.Decimal(18, 2)
-  transport        Decimal? @db.Decimal(18, 2)
-  dressing         Decimal? @db.Decimal(18, 2)
-  leaveAllowance   Decimal? @db.Decimal(18, 2)
-  entertainment    Decimal? @db.Decimal(18, 2)
-  utility          Decimal? @db.Decimal(18, 2)
-  otherAllowance   Decimal? @db.Decimal(18, 2)  // For Blueridge template
-  
-  // Additional salary components from first model
-  proratedGrossPay    Decimal? @db.Decimal(18, 2)
-  proratedGrossWithExtra Decimal? @db.Decimal(18, 2)
-  annualPension       Decimal? @db.Decimal(18, 2)
-  annualGrossPay      Decimal? @db.Decimal(18, 2)
-  consolidatedRelief  Decimal? @db.Decimal(18, 2)
-  taxableIncome       Decimal? @db.Decimal(18, 2)
-  
-  // Deductions
-  deductions          Decimal? @db.Decimal(18, 2)
-  payee               Decimal? @db.Decimal(18, 2)
-  pensionDeduction    Decimal? @db.Decimal(18, 2)
-  bonusKPI            Decimal? @db.Decimal(18, 2)
-  
-  // Final calculations
-  netSalary           Decimal? @db.Decimal(18, 2)
-  finalGross          Decimal? @db.Decimal(18, 2)
-  medicalContribution Decimal? @db.Decimal(18, 2)
-  
-  // Employer contributions
-  employerPension     Decimal? @db.Decimal(18, 2)
-  nsitf               Decimal? @db.Decimal(18, 2)
-  proratedSubTotal    Decimal? @db.Decimal(18, 2)
-  managementFee       Decimal? @db.Decimal(18, 2)
-  vatOnManagementFee  Decimal? @db.Decimal(18, 2)
-  totalInvoiceValue   Decimal? @db.Decimal(18, 2)
-  
-  // Status and metadata
-  status         String   @default("PROCESSED")
-  templateType   String?  @default("ISURF_STANDARD") // Optional: track template used
-  uploadedBy     String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                     String      @id @default(cuid())
+  companyId              String
+  staffRecordId          String
+  month                  String
+  year                   Int
+  grossPay               Decimal?    @db.Decimal(18, 2)
+  basicSalary            Decimal?    @db.Decimal(18, 2)
+  housing                Decimal?    @db.Decimal(18, 2)
+  transport              Decimal?    @db.Decimal(18, 2)
+  dressing               Decimal?    @db.Decimal(18, 2)
+  leaveAllowance         Decimal?    @db.Decimal(18, 2)
+  entertainment          Decimal?    @db.Decimal(18, 2)
+  utility                Decimal?    @db.Decimal(18, 2)
+  otherAllowance         Decimal?    @db.Decimal(18, 2)
+  proratedGrossPay       Decimal?    @db.Decimal(18, 2)
+  proratedGrossWithExtra Decimal?    @db.Decimal(18, 2)
+  annualPension          Decimal?    @db.Decimal(18, 2)
+  annualGrossPay         Decimal?    @db.Decimal(18, 2)
+  consolidatedRelief     Decimal?    @db.Decimal(18, 2)
+  taxableIncome          Decimal?    @db.Decimal(18, 2)
+  deductions             Decimal?    @db.Decimal(18, 2)
+  payee                  Decimal?    @db.Decimal(18, 2)
+  pensionDeduction       Decimal?    @db.Decimal(18, 2)
+  bonusKPI               Decimal?    @db.Decimal(18, 2)
+  netSalary              Decimal?    @db.Decimal(18, 2)
+  finalGross             Decimal?    @db.Decimal(18, 2)
+  medicalContribution    Decimal?    @db.Decimal(18, 2)
+  employerPension        Decimal?    @db.Decimal(18, 2)
+  nsitf                  Decimal?    @db.Decimal(18, 2)
+  proratedSubTotal       Decimal?    @db.Decimal(18, 2)
+  managementFee          Decimal?    @db.Decimal(18, 2)
+  vatOnManagementFee     Decimal?    @db.Decimal(18, 2)
+  totalInvoiceValue      Decimal?    @db.Decimal(18, 2)
+  status                 String      @default("PROCESSED")
+  templateType           String?     @default("ISURF_STANDARD")
+  uploadedBy             String
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+  company                Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staffRecord            StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+  payslips               Payslip[]
 
-  // Relations
-  company     Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  staffRecord StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
-  payslips    Payslip[]
-
-  // Indexes and constraints
   @@unique([staffRecordId, month, year, companyId])
   @@index([companyId, year, month])
   @@map("payrolls")
 }
 
 model Payslip {
-  id            String   @id @default(cuid())
+  id            String      @id @default(cuid())
   payrollId     String
   staffRecordId String
   companyId     String
-
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  // File storage as binary data
-  fileData      Bytes?   // Store PDF as binary data
+  fileData      Bytes?
   fileName      String
-  fileType      String   @default("application/pdf")
-  fileSize      Int?     // in bytes
-  
-  // Keep original filePath for migration/backward compatibility
-  filePath      String?  
-  
+  fileType      String      @default("application/pdf")
+  fileSize      Int?
+  filePath      String?
   month         String
   year          Int
-  grossPay      Decimal? @db.Decimal(18, 2)
-  netPay        Decimal? @db.Decimal(18, 2)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
-  updatedBy String?
-  createdBy String?
-
-  payroll     Payroll     @relation(fields: [payrollId], references: [id], onDelete: Cascade)
-  staffRecord StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+  grossPay      Decimal?    @db.Decimal(18, 2)
+  netPay        Decimal?    @db.Decimal(18, 2)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @default(now()) @updatedAt
+  updatedBy     String?
+  createdBy     String?
+  company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payroll       Payroll     @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+  staffRecord   StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
 
   @@index([staffRecordId, year, month])
   @@map("payslips")
 }
 
 model StaffUpload {
-  id        String  @id @default(cuid())
-  companyId String
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
+  id           String   @id @default(cuid())
+  companyId    String
   fileName     String
   filePath     String
   totalRecords Int
@@ -220,21 +175,20 @@ model StaffUpload {
   errors       String[]
   uploadedBy   String
   createdAt    DateTime @default(now())
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@map("staff_uploads")
 }
 
 model PayrollUpload {
-  id        String  @id @default(cuid())
-  companyId String
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
+  id                String   @id @default(cuid())
+  companyId         String
   fileName          String
   filePath          String
   processedFilePath String?
   processedFileName String?
-  templateType      String  @default("ISURF_STANDARD")
-  sendEmails        Boolean @default(true)
+  templateType      String   @default("ISURF_STANDARD")
+  sendEmails        Boolean  @default(true)
   totalRecords      Int
   successful        Int
   failed            Int
@@ -243,11 +197,529 @@ model PayrollUpload {
   emailsSent        Int?
   emailAttempts     Int?
   errors            String[]
-
-  uploadedBy String
-  createdAt  DateTime @default(now())
+  uploadedBy        String
+  createdAt         DateTime @default(now())
+  company           Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@map("payroll_uploads")
+}
+
+model JobApplication {
+  id              String                    @id @default(cuid())
+  companyId       String
+  jobId           String
+  candidateId     String
+  cvFilePath      String
+  cvFileName      String?
+  parsedCvContent String?
+  status          ApplicationStatus         @default(SUBMITTED)
+  score           Int?
+  notes           String?
+  metadata        Json?
+  reviewedBy      String?
+  createdBy       String?
+  updatedBy       String?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  reviewedAt      DateTime?
+  cvFileId        String?                   @unique
+  stageHistory    ApplicationStageHistory[]
+  files           CandidateFile[]           @relation("ApplicationFiles")
+  interviews      Interview[]
+  candidate       Candidate                 @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  company         Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  cvFile          CandidateFile?            @relation("ApplicationCVFile", fields: [cvFileId], references: [id])
+  job             Job                       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  offer           Offer?
+
+  @@unique([jobId, candidateId])
+  @@index([companyId, jobId, status])
+  @@index([cvFileId])
+  @@map("job_applications")
+}
+
+model CandidateFile {
+  id               String            @id @default(cuid())
+  companyId        String
+  candidateId      String
+  applicationId    String?
+  type             CandidateFileType @default(CV)
+  fileName         String
+  mimeType         String
+  sizeBytes        Int
+  data             Bytes
+  createdBy        String?
+  createdAt        DateTime          @default(now())
+  application      JobApplication?   @relation("ApplicationFiles", fields: [applicationId], references: [id])
+  candidate        Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  cvForApplication JobApplication?   @relation("ApplicationCVFile")
+
+  @@index([companyId, candidateId])
+  @@index([applicationId])
+  @@index([companyId, applicationId, type])
+  @@map("candidate_files")
+}
+
+model Keyword {
+  id          String @id @default(cuid())
+  name        String @unique
+  description String
+  jobId       String
+  job         Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@map("keywords")
+}
+
+model Job {
+  id             String           @id @default(cuid())
+  title          String
+  description    String           @db.Text
+  department     String
+  position       String
+  companyId      String
+  status         JobStatus        @default(ACTIVE)
+  expirationDate DateTime?
+  createdBy      String
+  createdAt      DateTime         @default(now())
+  updatedBy      String?
+  updatedAt      DateTime         @updatedAt
+  applications   JobApplication[]
+  company        Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  keywords       Keyword[]
+
+  @@index([companyId, status])
+  @@map("jobs")
+}
+
+model Candidate {
+  id           String              @id @default(cuid())
+  companyId    String
+  firstName    String
+  lastName     String
+  email        String
+  phone        String?
+  address      String?
+  linkedInUrl  String?
+  portfolioUrl String?
+  createdBy    String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  documents    CandidateDocument[]
+  files        CandidateFile[]
+  company      Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  applications JobApplication[]
+  offers       Offer[]
+
+  @@unique([email, companyId])
+  @@index([companyId])
+  @@map("candidates")
+}
+
+model ApplicationStageHistory {
+  id            String             @id @default(cuid())
+  applicationId String
+  fromStatus    ApplicationStatus?
+  toStatus      ApplicationStatus
+  changedBy     String?
+  changedAt     DateTime           @default(now())
+  comment       String?
+  application   JobApplication     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@map("application_stage_history")
+}
+
+model Interview {
+  id            String           @id @default(cuid())
+  applicationId String
+  companyId     String
+  type          InterviewType    @default(VIDEO)
+  scheduledAt   DateTime
+  durationMins  Int?
+  meetingLink   String?
+  location      String?
+  interviewers  String[]
+  notes         String?
+  outcome       InterviewOutcome @default(PENDING)
+  createdBy     String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  application   JobApplication   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, scheduledAt])
+  @@index([companyId])
+  @@map("interviews")
+}
+
+model Offer {
+  id                String         @id @default(cuid())
+  companyId         String
+  applicationId     String         @unique
+  candidateId       String
+  status            OfferStatus    @default(DRAFT)
+  proposedStartDate DateTime?
+  employmentType    String?
+  salary            Decimal?       @db.Decimal(18, 2)
+  currency          String?
+  offerLetterPath   String?
+  offerLetterName   String?
+  sentAt            DateTime?
+  acceptedAt        DateTime?
+  declinedAt        DateTime?
+  createdBy         String?
+  updatedBy         String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  application       JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  candidate         Candidate      @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  company           Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  onboarding        Onboarding?
+
+  @@index([companyId, status])
+  @@map("offers")
+}
+
+model Onboarding {
+  id            String              @id @default(cuid())
+  companyId     String
+  offerId       String              @unique
+  status        OnboardingStatus    @default(NOT_STARTED)
+  startDate     DateTime?
+  completedAt   DateTime?
+  staffRecordId String?
+  createdBy     String?
+  updatedBy     String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  documents     CandidateDocument[]
+  tasks         OnboardingTask[]
+  company       Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  offer         Offer               @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  staffRecord   StaffRecord?        @relation(fields: [staffRecordId], references: [id])
+
+  @@index([companyId, status])
+  @@map("onboardings")
+}
+
+model OnboardingTask {
+  id           String               @id @default(cuid())
+  onboardingId String
+  title        String
+  description  String?
+  department   String?
+  assigneeId   String?
+  dueDate      DateTime?
+  status       OnboardingTaskStatus @default(PENDING)
+  completedAt  DateTime?
+  createdBy    String?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  onboarding   Onboarding           @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
+
+  @@index([onboardingId, status])
+  @@map("onboarding_tasks")
+}
+
+model CandidateDocument {
+  id           String                @id @default(cuid())
+  companyId    String
+  candidateId  String
+  onboardingId String?
+  type         CandidateDocumentType @default(OTHER)
+  filePath     String
+  fileName     String
+  uploadedBy   String?
+  createdAt    DateTime              @default(now())
+  candidate    Candidate             @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  company      Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  onboarding   Onboarding?           @relation(fields: [onboardingId], references: [id])
+
+  @@index([candidateId, type])
+  @@index([companyId])
+  @@map("candidate_documents")
+}
+
+model AISettings {
+  id                     String   @id @default(cuid())
+  companyId              String   @unique
+  monthlyBudget          Float    @default(100.00)
+  costPerReview          Float    @default(0.02)
+  costAlertThreshold     Int      @default(80)
+  enabled                Boolean  @default(true)
+  defaultService         String   @default("openai")
+  defaultModel           String   @default("gpt-3.5-turbo")
+  autoShortlistThreshold Int      @default(75)
+  useForSeniorRoles      Boolean  @default(true)
+  useForTechnicalRoles   Boolean  @default(true)
+  useForManagerRoles     Boolean  @default(true)
+  notifyEmails           String[]
+  createdBy              String?
+  updatedBy              String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  company                Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("ai_settings")
+}
+
+model AIUsageLog {
+  id            String   @id @default(cuid())
+  companyId     String
+  applicationId String?
+  service       String
+  model         String
+  tokensUsed    Int
+  cost          Float
+  endpoint      String
+  inputLength   Int
+  outputLength  Int
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([createdAt])
+  @@map("ai_usage_logs")
+}
+
+model UserCompany {
+  id        String      @id @default(cuid())
+  userId    String
+  companyId String
+  role      String      @default("HR")
+  createdBy String?
+  updatedBy String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user      StaffRecord @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, companyId])
+  @@index([userId])
+  @@index([companyId])
+  @@index([role])
+  @@map("user_companies")
+}
+
+model PasswordReset {
+  id           String   @id @default(cuid())
+  email        String
+  otp          String
+  otpExpiresAt DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  attempts     Int      @default(0)
+  companyId    String
+  isUsed       Boolean  @default(false)
+  notes        String?
+
+  @@unique([email, companyId])
+  @@index([email])
+  @@index([companyId])
+}
+
+model Attendance {
+  id             String      @id @default(cuid())
+  companyId      String
+  staffId        String
+  date           DateTime
+  signInTime     DateTime?
+  signOutTime    DateTime?
+  recordedById   String?
+  recordedByRole String?
+  method         String?
+  notes          String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  status         String?     @default("PRESENT")
+  company        Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staffRecord    StaffRecord @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, staffId, date])
+  @@index([companyId, date])
+  @@index([staffId, date])
+  @@index([status, date])
+  @@map("attendances")
+}
+
+model LeavePolicy {
+  id                     String                   @id @default(cuid())
+  companyId              String
+  name                   String
+  description            String?
+  maxDays                Int
+  carryOver              Int                      @default(0)
+  isPaid                 Boolean                  @default(true)
+  accrualRate            Float?
+  minEmploymentMonths    Int                      @default(0)
+  requiresApproval       Boolean                  @default(true)
+  approvalWorkflow       String                   @default("MANAGER_THEN_HR")
+  noticePeriod           Int                      @default(7)
+  documentationRequired  Boolean                  @default(false)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  allowHalfDays          Boolean                  @default(true)
+  maxConsecutiveDays     Int?
+  requireManagerComments Boolean                  @default(false)
+  seasonalRestrictions   String?
+  leave_blackout_periods leave_blackout_periods[]
+  company                Company                  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leaveTypes             LeaveType[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+  @@map("leave_policies")
+}
+
+model LeaveType {
+  id                 String              @id @default(cuid())
+  policyId           String
+  name               String
+  code               String
+  description        String?
+  color              String?
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  leaveRequests      LeaveRequest[]
+  policy             LeavePolicy         @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  staffLeaveBalances StaffLeaveBalance[]
+
+  @@unique([policyId, name])
+  @@index([policyId])
+  @@map("leave_types")
+}
+
+model StaffLeaveBalance {
+  id            String      @id @default(cuid())
+  staffRecordId String
+  leaveTypeId   String
+  year          Int
+  totalDays     Int
+  usedDays      Int         @default(0)
+  pendingDays   Int         @default(0)
+  carriedOver   Int         @default(0)
+  expiresAt     DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  leaveType     LeaveType   @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  staffRecord   StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+
+  @@unique([staffRecordId, leaveTypeId, year])
+  @@index([staffRecordId, year])
+  @@index([leaveTypeId])
+  @@map("staff_leave_balances")
+}
+
+model LeaveRequest {
+  id                String       @id @default(cuid())
+  referenceNumber   String?      @unique
+  staffRecordId     String
+  leaveTypeId       String
+  startDate         DateTime
+  endDate           DateTime
+  totalDays         Decimal      @db.Decimal(5, 1)
+  reason            String
+  emergencyContact  String?
+  contactPhone      String?
+  status            String       @default("PENDING")
+  currentStep       String       @default("MANAGER")
+  managerApproverId String?
+  managerApprovedAt DateTime?
+  managerApprovedBy String?
+  managerComments   String?
+  hrApproverUserId  String?
+  hrApproverRole    String?
+  hrApprovedAt      DateTime?
+  hrApprovedBy      String?
+  hrComments        String?
+  rejectionReason   String?
+  rejectedByStep    String?
+  rejectedById      String?
+  handoverTo        String?
+  handoverStaffId   String?
+  handoverNotes     String?
+  attachmentUrl     String?
+  fileName          String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  createdBy         String
+  updatedBy         String?
+  
+  // Relations - ALL must have unique relation names
+  leaveType         LeaveType    @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  
+  // Each relation to StaffRecord needs a unique name
+  managerApprover   StaffRecord? @relation("LeaveRequestManagerApprover", fields: [managerApproverId], references: [id])
+  staffRecord       StaffRecord  @relation("LeaveRequestStaff", fields: [staffRecordId], references: [id], onDelete: Cascade)
+  handoverStaff     StaffRecord? @relation("LeaveRequestHandover", fields: [handoverStaffId], references: [id])
+
+  @@index([staffRecordId, startDate])
+  @@index([status, startDate])
+  @@index([managerApproverId, status])
+  @@index([hrApproverUserId, status])
+  @@map("leave_requests")
+}
+
+model PublicHoliday {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  date        DateTime
+  description String?
+  isRecurring Boolean  @default(false)
+  country     String?
+  state       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, date, name])
+  @@index([companyId, date])
+  @@map("public_holidays")
+}
+
+model leave_blackout_periods {
+  id                     String       @id
+  companyId              String
+  policyId               String?
+  name                   String
+  startDate              DateTime
+  endDate                DateTime
+  reason                 String?
+  appliesToAllLeaveTypes Boolean      @default(true)
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime
+  companies              Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leave_policies         LeavePolicy? @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, startDate, endDate])
+  @@index([policyId])
+}
+
+model leave_uploads {
+  id                     String   @id @default(cuid())
+  companyId              String
+  fileName               String
+  filePath               String
+  policiesCreated        Int      @default(0)
+  policiesFailed         Int      @default(0)
+  leaveTypesCreated      Int      @default(0)
+  leaveTypesFailed       Int      @default(0)
+  holidaysCreated        Int      @default(0)
+  holidaysFailed         Int      @default(0)
+  uploadedBy             String
+  createdAt              DateTime @default(now())
+  blackoutPeriodsCreated Int      @default(0)
+  blackoutPeriodsFailed  Int      @default(0)
+  blackoutPeriodsUpdated Int      @default(0)
+  failedRecords          Json?
+  holidaysUpdated        Int      @default(0)
+  leaveTypesUpdated      Int      @default(0)
+  policiesUpdated        Int      @default(0)
+  companies              Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 }
 
 enum PayrollStatus {
@@ -266,7 +738,7 @@ enum JobStatus {
 
 enum ApplicationStatus {
   SUBMITTED
-  REVIEWING      // Add this
+  REVIEWING
   SHORTLISTED
   INTERVIEWING
   OFFERED
@@ -328,666 +800,22 @@ enum CandidateFileType {
   OTHER
 }
 
-model JobApplication {
-  id String @id @default(cuid())
-
-  companyId String
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  jobId String
-  job   Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
-
-  candidateId String
-  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-
-  cvFilePath      String
-  cvFileName      String?
-  parsedCvContent String?
-
-  status ApplicationStatus @default(SUBMITTED)
-
-  score Int?
-  notes String?
-  
-  // NEW: Add metadata field for AI review information
-  metadata Json?
-  reviewedBy String?
-  createdBy String?
-  updatedBy String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  reviewedAt DateTime?
-
-  // Relations with CandidateFile
-  files    CandidateFile[] @relation("ApplicationFiles")
-  cvFileId String?         @unique // Added @unique for one-to-one
-  cvFile   CandidateFile?  @relation("ApplicationCVFile", fields: [cvFileId], references: [id])
-
-  interviews   Interview[]
-  stageHistory ApplicationStageHistory[]
-  offer        Offer?
-
-  @@unique([jobId, candidateId])
-  @@index([companyId, jobId, status])
-  @@index([cvFileId])
-  @@map("job_applications")
-}
-
-model CandidateFile {
-  id String @id @default(cuid())
-
-  companyId String
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  candidateId String
-  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-
-  // For general application files (one-to-many)
-  applicationId String?
-  application   JobApplication? @relation("ApplicationFiles", fields: [applicationId], references: [id], onDelete: SetNull)
-
-  // For CV file reference (one-to-one) - this is the back relation
-  cvForApplication JobApplication? @relation("ApplicationCVFile")
-
-  type CandidateFileType @default(CV)
-
-  fileName  String
-  mimeType  String
-  sizeBytes Int
-  data      Bytes
-
-  createdBy String?
-  createdAt DateTime @default(now())
-
-  @@index([companyId, candidateId])
-  @@index([applicationId])
-  @@index([companyId, applicationId, type])
-  @@map("candidate_files")
-}
-
-model Keyword {
-  id          String @id @default(cuid())
-  name        String @unique
-  description String
-  jobId       String
-  job         Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
-
-  @@map("keywords")
-}
-
-model Job {
-  id          String @id @default(cuid())
-  title       String
-  description String
-  department  String
-  position    String
-
-  companyId String
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  status         JobStatus @default(ACTIVE)
-  expirationDate DateTime?
-
-  createdBy String
-  createdAt DateTime @default(now())
-  updatedBy String?
-  updatedAt DateTime @updatedAt
-
-  applications JobApplication[]
-  keywords     Keyword[]
-
-  @@index([companyId, status])
-  @@map("jobs")
-}
-
-model Candidate {
-  id           String   @id @default(cuid())
-  companyId    String
-  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  firstName    String
-  lastName     String
-  email        String
-  phone        String?
-  address      String?
-  linkedInUrl  String?
-  portfolioUrl String?
-  createdBy    String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  applications JobApplication[]
-  documents    CandidateDocument[]
-  offers       Offer[]
-  files        CandidateFile[]
-
-  @@unique([email, companyId])
-  @@index([companyId])
-  @@map("candidates")
-}
-
-model ApplicationStageHistory {
-  id String @id @default(cuid())
-
-  applicationId String
-  application   JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  fromStatus ApplicationStatus?
-  toStatus   ApplicationStatus
-
-  changedBy String?
-  changedAt DateTime @default(now())
-  comment   String?
-
-  @@index([applicationId])
-  @@map("application_stage_history")
-}
-
-model Interview {
-  id String @id @default(cuid())
-
-  applicationId String
-  application   JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  companyId String
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  type         InterviewType @default(VIDEO)
-  scheduledAt  DateTime
-  durationMins Int?
-  meetingLink  String?
-  location     String?
-
-  interviewers String[] // userIds/emails
-  notes        String?
-  outcome      InterviewOutcome @default(PENDING)
-
-  createdBy String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([applicationId, scheduledAt])
-  @@index([companyId])
-  @@map("interviews")
-}
-
-model Offer {
-  id String @id @default(cuid())
-
-  companyId String
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  applicationId String         @unique
-  application   JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  candidateId String
-  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-
-  status OfferStatus @default(DRAFT)
-
-  proposedStartDate DateTime?
-  employmentType    String? // can become enum later
-  salary            Decimal?  @db.Decimal(18, 2)
-  currency          String? // NGN, USD...
-
-  offerLetterPath String?
-  offerLetterName String?
-
-  sentAt     DateTime?
-  acceptedAt DateTime?
-  declinedAt DateTime?
-
-  createdBy String?
-  updatedBy String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  onboarding Onboarding?
-
-  @@index([companyId, status])
-  @@map("offers")
-}
-
-model Onboarding {
-  id String @id @default(cuid())
-
-  companyId String
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  offerId String @unique
-  offer   Offer  @relation(fields: [offerId], references: [id], onDelete: Cascade)
-
-  status OnboardingStatus @default(NOT_STARTED)
-
-  startDate   DateTime?
-  completedAt DateTime?
-
-  staffRecordId String?
-  staffRecord   StaffRecord? @relation(fields: [staffRecordId], references: [id], onDelete: SetNull)
-
-  tasks     OnboardingTask[]
-  documents CandidateDocument[]
-
-  createdBy String?
-  updatedBy String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([companyId, status])
-  @@map("onboardings")
-}
-
-model OnboardingTask {
-  id String @id @default(cuid())
-
-  onboardingId String
-  onboarding   Onboarding @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
-
-  title       String
-  description String?
-  department  String? // HR / IT / FINANCE
-  assigneeId  String? // userId or staffRecordId
-  dueDate     DateTime?
-
-  status      OnboardingTaskStatus @default(PENDING)
-  completedAt DateTime?
-
-  createdBy String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([onboardingId, status])
-  @@map("onboarding_tasks")
-}
-
-model CandidateDocument {
-  id String @id @default(cuid())
-
-  companyId String
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  candidateId String
-  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-
-  onboardingId String?
-  onboarding   Onboarding? @relation(fields: [onboardingId], references: [id], onDelete: SetNull)
-
-  type       CandidateDocumentType @default(OTHER)
-  filePath   String
-  fileName   String
-  uploadedBy String?
-  createdAt  DateTime              @default(now())
-
-  @@index([candidateId, type])
-  @@index([companyId])
-  @@map("candidate_documents")
-}
-//AI cv review models
-model AISettings {
-  id                   String   @id @default(cuid())
-  companyId            String   @unique
-  company              Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  
-  // Budget settings
-  monthlyBudget        Float    @default(100.00) // in USD
-  costPerReview        Float    @default(0.02)   // estimated cost per review
-  costAlertThreshold   Int      @default(80)     // percentage of budget to trigger alert
-  
-  // Service settings
-  enabled              Boolean  @default(true)
-  defaultService       String   @default("openai") // openai, anthropic, gemini, local
-  defaultModel         String   @default("gpt-3.5-turbo")
-  
-  // Usage settings
-  autoShortlistThreshold Int    @default(75)
-  useForSeniorRoles    Boolean  @default(true)
-  useForTechnicalRoles Boolean  @default(true)
-  useForManagerRoles   Boolean  @default(true) // Added this field based on your API code
-  
-  // Notification settings
-  notifyEmails         String[] // Emails to notify for alerts
-  
-  // Tracking
-  createdBy            String?
-  updatedBy            String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  
-  @@map("ai_settings")
-}
-
-model AIUsageLog {
-  id          String   @id @default(cuid())
-  companyId   String
-  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  
-  applicationId String? // Link to job application
-  service      String   // openai, anthropic, etc.
-  model        String
-  tokensUsed   Int
-  cost         Float
-  endpoint     String
-  inputLength  Int
-  outputLength Int
-  
-  metadata     Json?
-  
-  createdAt    DateTime @default(now())
-  
-  @@index([companyId])
-  @@index([createdAt])
-  @@map("ai_usage_logs")
-}
-// Updated UserCompany model with StaffRecord relation
-model UserCompany {
+model Notification {
   id         String   @id @default(cuid())
   userId     String
   companyId  String
-  role       String   @default("HR") // "HR", "ADMIN", "MANAGER", etc.
-  
-  // Audit fields
-  createdBy  String?
-  updatedBy  String?
+  type       String
+  title      String
+  message    String
+  data       Json?
+  read       Boolean  @default(false)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
-  
-  // Relations
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  user    StaffRecord @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  // Add a composite unique constraint
-  @@unique([userId, companyId])
-  @@index([userId])
-  @@index([companyId])
-  @@index([role])
-  @@map("user_companies")
-}
 
-
-model PasswordReset {
-  id            String   @id @default(cuid())
-  email         String
-  companyId     String
-  otp           String
-  otpExpiresAt  DateTime
-  isUsed        Boolean  @default(false)
-  attempts      Int      @default(0)
-  notes         String?  // Add this optional field
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
-  @@unique([email, companyId]) // Composite unique constraint
-  @@index([email])
-  @@index([companyId])
-}
-
-// attendance model
-model Attendance {
-  id          String   @id @default(cuid())
-  companyId   String
-  staffId     String
-  date        DateTime
-  signInTime  DateTime?
-  signOutTime DateTime?
-  status      String?   @default("PRESENT") // "PRESENT", "ABSENT", "LATE", "LEAVE", "HALF_DAY"
-  recordedById   String?
-  recordedByRole String?
-  method         String?    // "staff_id", "email", "barcode"
-  notes          String?
-  
-  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  staffRecord StaffRecord @relation(fields: [staffId], references: [id], onDelete: Cascade)
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@unique([companyId, staffId, date]) // One attendance per day per staff
-  @@index([companyId, date])
-  @@index([staffId, date])
-  @@index([status, date])
-  @@map("attendances")
-}
-// ============ LEAVE MANAGEMENT MODELS ============
-
-/// ============ LEAVE MANAGEMENT MODELS ============
-
-// Leave Policy Model
-model LeavePolicy {
-  id           String   @id @default(cuid())
-  companyId    String
-  name         String   // e.g., "Annual Leave", "Sick Leave", "Maternity Leave"
-  description  String?
-  maxDays      Int      // Maximum days allowed per year
-  carryOver    Int      @default(0) // Days that can be carried to next year
-  isPaid       Boolean  @default(true)
-  accrualRate  Float?   // e.g., 1.67 days per month (20/12)
-  minEmploymentMonths Int @default(0) // Minimum months before eligible
-  requiresApproval Boolean @default(true)
-  approvalWorkflow String @default("MANAGER_THEN_HR") // "MANAGER_THEN_HR", "MANAGER_ONLY", "HR_ONLY"
-  noticePeriod  Int      @default(7)    // Days notice required
-  documentationRequired Boolean @default(false)
-  // NEW FIELDS FOR ADVANCED VALIDATION
-  allowHalfDays     Boolean @default(true)      // Whether half-day leaves are allowed
-  maxConsecutiveDays Int?                       // Maximum consecutive days allowed
-  seasonalRestrictions String?                  // Comma-separated restricted months (e.g., "1,2,12")
-  requireManagerComments Boolean @default(false) // Whether manager must provide comments
-  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  leaveTypes   LeaveType[]
-  blackoutPeriods LeaveBlackoutPeriod[]
-  //blackoutPeriods LeaveBlackoutPeriod[]  // Add this line
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  @@unique([companyId, name])
-  @@index([companyId])
-  @@map("leave_policies")
-}
-
-// Leave Type Model
-model LeaveType {
-  id          String   @id @default(cuid())
-  policyId    String
-  name        String   // e.g., "Vacation", "Medical", "Bereavement", "Study"
-  code        String   // e.g., "AL", "SL", "ML"
-  description String?
-  color       String?  // For UI display
-  isActive    Boolean  @default(true)
-  
-  policy      LeavePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
-  leaveRequests LeaveRequest[]
-  staffLeaveBalances StaffLeaveBalance[]
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  @@unique([policyId, name])
-  @@index([policyId])
-  @@map("leave_types")
-}
-
-// Staff Leave Balance Model
-model StaffLeaveBalance {
-  id          String   @id @default(cuid())
-  staffRecordId String
-  leaveTypeId String
-  year        Int      // The year this balance applies to
-  totalDays   Int      // Total days entitled for the year
-  usedDays    Int      @default(0) // Days used so far
-  pendingDays Int      @default(0) // Days in pending requests
-  carriedOver Int      @default(0) // Days carried from previous year
-  expiresAt   DateTime? // When unused balance expires
-  
-  staffRecord StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
-  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  @@unique([staffRecordId, leaveTypeId, year])
-  @@index([staffRecordId, year])
-  @@index([leaveTypeId])
-  @@map("staff_leave_balances")
-}
-
-model LeaveRequest {
-  id           String   @id @default(cuid())
-  staffRecordId String
-  companyId    String
-  referenceNumber String  @unique
-  leaveTypeId  String
-  startDate    DateTime
-  endDate      DateTime
-  totalDays    Decimal  @db.Decimal(5, 1) // e.g., 2.5 days
-  reason       String
-  emergencyContact String?
-  contactPhone String?
-  
-  // Approval Workflow Fields
-  status       String   @default("PENDING") // "PENDING", "MANAGER_APPROVED", "HR_APPROVED", "APPROVED", "REJECTED", "CANCELLED"
-  currentStep  String   @default("MANAGER") // "MANAGER", "HR", "COMPLETED", "REJECTED", "CANCELLED"
-  
-  // Manager Approval
-  managerApproverId   String?   // StaffRecord ID of manager approver
-  managerApprovedAt   DateTime?
-  managerComments    String?
-  
-  // HR/ADMIN/SUPER_ADMIN Approval
-  hrApprovedAt       DateTime?
-  hrComments         String?
-  
-  // Rejection
-  rejectedAt         DateTime?
-  rejectComments     String?
-  rejectedBy         String?   // StaffRecord ID who rejected
-  
-  // Cancellation
-  cancelledAt        DateTime?
-  cancelComments     String?
-  cancelledBy        String?   // StaffRecord ID who cancelled
-  
-  // Handover information
-  handoverTo         String?   // StaffRecord ID
-  handoverNotes      String?
-  
-  // Attachment support
-  attachmentUrl      String?
-  fileName           String?
-  
-  // Track changes
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  createdBy          String   // StaffRecord ID who created
-  updatedBy          String?
-  // Relations
-  staffRecord        StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
-  leaveType          LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
-  managerApprover    StaffRecord? @relation("ManagerApprovals", fields: [managerApproverId], references: [id])
-  company            Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  handoverStaff      StaffRecord? @relation("HandoverStaff", fields: [handoverTo], references: [id])
-  notifications      Notification[]
-  // hrApproverUserId   String?   // User ID (from AuthUser) of HR/Admin approver - KEEP FOR NOW
-  // hrApproverRole     String?   // Role of HR/Admin approver: "HR", "ADMIN", "SUPER_ADMIN" - KEEP FOR NOW
-  // hrApprovedBy       String?   // Name/email of HR/Admin approver - KEEP FOR NOW
-  // rejectionReason    String?   // KEEP FOR NOW
-  // rejectedByStep     String?   // "MANAGER" or "HR" - KEEP FOR NOW
-  
-  @@index([staffRecordId, startDate])
-  @@index([status, startDate])
-  @@index([managerApproverId, status])
-  @@index([companyId, createdAt])
-  @@index([status, currentStep])
-  @@map("leave_requests")
-}
-
-// Public Holiday Model
-model PublicHoliday {
-  id          String   @id @default(cuid())
-  companyId   String
-  name        String
-  date        DateTime
-  description String?
-  isRecurring Boolean  @default(false) // Repeats every year
-  country     String?  // For country-specific holidays
-  state       String?  // For state-specific holidays
-  
-  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  @@unique([companyId, date, name])
-  @@index([companyId, date])
-  @@map("public_holidays")
-}
-
-model LeaveUpload {
-  id                  String   @id @default(cuid())
-  companyId           String
-  fileName            String
-  filePath            String
-  
-  // Counts
-  policiesCreated     Int      @default(0)
-  policiesFailed      Int      @default(0)
-  policiesUpdated     Int      @default(0)  
-  leaveTypesCreated   Int      @default(0)
-  leaveTypesFailed    Int      @default(0)
-  leaveTypesUpdated   Int      @default(0)  
-  holidaysCreated     Int      @default(0)
-  holidaysFailed      Int      @default(0)
-  holidaysUpdated     Int      @default(0)  
-  blackoutPeriodsCreated Int   @default(0)  
-  blackoutPeriodsFailed Int    @default(0)  
-  blackoutPeriodsUpdated Int   @default(0)  
-  // Store failed records as JSON for persistence
-  failedRecords       Json?    @db.JsonB
-  uploadedBy          String
-  createdAt           DateTime @default(now())
-  company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  @@map("leave_uploads")
-}
-
-model LeaveBlackoutPeriod {
-  id          String   @id @default(cuid())
-  companyId   String
-  policyId    String?
-  name        String
-  startDate   DateTime
-  endDate     DateTime
-  reason      String?
-  appliesToAllLeaveTypes Boolean @default(true)
-  
-  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  policy      LeavePolicy? @relation(fields: [policyId], references: [id], onDelete: Cascade)
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  @@index([companyId, startDate, endDate])
-  @@index([policyId])
-  @@map("leave_blackout_periods")
-}
-
-//leave notification model
-model Notification {
-  id          String   @id @default(cuid())
-  leaveRequestId  String?
-  userId      String
-  type        String
-  title       String
-  message     String
-  data        Json?
-  read        Boolean  @default(false)
-  companyId   String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // Relations
   user    StaffRecord @relation(fields: [userId], references: [id], onDelete: Cascade)
   company Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  leaveRequest    LeaveRequest? @relation(fields: [leaveRequestId], references: [id])
-  @@index([userId, read])
-  @@index([companyId, createdAt])
-  @@index([leaveRequestId])
-  @@index([type, companyId])
-  @@index([read])
-  @@index([createdAt])
+
+  @@index([userId])
+  @@index([companyId])
+  @@map("notifications")
 }

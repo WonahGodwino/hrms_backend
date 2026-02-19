@@ -34,13 +34,14 @@ CREATE TABLE "companies" (
     "companyName" TEXT NOT NULL,
     "address" TEXT,
     "phone" TEXT,
-    "email" TEXT,
+    "email" TEXT NOT NULL,
     "logo" TEXT,
     "taxId" TEXT,
     "archived" INTEGER NOT NULL DEFAULT 0,
     "createdBy" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3),
+    "workWeekPattern" VARCHAR(20),
 
     CONSTRAINT "companies_pkey" PRIMARY KEY ("id")
 );
@@ -63,9 +64,12 @@ CREATE TABLE "staff_records" (
     "role" TEXT NOT NULL DEFAULT 'STAFF',
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "companyId" TEXT NOT NULL,
-    "createdBy" TEXT,
+    "createdBy" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "encodedId" TEXT,
+    "updatedBy" TEXT,
+    "managerId" TEXT,
 
     CONSTRAINT "staff_records_pkey" PRIMARY KEY ("id")
 );
@@ -434,22 +438,183 @@ CREATE TABLE "PasswordReset" (
     "otpExpiresAt" TIMESTAMP(3) NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "attempts" INTEGER NOT NULL DEFAULT 0,
+    "companyId" TEXT NOT NULL,
+    "isUsed" BOOLEAN NOT NULL DEFAULT false,
+    "notes" TEXT,
 
     CONSTRAINT "PasswordReset_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
-CREATE TABLE "Attendance" (
+CREATE TABLE "attendances" (
     "id" TEXT NOT NULL,
     "companyId" TEXT NOT NULL,
     "staffId" TEXT NOT NULL,
     "date" TIMESTAMP(3) NOT NULL,
     "signInTime" TIMESTAMP(3),
     "signOutTime" TIMESTAMP(3),
+    "recordedById" TEXT,
+    "recordedByRole" TEXT,
+    "method" TEXT,
+    "notes" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "status" TEXT DEFAULT 'PRESENT',
+
+    CONSTRAINT "attendances_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "leave_policies" (
+    "id" TEXT NOT NULL,
+    "companyId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "maxDays" INTEGER NOT NULL,
+    "carryOver" INTEGER NOT NULL DEFAULT 0,
+    "isPaid" BOOLEAN NOT NULL DEFAULT true,
+    "accrualRate" DOUBLE PRECISION,
+    "minEmploymentMonths" INTEGER NOT NULL DEFAULT 0,
+    "requiresApproval" BOOLEAN NOT NULL DEFAULT true,
+    "approvalWorkflow" TEXT NOT NULL DEFAULT 'MANAGER_THEN_HR',
+    "noticePeriod" INTEGER NOT NULL DEFAULT 7,
+    "documentationRequired" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "allowHalfDays" BOOLEAN NOT NULL DEFAULT true,
+    "maxConsecutiveDays" INTEGER,
+    "requireManagerComments" BOOLEAN NOT NULL DEFAULT false,
+    "seasonalRestrictions" TEXT,
+
+    CONSTRAINT "leave_policies_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "leave_types" (
+    "id" TEXT NOT NULL,
+    "policyId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "code" TEXT NOT NULL,
+    "description" TEXT,
+    "color" TEXT,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "Attendance_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "leave_types_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "staff_leave_balances" (
+    "id" TEXT NOT NULL,
+    "staffRecordId" TEXT NOT NULL,
+    "leaveTypeId" TEXT NOT NULL,
+    "year" INTEGER NOT NULL,
+    "totalDays" INTEGER NOT NULL,
+    "usedDays" INTEGER NOT NULL DEFAULT 0,
+    "pendingDays" INTEGER NOT NULL DEFAULT 0,
+    "carriedOver" INTEGER NOT NULL DEFAULT 0,
+    "expiresAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "staff_leave_balances_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "leave_requests" (
+    "id" TEXT NOT NULL,
+    "referenceNumber" TEXT,
+    "staffRecordId" TEXT NOT NULL,
+    "leaveTypeId" TEXT NOT NULL,
+    "startDate" TIMESTAMP(3) NOT NULL,
+    "endDate" TIMESTAMP(3) NOT NULL,
+    "totalDays" DECIMAL(5,1) NOT NULL,
+    "reason" TEXT NOT NULL,
+    "emergencyContact" TEXT,
+    "contactPhone" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'PENDING',
+    "currentStep" TEXT NOT NULL DEFAULT 'MANAGER',
+    "managerApproverId" TEXT,
+    "managerApprovedAt" TIMESTAMP(3),
+    "managerApprovedBy" TEXT,
+    "managerComments" TEXT,
+    "hrApproverUserId" TEXT,
+    "hrApproverRole" TEXT,
+    "hrApprovedAt" TIMESTAMP(3),
+    "hrApprovedBy" TEXT,
+    "hrComments" TEXT,
+    "rejectionReason" TEXT,
+    "rejectedByStep" TEXT,
+    "rejectedById" TEXT,
+    "handoverTo" TEXT,
+    "handoverNotes" TEXT,
+    "attachmentUrl" TEXT,
+    "fileName" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "createdBy" TEXT NOT NULL,
+    "updatedBy" TEXT,
+
+    CONSTRAINT "leave_requests_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public_holidays" (
+    "id" TEXT NOT NULL,
+    "companyId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "date" TIMESTAMP(3) NOT NULL,
+    "description" TEXT,
+    "isRecurring" BOOLEAN NOT NULL DEFAULT false,
+    "country" TEXT,
+    "state" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "public_holidays_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "leave_blackout_periods" (
+    "id" TEXT NOT NULL,
+    "companyId" TEXT NOT NULL,
+    "policyId" TEXT,
+    "name" TEXT NOT NULL,
+    "startDate" TIMESTAMP(3) NOT NULL,
+    "endDate" TIMESTAMP(3) NOT NULL,
+    "reason" TEXT,
+    "appliesToAllLeaveTypes" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "leave_blackout_periods_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "leave_uploads" (
+    "id" TEXT NOT NULL,
+    "companyId" TEXT NOT NULL,
+    "fileName" TEXT NOT NULL,
+    "filePath" TEXT NOT NULL,
+    "policiesCreated" INTEGER NOT NULL DEFAULT 0,
+    "policiesFailed" INTEGER NOT NULL DEFAULT 0,
+    "leaveTypesCreated" INTEGER NOT NULL DEFAULT 0,
+    "leaveTypesFailed" INTEGER NOT NULL DEFAULT 0,
+    "holidaysCreated" INTEGER NOT NULL DEFAULT 0,
+    "holidaysFailed" INTEGER NOT NULL DEFAULT 0,
+    "uploadedBy" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "blackoutPeriodsCreated" INTEGER NOT NULL DEFAULT 0,
+    "blackoutPeriodsFailed" INTEGER NOT NULL DEFAULT 0,
+    "blackoutPeriodsUpdated" INTEGER NOT NULL DEFAULT 0,
+    "failedRecords" JSONB,
+    "holidaysUpdated" INTEGER NOT NULL DEFAULT 0,
+    "leaveTypesUpdated" INTEGER NOT NULL DEFAULT 0,
+    "policiesUpdated" INTEGER NOT NULL DEFAULT 0,
+
+    CONSTRAINT "leave_uploads_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -552,19 +717,79 @@ CREATE INDEX "user_companies_role_idx" ON "user_companies"("role");
 CREATE UNIQUE INDEX "user_companies_userId_companyId_key" ON "user_companies"("userId", "companyId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "PasswordReset_email_key" ON "PasswordReset"("email");
+CREATE INDEX "PasswordReset_email_idx" ON "PasswordReset"("email");
 
 -- CreateIndex
-CREATE INDEX "Attendance_companyId_date_idx" ON "Attendance"("companyId", "date");
+CREATE INDEX "PasswordReset_companyId_idx" ON "PasswordReset"("companyId");
 
 -- CreateIndex
-CREATE INDEX "Attendance_staffId_date_idx" ON "Attendance"("staffId", "date");
+CREATE UNIQUE INDEX "PasswordReset_email_companyId_key" ON "PasswordReset"("email", "companyId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Attendance_companyId_staffId_date_key" ON "Attendance"("companyId", "staffId", "date");
+CREATE INDEX "attendances_companyId_date_idx" ON "attendances"("companyId", "date");
+
+-- CreateIndex
+CREATE INDEX "attendances_staffId_date_idx" ON "attendances"("staffId", "date");
+
+-- CreateIndex
+CREATE INDEX "attendances_status_date_idx" ON "attendances"("status", "date");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "attendances_companyId_staffId_date_key" ON "attendances"("companyId", "staffId", "date");
+
+-- CreateIndex
+CREATE INDEX "leave_policies_companyId_idx" ON "leave_policies"("companyId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "leave_policies_companyId_name_key" ON "leave_policies"("companyId", "name");
+
+-- CreateIndex
+CREATE INDEX "leave_types_policyId_idx" ON "leave_types"("policyId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "leave_types_policyId_name_key" ON "leave_types"("policyId", "name");
+
+-- CreateIndex
+CREATE INDEX "staff_leave_balances_staffRecordId_year_idx" ON "staff_leave_balances"("staffRecordId", "year");
+
+-- CreateIndex
+CREATE INDEX "staff_leave_balances_leaveTypeId_idx" ON "staff_leave_balances"("leaveTypeId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "staff_leave_balances_staffRecordId_leaveTypeId_year_key" ON "staff_leave_balances"("staffRecordId", "leaveTypeId", "year");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "leave_requests_referenceNumber_key" ON "leave_requests"("referenceNumber");
+
+-- CreateIndex
+CREATE INDEX "leave_requests_staffRecordId_startDate_idx" ON "leave_requests"("staffRecordId", "startDate");
+
+-- CreateIndex
+CREATE INDEX "leave_requests_status_startDate_idx" ON "leave_requests"("status", "startDate");
+
+-- CreateIndex
+CREATE INDEX "leave_requests_managerApproverId_status_idx" ON "leave_requests"("managerApproverId", "status");
+
+-- CreateIndex
+CREATE INDEX "leave_requests_hrApproverUserId_status_idx" ON "leave_requests"("hrApproverUserId", "status");
+
+-- CreateIndex
+CREATE INDEX "public_holidays_companyId_date_idx" ON "public_holidays"("companyId", "date");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "public_holidays_companyId_date_name_key" ON "public_holidays"("companyId", "date", "name");
+
+-- CreateIndex
+CREATE INDEX "leave_blackout_periods_companyId_startDate_endDate_idx" ON "leave_blackout_periods"("companyId", "startDate", "endDate");
+
+-- CreateIndex
+CREATE INDEX "leave_blackout_periods_policyId_idx" ON "leave_blackout_periods"("policyId");
 
 -- AddForeignKey
 ALTER TABLE "staff_records" ADD CONSTRAINT "staff_records_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "staff_records" ADD CONSTRAINT "staff_records_managerId_fkey" FOREIGN KEY ("managerId") REFERENCES "staff_records"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "payrolls" ADD CONSTRAINT "payrolls_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -588,25 +813,25 @@ ALTER TABLE "staff_uploads" ADD CONSTRAINT "staff_uploads_companyId_fkey" FOREIG
 ALTER TABLE "payroll_uploads" ADD CONSTRAINT "payroll_uploads_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "job_applications" ADD CONSTRAINT "job_applications_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "job_applications" ADD CONSTRAINT "job_applications_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "jobs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "job_applications" ADD CONSTRAINT "job_applications_candidateId_fkey" FOREIGN KEY ("candidateId") REFERENCES "candidates"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "job_applications" ADD CONSTRAINT "job_applications_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "job_applications" ADD CONSTRAINT "job_applications_cvFileId_fkey" FOREIGN KEY ("cvFileId") REFERENCES "candidate_files"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "candidate_files" ADD CONSTRAINT "candidate_files_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "job_applications" ADD CONSTRAINT "job_applications_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "jobs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "candidate_files" ADD CONSTRAINT "candidate_files_applicationId_fkey" FOREIGN KEY ("applicationId") REFERENCES "job_applications"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "candidate_files" ADD CONSTRAINT "candidate_files_candidateId_fkey" FOREIGN KEY ("candidateId") REFERENCES "candidates"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "candidate_files" ADD CONSTRAINT "candidate_files_applicationId_fkey" FOREIGN KEY ("applicationId") REFERENCES "job_applications"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "candidate_files" ADD CONSTRAINT "candidate_files_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "keywords" ADD CONSTRAINT "keywords_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "jobs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -627,13 +852,13 @@ ALTER TABLE "interviews" ADD CONSTRAINT "interviews_applicationId_fkey" FOREIGN 
 ALTER TABLE "interviews" ADD CONSTRAINT "interviews_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "offers" ADD CONSTRAINT "offers_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "offers" ADD CONSTRAINT "offers_applicationId_fkey" FOREIGN KEY ("applicationId") REFERENCES "job_applications"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "offers" ADD CONSTRAINT "offers_candidateId_fkey" FOREIGN KEY ("candidateId") REFERENCES "candidates"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "offers" ADD CONSTRAINT "offers_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "onboardings" ADD CONSTRAINT "onboardings_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -648,10 +873,10 @@ ALTER TABLE "onboardings" ADD CONSTRAINT "onboardings_staffRecordId_fkey" FOREIG
 ALTER TABLE "onboarding_tasks" ADD CONSTRAINT "onboarding_tasks_onboardingId_fkey" FOREIGN KEY ("onboardingId") REFERENCES "onboardings"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "candidate_documents" ADD CONSTRAINT "candidate_documents_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "candidate_documents" ADD CONSTRAINT "candidate_documents_candidateId_fkey" FOREIGN KEY ("candidateId") REFERENCES "candidates"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "candidate_documents" ADD CONSTRAINT "candidate_documents_candidateId_fkey" FOREIGN KEY ("candidateId") REFERENCES "candidates"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "candidate_documents" ADD CONSTRAINT "candidate_documents_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "candidate_documents" ADD CONSTRAINT "candidate_documents_onboardingId_fkey" FOREIGN KEY ("onboardingId") REFERENCES "onboardings"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -669,7 +894,40 @@ ALTER TABLE "user_companies" ADD CONSTRAINT "user_companies_companyId_fkey" FORE
 ALTER TABLE "user_companies" ADD CONSTRAINT "user_companies_userId_fkey" FOREIGN KEY ("userId") REFERENCES "staff_records"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Attendance" ADD CONSTRAINT "Attendance_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "attendances" ADD CONSTRAINT "attendances_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Attendance" ADD CONSTRAINT "Attendance_staffId_fkey" FOREIGN KEY ("staffId") REFERENCES "staff_records"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "attendances" ADD CONSTRAINT "attendances_staffId_fkey" FOREIGN KEY ("staffId") REFERENCES "staff_records"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "leave_policies" ADD CONSTRAINT "leave_policies_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "leave_types" ADD CONSTRAINT "leave_types_policyId_fkey" FOREIGN KEY ("policyId") REFERENCES "leave_policies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "staff_leave_balances" ADD CONSTRAINT "staff_leave_balances_leaveTypeId_fkey" FOREIGN KEY ("leaveTypeId") REFERENCES "leave_types"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "staff_leave_balances" ADD CONSTRAINT "staff_leave_balances_staffRecordId_fkey" FOREIGN KEY ("staffRecordId") REFERENCES "staff_records"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "leave_requests" ADD CONSTRAINT "leave_requests_leaveTypeId_fkey" FOREIGN KEY ("leaveTypeId") REFERENCES "leave_types"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "leave_requests" ADD CONSTRAINT "leave_requests_managerApproverId_fkey" FOREIGN KEY ("managerApproverId") REFERENCES "staff_records"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "leave_requests" ADD CONSTRAINT "leave_requests_staffRecordId_fkey" FOREIGN KEY ("staffRecordId") REFERENCES "staff_records"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public_holidays" ADD CONSTRAINT "public_holidays_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "leave_blackout_periods" ADD CONSTRAINT "leave_blackout_periods_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "leave_blackout_periods" ADD CONSTRAINT "leave_blackout_periods_policyId_fkey" FOREIGN KEY ("policyId") REFERENCES "leave_policies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "leave_uploads" ADD CONSTRAINT "leave_uploads_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;

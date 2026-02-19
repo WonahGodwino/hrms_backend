@@ -3,6 +3,7 @@ import 'dotenv/config'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { Pool } from 'pg'
 import { PrismaClient } from '@prisma/client'
+import { randomUUID } from 'crypto'
 
 // Load environment variables from .env.production if available
 // Otherwise fall back to .env
@@ -266,11 +267,12 @@ async function seedLeaves() {
     
     console.log(`✅ Created ${holidaysCreated} new holidays`)
     
-    // Create a test blackout period (optional)
+    // Create a test blackout period (optional) - FIXED: Using table name with all required fields
     console.log('Creating test blackout period...')
     
     try {
-      const blackoutExists = await prisma.leaveBlackoutPeriod.findFirst({
+      // Using the table name directly (leave_blackout_periods) with all required fields
+      const blackoutExists = await prisma.leave_blackout_periods.findFirst({
         where: {
           companyId: company.id,
           name: 'Year-End Shutdown'
@@ -278,14 +280,17 @@ async function seedLeaves() {
       })
       
       if (!blackoutExists) {
-        await prisma.leaveBlackoutPeriod.create({
+        // Create with all required fields (id and updatedAt)
+        await prisma.leave_blackout_periods.create({
           data: {
+            id: randomUUID(),
             companyId: company.id,
             name: 'Year-End Shutdown',
             startDate: new Date(new Date().getFullYear(), 11, 20), // Dec 20
             endDate: new Date(new Date().getFullYear(), 11, 31), // Dec 31
             reason: 'Company-wide holiday shutdown',
-            appliesToAllLeaveTypes: true
+            appliesToAllLeaveTypes: true,
+            updatedAt: new Date()
           }
         })
         console.log('✅ Created blackout period: Year-End Shutdown')

@@ -34,11 +34,11 @@ export async function GET(
     // Get upload ID from params
     const { id } = await params
     
-    // Get upload record with company info
-    const uploadRecord = await prisma.leaveUpload.findUnique({
+    // Get upload record with company info - FIXED: use leave_uploads (table name) not leaveUpload
+    const uploadRecord = await prisma.leave_uploads.findUnique({
       where: { id },
       include: {
-        company: {
+        companies: { // FIXED: relation name is 'companies' not 'company'
           select: {
             id: true,
             companyName: true
@@ -133,7 +133,7 @@ export async function GET(
           uploadId: uploadRecord.id,
           fileName: uploadRecord.fileName,
           uploadedAt: uploadRecord.createdAt,
-          company: uploadRecord.company.companyName,
+          company: uploadRecord.companies?.companyName || 'Unknown Company', // FIXED: use companies not company
           status: 'COMPLETED',
           summary: {
             policies: {
@@ -194,10 +194,10 @@ export async function GET(
 
     // Group failed records by type for better analysis
     const failedByType = {
-      policies: failedRecords.filter((r: any) => r.type === 'POLICY'),
-      leaveTypes: failedRecords.filter((r: any) => r.type === 'LEAVE_TYPE'),
-      holidays: failedRecords.filter((r: any) => r.type === 'HOLIDAY'),
-      blackoutPeriods: failedRecords.filter((r: any) => r.type === 'BLACKOUT_PERIOD')
+      policies: failedRecords.filter((r: any) => r.sheetType === 'POLICIES' || r.type === 'POLICY'),
+      leaveTypes: failedRecords.filter((r: any) => r.sheetType === 'LEAVE_TYPES' || r.type === 'LEAVE_TYPE'),
+      holidays: failedRecords.filter((r: any) => r.sheetType === 'HOLIDAYS' || r.type === 'HOLIDAY'),
+      blackoutPeriods: failedRecords.filter((r: any) => r.sheetType === 'BLACKOUT_PERIODS' || r.type === 'BLACKOUT_PERIOD')
     }
 
     // Get most common errors for each type
@@ -222,7 +222,7 @@ export async function GET(
       uploadedBy: uploadRecord.uploadedBy,
       company: {
         id: uploadRecord.companyId,
-        name: uploadRecord.company.companyName
+        name: uploadRecord.companies?.companyName || 'Unknown Company' // FIXED: use companies not company
       },
       filePath: uploadRecord.filePath,
       statistics: {
@@ -288,9 +288,9 @@ export async function GET(
         sampleRecords: failedRecords.slice(0, 20) // Show first 20 for preview
       },
       downloadFormats: {
-        json: `/api/leaves/upload/${id}/failed/json`,
-        csv: `/api/leaves/upload/${id}/failed/csv`,
-        excel: `/api/leaves/upload/${id}/failed/excel`
+        json: `/api/leaves/upload/${id}/failed?format=json`,
+        csv: `/api/leaves/upload/${id}/failed?format=csv`,
+        excel: `/api/leaves/upload/${id}/failed?format=excel`
       },
       retryOptions: {
         canRetry: totalFailed > 0,
@@ -362,14 +362,14 @@ export async function GET(
       let csvContent = 'Type,Identifier,Error,Details,Timestamp,RowNumber\n'
       
       failedRecords.forEach((record: any, index: number) => {
-        const details = record.data ? JSON.stringify(record.data).replace(/"/g, '""') : ''
+        const details = record.rowData ? JSON.stringify(record.rowData).replace(/"/g, '""') : ''
         const row = [
-          record.type || '',
-          record.identifier || '',
+          record.sheetType || record.type || '',
+          record.rowData?.policyName || record.rowData?.typeName || record.rowData?.holidayName || record.rowData?.periodName || '',
           `"${(record.error || '').replace(/"/g, '""')}"`,
           `"${details}"`,
-          record.timestamp || '',
-          record.data?.rowNumber || index + 1
+          record.timestamp || new Date().toISOString(),
+          record.rowNumber || index + 1
         ].join(',')
         csvContent += row + '\n'
       })
@@ -392,14 +392,14 @@ export async function GET(
       let csvContent = 'Type,Identifier,Error,Details,Timestamp,RowNumber\n'
       
       failedRecords.forEach((record: any, index: number) => {
-        const details = record.data ? JSON.stringify(record.data).replace(/"/g, '""') : ''
+        const details = record.rowData ? JSON.stringify(record.rowData).replace(/"/g, '""') : ''
         const row = [
-          record.type || '',
-          record.identifier || '',
+          record.sheetType || record.type || '',
+          record.rowData?.policyName || record.rowData?.typeName || record.rowData?.holidayName || record.rowData?.periodName || '',
           `"${(record.error || '').replace(/"/g, '""')}"`,
           `"${details}"`,
-          record.timestamp || '',
-          record.data?.rowNumber || index + 1
+          record.timestamp || new Date().toISOString(),
+          record.rowNumber || index + 1
         ].join(',')
         csvContent += row + '\n'
       })
@@ -495,8 +495,8 @@ export async function DELETE(
     // Get upload ID from params
     const { id } = await params
     
-    // Get upload record to check company
-    const uploadRecord = await prisma.leaveUpload.findUnique({
+    // Get upload record to check company - FIXED: use leave_uploads
+    const uploadRecord = await prisma.leave_uploads.findUnique({
       where: { id },
       select: { companyId: true }
     })
@@ -538,8 +538,8 @@ export async function DELETE(
       return withCors(response, origin)
     }
 
-    // Delete the upload record
-    await prisma.leaveUpload.delete({
+    // Delete the upload record - FIXED: use leave_uploads
+    await prisma.leave_uploads.delete({
       where: { id }
     })
 
