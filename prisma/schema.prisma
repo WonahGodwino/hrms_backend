@@ -41,6 +41,7 @@ model Company {
   staff                  StaffRecord[]
   staffUploads           StaffUpload[]
   userCompanies          UserCompany[]
+  emailLogs              EmailLog[]
   
 
   @@map("companies")
@@ -84,6 +85,7 @@ model StaffRecord {
   directReports                   StaffRecord[]       @relation("StaffManagers")
   userCompanies                   UserCompany[]
   notifications                    Notification[]
+  emailLogs                       EmailLog[]
 
   @@unique([staffId, companyId])
   @@unique([email, companyId])
@@ -132,6 +134,7 @@ model Payroll {
   company                Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   staffRecord            StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
   payslips               Payslip[]
+  emailLogs              EmailLog[]
 
   @@unique([staffRecordId, month, year, companyId])
   @@index([companyId, year, month])
@@ -159,6 +162,7 @@ model Payslip {
   company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   payroll       Payroll     @relation(fields: [payrollId], references: [id], onDelete: Cascade)
   staffRecord   StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+  emailLogs     EmailLog[]
 
   @@index([staffRecordId, year, month])
   @@map("payslips")
@@ -818,4 +822,31 @@ model Notification {
   @@index([userId])
   @@index([companyId])
   @@map("notifications")
+}
+
+// Update your EmailLog model in schema.prisma
+model EmailLog {
+  id          String   @id @default(cuid())
+  companyId   String
+  staffId     String?
+  payrollId   String?
+  payslipId   String?   // Add this field
+  emailType   String   // PAYSLIP_SELECTED, PAYSLIP_INITIAL, etc.
+  recipient   String
+  status      String   // SENT, FAILED, PENDING
+  sentBy      String?  // User ID who triggered the send
+  error       String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  company     Company      @relation(fields: [companyId], references: [id])
+  staff       StaffRecord? @relation(fields: [staffId], references: [id])
+  payroll     Payroll?     @relation(fields: [payrollId], references: [id])
+  payslip     Payslip?     @relation(fields: [payslipId], references: [id])
+
+  @@index([companyId])
+  @@index([staffId])
+  @@index([payrollId])
+  @@index([payslipId])
+  @@index([createdAt])
 }
