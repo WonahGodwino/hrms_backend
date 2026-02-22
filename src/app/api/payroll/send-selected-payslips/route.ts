@@ -183,7 +183,6 @@ export async function POST(request: NextRequest) {
 
         // Check if this might be an update (you might want to track this in your UI)
         // For now, we'll set isUpdate based on whether this payslip was created after the initial payroll
-        // This logic can be adjusted based on your needs
         if (payroll) {
           // If the payslip was created after the payroll, it might be an update
           // You could also pass this flag from the frontend if the user knows
