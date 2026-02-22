@@ -2,7 +2,7 @@
 import ExcelJS from 'exceljs'
 import { prisma } from '@/app/lib/db'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
-import { generatePayslipPdf } from '@/app/lib/payroll/generatePayslipPdf'
+import { generateEnhancedPayslipPdf } from '@/app/lib/payroll/generateEnhancedPayslipPdf'
 import type { ParsedPayrollRow } from '@/app/lib/payroll/types'
 import { PAYROLL_TEMPLATES } from './types'
 
@@ -272,10 +272,15 @@ export const processBlueridgeTemplate = {
           console.log(`[BLUERIDGE_PROCESSOR] Row ${displayRowNumber}: Using fallback month - ${monthName} ${year}`)
         }
 
+        // Parse all BLUERIDGE specific fields
         const basicSalary = num(getCell(row, 'Basic Salary before Verify(coe)', canonicalMap))
         const housing = num(getCell(row, 'Housing', canonicalMap))
         const transport = num(getCell(row, 'Transport', canonicalMap))
         const otherAllowance = num(getCell(row, 'Other Allowance', canonicalMap))
+        const overtimeIncome = num(getCell(row, 'Overtime Income (OI)', canonicalMap))
+        const communicationAllowance = num(getCell(row, 'Communication Allowance (CA)', canonicalMap))
+        const transportationAllowance = num(getCell(row, 'Transportation Allowance (TA)', canonicalMap))
+        const outstandingIncome = num(getCell(row, 'Outstanding Income (OI)', canonicalMap))
         const grossPay = num(getCell(row, 'Final Gross Income This Month (Salary, OI, CA, TA, OI & PB)', canonicalMap))
         const payee = num(getCell(row, 'Tax Payable This Month (Salary, OI, CA, TA, OI & PB)', canonicalMap))
         const pension = num(getCell(row, 'Employee Pension Deduction', canonicalMap))
@@ -370,6 +375,11 @@ export const processBlueridgeTemplate = {
             deductions: deductions,
             bonusKPI: bonusKPI,
             finalGross: grossPay,
+            // BLUERIDGE specific fields
+            overtimeIncome: overtimeIncome,
+            communicationAllowance: communicationAllowance,
+            transportationAllowance: transportationAllowance,
+            outstandingIncome: outstandingIncome,
             employerPension: num(getCell(row, 'Employer Pension Contribution', canonicalMap)),
             managementFee: num(getCell(row, 'Management Fees', canonicalMap)),
             vatOnManagementFee: num(getCell(row, 'VAT on Management Fees', canonicalMap)),
@@ -394,6 +404,11 @@ export const processBlueridgeTemplate = {
             deductions: deductions,
             bonusKPI: bonusKPI,
             finalGross: grossPay,
+            // BLUERIDGE specific fields
+            overtimeIncome: overtimeIncome,
+            communicationAllowance: communicationAllowance,
+            transportationAllowance: transportationAllowance,
+            outstandingIncome: outstandingIncome,
             employerPension: num(getCell(row, 'Employer Pension Contribution', canonicalMap)),
             managementFee: num(getCell(row, 'Management Fees', canonicalMap)),
             vatOnManagementFee: num(getCell(row, 'VAT on Management Fees', canonicalMap)),
@@ -424,7 +439,7 @@ export const processBlueridgeTemplate = {
           basicSalary,
           housingAllowance: housing,
           transportAllowance: transport,
-          transportationAllowance: 0,
+          transportationAllowance: transportationAllowance,
           otherAllowances: otherAllowance,
           grossPay,
           payee,
@@ -435,9 +450,14 @@ export const processBlueridgeTemplate = {
           rawRow: row,
           bonusKPI: bonusKPI,
           deductions: deductions,
+          // BLUERIDGE specific fields
+          overtimeIncome: overtimeIncome,
+          communicationAllowance: communicationAllowance,
+          outstandingIncome: outstandingIncome,
         }
 
-        const pdfResult = await generatePayslipPdf({
+        // Use the enhanced PDF generator
+        const pdfResult = await generateEnhancedPayslipPdf({
           staff: {
             staffId: staffRecord.staffId,
             firstName: staffRecord.firstName,
@@ -454,6 +474,14 @@ export const processBlueridgeTemplate = {
           },
           payroll: parsedRow,
           templateType: 'BLUERIDGE',
+          companyInfo: company ? {
+            name: company.companyName || '',
+            address: company.address || '',
+            phone: company.phone || '',
+            email: company.email || '',
+            logo: company.logo || '',
+            taxId: company.taxId || ''
+          } : undefined
         })
 
         const pdfBuffer = pdfResult.pdfBuffer

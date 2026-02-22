@@ -7,6 +7,19 @@ export interface TemplateConfig {
   description: string;
   requiredColumns: string[];
   canonicalHeaders: Record<string, string>;
+  payslipTitle: string;
+  displaySections: {
+    earnings: Array<{
+      displayName: string;
+      sourceField: string;
+      conditional?: boolean;
+    }>;
+    deductions: Array<{
+      displayName: string;
+      sourceField: string;
+      conditional?: boolean;
+    }>;
+  };
 }
 
 export const PAYROLL_TEMPLATES: Record<PayrollTemplateType, TemplateConfig> = {
@@ -14,6 +27,7 @@ export const PAYROLL_TEMPLATES: Record<PayrollTemplateType, TemplateConfig> = {
     id: 'ISURF_STANDARD',
     name: 'Isurf Standard Template',
     description: 'Original Isurf payroll template',
+    payslipTitle: 'STANDARD PAYSLIP',
     requiredColumns: [
       'Name', 'EMAIL', 'Gross Pay', 'Basic', 'Housing', 'Transport', 
       'Dressing', 'Leave Allowance', 'Entertainment', 'Utility', 'Payee', 
@@ -55,12 +69,31 @@ export const PAYROLL_TEMPLATES: Record<PayrollTemplateType, TemplateConfig> = {
       'email': 'EMAIL',
       'month': 'Month',
       'year': 'Year',
+    },
+    displaySections: {
+      earnings: [
+        { displayName: 'Basic Salary', sourceField: 'basicSalary', conditional: false },
+        { displayName: 'Housing Allowance', sourceField: 'housingAllowance', conditional: false },
+        { displayName: 'Transport Allowance', sourceField: 'transportAllowance', conditional: false },
+        { displayName: 'Dressing Allowance', sourceField: 'dressingAllowance', conditional: true },
+        { displayName: 'Leave Allowance', sourceField: 'leaveAllowance', conditional: true },
+        { displayName: 'Entertainment Allowance', sourceField: 'entertainmentAllowance', conditional: true },
+        { displayName: 'Utility Allowance', sourceField: 'utilityAllowance', conditional: true },
+        { displayName: 'Other Allowances', sourceField: 'otherAllowances', conditional: true },
+        { displayName: 'Performance Bonus', sourceField: 'bonusKPI', conditional: true }
+      ],
+      deductions: [
+        { displayName: 'PAYE Tax', sourceField: 'payee', conditional: false },
+        { displayName: 'Pension Contribution', sourceField: 'pension', conditional: false },
+        { displayName: 'Other Deductions', sourceField: 'deductions', conditional: true }
+      ]
     }
   },
   BLUERIDGE: {
     id: 'BLUERIDGE',
     name: 'Blueridge Template',
     description: 'Blueridge payroll template with different structure',
+    payslipTitle: 'BLUERIDGE PAYSLIP',
     requiredColumns: [
       'Staff ID', 'Name', 'Basic Salary before Verify(coe)', 
       'Housing', 'Transport', 'Other Allowance',
@@ -140,6 +173,24 @@ export const PAYROLL_TEMPLATES: Record<PayrollTemplateType, TemplateConfig> = {
       'ba': 'BA',
       'pfa number': 'PFA Number',
       'email': 'Email'
+    },
+    displaySections: {
+      earnings: [
+        { displayName: 'Basic Salary', sourceField: 'basicSalary', conditional: false },
+        { displayName: 'Housing Allowance', sourceField: 'housingAllowance', conditional: false },
+        { displayName: 'Transport Allowance', sourceField: 'transportAllowance', conditional: false },
+        { displayName: 'Overtime Income (OI)', sourceField: 'overtimeIncome', conditional: true },
+        { displayName: 'Communication Allowance (CA)', sourceField: 'communicationAllowance', conditional: true },
+        { displayName: 'Transportation Allowance (TA)', sourceField: 'transportationAllowance', conditional: true },
+        { displayName: 'Outstanding Income (OI)', sourceField: 'outstandingIncome', conditional: true },
+        { displayName: 'Other Allowances', sourceField: 'otherAllowances', conditional: true },
+        { displayName: 'Performance Bonus (PB)', sourceField: 'bonusKPI', conditional: true }
+      ],
+      deductions: [
+        { displayName: 'PAYE Tax', sourceField: 'payee', conditional: false },
+        { displayName: 'Pension Contribution', sourceField: 'pension', conditional: false },
+        { displayName: 'Penalty & Deductions', sourceField: 'deductions', conditional: true }
+      ]
     }
   }
 };

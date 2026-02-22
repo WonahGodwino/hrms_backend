@@ -126,6 +126,10 @@ model Payroll {
   managementFee          Decimal?    @db.Decimal(18, 2)
   vatOnManagementFee     Decimal?    @db.Decimal(18, 2)
   totalInvoiceValue      Decimal?    @db.Decimal(18, 2)
+  overtimeIncome         Decimal?    @db.Decimal(18, 2)
+  communicationAllowance Decimal?    @db.Decimal(18, 2)
+  transportationAllowance Decimal?   @db.Decimal(18, 2)
+  outstandingIncome      Decimal?    @db.Decimal(18, 2)
   status                 String      @default("PROCESSED")
   templateType           String?     @default("ISURF_STANDARD")
   uploadedBy             String

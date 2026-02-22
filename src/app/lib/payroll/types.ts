@@ -34,6 +34,15 @@ export type ParsedPayrollRow = {
   bonusKPI?: number
   deductions?: number
   
+  // BLUERIDGE-specific fields
+  overtimeIncome?: number
+  communicationAllowance?: number
+  outstandingIncome?: number
+  employerPension?: number
+  managementFee?: number
+  vatOnManagementFee?: number
+  totalInvoiceValue?: number
+  
   // raw original row (for debugging / failed records)
   rawRow: any
 }
