@@ -4,7 +4,6 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { CompanyInfo } from '@/app/lib/types/payslip'
 
 interface AdminPayslipItem {
   id: string;
@@ -15,14 +14,21 @@ interface AdminPayslipItem {
   createdAt: Date;
   fileName: string;
   downloadUrl: string;
+  companyId: string;
   staffRecord: {
     id: string;
     staffId: string;
     name: string;
     email: string;
-    department: string;
-    position: string;
+    department: string | null;
+    position: string | null;
+    companyId: string;
   };
+}
+
+interface CompanyInfo {
+  id: string;
+  companyName: string;
 }
 
 export async function OPTIONS(request: NextRequest) {
@@ -53,8 +59,6 @@ export async function GET(request: NextRequest) {
     const year = searchParams.get('year')
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '50')
-    
-    // NEW: Get toggle parameter (defaults to false)
     const showOnlyMine = searchParams.get('showOnlyMine') === 'true'
     
     const skip = (page - 1) * limit
@@ -66,7 +70,7 @@ export async function GET(request: NextRequest) {
       const userAssignments = await prisma.userCompany.findMany({
         where: {
           userId: user.userId,
-          role: user.role === 'HR' ? 'HR' : { in: ['ADMIN', 'HR'] } // ADMIN might have both roles
+          role: user.role === 'HR' ? 'HR' : { in: ['ADMIN', 'HR'] }
         },
         select: { companyId: true }
       })
@@ -84,9 +88,8 @@ export async function GET(request: NextRequest) {
     // Build base where clause
     const whereClause: any = {}
 
-    //Add filter for createdBy when toggle is ON
+    // Add filter for createdBy when toggle is ON
     if (showOnlyMine) {
-      // Only show payslips created by the current user
       whereClause.createdBy = user.userId
     }
 
@@ -96,15 +99,14 @@ export async function GET(request: NextRequest) {
       whereClause.companyId = { in: userAssignedCompanyIds }
       
       // If a specific companyId is requested, validate that user has access to it
-      if (requestedCompanyId && !userAssignedCompanyIds.includes(requestedCompanyId)) {
-        return withCors(
-          ApiResponse.error(`You don't have access to company ${requestedCompanyId}`, 403),
-          origin
-        )
-      }
-      
-      // If companyId filter is provided and user has access, use it
-      if (requestedCompanyId && userAssignedCompanyIds.includes(requestedCompanyId)) {
+      if (requestedCompanyId) {
+        if (!userAssignedCompanyIds.includes(requestedCompanyId)) {
+          return withCors(
+            ApiResponse.error(`You don't have access to company ${requestedCompanyId}`, 403),
+            origin
+          )
+        }
+        // If companyId filter is provided and user has access, use it
         whereClause.companyId = requestedCompanyId
       }
     } else if (user.role === 'SUPER_ADMIN') {
@@ -202,8 +204,8 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    // Transform the data
-    const items: AdminPayslipItem[] = payslips.map((p: any) => ({
+    // Transform the data with companyId included
+    const items: AdminPayslipItem[] = payslips.map((p) => ({
       id: p.id,
       month: p.month,
       year: p.year,
@@ -212,6 +214,7 @@ export async function GET(request: NextRequest) {
       createdAt: p.createdAt,
       fileName: p.fileName,
       downloadUrl: `/api/payslips/${p.id}/download`,
+      companyId: p.companyId,
       staffRecord: {
         id: p.staffRecord.id,
         staffId: p.staffRecord.staffId,
@@ -219,14 +222,18 @@ export async function GET(request: NextRequest) {
         email: p.staffRecord.email,
         department: p.staffRecord.department,
         position: p.staffRecord.position,
+        companyId: p.staffRecord.companyId,
       }
     }))
 
-    // Get unique companies for SUPER_ADMIN filter dropdown
+    // Get unique companies for filter dropdown
     let companies: CompanyInfo[] = [];
     
     if (user.role === 'SUPER_ADMIN') {
       companies = await prisma.company.findMany({
+        where: {
+          archived: 0
+        },
         select: {
           id: true,
           companyName: true,
@@ -237,7 +244,8 @@ export async function GET(request: NextRequest) {
       // HR/ADMIN can only see companies they're assigned to
       const assignedCompanies = await prisma.company.findMany({
         where: {
-          id: { in: userAssignedCompanyIds }
+          id: { in: userAssignedCompanyIds },
+          archived: 0
         },
         select: {
           id: true,
@@ -259,7 +267,6 @@ export async function GET(request: NextRequest) {
             limit,
             totalPages: Math.ceil(totalCount / limit),
           },
-          // Return toggle state in response
           filter: {
             showOnlyMine,
           }
@@ -269,6 +276,7 @@ export async function GET(request: NextRequest) {
       origin
     )
   } catch (error) {
+    console.error('[ADMIN_PAYSLIPS] Error:', error)
     return withCors(
       handleApiError(error),
       origin
