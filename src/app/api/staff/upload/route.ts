@@ -42,17 +42,14 @@ function splitCsvLine(line: string) {
 function cellToString(value: any): string {
   if (value === null || value === undefined) return ''
 
-  // ExcelJS RichText
   if (typeof value === 'object' && Array.isArray(value?.richText)) {
     return value.richText.map((t: any) => t?.text || '').join('').trim()
   }
 
-  // ExcelJS hyperlink cell: { text, hyperlink }
   if (typeof value === 'object' && value?.text) {
     return String(value.text).trim()
   }
 
-  // ExcelJS formula cell: { formula, result }
   if (typeof value === 'object' && value?.result !== undefined) {
     return String(value.result).trim()
   }
@@ -62,18 +59,11 @@ function cellToString(value: any): string {
 
 function cleanEmail(raw: any): string {
   let s = cellToString(raw)
-
-  // normalize weird spaces
   s = s.replace(/\u00A0/g, ' ').trim()
-
-  // handle mailto links
   if (s.toLowerCase().startsWith('mailto:')) {
     s = s.slice('mailto:'.length).trim()
   }
-
-  // remove surrounding angle brackets
   s = s.replace(/^<|>$/g, '').trim()
-
   return s.toLowerCase()
 }
 
@@ -94,7 +84,6 @@ function normalizeHeader(h: string) {
 }
 
 function pick(row: any, keys: string[]) {
-  // Try exact keys first, then normalized matching
   for (const k of keys) {
     if (row?.[k] !== undefined && row?.[k] !== null && row?.[k] !== '') return row[k]
   }
@@ -145,9 +134,7 @@ export async function POST(request: NextRequest) {
     
     let companyId: string | null = null
 
-    // Determine company based on user role
     if (authUser.role === 'HR') {
-      // HR can only upload for their own company
       if (!authUser.companyId) {
         return withCors(
           ApiResponse.error('Company context missing for HR user', 400),
@@ -157,7 +144,6 @@ export async function POST(request: NextRequest) {
       companyId = authUser.companyId
     } 
     else if (authUser.role === 'SUPER_ADMIN' || authUser.role === 'ADMIN') {
-      // SUPER_ADMIN and ADMIN must select a company
       const selectedCompanyId = formData.get('companyId') as string | null
       
       if (!selectedCompanyId) {
@@ -168,7 +154,6 @@ export async function POST(request: NextRequest) {
       }
       companyId = selectedCompanyId
 
-      // Validate that user has access to the selected company
       if (authUser.role === 'ADMIN') {
         const hasAccess = await prisma.userCompany.findFirst({
           where: {
@@ -185,7 +170,6 @@ export async function POST(request: NextRequest) {
           )
         }
       }
-      // SUPER_ADMIN doesn't need access validation - they have access to all companies
     }
 
     if (!companyId) {
@@ -195,7 +179,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Verify company exists and is not archived
     const company = await prisma.company.findFirst({
       where: {
         id: companyId,
@@ -214,7 +197,6 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('No file uploaded', 400), origin)
     }
 
-    // Validate file type
     const allowedTypes = [
       'application/vnd.ms-excel',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -232,13 +214,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Read file bytes
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
 
     let data: any[] = []
 
-    // Parse file into row objects
     try {
       const workbook = new ExcelJS.Workbook()
 
@@ -273,7 +253,6 @@ export async function POST(request: NextRequest) {
           return withCors(ApiResponse.error('No worksheet found in Excel file', 400), origin)
         }
 
-        // Read headers row 1
         const headers: string[] = []
         const headerRow = worksheet.getRow(1)
         headerRow.eachCell((cell, colNumber) => {
@@ -281,7 +260,6 @@ export async function POST(request: NextRequest) {
           headers[colNumber - 1] = raw
         })
 
-        // Process rows
         worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
           if (rowNumber <= 1) return
 
@@ -309,7 +287,6 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('No valid data found in the file', 400), origin)
     }
 
-    // Validate required columns (case-insensitive and flexible headers)
     const requiredColumns = ['staffid', 'email', 'firstname', 'lastname', 'department', 'position']
     const actualColumns = Object.keys(data[0] || {})
     const actualColumnsLower = actualColumns.map((c) => normalizeHeader(c))
@@ -334,10 +311,9 @@ export async function POST(request: NextRequest) {
       records: [] as any[],
     }
 
-    // Process each staff record
     for (let index = 0; index < data.length; index++) {
       const row = data[index]
-      const displayRow = index + 2 // header row is 1
+      const displayRow = index + 2
 
       try {
         const staffIdRaw = pick(row, ['staffId', 'StaffID', 'STAFFID', 'Staff Id', 'Staff ID', 'STAFF ID'])
@@ -362,21 +338,18 @@ export async function POST(request: NextRequest) {
         const accountNumber = cellToString(accountNumberRaw)
         const bvn = cellToString(bvnRaw)
 
-        // Validate required fields
         if (!staffId || !email || !firstName || !lastName || !department || !position) {
           results.failed++
           results.errors.push(`Row ${displayRow}: Missing required fields`)
           continue
         }
 
-        // Validate email format
         if (!isValidEmail(email)) {
           results.failed++
           results.errors.push(`Row ${displayRow}: Invalid email format: ${cellToString(emailRaw)}`)
           continue
         }
 
-        // Validate staff ID format (alphanumeric, 3-20 characters)
         const staffIdRegex = /^[a-zA-Z0-9]{3,20}$/
         if (!staffIdRegex.test(staffId)) {
           results.failed++
@@ -384,25 +357,38 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // Check for duplicate staffId or email within this company
-        // ONLY consider staff with isActive = true as duplicates
-        const existingStaff = await prisma.staffRecord.findFirst({
+        const existingStaffById = await prisma.staffRecord.findFirst({
           where: {
             companyId: companyId!,
-            isActive: true, // Only check active records
-            OR: [{ staffId }, { email }],
+            staffId: staffId,
+            isActive: true,
           },
         })
 
-        if (existingStaff) {
+        if (existingStaffById) {
           results.failed++
           results.errors.push(
-            `Row ${displayRow}: Active staff with ID ${staffId} or email ${email} already exists`
+            `Row ${displayRow}: Staff ID "${staffId}" already exists in company "${company.companyName}"`
           )
           continue
         }
 
-        // Create staff record
+        const existingStaffByEmail = await prisma.staffRecord.findFirst({
+          where: {
+            companyId: companyId!,
+            email: email,
+            isActive: true,
+          },
+        })
+
+        if (existingStaffByEmail) {
+          results.failed++
+          results.errors.push(
+            `Row ${displayRow}: Email "${email}" already exists in company "${company.companyName}"`
+          )
+          continue
+        }
+
         const staffRecord = await prisma.staffRecord.create({
           data: {
             staffId,
@@ -424,13 +410,23 @@ export async function POST(request: NextRequest) {
         results.records.push(staffRecord)
         results.successful++
       } catch (error: any) {
-        const msg = error?.message || 'Unknown error'
+        if (error.code === 'P2002') {
+          const target = error.meta?.target || []
+          if (target.includes('staffId')) {
+            results.errors.push(`Row ${displayRow}: Staff ID already exists in this company`)
+          } else if (target.includes('email')) {
+            results.errors.push(`Row ${displayRow}: Email already exists in this company`)
+          } else {
+            results.errors.push(`Row ${displayRow}: Unique constraint violation`)
+          }
+        } else {
+          const msg = error?.message || 'Unknown error'
+          results.errors.push(`Row ${displayRow}: ${msg}`)
+        }
         results.failed++
-        results.errors.push(`Row ${displayRow}: ${msg}`)
       }
     }
 
-    // Save upload record (StaffUpload model)
     const { baseDir, uploadsDir } = await ensureUploadDirectories()
     const staffDir = path.join(uploadsDir, 'staff')
     await mkdir(staffDir, { recursive: true })
@@ -452,7 +448,6 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Save the original file
     await writeFile(savedFilePath, buffer)
 
     return withCors(
@@ -496,7 +491,6 @@ export async function GET(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const authUser = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
-    // For HR users, we need to include company info in the template
     let companyInfo = null
     if (authUser.role === 'HR' && authUser.companyId) {
       companyInfo = await prisma.company.findUnique({
@@ -512,7 +506,6 @@ export async function GET(request: NextRequest) {
       const workbook = new ExcelJS.Workbook()
       const worksheet = workbook.addWorksheet('Staff Records')
 
-      // Add company info for HR users
       if (companyInfo) {
         worksheet.addRow([`Company: ${companyInfo.companyName}`])
         worksheet.addRow(['Upload staff records for your company only'])
@@ -532,7 +525,7 @@ export async function GET(request: NextRequest) {
         { header: 'bvn', key: 'bvn', width: 15 },
       ]
 
-      const headerRow = worksheet.getRow(companyInfo ? 4 : 1) // Adjust row number if company info added
+      const headerRow = worksheet.getRow(companyInfo ? 4 : 1)
       headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 }
       headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
       headerRow.alignment = { vertical: 'middle', horizontal: 'center' }
@@ -566,7 +559,7 @@ export async function GET(request: NextRequest) {
 
       sampleData.forEach((row) => worksheet.addRow(row))
 
-      const startRow = companyInfo ? 5 : 2 // Adjust starting row for data
+      const startRow = companyInfo ? 5 : 2
       worksheet.eachRow((row, rowNumber) => {
         if (rowNumber >= startRow && rowNumber < startRow + sampleData.length) {
           row.alignment = { vertical: 'middle', horizontal: 'left' }
@@ -577,7 +570,6 @@ export async function GET(request: NextRequest) {
         }
       })
 
-      // Add instructions
       const instructionsRow = worksheet.rowCount + 2
       worksheet.getRow(instructionsRow).values = ['IMPORTANT NOTES:']
       worksheet.getRow(instructionsRow + 1).values = ['- staffId: Unique staff ID (3-20 alphanumeric characters, REQUIRED)']
