@@ -1,21 +1,5 @@
-// ...existing code...
-import * as LRU from 'lru-cache'
-
-interface LRUCacheInstance<K = any, V = any> {
-  get(key: K): V | undefined
-  set(key: K, value: V, options?: any): LRUCacheInstance<K, V>
-  has(key: K): boolean
-  delete(key: K): boolean
-  clear(): void
-  readonly size: number
-}
-
-interface LRUCacheConstructor {
-  new <K = any, V = any>(options?: any): LRUCacheInstance<K, V>
-}
-
-// runtime-compatible constructor resolution for different lru-cache exports
-const LRUCache = ((LRU as any).default ?? (LRU as any).LRUCache ?? LRU) as unknown as LRUCacheConstructor
+// src/app/lib/rateLimiter.ts
+import { LRUCache } from 'lru-cache'
 
 interface RateLimitOptions {
   uniqueTokenPerInterval?: number
@@ -24,30 +8,29 @@ interface RateLimitOptions {
 
 export default function rateLimit(options?: RateLimitOptions) {
   const tokenCache = new LRUCache<string, number[]>({
-    max: options?.uniqueTokenPerInterval ?? 500,
-    ttl: options?.interval ?? 60000
+    max: options?.uniqueTokenPerInterval || 500,
+    ttl: options?.interval || 60000, // v11 uses ttl instead of maxAge
   })
 
   return {
     check: (limit: number, token: string) =>
       new Promise<void>((resolve, reject) => {
-        let tokenCount = tokenCache.get(token)
+        const tokenCount = tokenCache.get(token)
+        
         if (!tokenCount) {
-          tokenCount = [0]
-          tokenCache.set(token, tokenCount)
+          tokenCache.set(token, [1])
+          resolve()
+          return
         }
 
         tokenCount[0] += 1
-
         const currentUsage = tokenCount[0]
-        const isRateLimited = currentUsage >= limit
-
-        if (isRateLimited) {
+        
+        if (currentUsage >= limit) {
           reject(new Error('Rate limit exceeded'))
         } else {
           resolve()
         }
-      })
+      }),
   }
 }
-// ...existing code...

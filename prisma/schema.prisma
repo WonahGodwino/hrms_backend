@@ -177,6 +177,8 @@ model StaffUpload {
   companyId    String
   fileName     String
   filePath     String
+  processedFilePath String?  // Add this field
+  processedFileName String?  // Add this field
   totalRecords Int
   successful   Int
   failed       Int

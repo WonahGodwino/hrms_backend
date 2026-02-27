@@ -308,12 +308,14 @@ export async function POST(request: NextRequest) {
       successful: 0,
       failed: 0,
       errors: [] as string[],
+      failedRecords: [] as any[], // Store failed records with error messages
       records: [] as any[],
     }
 
     for (let index = 0; index < data.length; index++) {
       const row = data[index]
       const displayRow = index + 2
+      let errorMessage = ''
 
       try {
         const staffIdRaw = pick(row, ['staffId', 'StaffID', 'STAFFID', 'Staff Id', 'Staff ID', 'STAFF ID'])
@@ -339,22 +341,19 @@ export async function POST(request: NextRequest) {
         const bvn = cellToString(bvnRaw)
 
         if (!staffId || !email || !firstName || !lastName || !department || !position) {
-          results.failed++
-          results.errors.push(`Row ${displayRow}: Missing required fields`)
-          continue
+          errorMessage = `Missing required fields. Please ensure all required fields are filled.`
+          throw new Error(errorMessage)
         }
 
         if (!isValidEmail(email)) {
-          results.failed++
-          results.errors.push(`Row ${displayRow}: Invalid email format: ${cellToString(emailRaw)}`)
-          continue
+          errorMessage = `Invalid email format: "${cellToString(emailRaw)}". Please enter a valid email address.`
+          throw new Error(errorMessage)
         }
 
         const staffIdRegex = /^[a-zA-Z0-9]{3,20}$/
         if (!staffIdRegex.test(staffId)) {
-          results.failed++
-          results.errors.push(`Row ${displayRow}: Staff ID must be 3-20 alphanumeric characters`)
-          continue
+          errorMessage = `Staff ID "${staffId}" must be 3-20 alphanumeric characters (letters and numbers only).`
+          throw new Error(errorMessage)
         }
 
         const existingStaffById = await prisma.staffRecord.findFirst({
@@ -366,11 +365,8 @@ export async function POST(request: NextRequest) {
         })
 
         if (existingStaffById) {
-          results.failed++
-          results.errors.push(
-            `Row ${displayRow}: Staff ID "${staffId}" already exists in company "${company.companyName}"`
-          )
-          continue
+          errorMessage = `Staff ID "${staffId}" already exists in ${company.companyName}. Please use a different Staff ID or check if this staff member is already registered.`
+          throw new Error(errorMessage)
         }
 
         const existingStaffByEmail = await prisma.staffRecord.findFirst({
@@ -382,11 +378,8 @@ export async function POST(request: NextRequest) {
         })
 
         if (existingStaffByEmail) {
-          results.failed++
-          results.errors.push(
-            `Row ${displayRow}: Email "${email}" already exists in company "${company.companyName}"`
-          )
-          continue
+          errorMessage = `Email "${email}" is already registered in ${company.companyName}. Please use a different email address or check if this staff member is already registered.`
+          throw new Error(errorMessage)
         }
 
         const staffRecord = await prisma.staffRecord.create({
@@ -410,20 +403,33 @@ export async function POST(request: NextRequest) {
         results.records.push(staffRecord)
         results.successful++
       } catch (error: any) {
-        if (error.code === 'P2002') {
-          const target = error.meta?.target || []
-          if (target.includes('staffId')) {
-            results.errors.push(`Row ${displayRow}: Staff ID already exists in this company`)
-          } else if (target.includes('email')) {
-            results.errors.push(`Row ${displayRow}: Email already exists in this company`)
-          } else {
-            results.errors.push(`Row ${displayRow}: Unique constraint violation`)
-          }
-        } else {
-          const msg = error?.message || 'Unknown error'
-          results.errors.push(`Row ${displayRow}: ${msg}`)
-        }
         results.failed++
+        
+        // Set error message if not already set
+        if (!errorMessage) {
+          if (error.code === 'P2002') {
+            const target = error.meta?.target || []
+            if (target.includes('staffId')) {
+              errorMessage = `This Staff ID already exists in the system. Please review the Staff ID and try again.`
+            } else if (target.includes('email')) {
+              errorMessage = `This email address is already registered. Please review the email and try again.`
+            } else {
+              errorMessage = `A staff record with this information already exists. Please review the details and try again.`
+            }
+          } else {
+            errorMessage = error?.message || 'An error occurred while processing this record. Please check the data and try again.'
+          }
+        }
+
+        results.errors.push(`Row ${displayRow}: ${errorMessage}`)
+        
+        // Add failed record with error message
+        results.failedRecords.push({
+          ...row,
+          ROW_NUMBER: displayRow,
+          ERROR_MESSAGE: errorMessage,
+          STATUS: 'FAILED'
+        })
       }
     }
 
@@ -435,11 +441,64 @@ export async function POST(request: NextRequest) {
     const savedFilePath = path.join(staffDir, fileName)
     const relativeFilePath = getRelativePath(savedFilePath)
 
+    // Create failed records file if there are failures
+    let failedRecordsFilePath: string | null = null
+    if (results.failedRecords.length > 0) {
+      const failedWorkbook = new ExcelJS.Workbook()
+      const failedWorksheet = failedWorkbook.addWorksheet('Failed Records')
+
+      // Get all unique column headers from the failed records
+      const headersSet = new Set<string>()
+      results.failedRecords.forEach(record => {
+        Object.keys(record).forEach(key => headersSet.add(key))
+      })
+      
+      // Ensure ERROR_MESSAGE and ROW_NUMBER are included
+      headersSet.add('ROW_NUMBER')
+      headersSet.add('ERROR_MESSAGE')
+      headersSet.add('STATUS')
+      
+      const headers = Array.from(headersSet)
+      failedWorksheet.columns = headers.map(header => ({
+        header: header,
+        key: header,
+        width: header === 'ERROR_MESSAGE' ? 50 : 20
+      }))
+
+      // Add failed records
+      results.failedRecords.forEach(record => {
+        failedWorksheet.addRow(record)
+      })
+
+      // Style the header row
+      const headerRow = failedWorksheet.getRow(1)
+      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+      headerRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFDC3545' }, // Red color for errors
+      }
+
+      // Auto-filter for easy sorting
+      failedWorksheet.autoFilter = {
+        from: 'A1',
+        to: `${String.fromCharCode(64 + headers.length)}1`
+      }
+
+      const failedFileName = `staff-upload-failed-${Date.now()}.xlsx`
+      const failedFilePath = path.join(staffDir, failedFileName)
+      const failedBuffer = await failedWorkbook.xlsx.writeBuffer()
+      await writeFile(failedFilePath, Buffer.from(failedBuffer as any))
+      failedRecordsFilePath = getRelativePath(failedFilePath)
+    }
+
     const uploadRecord = await prisma.staffUpload.create({
       data: {
         companyId: companyId!,
         fileName: file.name,
         filePath: relativeFilePath,
+        processedFilePath: failedRecordsFilePath,
+        processedFileName: failedRecordsFilePath ? path.basename(failedRecordsFilePath) : null,
         totalRecords: data.length,
         successful: results.successful,
         failed: results.failed,
@@ -450,23 +509,30 @@ export async function POST(request: NextRequest) {
 
     await writeFile(savedFilePath, buffer)
 
+    const responseData = {
+      results,
+      uploadId: uploadRecord.id,
+      summary: {
+        totalProcessed: data.length,
+        successful: results.successful,
+        failed: results.failed,
+        userRole: authUser.role,
+        companyId: companyId,
+        companyName: company.companyName,
+      },
+      downloadLinks: {
+        failedRecords: results.failedRecords.length > 0 
+          ? `/api/staff/download-failed/${uploadRecord.id}`
+          : null,
+      },
+      ...(results.failed > 0 && {
+        failedRecordsInfo: `${results.failed} records failed. Download the failed records file for details.`,
+      }),
+    }
+
     return withCors(
       ApiResponse.success(
-        {
-          results,
-          uploadId: uploadRecord.id,
-          summary: {
-            totalProcessed: data.length,
-            successful: results.successful,
-            failed: results.failed,
-            userRole: authUser.role,
-            companyId: companyId,
-            companyName: company.companyName,
-          },
-          ...(results.failed > 0 && {
-            failedRecordsInfo: `${results.failed} records failed. Check errors array for details.`,
-          }),
-        },
+        responseData,
         `Staff records processing completed. Successful: ${results.successful}, Failed: ${results.failed}`
       ),
       origin

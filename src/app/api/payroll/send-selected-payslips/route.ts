@@ -97,15 +97,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Fetch all selected payslips with their staff information and payroll data
+    // FIX: First fetch the payslips with staff information only
     const payslips = await prisma.payslip.findMany({
       where: {
         id: { in: payslipIds },
         companyId: companyId
       },
       include: {
-        staffRecord: true,
-        payroll: true // Include payroll data
+        staffRecord: true
+        // REMOVED: payroll include since it's causing issues
       }
     })
 
@@ -125,6 +125,29 @@ export async function POST(request: NextRequest) {
         ApiResponse.error(`Some payslips not found or don't belong to your company: ${missingIds.join(', ')}`, 404),
         origin
       )
+    }
+
+    // FIX: Fetch payroll data separately for payslips that have payrollId
+    const payrollIds = payslips
+      .filter(p => p.payrollId)
+      .map(p => p.payrollId);
+    
+    let payrollsMap = new Map();
+    
+    if (payrollIds.length > 0) {
+      const payrolls = await prisma.payroll.findMany({
+        where: {
+          id: { in: payrollIds }
+        },
+        select: {
+          id: true,
+          netSalary: true,
+          createdAt: true
+          // Add only fields that exist in your Payroll model
+        }
+      });
+      
+      payrollsMap = new Map(payrolls.map(p => [p.id, p]));
     }
 
     // Month names for display
@@ -150,7 +173,7 @@ export async function POST(request: NextRequest) {
 
     for (const payslip of payslips) {
       const staff = payslip.staffRecord
-      const payroll = payslip.payroll
+      const payroll = payslip.payrollId ? payrollsMap.get(payslip.payrollId) : null
       const staffName = `${staff.firstName} ${staff.lastName}`
       
       try {
@@ -159,7 +182,7 @@ export async function POST(request: NextRequest) {
           throw new Error('Staff member has no email address')
         }
 
-        // Prepare staff object for email function (matches what sendPayrollNotificationEmail expects)
+        // Prepare staff object for email function
         const staffForEmail = {
           id: staff.id,
           companyId: staff.companyId,
@@ -172,24 +195,22 @@ export async function POST(request: NextRequest) {
           isRegistered: staff.isRegistered
         }
 
-        // Prepare payroll object for email
+        // Prepare payroll object for email - use payslip data primarily
         const payrollForEmail = {
-          id: payslip.payrollId, // Use payroll ID, not payslip ID
+          id: payslip.payrollId || 'unknown',
           month: monthNames[parseInt(payslip.month) - 1] || payslip.month,
           year: payslip.year,
+          // Use payslip.netPay first, fallback to payroll?.netSalary, then 0
           netSalary: Number(payslip.netPay || payroll?.netSalary || 0),
-          isUpdate: false // Default to false, but you could determine this if needed
+          isUpdate: false
         }
 
-        // Check if this might be an update (you might want to track this in your UI)
-        // For now, we'll set isUpdate based on whether this payslip was created after the initial payroll
-        if (payroll) {
-          // If the payslip was created after the payroll, it might be an update
-          // You could also pass this flag from the frontend if the user knows
+        // Check if this might be an update (only if payroll exists)
+        if (payroll && payslip.createdAt) {
           payrollForEmail.isUpdate = payslip.createdAt > payroll.createdAt
         }
 
-        // Send the email using the existing function (no attachment, just link)
+        // Send the email
         const emailResult = await sendPayrollNotificationEmail(
           staffForEmail,
           payrollForEmail
@@ -208,24 +229,28 @@ export async function POST(request: NextRequest) {
           })
 
           // Log the email sending
-          await prisma.emailLog.create({
-            data: {
-              companyId,
-              staffId: staff.id,
-              payrollId: payslip.payrollId,
-              payslipId: payslip.id,
-              emailType: 'PAYSLIP_RESEND',
-              recipient: staff.email,
-              status: 'SENT',
-              sentBy: user.userId,
-              metadata: {
-                month: payslip.month,
-                year: payslip.year,
-                isUpdate: payrollForEmail.isUpdate,
-                isRegistered: staffForEmail.isRegistered
+          try {
+            await prisma.emailLog.create({
+              data: {
+                companyId,
+                staffId: staff.id,
+                payrollId: payslip.payrollId, // This can be null, which is fine
+                payslipId: payslip.id,
+                emailType: 'PAYSLIP_RESEND',
+                recipient: staff.email,
+                status: 'SENT',
+                sentBy: user.userId,
+                metadata: {
+                  month: payslip.month,
+                  year: payslip.year,
+                  isUpdate: payrollForEmail.isUpdate,
+                  isRegistered: staffForEmail.isRegistered
+                }
               }
-            }
-          }).catch(err => console.error('Failed to log email:', err))
+            })
+          } catch (logError) {
+            console.error('Failed to log email (non-critical):', logError)
+          }
 
         } else {
           throw new Error(emailResult.error || 'Failed to send email')
@@ -244,24 +269,28 @@ export async function POST(request: NextRequest) {
         })
 
         // Log the failed attempt
-        await prisma.emailLog.create({
-          data: {
-            companyId,
-            staffId: staff.id,
-            payrollId: payslip.payrollId,
-            payslipId: payslip.id,
-            emailType: 'PAYSLIP_RESEND',
-            recipient: staff.email || 'unknown',
-            status: 'FAILED',
-            sentBy: user.userId,
-            error: error.message,
-            metadata: {
-              month: payslip.month,
-              year: payslip.year,
-              isRegistered: staff.isRegistered
+        try {
+          await prisma.emailLog.create({
+            data: {
+              companyId,
+              staffId: staff.id,
+              payrollId: payslip.payrollId,
+              payslipId: payslip.id,
+              emailType: 'PAYSLIP_RESEND',
+              recipient: staff.email || 'unknown',
+              status: 'FAILED',
+              sentBy: user.userId,
+              error: error.message,
+              metadata: {
+                month: payslip.month,
+                year: payslip.year,
+                isRegistered: staff.isRegistered
+              }
             }
-          }
-        }).catch(err => console.error('Failed to log email failure:', err))
+          })
+        } catch (logError) {
+          console.error('Failed to log email failure (non-critical):', logError)
+        }
       }
     }
 
