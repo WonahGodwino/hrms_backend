@@ -1,4 +1,4 @@
-// src/app/api/auth/payslip-access/route.ts - FINAL PRODUCTION VERSION
+// src/app/api/auth/payslip-access/route.ts - ONLY REMOVED PAYSLIP CHECK
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { verify } from 'jsonwebtoken'
@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
     const staffId = decoded.staffId
     const companyId = decoded.companyId
     const isRegistered = decoded.isRegistered || false
-    const tokenPayslipId = decoded.payslipId
+    const payslipId = decoded.payslipId
 
     console.log(`🔐 Payslip access attempt:`, {
       staffRecordId,
@@ -60,8 +60,8 @@ export async function GET(request: NextRequest) {
       staffId,
       companyId,
       isRegistered,
-      tokenPayslipId,
-      hasPayslipId: !!tokenPayslipId
+      payslipId,
+      hasPayslipId: !!payslipId
     })
 
     const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://app.isurfglobal.com'
@@ -115,6 +115,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Verify staff ID matches
     if (staff.staffId !== staffId) {
       console.error(`❌ Staff ID mismatch: expected ${staffId}, got ${staff.staffId}`)
       const errorUrl = new URL('/auth/error', frontendUrl)
@@ -122,6 +123,7 @@ export async function GET(request: NextRequest) {
       return addCorsHeaders(NextResponse.redirect(errorUrl))
     }
 
+    // Verify staff record ID matches token
     if (staff.id !== staffRecordId) {
       console.error(`❌ Staff record ID mismatch: token ${staffRecordId}, record ${staff.id}`)
       const errorUrl = new URL('/auth/error', frontendUrl)
@@ -129,138 +131,47 @@ export async function GET(request: NextRequest) {
       return addCorsHeaders(NextResponse.redirect(errorUrl))
     }
 
-    // Registered user flow
-    if (isRegistered && staff.isRegistered) {
-      console.log(`✅ Registered user accessing: ${staff.email}`)
-      
-      if (tokenPayslipId) {
-        const payslip = await prisma.payslip.findUnique({
-          where: { id: tokenPayslipId },
-          include: {
-            staffRecord: {
-              select: { id: true }
-            }
-          }
-        })
-
-        if (payslip && payslip.staffRecord.id === staff.id) {
-          console.log(`📄 Redirecting to specific payslip: ${tokenPayslipId}`)
+    // Handle based on registration status from token
+    if (isRegistered) {
+      // For registered users: Check if they're actually registered
+      if (!staff.isRegistered) {
+        console.warn(`⚠️ Token says registered but staff record shows unregistered: ${staff.email}`)
+        // Fall through to unregistered flow
+      } else {
+        console.log(`✅ Registered user accessing: ${staff.email}`)
+        
+        // If payslipId is provided, add it to redirect (no verification)
+        if (payslipId) {
+          console.log(`📄 Redirecting with payslip reference: ${payslipId}`)
           const loginUrl = new URL('/login', frontendUrl)
           loginUrl.searchParams.set('email', staff.email)
-          loginUrl.searchParams.set('redirect', `/profile/payslips/${tokenPayslipId}`)
+          loginUrl.searchParams.set('redirect', `/profile/payslips/${payslipId}`)
           return addCorsHeaders(NextResponse.redirect(loginUrl))
         }
-      }
 
-      const loginUrl = new URL('/login', frontendUrl)
-      loginUrl.searchParams.set('email', staff.email)
-      loginUrl.searchParams.set('message', 'Please login to access your payslips')
-      return addCorsHeaders(NextResponse.redirect(loginUrl))
+        // Generic login redirect for registered users
+        const loginUrl = new URL('/login', frontendUrl)
+        loginUrl.searchParams.set('email', staff.email)
+        loginUrl.searchParams.set('message', 'Please login to access your payslips')
+        return addCorsHeaders(NextResponse.redirect(loginUrl))
+      }
     }
 
-    // Unregistered user flow
+    // For unregistered users (or fallback from above)
     console.log(`📝 Unregistered user accessing: ${staff.email}`)
     
-    let targetPayslipId = tokenPayslipId
-    let payslipVerified = false
-    let idCorrected = false
-
-    if (tokenPayslipId) {
-      // Try by exact ID first
-      let payslip = await prisma.payslip.findUnique({
-        where: { id: tokenPayslipId },
-        include: {
-          staffRecord: {
-            select: { id: true }
-          }
-        }
-      })
-
-      if (payslip && payslip.staffRecord.id === staff.id) {
-        console.log(`✅ Payslip verified by exact ID: ${tokenPayslipId}`)
-        payslipVerified = true
-        targetPayslipId = payslip.id
-      } else {
-        console.log(`⚠️ Payslip ID ${tokenPayslipId} not found or mismatch, trying fallback`)
-        
-        // Find any payslip for this staff through the staffRecord relation
-        const staffPayslip = await prisma.payslip.findFirst({
-          where: {
-            staffRecordId: staff.id,
-            companyId: staff.companyId
-          },
-          orderBy: [
-            { year: 'desc' },
-            { month: 'desc' }
-          ],
-          include: {
-            staffRecord: {
-              select: { id: true }
-            }
-          }
-        })
-
-        if (staffPayslip) {
-          console.log(`✅ Found alternative payslip: ${staffPayslip.id} (${staffPayslip.month} ${staffPayslip.year})`)
-          targetPayslipId = staffPayslip.id
-          payslipVerified = true
-          idCorrected = true
-        }
-      }
-
-      if (!payslipVerified) {
-        console.error(`❌ No payslip found for staff: ${staff.staffId}`)
-        const errorUrl = new URL('/auth/error', frontendUrl)
-        errorUrl.searchParams.set('message', 'No payslip found for your account')
-        errorUrl.searchParams.set('details', 'Please contact HR to ensure a payslip has been generated.')
-        return addCorsHeaders(NextResponse.redirect(errorUrl))
-      }
-    } else {
-      // No payslipId in token - try to find any payslip for this staff
-      const anyPayslip = await prisma.payslip.findFirst({
-        where: {
-          staffRecordId: staff.id,
-          companyId: staff.companyId
-        },
-        orderBy: [
-          { year: 'desc' },
-          { month: 'desc' }
-        ]
-      })
-
-      if (anyPayslip) {
-        console.log(`✅ Found payslip for staff: ${anyPayslip.id}`)
-        targetPayslipId = anyPayslip.id
-        payslipVerified = true
-      } else {
-        console.log(`⚠️ No payslip found, proceeding with registration only`)
-      }
-    }
-
-    // Redirect to registration
+    // Redirect to complete registration on FRONTEND
     const registrationUrl = new URL('/complete-registration', frontendUrl)
-    
     registrationUrl.searchParams.set('email', staff.email)
     registrationUrl.searchParams.set('staffId', staff.staffId)
     registrationUrl.searchParams.set('companyId', staff.companyId)
     registrationUrl.searchParams.set('token', token)
     
-    if (targetPayslipId) {
-      registrationUrl.searchParams.set('payslipId', targetPayslipId)
+    if (payslipId) {
+      registrationUrl.searchParams.set('payslipId', payslipId)
     }
     
-    if (idCorrected) {
-      registrationUrl.searchParams.set('idCorrected', 'true')
-      if (tokenPayslipId) {
-        registrationUrl.searchParams.set('originalPayslipId', tokenPayslipId)
-      }
-    }
-    
-    if (!payslipVerified) {
-      registrationUrl.searchParams.set('noPayslip', 'true')
-    }
-
-    console.log(`🔗 Redirecting to registration: ${registrationUrl.toString()}`)
+    console.log(`🔗 Redirecting to registration on frontend: ${registrationUrl.toString()}`)
     return addCorsHeaders(NextResponse.redirect(registrationUrl))
 
   } catch (error: any) {
@@ -309,48 +220,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    let staffExists = false
-    let staff = null
-    try {
-      staff = await prisma.staffRecord.findUnique({
-        where: {
-          email_companyId: {
-            email: decoded.email,
-            companyId: decoded.companyId
-          }
-        },
-        select: {
-          id: true,
-          isRegistered: true,
-          payslips: {
-            select: { id: true },
-            take: 1,
-            orderBy: [
-              { year: 'desc' },
-              { month: 'desc' }
-            ]
-          }
-        }
-      })
-      staffExists = !!staff
-    } catch (dbError) {
-      console.error('Database check failed:', dbError)
-    }
-
-    const response = NextResponse.json({
+    // Return token info (without sensitive data)
+    return NextResponse.json({
       valid: true,
       email: decoded.email,
       staffId: decoded.staffId,
       companyId: decoded.companyId,
       isRegistered: decoded.isRegistered || false,
       hasPayslipId: !!decoded.payslipId,
-      staffExists,
-      staffIsRegistered: staff?.isRegistered || false,
-      hasAnyPayslip: staff && staff.payslips.length > 0,
       expiresAt: new Date(decoded.exp * 1000).toISOString()
     })
-
-    return addCorsHeaders(response)
   } catch (error: any) {
     console.error('Token verification failed:', error)
     
@@ -365,11 +244,9 @@ export async function POST(request: NextRequest) {
       status = 500
     }
     
-    const response = NextResponse.json(
+    return NextResponse.json(
       { error: errorMessage },
       { status }
     )
-    
-    return addCorsHeaders(response)
   }
 }
