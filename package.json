@@ -32,6 +32,7 @@
     "he": "^1.2.0",
     "iconv-lite": "^0.7.0",
     "jsonwebtoken": "^9.0.2",
+    "lru-cache": "^11.2.6",
     "lucide-react": "^0.562.0",
     "mailgun-js": "^0.22.0",
     "mailgun.js": "^12.4.0",
