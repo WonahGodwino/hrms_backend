@@ -1,11 +1,15 @@
 // src/app/lib/payroll/generateEnhancedPayslipPdf.ts
 import PDFDocument from 'pdfkit'
 import type { PayrollTemplateType } from './templates/types'
-import { PAYROLL_TEMPLATES } from './templates/types'
 
 function formatCurrency(n: number) {
+  // Ensure we always have a valid number
   const safe = Number.isFinite(n) ? n : 0
-  return `₦${safe.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`
+  // Format with proper naira sign and 2 decimal places
+  return `₦${safe.toLocaleString('en-NG', { 
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2 
+  })}`
 }
 
 function getMonthName(monthNumber: number): string {
@@ -52,6 +56,7 @@ export interface GeneratePayslipInput {
     rawRow: any
     bonusKPI?: number
     deductions?: number
+    position?: string
     
     // BLUERIDGE specific fields
     overtimeIncome?: number
@@ -61,8 +66,12 @@ export interface GeneratePayslipInput {
     leaveAllowance?: number
     entertainmentAllowance?: number
     utilityAllowance?: number
+    
+    // Additional fields from mapping
+    proratedGrossPay?: number
+    walletPayment?: number
+    commercialPayment?: number
   }
-  templateType?: PayrollTemplateType
   companyInfo?: {
     name: string
     address: string
@@ -76,8 +85,7 @@ export interface GeneratePayslipInput {
 export async function generateEnhancedPayslipPdf(
   input: GeneratePayslipInput
 ): Promise<{ pdfBuffer: Uint8Array; fileName: string }> {
-  const { staff, payroll, templateType = 'ISURF_STANDARD', companyInfo } = input
-  const template = PAYROLL_TEMPLATES[templateType]
+  const { staff, payroll, companyInfo } = input
   
   const fileName = `payslip-${staff.staffId}-${payroll.periodMonth.toString().padStart(2, '0')}-${payroll.periodYear}.pdf`
 
@@ -109,14 +117,12 @@ export async function generateEnhancedPayslipPdf(
       
       doc.fontSize(14)
         .font('Helvetica')
-        .text(template.payslipTitle, 40, 55)
+        .text('PAYSLIP', 40, 55)
       
-      // Right side info
+      // Right side info - NO TEMPLATE DISPLAY
       doc.fillColor('#ffffff')
         .fontSize(10)
         .font('Helvetica')
-        .text(`Template: ${template.name}`, 
-              doc.page.width - 250, 25, { width: 200, align: 'right' })
         .text(`Pay Period: ${getMonthName(payroll.periodMonth)} ${payroll.periodYear}`, 
               doc.page.width - 250, 42, { width: 200, align: 'right' })
         .text(`Generated: ${new Date().toLocaleDateString('en-NG')}`, 
@@ -124,7 +130,7 @@ export async function generateEnhancedPayslipPdf(
 
       // ===== STAFF INFORMATION SECTION =====
       const staffSectionTop = 120
-      doc.roundedRect(40, staffSectionTop, doc.page.width - 80, 100, 6)
+      doc.roundedRect(40, staffSectionTop, doc.page.width - 80, 140, 6)
         .fill('#f3f6fb')
       
       doc.fillColor('#000000')
@@ -132,26 +138,25 @@ export async function generateEnhancedPayslipPdf(
         .font('Helvetica-Bold')
         .text('EMPLOYEE INFORMATION', 55, staffSectionTop + 10)
         
-      // Left column
+      // Left column - Staff details
       doc.fontSize(10)
         .font('Helvetica')
-        .text(`Name: ${staff.firstName} ${staff.lastName}`, 55, staffSectionTop + 30)
-        .text(`Staff ID: ${staff.staffId}`, 55, staffSectionTop + 47)
-        .text(`Email: ${staff.email}`, 55, staffSectionTop + 64)
+        .text(`Staff ID: ${staff.staffId}`, 55, staffSectionTop + 30)
+        .text(`Staff Name: ${staff.firstName} ${staff.lastName}`, 55, staffSectionTop + 47)
+        .text(`Position: ${payroll.position || staff.position || staff.designation || 'N/A'}`, 55, staffSectionTop + 64)
         .text(`Department: ${staff.department || 'N/A'}`, 55, staffSectionTop + 81)
+        .text(`Email: ${staff.email}`, 55, staffSectionTop + 98)
       
-      // Right column
-      doc.text(`Position: ${staff.position || staff.designation || 'N/A'}`, 
+      // Right column - Attendance Info
+      doc.text(`Number of days in the month: ${payroll.daysInMonth || 0}`, 
               doc.page.width / 2 + 10, staffSectionTop + 30)
-        .text(`Pay Period: ${getMonthName(payroll.periodMonth)} ${payroll.periodYear}`, 
+        .text(`Number of days worked: ${payroll.daysWorked || 0}`, 
               doc.page.width / 2 + 10, staffSectionTop + 47)
-        .text(`Days in Month: ${payroll.daysInMonth || 0}`, 
+        .text(`Pay Period: ${getMonthName(payroll.periodMonth)} ${payroll.periodYear}`, 
               doc.page.width / 2 + 10, staffSectionTop + 64)
-        .text(`Days Worked: ${payroll.daysWorked || 0}`, 
-              doc.page.width / 2 + 10, staffSectionTop + 81)
 
       // ===== EARNINGS SECTION =====
-      let currentY = staffSectionTop + 125
+      let currentY = staffSectionTop + 155
       
       // Section header
       doc.fontSize(14)
@@ -177,46 +182,46 @@ export async function generateEnhancedPayslipPdf(
       
       currentY += 20
 
-      // Map field values
-      const fieldValues: Record<string, number> = {
-        basicSalary: payroll.basicSalary || 0,
-        housingAllowance: payroll.housingAllowance || 0,
-        transportAllowance: payroll.transportAllowance || 0,
-        transportationAllowance: payroll.transportationAllowance || 0,
-        otherAllowances: payroll.otherAllowances || 0,
-        overtimeIncome: payroll.overtimeIncome || 0,
-        communicationAllowance: payroll.communicationAllowance || 0,
-        outstandingIncome: payroll.outstandingIncome || 0,
-        bonusKPI: payroll.bonusKPI || 0,
-        dressingAllowance: payroll.dressingAllowance || 0,
-        leaveAllowance: payroll.leaveAllowance || 0,
-        entertainmentAllowance: payroll.entertainmentAllowance || 0,
-        utilityAllowance: payroll.utilityAllowance || 0
-      }
+      // Map field values to display names based on the mapping table
+      // ALL FIELDS SHOWN EVEN IF ZERO
+      const earningsFields = [
+        // Basic fields from mapping
+        { displayName: 'Prorated Gross Pay', value: payroll.proratedGrossPay ?? payroll.basicSalary ?? 0 },
+        { displayName: 'Overtime Income (OI)', value: payroll.overtimeIncome ?? 0 },
+        { displayName: 'Communication Allowance (CA)', value: payroll.communicationAllowance ?? 0 },
+        { displayName: 'Transportation Allowance (TA)', value: payroll.transportationAllowance ?? payroll.transportAllowance ?? 0 },
+        { displayName: 'Outstanding Income (OI)', value: payroll.outstandingIncome ?? 0 },
+        { displayName: 'Performance Bonus (PB)', value: payroll.bonusKPI ?? 0 },
+        
+        // Other allowances - always show with 0 if not present
+        { displayName: 'Housing Allowance', value: payroll.housingAllowance ?? 0 },
+        { displayName: 'Other Allowances', value: payroll.otherAllowances ?? 0 },
+        { displayName: 'Dressing Allowance', value: payroll.dressingAllowance ?? 0 },
+        { displayName: 'Leave Allowance', value: payroll.leaveAllowance ?? 0 },
+        { displayName: 'Entertainment Allowance', value: payroll.entertainmentAllowance ?? 0 },
+        { displayName: 'Utility Allowance', value: payroll.utilityAllowance ?? 0 },
+      ];
 
-      // Display earnings based on template configuration
-      template.displaySections.earnings.forEach(item => {
-        const value = fieldValues[item.sourceField] || 0
-        if (value > 0 || !item.conditional) {
-          doc.fontSize(10)
-            .font('Helvetica')
-            .fillColor('#000000')
-            .text(item.displayName, 50, currentY)
-            .text(formatCurrency(value), doc.page.width - 180, currentY, {
-              width: 130,
-              align: 'right'
-            })
-          currentY += 18
-        }
-      })
+      // Display ALL earnings fields (even zero values)
+      earningsFields.forEach(field => {
+        doc.fontSize(10)
+          .font('Helvetica')
+          .fillColor('#000000')
+          .text(field.displayName, 50, currentY)
+          .text(formatCurrency(field.value), doc.page.width - 180, currentY, {
+            width: 130,
+            align: 'right'
+          })
+        currentY += 18
+      });
 
-      // Gross Pay
+      // Gross Salary
       currentY += 5
       doc.fontSize(11)
         .font('Helvetica-Bold')
         .fillColor('#0f5132')
-        .text('GROSS PAY', 50, currentY)
-        .text(formatCurrency(payroll.grossPay || 0), doc.page.width - 180, currentY, {
+        .text('Gross Salary', 50, currentY)
+        .text(formatCurrency(payroll.grossPay ?? 0), doc.page.width - 180, currentY, {
           width: 130,
           align: 'right'
         })
@@ -246,35 +251,31 @@ export async function generateEnhancedPayslipPdf(
       
       currentY += 20
 
-      // Deduction values
-      const deductionValues: Record<string, number> = {
-        payee: payroll.payee || 0,
-        pension: payroll.pension || 0,
-        deductions: payroll.deductions || 0
-      }
+      // Deduction fields with display names from mapping - ALL SHOWN
+      const deductionFields = [
+        { displayName: 'Employee Pension Deduction', value: payroll.pension ?? 0 },
+        { displayName: 'Payee', value: payroll.payee ?? 0 },
+        { displayName: 'Other Deductions', value: payroll.deductions ?? 0 },
+      ];
 
-      // Display deductions based on template configuration
       let totalDeductions = 0
-      template.displaySections.deductions.forEach(item => {
-        const value = deductionValues[item.sourceField] || 0
-        totalDeductions += value
-        if (value > 0 || !item.conditional) {
-          doc.fontSize(10)
-            .font('Helvetica')
-            .fillColor('#000000')
-            .text(item.displayName, 50, currentY)
-            .text(formatCurrency(value), doc.page.width - 180, currentY, {
-              width: 130,
-              align: 'right'
-            })
-          currentY += 18
-        }
-      })
+      
+      // Display ALL deduction fields
+      deductionFields.forEach(field => {
+        totalDeductions += field.value
+        doc.fontSize(10)
+          .font('Helvetica')
+          .fillColor('#000000')
+          .text(field.displayName, 50, currentY)
+          .text(formatCurrency(field.value), doc.page.width - 180, currentY, {
+            width: 130,
+            align: 'right'
+          })
+        currentY += 18
+      });
 
       // Total Deductions
-      if (template.displaySections.deductions.length > 0) {
-        currentY += 5
-      }
+      currentY += 5
       doc.fontSize(11)
         .font('Helvetica-Bold')
         .fillColor('#8b0000')
@@ -284,7 +285,7 @@ export async function generateEnhancedPayslipPdf(
           align: 'right'
         })
 
-      // ===== NET PAY SECTION =====
+      // ===== NET SALARY SECTION =====
       currentY += 45
       
       doc.roundedRect(40, currentY, doc.page.width - 80, 60, 6)
@@ -293,16 +294,50 @@ export async function generateEnhancedPayslipPdf(
       doc.fillColor('#0b1f44')
         .fontSize(16)
         .font('Helvetica-Bold')
-        .text('NET PAY', 55, currentY + 20)
+        .text('Net Salary', 55, currentY + 20)
       
       doc.fontSize(18)
-        .text(formatCurrency(payroll.netPay || 0), doc.page.width - 220, currentY + 15, {
+        .text(formatCurrency(payroll.netPay ?? 0), doc.page.width - 220, currentY + 15, {
           width: 170,
           align: 'right'
         })
 
-      // ===== ATTENDANCE SUMMARY =====
+      // ===== PAYMENT DETAILS SECTION =====
       currentY += 75
+      
+      doc.fontSize(12)
+        .font('Helvetica-Bold')
+        .fillColor('#1e3a5f')
+        .text('PAYMENT DETAILS', 40, currentY)
+      
+      currentY += 20
+      
+      doc.moveTo(40, currentY)
+        .lineTo(doc.page.width - 40, currentY)
+        .stroke('#1e3a5f')
+      
+      currentY += 15
+
+      // Payment method fields - ALL SHOWN
+      const paymentFields = [
+        { displayName: 'WALLET PAYMENT', value: payroll.walletPayment ?? 0 },
+        { displayName: 'COMMERCIAL PAYMENT', value: payroll.commercialPayment ?? 0 },
+      ];
+
+      paymentFields.forEach(field => {
+        doc.fontSize(10)
+          .font('Helvetica')
+          .fillColor('#000000')
+          .text(field.displayName, 50, currentY)
+          .text(formatCurrency(field.value), doc.page.width - 180, currentY, {
+            width: 130,
+            align: 'right'
+          })
+        currentY += 18
+      });
+
+      // ===== ATTENDANCE SUMMARY =====
+      currentY += 15
       
       doc.fontSize(9)
         .fillColor('#666666')
@@ -334,11 +369,11 @@ export async function generateEnhancedPayslipPdf(
           { align: 'center', width: doc.page.width - 80 }
         )
 
-      // Page info
+      // Page info - NO TEMPLATE REFERENCE
       doc.fontSize(7)
         .fillColor('#999999')
         .text(
-          `Generated on ${new Date().toLocaleString('en-NG')} | Template: ${template.name} | Page 1 of 1`,
+          `Generated on ${new Date().toLocaleString('en-NG')} | Page 1 of 1`,
           40,
           doc.page.height - 25,
           { align: 'center', width: doc.page.width - 80 }
@@ -346,7 +381,7 @@ export async function generateEnhancedPayslipPdf(
 
       doc.end()
       
-      console.log(`✅ Enhanced payslip PDF generated for ${staff.staffId}: ${fileName} (${template.name})`)
+      console.log(`✅ Enhanced payslip PDF generated for ${staff.staffId}: ${fileName}`)
       
     } catch (error) {
       console.error('❌ Error generating enhanced payslip PDF:', error)

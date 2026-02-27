@@ -43,6 +43,16 @@ export type ParsedPayrollRow = {
   vatOnManagementFee?: number
   totalInvoiceValue?: number
   
+  // Additional allowance fields
+  dressingAllowance?: number
+  leaveAllowance?: number
+  entertainmentAllowance?: number
+  utilityAllowance?: number
+  walletPayment?: number
+  commercialPayment?: number
+  proratedGrossPay?: number
+  position?: string
+  
   // raw original row (for debugging / failed records)
   rawRow: any
 }

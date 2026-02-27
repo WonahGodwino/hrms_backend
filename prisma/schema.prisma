@@ -130,6 +130,11 @@ model Payroll {
   communicationAllowance Decimal?    @db.Decimal(18, 2)
   transportationAllowance Decimal?   @db.Decimal(18, 2)
   outstandingIncome      Decimal?    @db.Decimal(18, 2)
+  
+  // NEW FIELDS - Add these
+  walletPayment          Decimal?    @db.Decimal(18, 2)  // Maps to "Pay OPay"
+  commercialPayment      Decimal?    @db.Decimal(18, 2)  // Maps to "Bank Payment"
+  
   status                 String      @default("PROCESSED")
   templateType           String?     @default("ISURF_STANDARD")
   uploadedBy             String

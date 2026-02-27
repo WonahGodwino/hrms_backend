@@ -1,4 +1,5 @@
-// src/app/lib/payroll/templates/types.ts
+// src/app/lib/payroll/types.ts
+
 export type PayrollTemplateType = 'ISURF_STANDARD' | 'BLUERIDGE';
 
 export interface TemplateConfig {
@@ -20,6 +21,49 @@ export interface TemplateConfig {
       conditional?: boolean;
     }>;
   };
+}
+
+// Make sure this interface is exported
+export interface ParsedPayrollRow {
+  rowNumber: number;
+  staffId: string;
+  email: string;
+  fullName: string;
+  periodMonth: number;
+  periodYear: number;
+  basicSalary: number;
+  housingAllowance: number;
+  transportAllowance: number;
+  transportationAllowance: number;
+  otherAllowances: number;
+  grossPay: number;
+  payee: number;
+  pension: number;
+  netPay: number;
+  daysInMonth: number;
+  daysWorked: number;
+  rawRow: any;
+  bonusKPI?: number;
+  deductions?: number;
+  
+  // BLUERIDGE specific fields
+  overtimeIncome?: number;
+  communicationAllowance?: number;
+  outstandingIncome?: number;
+  
+  // Additional allowance fields
+  dressingAllowance?: number;
+  leaveAllowance?: number;
+  entertainmentAllowance?: number;
+  utilityAllowance?: number;
+  
+  // Payment fields
+  walletPayment?: number;
+  commercialPayment?: number;
+  proratedGrossPay?: number;
+  
+  // Position field
+  position?: string;
 }
 
 export const PAYROLL_TEMPLATES: Record<PayrollTemplateType, TemplateConfig> = {

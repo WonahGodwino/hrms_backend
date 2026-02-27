@@ -1,4 +1,4 @@
-// src/app/lib/payroll/templates/blueridge.ts
+// src/app/lib/payroll/templates/blueridge.ts - COMPLETE FIXED VERSION
 import ExcelJS from 'exceljs'
 import { prisma } from '@/app/lib/db'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
@@ -21,12 +21,14 @@ function getCell(row: any, header: string, canonicalMap: Record<string, string>)
   return row[actualKey]
 }
 
-function num(v: any) {
-  return v === null || v === undefined || v === '' ? 0 : Number(v) || 0
+function num(v: any): number {
+  if (v === null || v === undefined || v === '') return 0
+  const parsed = Number(v)
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
 function monthNameToNumber(month: string): number {
-  if (!month) return 0
+  if (!month) return new Date().getMonth() + 1
   const normalized = month.toString().trim().toLowerCase()
   const months = [
     'january', 'february', 'march', 'april', 'may', 'june',
@@ -35,13 +37,11 @@ function monthNameToNumber(month: string): number {
   const idx = months.indexOf(normalized)
   if (idx >= 0) return idx + 1
   
-  // Also handle month numbers
   const asNumber = Number(normalized)
   if (Number.isFinite(asNumber) && asNumber >= 1 && asNumber <= 12) {
     return asNumber
   }
   
-  // Try to parse date strings
   try {
     const date = new Date(normalized)
     if (!isNaN(date.getTime())) {
@@ -49,7 +49,7 @@ function monthNameToNumber(month: string): number {
     }
   } catch {}
   
-  return 0
+  return new Date().getMonth() + 1
 }
 
 function getMonthNameFromNumber(monthNumber: number): string {
@@ -61,14 +61,12 @@ function getMonthNameFromNumber(monthNumber: number): string {
 }
 
 function getYearFromMonth(monthInput: any): number {
-  // If month contains year information (e.g., "September 2025"), extract it
   if (typeof monthInput === 'string') {
     const yearMatch = monthInput.match(/\b(20\d{2})\b/)
     if (yearMatch) {
       return parseInt(yearMatch[1], 10)
     }
     
-    // Try to parse as date
     try {
       const date = new Date(monthInput)
       if (!isNaN(date.getTime())) {
@@ -77,15 +75,15 @@ function getYearFromMonth(monthInput: any): number {
     } catch {}
   }
   
-  // Default to current year
   return new Date().getFullYear()
 }
 
-function toPrismaBytes(data: Uint8Array): any {
-  return data as any
+// FIXED: Convert to plain Buffer for Prisma compatibility
+function toPrismaBytes(data: Uint8Array): Buffer {
+  return Buffer.from(data.buffer, data.byteOffset, data.byteLength)
 }
 
-function splitCsvLine(line: string) {
+function splitCsvLine(line: string): string[] {
   const result: string[] = []
   let cur = ''
   let inQuotes = false
@@ -167,9 +165,8 @@ export const processBlueridgeTemplate = {
         }
       } else {
         const workbook = new ExcelJS.Workbook()
-        
-        // Use type assertion to bypass TypeScript error
-        await workbook.xlsx.load(buffer as any)
+        const uint8Array = new Uint8Array(buffer)
+        await workbook.xlsx.load(uint8Array as any)
         
         const worksheet = workbook.worksheets[0]
         if (!worksheet) throw new Error('No worksheet found in Excel file')
@@ -180,9 +177,6 @@ export const processBlueridgeTemplate = {
           const h = String(cell.value || '').trim()
           headers[col - 1] = canonicalMap[normalizeHeader(h)] || h
         })
-
-        // Log headers for debugging
-        console.log('[BLUERIDGE_PROCESSOR] Headers found:', headers)
 
         worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
           if (rowNumber === 1) return
@@ -201,8 +195,6 @@ export const processBlueridgeTemplate = {
           }
         })
       }
-
-      console.log(`[BLUERIDGE_PROCESSOR] Parsed ${data.length} rows`)
     } catch (err: any) {
       console.error('[BLUERIDGE_PROCESSOR] Error parsing file:', err)
       throw new Error(`Error parsing file: ${err.message}`)
@@ -219,8 +211,8 @@ export const processBlueridgeTemplate = {
         email: true, 
         address: true, 
         phone: true,
-        logo: true as any,
-        taxId: true as any,
+        logo: true,
+        taxId: true,
       }
     })
 
@@ -231,10 +223,8 @@ export const processBlueridgeTemplate = {
       let rawEmail = ''
       let staffId = ''
       let monthValue = ''
-      let yearValue = 0
       
       try {
-        // Extract month from the row (comes before Staff ID)
         monthValue = getCell(row, 'Month', canonicalMap)?.toString().trim() || ''
         staffId = getCell(row, 'Staff ID', canonicalMap)?.toString().trim() || ''
         rawName = getCell(row, 'Name', canonicalMap)?.toString().trim() || ''
@@ -249,50 +239,48 @@ export const processBlueridgeTemplate = {
           throw new Error(`Missing required columns: ${missingCols.join(', ')}`)
         }
 
-        // Determine month and year from the month column
         let monthName = ''
         let year = 0
         let periodMonth = 0
         
         if (monthValue) {
-          // Try to extract month and year from the month value
           periodMonth = monthNameToNumber(monthValue)
           year = getYearFromMonth(monthValue)
           monthName = getMonthNameFromNumber(periodMonth)
-          
-          console.log(`[BLUERIDGE_PROCESSOR] Row ${displayRowNumber}: Month value="${monthValue}" -> periodMonth=${periodMonth}, year=${year}, monthName="${monthName}"`)
         }
         
-        // If month parsing failed, use current month/year as fallback
         if (!periodMonth || periodMonth === 0) {
           const now = new Date()
           periodMonth = now.getMonth() + 1
           year = now.getFullYear()
           monthName = getMonthNameFromNumber(periodMonth)
-          console.log(`[BLUERIDGE_PROCESSOR] Row ${displayRowNumber}: Using fallback month - ${monthName} ${year}`)
         }
 
-        // Parse all BLUERIDGE specific fields
-        const basicSalary = num(getCell(row, 'Basic Salary before Verify(coe)', canonicalMap))
-        const housing = num(getCell(row, 'Housing', canonicalMap))
-        const transport = num(getCell(row, 'Transport', canonicalMap))
-        const otherAllowance = num(getCell(row, 'Other Allowance', canonicalMap))
+        const position = getCell(row, 'Position verify (coe)', canonicalMap)?.toString().trim() || ''
+        const workingDays = num(getCell(row, 'WorkingDays', canonicalMap))
+        const workedDays = num(getCell(row, 'WorkedDays', canonicalMap))
+        const proratedGrossPay = num(getCell(row, 'This Month\'s Gross', canonicalMap))
         const overtimeIncome = num(getCell(row, 'Overtime Income (OI)', canonicalMap))
         const communicationAllowance = num(getCell(row, 'Communication Allowance (CA)', canonicalMap))
         const transportationAllowance = num(getCell(row, 'Transportation Allowance (TA)', canonicalMap))
         const outstandingIncome = num(getCell(row, 'Outstanding Income (OI)', canonicalMap))
-        const grossPay = num(getCell(row, 'Final Gross Income This Month (Salary, OI, CA, TA, OI & PB)', canonicalMap))
-        const payee = num(getCell(row, 'Tax Payable This Month (Salary, OI, CA, TA, OI & PB)', canonicalMap))
-        const pension = num(getCell(row, 'Employee Pension Deduction', canonicalMap))
-        const netSalary = num(getCell(row, 'Total Net (Salary, OI, CA, TA, OI & PB)', canonicalMap))
-        const workingDays = num(getCell(row, 'Working Days', canonicalMap))
-        const workedDays = num(getCell(row, 'Worked Days', canonicalMap))
-        const deductions = num(getCell(row, 'Penalty & Deductions (After Tax)', canonicalMap))
         const bonusKPI = num(getCell(row, 'Performance Bonus (PB)', canonicalMap))
-
-        if (netSalary < 0) {
-          throw new Error('Net Salary cannot be negative')
-        }
+        const grossPay = num(getCell(row, 'Final Gross Income This Month (Salary, OI, CA, TA, OI & PB)', canonicalMap))
+        const netSalary = num(getCell(row, 'Total Net (Salary, OI, CA, TA, OI & PB)', canonicalMap))
+        const pension = num(getCell(row, 'Employee Pension Deduction', canonicalMap))
+        const payee = num(getCell(row, 'Tax Payable This Month (Salary, OI, CA, TA, OI & PB)', canonicalMap))
+        const walletPayment = num(getCell(row, 'Pay OPay', canonicalMap))
+        const commercialPayment = num(getCell(row, 'Bank Payment', canonicalMap))
+        
+        const basicSalary = num(getCell(row, 'Basic Salary before Verify(coe)', canonicalMap))
+        const housing = num(getCell(row, 'Housing', canonicalMap))
+        const transport = num(getCell(row, 'Transport', canonicalMap))
+        const otherAllowance = num(getCell(row, 'Other Allowance', canonicalMap))
+        const deductions = num(getCell(row, 'Penalty & Deductions (After Tax)', canonicalMap))
+        const dressingAllowance = num(getCell(row, 'Dressing Allowance', canonicalMap))
+        const leaveAllowance = num(getCell(row, 'Leave Allowance', canonicalMap))
+        const entertainmentAllowance = num(getCell(row, 'Entertainment Allowance', canonicalMap))
+        const utilityAllowance = num(getCell(row, 'Utility Allowance', canonicalMap))
 
         let staffRecord = null
         
@@ -348,6 +336,13 @@ export const processBlueridgeTemplate = {
           throw new Error(`Staff record not found for ${rawName || rawEmail || staffId}`)
         }
 
+        if (position && staffRecord.position !== position) {
+          await prisma.staffRecord.update({
+            where: { id: staffRecord.id },
+            data: { position }
+          });
+        }
+
         const payrollRecord = await prisma.payroll.upsert({
           where: {
             staffRecordId_month_year_companyId: {
@@ -358,9 +353,6 @@ export const processBlueridgeTemplate = {
             },
           },
           update: {
-            companyId: companyId,
-            month: monthName,
-            year,
             grossPay,
             basicSalary,
             housing,
@@ -372,14 +364,20 @@ export const processBlueridgeTemplate = {
             status: 'PROCESSED',
             uploadedBy: user.userId,
             updatedAt: new Date(),
-            deductions: deductions,
-            bonusKPI: bonusKPI,
+            deductions,
+            bonusKPI,
             finalGross: grossPay,
-            // BLUERIDGE specific fields
-            overtimeIncome: overtimeIncome,
-            communicationAllowance: communicationAllowance,
-            transportationAllowance: transportationAllowance,
-            outstandingIncome: outstandingIncome,
+            overtimeIncome,
+            communicationAllowance,
+            transportationAllowance,
+            outstandingIncome,
+            dressing: dressingAllowance,
+            leaveAllowance,
+            entertainment: entertainmentAllowance,
+            utility: utilityAllowance,
+            proratedGrossPay,
+            walletPayment,
+            commercialPayment,
             employerPension: num(getCell(row, 'Employer Pension Contribution', canonicalMap)),
             managementFee: num(getCell(row, 'Management Fees', canonicalMap)),
             vatOnManagementFee: num(getCell(row, 'VAT on Management Fees', canonicalMap)),
@@ -401,14 +399,20 @@ export const processBlueridgeTemplate = {
             netSalary,
             status: 'PROCESSED',
             uploadedBy: user.userId,
-            deductions: deductions,
-            bonusKPI: bonusKPI,
+            deductions,
+            bonusKPI,
             finalGross: grossPay,
-            // BLUERIDGE specific fields
-            overtimeIncome: overtimeIncome,
-            communicationAllowance: communicationAllowance,
-            transportationAllowance: transportationAllowance,
-            outstandingIncome: outstandingIncome,
+            overtimeIncome,
+            communicationAllowance,
+            transportationAllowance,
+            outstandingIncome,
+            dressing: dressingAllowance,
+            leaveAllowance,
+            entertainment: entertainmentAllowance,
+            utility: utilityAllowance,
+            proratedGrossPay,
+            walletPayment,
+            commercialPayment,
             employerPension: num(getCell(row, 'Employer Pension Contribution', canonicalMap)),
             managementFee: num(getCell(row, 'Management Fees', canonicalMap)),
             vatOnManagementFee: num(getCell(row, 'VAT on Management Fees', canonicalMap)),
@@ -433,13 +437,13 @@ export const processBlueridgeTemplate = {
           rowNumber: displayRowNumber,
           staffId: staffRecord.staffId,
           email: staffRecord.email,
-          fullName: `${staffRecord.firstName} ${staffRecord.lastName}`,
+          fullName: rawName || `${staffRecord.firstName} ${staffRecord.lastName}`,
           periodMonth,
           periodYear: year,
-          basicSalary,
+          basicSalary: proratedGrossPay || basicSalary,
           housingAllowance: housing,
           transportAllowance: transport,
-          transportationAllowance: transportationAllowance,
+          transportationAllowance,
           otherAllowances: otherAllowance,
           grossPay,
           payee,
@@ -448,15 +452,21 @@ export const processBlueridgeTemplate = {
           daysInMonth: workingDays,
           daysWorked: workedDays,
           rawRow: row,
-          bonusKPI: bonusKPI,
-          deductions: deductions,
-          // BLUERIDGE specific fields
-          overtimeIncome: overtimeIncome,
-          communicationAllowance: communicationAllowance,
-          outstandingIncome: outstandingIncome,
+          bonusKPI,
+          deductions,
+          overtimeIncome,
+          communicationAllowance,
+          outstandingIncome,
+          dressingAllowance,
+          leaveAllowance,
+          entertainmentAllowance,
+          utilityAllowance,
+          walletPayment,
+          commercialPayment,
+          proratedGrossPay,
+          position: position || staffRecord.position || undefined,
         }
 
-        // Use the enhanced PDF generator
         const pdfResult = await generateEnhancedPayslipPdf({
           staff: {
             staffId: staffRecord.staffId,
@@ -464,8 +474,8 @@ export const processBlueridgeTemplate = {
             lastName: staffRecord.lastName,
             email: staffRecord.email,
             department: staffRecord.department || '',
-            designation: staffRecord.position || '',
-            position: staffRecord.position || '',
+            designation: position || staffRecord.position || '',
+            position: position || staffRecord.position || '',
             companyName: company?.companyName || '',
             companyAddress: company?.address || '',
             companyPhone: company?.phone || '',
@@ -473,7 +483,6 @@ export const processBlueridgeTemplate = {
             companyTaxId: company?.taxId || '',
           },
           payroll: parsedRow,
-          templateType: 'BLUERIDGE',
           companyInfo: company ? {
             name: company.companyName || '',
             address: company.address || '',
@@ -490,12 +499,15 @@ export const processBlueridgeTemplate = {
 
         results.payslipsGenerated++
 
+        // FIXED: Convert to plain Buffer for Prisma
+        const fileDataForPrisma = Buffer.from(pdfBuffer)
+
         const payslipData = {
           payrollId: payrollRecord.id,
           fileName: payslipFileName,
-          fileData: toPrismaBytes(pdfBuffer),
+          fileData: fileDataForPrisma,
           fileType: 'application/pdf',
-          fileSize: fileSize,
+          fileSize,
           grossPay,
           netPay: netSalary,
           filePath: `/database/payslips/${staffRecord.staffId}/${year}/${monthName}/${payslipFileName}`,
@@ -542,7 +554,7 @@ export const processBlueridgeTemplate = {
               email: staffRecord.email,
               staffId: staffRecord.staffId,
               department: staffRecord.department || null,
-              position: staffRecord.position || null,
+              position: position || staffRecord.position || null,
               isRegistered: staffRecord.isRegistered,
             }
 
@@ -550,8 +562,8 @@ export const processBlueridgeTemplate = {
               id: payslipId,
               month: monthName,
               year,
-              netSalary,
-              isUpdate: isUpdate,
+              netSalary: netSalary,
+              isUpdate,
             }
 
             const emailResult = await sendPayrollNotificationEmail(staffDataForEmail, payrollDataForEmail)
@@ -605,13 +617,6 @@ export const processBlueridgeTemplate = {
         })
       }
     }
-
-    console.log('[BLUERIDGE_PROCESSOR] Processing completed', {
-      successful: results.successful,
-      failed: results.failed,
-      sendEmails,
-      companyId,
-    })
 
     return results
   }
