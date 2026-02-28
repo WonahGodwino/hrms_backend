@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'MANAGER'])
+    const user = requireRole(token, ['HR','SUPER_ADMIN','ADMIN', 'MANAGER'])
 
     const { searchParams } = new URL(request.url)
     const uploadId = searchParams.get('uploadId')
