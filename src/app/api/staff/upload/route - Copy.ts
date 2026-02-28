@@ -350,10 +350,9 @@ export async function POST(request: NextRequest) {
           throw new Error(errorMessage)
         }
 
-        // MODIFIED: Staff ID validation - now accepts any non-empty string
-        // Only check that it's not empty (already checked above)
-        if (!staffId || staffId.trim() === '') {
-          errorMessage = `Staff ID cannot be empty.`
+        const staffIdRegex = /^[a-zA-Z0-9]{3,20}$/
+        if (!staffIdRegex.test(staffId)) {
+          errorMessage = `Staff ID "${staffId}" must be 3-20 alphanumeric characters (letters and numbers only).`
           throw new Error(errorMessage)
         }
 
@@ -580,7 +579,7 @@ export async function GET(request: NextRequest) {
       }
 
       worksheet.columns = [
-        { header: 'staffId', key: 'staffId', width: 20 }, // Increased width for longer IDs
+        { header: 'staffId', key: 'staffId', width: 15 },
         { header: 'email', key: 'email', width: 25 },
         { header: 'firstName', key: 'firstName', width: 15 },
         { header: 'lastName', key: 'lastName', width: 15 },
@@ -597,10 +596,9 @@ export async function GET(request: NextRequest) {
       headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
       headerRow.alignment = { vertical: 'middle', horizontal: 'center' }
 
-      // MODIFIED: Updated sample data to show more diverse Staff ID formats
       const sampleData = [
         {
-          staffId: 'Opay-Owallet-15763',
+          staffId: 'EMP001',
           email: 'john.doe@company.com',
           firstName: 'John',
           lastName: 'Doe',
@@ -623,18 +621,6 @@ export async function GET(request: NextRequest) {
           accountNumber: '9876543210',
           bvn: '10987654321',
         },
-        {
-          staffId: 'STAFF_2025_0042',
-          email: 'peter.jones@company.com',
-          firstName: 'Peter',
-          lastName: 'Jones',
-          department: 'IT',
-          position: 'Developer',
-          phone: '+2348123456789',
-          bankName: 'UBA',
-          accountNumber: '4567890123',
-          bvn: '45678901234',
-        },
       ]
 
       sampleData.forEach((row) => worksheet.addRow(row))
@@ -652,7 +638,7 @@ export async function GET(request: NextRequest) {
 
       const instructionsRow = worksheet.rowCount + 2
       worksheet.getRow(instructionsRow).values = ['IMPORTANT NOTES:']
-      worksheet.getRow(instructionsRow + 1).values = ['- staffId: Unique staff identifier (REQUIRED) - Can include letters, numbers, hyphens, underscores']
+      worksheet.getRow(instructionsRow + 1).values = ['- staffId: Unique staff ID (3-20 alphanumeric characters, REQUIRED)']
       worksheet.getRow(instructionsRow + 2).values = ['- email: Valid email address (REQUIRED)']
       worksheet.getRow(instructionsRow + 3).values = ['- firstName, lastName: Staff names (REQUIRED)']
       worksheet.getRow(instructionsRow + 4).values = ['- department, position: Staff details (REQUIRED)']
