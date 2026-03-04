@@ -600,7 +600,7 @@ export async function GET(request: NextRequest) {
       // MODIFIED: Updated sample data to show more diverse Staff ID formats
       const sampleData = [
         {
-          staffId: 'Opay-Owallet-15763',
+          staffId: 'Opay-Owallet-1563001',
           email: 'john.doe@company.com',
           firstName: 'John',
           lastName: 'Doe',
