@@ -73,13 +73,33 @@ export async function POST(request: NextRequest) {
     }
 
     if (user.role === 'HR') {
-      if (!user.companyId) {
+      // HR now needs to select a company and validate access through user_companies
+      const selectedCompanyId = formData.get('companyId') as string | null
+      
+      if (!selectedCompanyId) {
         return withCors(
-          ApiResponse.error('Company context missing for HR user', 400),
+          ApiResponse.error('Company selection is required', 400),
           origin
         )
       }
-      companyId = user.companyId
+
+      // Validate HR has access to this company through user_companies
+      const hasAccess = await prisma.userCompany.findFirst({
+        where: {
+          userId: user.userId,
+          companyId: selectedCompanyId,
+          role: { in: ['HR', 'ALL'] }
+        }
+      })
+
+      if (!hasAccess) {
+        return withCors(
+          ApiResponse.error('You do not have HR access for this company', 403),
+          origin
+        )
+      }
+
+      companyId = selectedCompanyId
     } 
     else if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') {
       if (!companyId) {

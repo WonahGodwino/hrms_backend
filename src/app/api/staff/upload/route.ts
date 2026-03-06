@@ -135,13 +135,33 @@ export async function POST(request: NextRequest) {
     let companyId: string | null = null
 
     if (authUser.role === 'HR') {
-      if (!authUser.companyId) {
+      // MODIFIED: HR now needs to select a company and validate access through user_companies
+      const selectedCompanyId = formData.get('companyId') as string | null
+      
+      if (!selectedCompanyId) {
         return withCors(
-          ApiResponse.error('Company context missing for HR user', 400),
+          ApiResponse.error('Company selection is required', 400),
           origin
         )
       }
-      companyId = authUser.companyId
+
+      // Validate HR has access to this company through user_companies
+      const hasAccess = await prisma.userCompany.findFirst({
+        where: {
+          userId: authUser.userId,
+          companyId: selectedCompanyId,
+          role: { in: ['HR', 'ALL'] }
+        }
+      })
+
+      if (!hasAccess) {
+        return withCors(
+          ApiResponse.error('You do not have HR access for this company', 403),
+          origin
+        )
+      }
+
+      companyId = selectedCompanyId
     } 
     else if (authUser.role === 'SUPER_ADMIN' || authUser.role === 'ADMIN') {
       const selectedCompanyId = formData.get('companyId') as string | null
@@ -308,7 +328,7 @@ export async function POST(request: NextRequest) {
       successful: 0,
       failed: 0,
       errors: [] as string[],
-      failedRecords: [] as any[], // Store failed records with error messages
+      failedRecords: [] as any[],
       records: [] as any[],
     }
 
@@ -350,8 +370,6 @@ export async function POST(request: NextRequest) {
           throw new Error(errorMessage)
         }
 
-        // MODIFIED: Staff ID validation - now accepts any non-empty string
-        // Only check that it's not empty (already checked above)
         if (!staffId || staffId.trim() === '') {
           errorMessage = `Staff ID cannot be empty.`
           throw new Error(errorMessage)
@@ -406,7 +424,6 @@ export async function POST(request: NextRequest) {
       } catch (error: any) {
         results.failed++
         
-        // Set error message if not already set
         if (!errorMessage) {
           if (error.code === 'P2002') {
             const target = error.meta?.target || []
@@ -424,7 +441,6 @@ export async function POST(request: NextRequest) {
 
         results.errors.push(`Row ${displayRow}: ${errorMessage}`)
         
-        // Add failed record with error message
         results.failedRecords.push({
           ...row,
           ROW_NUMBER: displayRow,
@@ -442,19 +458,16 @@ export async function POST(request: NextRequest) {
     const savedFilePath = path.join(staffDir, fileName)
     const relativeFilePath = getRelativePath(savedFilePath)
 
-    // Create failed records file if there are failures
     let failedRecordsFilePath: string | null = null
     if (results.failedRecords.length > 0) {
       const failedWorkbook = new ExcelJS.Workbook()
       const failedWorksheet = failedWorkbook.addWorksheet('Failed Records')
 
-      // Get all unique column headers from the failed records
       const headersSet = new Set<string>()
       results.failedRecords.forEach(record => {
         Object.keys(record).forEach(key => headersSet.add(key))
       })
       
-      // Ensure ERROR_MESSAGE and ROW_NUMBER are included
       headersSet.add('ROW_NUMBER')
       headersSet.add('ERROR_MESSAGE')
       headersSet.add('STATUS')
@@ -466,21 +479,18 @@ export async function POST(request: NextRequest) {
         width: header === 'ERROR_MESSAGE' ? 50 : 20
       }))
 
-      // Add failed records
       results.failedRecords.forEach(record => {
         failedWorksheet.addRow(record)
       })
 
-      // Style the header row
       const headerRow = failedWorksheet.getRow(1)
       headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
       headerRow.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: 'FFDC3545' }, // Red color for errors
+        fgColor: { argb: 'FFDC3545' },
       }
 
-      // Auto-filter for easy sorting
       failedWorksheet.autoFilter = {
         from: 'A1',
         to: `${String.fromCharCode(64 + headers.length)}1`
@@ -580,7 +590,7 @@ export async function GET(request: NextRequest) {
       }
 
       worksheet.columns = [
-        { header: 'staffId', key: 'staffId', width: 20 }, // Increased width for longer IDs
+        { header: 'staffId', key: 'staffId', width: 20 },
         { header: 'email', key: 'email', width: 25 },
         { header: 'firstName', key: 'firstName', width: 15 },
         { header: 'lastName', key: 'lastName', width: 15 },
@@ -597,7 +607,6 @@ export async function GET(request: NextRequest) {
       headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
       headerRow.alignment = { vertical: 'middle', horizontal: 'center' }
 
-      // MODIFIED: Updated sample data to show more diverse Staff ID formats
       const sampleData = [
         {
           staffId: 'Opay-Owallet-1563001',
