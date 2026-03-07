@@ -130,8 +130,7 @@ export async function generateEnhancedPayslipPdf(
 
       // ===== STAFF INFORMATION SECTION =====
       const staffSectionTop = 120
-      // FIXED: Increased height to accommodate all staff info
-      doc.roundedRect(40, staffSectionTop, doc.page.width - 80, 150, 6)
+      doc.roundedRect(40, staffSectionTop, doc.page.width - 80, 140, 6)
         .fill('#f3f6fb')
       
       doc.fillColor('#000000')
@@ -157,8 +156,7 @@ export async function generateEnhancedPayslipPdf(
               doc.page.width / 2 + 10, staffSectionTop + 64)
 
       // ===== EARNINGS SECTION =====
-      // FIXED: Adjusted Y position to account for taller staff section
-      let currentY = staffSectionTop + 175
+      let currentY = staffSectionTop + 155
       
       // Section header
       doc.fontSize(14)
@@ -348,9 +346,7 @@ export async function generateEnhancedPayslipPdf(
               40, currentY, { width: doc.page.width - 80, align: 'center' })
 
       // ===== FOOTER SECTION =====
-      // FIXED: Check if we're near the bottom of the page and adjust footer position
-      const pageBottom = doc.page.height - 50
-      const footerY = currentY + 40 > pageBottom ? pageBottom : currentY + 40
+      const footerY = doc.page.height - 50
       
       // Company contact info
       doc.fontSize(8)
@@ -379,7 +375,7 @@ export async function generateEnhancedPayslipPdf(
         .text(
           `Generated on ${new Date().toLocaleString('en-NG')} | Page 1 of 1`,
           40,
-          footerY + 30,
+          doc.page.height - 25,
           { align: 'center', width: doc.page.width - 80 }
         )
 
