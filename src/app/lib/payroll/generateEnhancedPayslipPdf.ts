@@ -1,12 +1,13 @@
 // src/app/lib/payroll/generateEnhancedPayslipPdf.ts
 import PDFDocument from 'pdfkit'
 
-function formatCurrency(n: number) {
+function formatCurrency(n: number): string {
   const safe = Number.isFinite(n) ? n : 0
-  return `₦${safe.toLocaleString('en-NG', { 
+  const formatted = safe.toLocaleString('en-NG', { 
     minimumFractionDigits: 2,
     maximumFractionDigits: 2 
-  })}`
+  })
+  return `₦ ${formatted}` // Added space after naira sign
 }
 
 function getMonthName(monthNumber: number): string {
@@ -84,7 +85,8 @@ export async function generateEnhancedPayslipPdf(
 ): Promise<{ pdfBuffer: Uint8Array; fileName: string }> {
   const { staff, payroll, companyInfo } = input
   
-  console.log('PDF Generator - Days:', {
+  console.log('PDF Generator - Generating payslip for:', {
+    staffId: staff.staffId,
     daysInMonth: payroll.daysInMonth,
     daysWorked: payroll.daysWorked
   })
@@ -93,6 +95,7 @@ export async function generateEnhancedPayslipPdf(
 
   return new Promise((resolve, reject) => {
     try {
+      // Create document with standard margins
       const doc = new PDFDocument({ 
         margin: 40, 
         size: 'A4'
@@ -115,6 +118,7 @@ export async function generateEnhancedPayslipPdf(
       // ===== HEADER SECTION =====
       doc.rect(0, 0, doc.page.width, 100).fill('#1e3a5f')
       
+      // Company Name
       doc.fillColor('#ffffff')
         .fontSize(20)
         .font('Helvetica-Bold')
@@ -124,6 +128,7 @@ export async function generateEnhancedPayslipPdf(
         .font('Helvetica')
         .text('PAYSLIP', 40, 55)
       
+      // Right side info
       doc.fillColor('#ffffff')
         .fontSize(10)
         .font('Helvetica')
@@ -143,7 +148,7 @@ export async function generateEnhancedPayslipPdf(
         .font('Helvetica-Bold')
         .text('EMPLOYEE INFORMATION', 55, y + 10)
         
-      // Left column
+      // Left column - Staff details
       doc.fontSize(10)
         .font('Helvetica')
         .text(`Staff ID: ${staff.staffId}`, 55, y + 30)
@@ -152,13 +157,11 @@ export async function generateEnhancedPayslipPdf(
         .text(`Department: ${staff.department || 'N/A'}`, 55, y + 81)
         .text(`Email: ${staff.email}`, 55, y + 98)
       
-      // Right column
-      doc.text(`Number of days in the month: ${payroll.daysInMonth || 0}`, 
-              doc.page.width / 2 + 10, y + 30)
-        .text(`Number of days worked: ${payroll.daysWorked || 0}`, 
-              doc.page.width / 2 + 10, y + 47)
-        .text(`Pay Period: ${getMonthName(payroll.periodMonth)} ${payroll.periodYear}`, 
-              doc.page.width / 2 + 10, y + 64)
+      // Right column - Attendance Info
+      const rightColX = doc.page.width / 2 + 20
+      doc.text(`Number of days in the month: ${payroll.daysInMonth || 0}`, rightColX, y + 30)
+        .text(`Number of days worked: ${payroll.daysWorked || 0}`, rightColX, y + 47)
+        .text(`Pay Period: ${getMonthName(payroll.periodMonth)} ${payroll.periodYear}`, rightColX, y + 64)
 
       y = y + 155
 
@@ -185,7 +188,7 @@ export async function generateEnhancedPayslipPdf(
       
       y += 20
 
-      // Earnings fields
+      // ALL EARNINGS FIELDS - SHOW ALL EVEN IF ZERO
       const earningsFields = [
         { displayName: 'Prorated Gross Pay', value: payroll.proratedGrossPay ?? payroll.basicSalary ?? 0 },
         { displayName: 'Overtime Income (OI)', value: payroll.overtimeIncome ?? 0 },
@@ -201,6 +204,7 @@ export async function generateEnhancedPayslipPdf(
         { displayName: 'Utility Allowance', value: payroll.utilityAllowance ?? 0 },
       ];
 
+      // Display ALL earnings fields (even zero values)
       earningsFields.forEach(field => {
         doc.fontSize(10)
           .font('Helvetica')
@@ -213,7 +217,7 @@ export async function generateEnhancedPayslipPdf(
         y += 18
       });
 
-      // Gross Pay
+      // Gross Salary
       y += 5
       doc.fontSize(11)
         .font('Helvetica-Bold')
@@ -249,7 +253,7 @@ export async function generateEnhancedPayslipPdf(
       
       y += 20
 
-      // Deduction fields
+      // ALL DEDUCTION FIELDS - SHOW ALL EVEN IF ZERO
       const deductionFields = [
         { displayName: 'Employee Pension Deduction', value: payroll.pension ?? 0 },
         { displayName: 'Payee', value: payroll.payee ?? 0 },
@@ -258,6 +262,7 @@ export async function generateEnhancedPayslipPdf(
 
       let totalDeductions = 0
       
+      // Display ALL deduction fields
       deductionFields.forEach(field => {
         totalDeductions += field.value
         doc.fontSize(10)
@@ -282,25 +287,29 @@ export async function generateEnhancedPayslipPdf(
           align: 'right'
         })
 
-      // ===== NET SALARY SECTION =====
+      // ===== NET SALARY & PAYMENT DETAILS =====
       y += 45
       
-      doc.roundedRect(40, y, doc.page.width - 80, 60, 6)
+      // Check if we need a new page
+      if (y > doc.page.height - 150) {
+        doc.addPage()
+        y = 50
+      }
+      
+      // Net Salary Box
+      doc.roundedRect(40, y, doc.page.width - 80, 70, 6)
         .fill('#e8f0ff')
       
       doc.fillColor('#0b1f44')
         .fontSize(16)
         .font('Helvetica-Bold')
-        .text('Net Salary', 55, y + 20)
+        .text('Net Salary', 55, y + 15)
       
       doc.fontSize(18)
-        .text(formatCurrency(payroll.netPay ?? 0), doc.page.width - 220, y + 15, {
-          width: 170,
-          align: 'right'
-        })
+        .text(formatCurrency(payroll.netPay ?? 0), 55, y + 35)
 
-      // ===== PAYMENT DETAILS SECTION =====
-      y += 75
+      // Payment Details - Below Net Salary
+      y += 85
       
       doc.fontSize(12)
         .font('Helvetica-Bold')
@@ -315,7 +324,7 @@ export async function generateEnhancedPayslipPdf(
       
       y += 15
 
-      // Payment fields - Display as a single block with amounts on same line
+      // Payment fields - ALL SHOWN
       const paymentFields = [
         { displayName: 'WALLET PAYMENT', value: payroll.walletPayment ?? 0 },
         { displayName: 'COMMERCIAL PAYMENT', value: payroll.commercialPayment ?? 0 },
@@ -333,22 +342,15 @@ export async function generateEnhancedPayslipPdf(
         y += 18
       });
 
-      // ===== ATTENDANCE SUMMARY =====
-      y += 15
-      
-      doc.fontSize(9)
-        .fillColor('#666666')
-        .font('Helvetica')
-        .text(`Attendance Summary: ${payroll.daysWorked || 0} days worked out of ${payroll.daysInMonth || 0} days`, 
-              40, y, { width: doc.page.width - 80, align: 'center' })
-
       // ===== FOOTER SECTION =====
-      y += 25
+      const footerY = doc.page.height - 60
       
-      // Check if we need a new page (if y > page height - 100)
-      if (y > doc.page.height - 100) {
+      // Only add footer if we're not past it
+      if (y < footerY - 20) {
+        y = footerY
+      } else {
         doc.addPage()
-        y = 50
+        y = doc.page.height - 80
       }
       
       // Company contact info
