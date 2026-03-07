@@ -1,4 +1,4 @@
-// src/app/lib/payroll/templates/blueridge.ts
+// src/app/lib/payroll/templates/blueridge.ts - COMPLETE FIXED VERSION
 import ExcelJS from 'exceljs'
 import { prisma } from '@/app/lib/db'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
@@ -78,6 +78,7 @@ function getYearFromMonth(monthInput: any): number {
   return new Date().getFullYear()
 }
 
+// FIXED: Convert to plain Buffer for Prisma compatibility
 function toPrismaBytes(data: Uint8Array): Buffer {
   return Buffer.from(data.buffer, data.byteOffset, data.byteLength)
 }
@@ -177,8 +178,6 @@ export const processBlueridgeTemplate = {
           headers[col - 1] = canonicalMap[normalizeHeader(h)] || h
         })
 
-        console.log('[BLUERIDGE_PROCESSOR] Headers found:', headers)
-
         worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
           if (rowNumber === 1) return
 
@@ -204,8 +203,6 @@ export const processBlueridgeTemplate = {
     if (!data.length) {
       throw new Error('No payroll data found in the file')
     }
-
-    console.log(`[BLUERIDGE_PROCESSOR] Total rows to process: ${data.length}`)
 
     const company = await prisma.company.findUnique({
       where: { id: companyId },
@@ -259,20 +256,9 @@ export const processBlueridgeTemplate = {
           monthName = getMonthNameFromNumber(periodMonth)
         }
 
-        // FIXED: Explicitly get the raw values first to debug
-        const workingDaysRaw = getCell(row, 'WorkingDays', canonicalMap)
-        const workedDaysRaw = getCell(row, 'WorkedDays', canonicalMap)
-        
-        // Parse all fields from the mapping table
         const position = getCell(row, 'Position verify (coe)', canonicalMap)?.toString().trim() || ''
-        
-        // FIXED: Properly parse working days and worked days
-        const workingDays = num(workingDaysRaw)
-        const workedDays = num(workedDaysRaw)
-        
-        // Log the values for debugging
-        console.log(`[BLUERIDGE_PROCESSOR] Row ${displayRowNumber}: Staff=${staffId}, WorkingDaysRaw=${workingDaysRaw}, WorkedDaysRaw=${workedDaysRaw}, WorkingDays=${workingDays}, WorkedDays=${workedDays}`)
-        
+        const workingDays = num(getCell(row, 'WorkingDays', canonicalMap))
+        const workedDays = num(getCell(row, 'WorkedDays', canonicalMap))
         const proratedGrossPay = num(getCell(row, 'This Month\'s Gross', canonicalMap))
         const overtimeIncome = num(getCell(row, 'Overtime Income (OI)', canonicalMap))
         const communicationAllowance = num(getCell(row, 'Communication Allowance (CA)', canonicalMap))
@@ -286,7 +272,6 @@ export const processBlueridgeTemplate = {
         const walletPayment = num(getCell(row, 'Pay OPay', canonicalMap))
         const commercialPayment = num(getCell(row, 'Bank Payment', canonicalMap))
         
-        // Parse additional fields
         const basicSalary = num(getCell(row, 'Basic Salary before Verify(coe)', canonicalMap))
         const housing = num(getCell(row, 'Housing', canonicalMap))
         const transport = num(getCell(row, 'Transport', canonicalMap))
@@ -351,7 +336,6 @@ export const processBlueridgeTemplate = {
           throw new Error(`Staff record not found for ${rawName || rawEmail || staffId}`)
         }
 
-        // Update staff record with position from template
         if (position && staffRecord.position !== position) {
           await prisma.staffRecord.update({
             where: { id: staffRecord.id },
@@ -449,7 +433,6 @@ export const processBlueridgeTemplate = {
         let payslipId = ''
         let isUpdate = false
 
-        // FIXED: Create parsedRow with all fields for PDF generation
         const parsedRow: ParsedPayrollRow = {
           rowNumber: displayRowNumber,
           staffId: staffRecord.staffId,
@@ -466,7 +449,6 @@ export const processBlueridgeTemplate = {
           payee,
           pension,
           netPay: netSalary,
-          // FIXED: Ensure days are passed correctly
           daysInMonth: workingDays,
           daysWorked: workedDays,
           rawRow: row,
@@ -485,10 +467,6 @@ export const processBlueridgeTemplate = {
           position: position || staffRecord.position || undefined,
         }
 
-        // Log the parsed row to verify days values
-        console.log(`[BLUERIDGE_PROCESSOR] Row ${displayRowNumber}: ParsedRow daysInMonth=${parsedRow.daysInMonth}, daysWorked=${parsedRow.daysWorked}`)
-
-        // Generate payslip PDF
         const pdfResult = await generateEnhancedPayslipPdf({
           staff: {
             staffId: staffRecord.staffId,
@@ -521,6 +499,7 @@ export const processBlueridgeTemplate = {
 
         results.payslipsGenerated++
 
+        // FIXED: Convert to plain Buffer for Prisma
         const fileDataForPrisma = Buffer.from(pdfBuffer)
 
         const payslipData = {
@@ -638,12 +617,6 @@ export const processBlueridgeTemplate = {
         })
       }
     }
-
-    console.log('[BLUERIDGE_PROCESSOR] Processing completed', {
-      successful: results.successful,
-      failed: results.failed,
-      totalRows: data.length,
-    })
 
     return results
   }

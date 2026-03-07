@@ -1,6 +1,5 @@
 // src/app/lib/payroll/generateEnhancedPayslipPdf.ts
 import PDFDocument from 'pdfkit'
-import type { PayrollTemplateType } from './templates/types'
 
 function formatCurrency(n: number) {
   const safe = Number.isFinite(n) ? n : 0
@@ -85,14 +84,19 @@ export async function generateEnhancedPayslipPdf(
 ): Promise<{ pdfBuffer: Uint8Array; fileName: string }> {
   const { staff, payroll, companyInfo } = input
   
+  // Log the values to verify they're being passed correctly
+  console.log('PDF Generator - Days:', {
+    daysInMonth: payroll.daysInMonth,
+    daysWorked: payroll.daysWorked
+  })
+  
   const fileName = `payslip-${staff.staffId}-${payroll.periodMonth.toString().padStart(2, '0')}-${payroll.periodYear}.pdf`
 
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({ 
         margin: 40, 
-        size: 'A4',
-        bufferPages: true // Important for page management
+        size: 'A4'
       })
       
       const chunks: Buffer[] = []
@@ -108,13 +112,6 @@ export async function generateEnhancedPayslipPdf(
       })
       
       doc.on('error', reject)
-
-      // ===== HELPER FUNCTION TO CHECK PAGE SPACE =====
-      const checkPageSpace = (neededSpace: number): boolean => {
-        const currentY = doc.y
-        const pageBottom = doc.page.height - 80 // Leave room for footer
-        return currentY + neededSpace <= pageBottom
-      }
 
       // ===== HEADER SECTION =====
       doc.rect(0, 0, doc.page.width, 100).fill('#1e3a5f')
@@ -137,63 +134,57 @@ export async function generateEnhancedPayslipPdf(
               doc.page.width - 250, 59, { width: 200, align: 'right' })
 
       // ===== STAFF INFORMATION SECTION =====
-      doc.y = 120 // Set Y position manually
+      let y = 120
       
-      doc.roundedRect(40, doc.y, doc.page.width - 80, 140, 6)
+      doc.roundedRect(40, y, doc.page.width - 80, 140, 6)
         .fill('#f3f6fb')
       
       doc.fillColor('#000000')
         .fontSize(12)
         .font('Helvetica-Bold')
-        .text('EMPLOYEE INFORMATION', 55, doc.y + 10)
+        .text('EMPLOYEE INFORMATION', 55, y + 10)
         
       // Left column
       doc.fontSize(10)
         .font('Helvetica')
-        .text(`Staff ID: ${staff.staffId}`, 55, doc.y + 30)
-        .text(`Staff Name: ${staff.firstName} ${staff.lastName}`, 55, doc.y + 47)
-        .text(`Position: ${payroll.position || staff.position || staff.designation || 'N/A'}`, 55, doc.y + 64)
-        .text(`Department: ${staff.department || 'N/A'}`, 55, doc.y + 81)
-        .text(`Email: ${staff.email}`, 55, doc.y + 98)
+        .text(`Staff ID: ${staff.staffId}`, 55, y + 30)
+        .text(`Staff Name: ${staff.firstName} ${staff.lastName}`, 55, y + 47)
+        .text(`Position: ${payroll.position || staff.position || staff.designation || 'N/A'}`, 55, y + 64)
+        .text(`Department: ${staff.department || 'N/A'}`, 55, y + 81)
+        .text(`Email: ${staff.email}`, 55, y + 98)
       
-      // Right column
+      // Right column - FIXED: Ensure days are displayed
       doc.text(`Number of days in the month: ${payroll.daysInMonth || 0}`, 
-              doc.page.width / 2 + 10, doc.y + 30)
+              doc.page.width / 2 + 10, y + 30)
         .text(`Number of days worked: ${payroll.daysWorked || 0}`, 
-              doc.page.width / 2 + 10, doc.y + 47)
+              doc.page.width / 2 + 10, y + 47)
         .text(`Pay Period: ${getMonthName(payroll.periodMonth)} ${payroll.periodYear}`, 
-              doc.page.width / 2 + 10, doc.y + 64)
+              doc.page.width / 2 + 10, y + 64)
 
-      // Move Y position after staff section
-      doc.y = doc.y + 155
+      y = y + 155
 
       // ===== EARNINGS SECTION =====
-      if (!checkPageSpace(250)) {
-        doc.addPage()
-        doc.y = 50
-      }
-      
       doc.fontSize(14)
         .font('Helvetica-Bold')
         .fillColor('#1e3a5f')
-        .text('EARNINGS', 40, doc.y)
+        .text('EARNINGS', 40, y)
       
-      doc.y += 20
+      y += 20
       
-      doc.moveTo(40, doc.y)
-        .lineTo(doc.page.width - 40, doc.y)
+      doc.moveTo(40, y)
+        .lineTo(doc.page.width - 40, y)
         .stroke('#1e3a5f')
       
-      doc.y += 15
+      y += 15
 
       // Column headers
       doc.fontSize(10)
         .font('Helvetica-Bold')
         .fillColor('#333333')
-        .text('Description', 50, doc.y)
-        .text('Amount', doc.page.width - 180, doc.y, { width: 130, align: 'right' })
+        .text('Description', 50, y)
+        .text('Amount', doc.page.width - 180, y, { width: 130, align: 'right' })
       
-      doc.y += 20
+      y += 20
 
       // Earnings fields
       const earningsFields = [
@@ -212,65 +203,52 @@ export async function generateEnhancedPayslipPdf(
       ];
 
       earningsFields.forEach(field => {
-        if (!checkPageSpace(18)) {
-          doc.addPage()
-          doc.y = 50
-        }
         doc.fontSize(10)
           .font('Helvetica')
           .fillColor('#000000')
-          .text(field.displayName, 50, doc.y)
-          .text(formatCurrency(field.value), doc.page.width - 180, doc.y, {
+          .text(field.displayName, 50, y)
+          .text(formatCurrency(field.value), doc.page.width - 180, y, {
             width: 130,
             align: 'right'
           })
-        doc.y += 18
+        y += 18
       });
 
       // Gross Pay
-      if (!checkPageSpace(25)) {
-        doc.addPage()
-        doc.y = 50
-      }
-      doc.y += 5
+      y += 5
       doc.fontSize(11)
         .font('Helvetica-Bold')
         .fillColor('#0f5132')
-        .text('Gross Salary', 50, doc.y)
-        .text(formatCurrency(payroll.grossPay ?? 0), doc.page.width - 180, doc.y, {
+        .text('Gross Salary', 50, y)
+        .text(formatCurrency(payroll.grossPay ?? 0), doc.page.width - 180, y, {
           width: 130,
           align: 'right'
         })
 
       // ===== DEDUCTIONS SECTION =====
-      doc.y += 35
-      
-      if (!checkPageSpace(150)) {
-        doc.addPage()
-        doc.y = 50
-      }
+      y += 35
       
       doc.fontSize(14)
         .font('Helvetica-Bold')
         .fillColor('#8b0000')
-        .text('DEDUCTIONS', 40, doc.y)
+        .text('DEDUCTIONS', 40, y)
       
-      doc.y += 20
+      y += 20
       
-      doc.moveTo(40, doc.y)
-        .lineTo(doc.page.width - 40, doc.y)
+      doc.moveTo(40, y)
+        .lineTo(doc.page.width - 40, y)
         .stroke('#8b0000')
       
-      doc.y += 15
+      y += 15
 
       // Column headers
       doc.fontSize(10)
         .font('Helvetica-Bold')
         .fillColor('#333333')
-        .text('Description', 50, doc.y)
-        .text('Amount', doc.page.width - 180, doc.y, { width: 130, align: 'right' })
+        .text('Description', 50, y)
+        .text('Amount', doc.page.width - 180, y, { width: 130, align: 'right' })
       
-      doc.y += 20
+      y += 20
 
       // Deduction fields
       const deductionFields = [
@@ -282,79 +260,61 @@ export async function generateEnhancedPayslipPdf(
       let totalDeductions = 0
       
       deductionFields.forEach(field => {
-        if (!checkPageSpace(18)) {
-          doc.addPage()
-          doc.y = 50
-        }
         totalDeductions += field.value
         doc.fontSize(10)
           .font('Helvetica')
           .fillColor('#000000')
-          .text(field.displayName, 50, doc.y)
-          .text(formatCurrency(field.value), doc.page.width - 180, doc.y, {
+          .text(field.displayName, 50, y)
+          .text(formatCurrency(field.value), doc.page.width - 180, y, {
             width: 130,
             align: 'right'
           })
-        doc.y += 18
+        y += 18
       });
 
       // Total Deductions
-      if (!checkPageSpace(25)) {
-        doc.addPage()
-        doc.y = 50
-      }
-      doc.y += 5
+      y += 5
       doc.fontSize(11)
         .font('Helvetica-Bold')
         .fillColor('#8b0000')
-        .text('TOTAL DEDUCTIONS', 50, doc.y)
-        .text(formatCurrency(totalDeductions), doc.page.width - 180, doc.y, {
+        .text('TOTAL DEDUCTIONS', 50, y)
+        .text(formatCurrency(totalDeductions), doc.page.width - 180, y, {
           width: 130,
           align: 'right'
         })
 
       // ===== NET SALARY SECTION =====
-      doc.y += 45
+      y += 45
       
-      if (!checkPageSpace(80)) {
-        doc.addPage()
-        doc.y = 50
-      }
-      
-      doc.roundedRect(40, doc.y, doc.page.width - 80, 60, 6)
+      doc.roundedRect(40, y, doc.page.width - 80, 60, 6)
         .fill('#e8f0ff')
       
       doc.fillColor('#0b1f44')
         .fontSize(16)
         .font('Helvetica-Bold')
-        .text('Net Salary', 55, doc.y + 20)
+        .text('Net Salary', 55, y + 20)
       
       doc.fontSize(18)
-        .text(formatCurrency(payroll.netPay ?? 0), doc.page.width - 220, doc.y + 15, {
+        .text(formatCurrency(payroll.netPay ?? 0), doc.page.width - 220, y + 15, {
           width: 170,
           align: 'right'
         })
 
       // ===== PAYMENT DETAILS SECTION =====
-      doc.y += 75
-      
-      if (!checkPageSpace(100)) {
-        doc.addPage()
-        doc.y = 50
-      }
+      y += 75
       
       doc.fontSize(12)
         .font('Helvetica-Bold')
         .fillColor('#1e3a5f')
-        .text('PAYMENT DETAILS', 40, doc.y)
+        .text('PAYMENT DETAILS', 40, y)
       
-      doc.y += 20
+      y += 20
       
-      doc.moveTo(40, doc.y)
-        .lineTo(doc.page.width - 40, doc.y)
+      doc.moveTo(40, y)
+        .lineTo(doc.page.width - 40, y)
         .stroke('#1e3a5f')
       
-      doc.y += 15
+      y += 15
 
       // Payment fields
       const paymentFields = [
@@ -363,46 +323,28 @@ export async function generateEnhancedPayslipPdf(
       ];
 
       paymentFields.forEach(field => {
-        if (!checkPageSpace(18)) {
-          doc.addPage()
-          doc.y = 50
-        }
         doc.fontSize(10)
           .font('Helvetica')
           .fillColor('#000000')
-          .text(field.displayName, 50, doc.y)
-          .text(formatCurrency(field.value), doc.page.width - 180, doc.y, {
+          .text(field.displayName, 50, y)
+          .text(formatCurrency(field.value), doc.page.width - 180, y, {
             width: 130,
             align: 'right'
           })
-        doc.y += 18
+        y += 18
       });
 
       // ===== ATTENDANCE SUMMARY =====
-      doc.y += 15
-      
-      if (!checkPageSpace(30)) {
-        doc.addPage()
-        doc.y = 50
-      }
+      y += 15
       
       doc.fontSize(9)
         .fillColor('#666666')
         .font('Helvetica')
         .text(`Attendance Summary: ${payroll.daysWorked || 0} days worked out of ${payroll.daysInMonth || 0} days`, 
-              40, doc.y, { width: doc.page.width - 80, align: 'center' })
+              40, y, { width: doc.page.width - 80, align: 'center' })
 
       // ===== FOOTER SECTION =====
-      // Move to bottom of page for footer
-      const footerY = doc.page.height - 80
-      
-      // Only add footer if we're not already past it
-      if (doc.y < footerY - 20) {
-        doc.y = footerY
-      } else {
-        doc.addPage()
-        doc.y = doc.page.height - 80
-      }
+      y += 25
       
       // Company contact info
       doc.fontSize(8)
@@ -411,7 +353,7 @@ export async function generateEnhancedPayslipPdf(
         .text(
           `${companyInfo?.name || staff.companyName} | ${companyInfo?.address || staff.companyAddress || ''} | Tel: ${companyInfo?.phone || staff.companyPhone || ''}`,
           40,
-          doc.y,
+          y,
           { align: 'center', width: doc.page.width - 80 }
         )
 
@@ -421,7 +363,7 @@ export async function generateEnhancedPayslipPdf(
         .text(
           'This is a computer-generated document. No signature is required.',
           40,
-          doc.y + 15,
+          y + 15,
           { align: 'center', width: doc.page.width - 80 }
         )
 
@@ -431,11 +373,10 @@ export async function generateEnhancedPayslipPdf(
         .text(
           `Generated on ${new Date().toLocaleString('en-NG')} | Page 1 of 1`,
           40,
-          doc.y + 30,
+          y + 30,
           { align: 'center', width: doc.page.width - 80 }
         )
 
-      // Finalize the PDF
       doc.end()
       
       console.log(`✅ Enhanced payslip PDF generated for ${staff.staffId}: ${fileName}`)
