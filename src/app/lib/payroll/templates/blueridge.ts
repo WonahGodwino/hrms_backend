@@ -9,6 +9,8 @@ import { PAYROLL_TEMPLATES } from './types'
 function normalizeHeader(h: string) {
   return h
     .toString()
+    // FIXED: Remove HTML tags like <br> before normalization
+    .replace(/<[^>]*>/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/\n/g, ' ')
     .trim()
@@ -259,19 +261,59 @@ export const processBlueridgeTemplate = {
           monthName = getMonthNameFromNumber(periodMonth)
         }
 
-        // FIXED: Explicitly get the raw values first to debug
-        const workingDaysRaw = getCell(row, 'WorkingDays', canonicalMap)
-        const workedDaysRaw = getCell(row, 'WorkedDays', canonicalMap)
-        
-        // Parse all fields from the mapping table
+        // FIXED: Get position
         const position = getCell(row, 'Position verify (coe)', canonicalMap)?.toString().trim() || ''
         
-        // FIXED: Properly parse working days and worked days
+        // FIXED: Try multiple ways to get working days - handle HTML tags properly
+        let workingDaysRaw = getCell(row, 'Working Days', canonicalMap)
+        if (workingDaysRaw === undefined || workingDaysRaw === null || workingDaysRaw === '') {
+          // Try direct access with possible header variations including HTML
+          const possibleWorkingHeaders = [
+            'Working<br>Days', 'Working Days', 'WorkingDays', 
+            'Working_Days', 'Working-Days', 'workingdays', 'working days'
+          ]
+          for (const header of possibleWorkingHeaders) {
+            if (row[header] !== undefined && row[header] !== null && row[header] !== '') {
+              workingDaysRaw = row[header]
+              console.log(`[BLUERIDGE_PROCESSOR] Found WorkingDays using header: ${header} = ${workingDaysRaw}`)
+              break
+            }
+          }
+        }
+
+        // FIXED: Try multiple ways to get worked days - handle HTML tags properly
+        let workedDaysRaw = getCell(row, 'Worked Days', canonicalMap)
+        if (workedDaysRaw === undefined || workedDaysRaw === null || workedDaysRaw === '') {
+          // Try direct access with possible header variations including HTML
+          const possibleWorkedHeaders = [
+            'Worked<br>Days', 'Worked Days', 'WorkedDays', 
+            'Worked_Days', 'Worked-Days', 'workeddays', 'worked days'
+          ]
+          for (const header of possibleWorkedHeaders) {
+            if (row[header] !== undefined && row[header] !== null && row[header] !== '') {
+              workedDaysRaw = row[header]
+              console.log(`[BLUERIDGE_PROCESSOR] Found WorkedDays using header: ${header} = ${workedDaysRaw}`)
+              break
+            }
+          }
+        }
+
+        // Parse the values
         const workingDays = num(workingDaysRaw)
         const workedDays = num(workedDaysRaw)
-        
-        // Log the values for debugging
-        console.log(`[BLUERIDGE_PROCESSOR] Row ${displayRowNumber}: Staff=${staffId}, WorkingDaysRaw=${workingDaysRaw}, WorkedDaysRaw=${workedDaysRaw}, WorkingDays=${workingDays}, WorkedDays=${workedDays}`)
+
+        // Log all available headers for debugging
+        console.log(`[BLUERIDGE_PROCESSOR] Row ${displayRowNumber}: Available headers:`, Object.keys(row))
+        console.log(`[BLUERIDGE_PROCESSOR] Row ${displayRowNumber}: WorkingDays:`, { 
+          raw: workingDaysRaw, 
+          parsed: workingDays,
+          type: typeof workingDaysRaw 
+        })
+        console.log(`[BLUERIDGE_PROCESSOR] Row ${displayRowNumber}: WorkedDays:`, { 
+          raw: workedDaysRaw, 
+          parsed: workedDays,
+          type: typeof workedDaysRaw 
+        })
         
         const proratedGrossPay = num(getCell(row, 'This Month\'s Gross', canonicalMap))
         const overtimeIncome = num(getCell(row, 'Overtime Income (OI)', canonicalMap))
@@ -449,7 +491,7 @@ export const processBlueridgeTemplate = {
         let payslipId = ''
         let isUpdate = false
 
-        // FIXED: Create parsedRow with all fields for PDF generation
+        // Create parsedRow with all fields for PDF generation
         const parsedRow: ParsedPayrollRow = {
           rowNumber: displayRowNumber,
           staffId: staffRecord.staffId,
