@@ -84,7 +84,6 @@ export async function generateEnhancedPayslipPdf(
 ): Promise<{ pdfBuffer: Uint8Array; fileName: string }> {
   const { staff, payroll, companyInfo } = input
   
-  // Log the values to verify they're being passed correctly
   console.log('PDF Generator - Days:', {
     daysInMonth: payroll.daysInMonth,
     daysWorked: payroll.daysWorked
@@ -153,7 +152,7 @@ export async function generateEnhancedPayslipPdf(
         .text(`Department: ${staff.department || 'N/A'}`, 55, y + 81)
         .text(`Email: ${staff.email}`, 55, y + 98)
       
-      // Right column - FIXED: Ensure days are displayed
+      // Right column
       doc.text(`Number of days in the month: ${payroll.daysInMonth || 0}`, 
               doc.page.width / 2 + 10, y + 30)
         .text(`Number of days worked: ${payroll.daysWorked || 0}`, 
@@ -316,7 +315,7 @@ export async function generateEnhancedPayslipPdf(
       
       y += 15
 
-      // Payment fields
+      // Payment fields - Display as a single block with amounts on same line
       const paymentFields = [
         { displayName: 'WALLET PAYMENT', value: payroll.walletPayment ?? 0 },
         { displayName: 'COMMERCIAL PAYMENT', value: payroll.commercialPayment ?? 0 },
@@ -345,6 +344,12 @@ export async function generateEnhancedPayslipPdf(
 
       // ===== FOOTER SECTION =====
       y += 25
+      
+      // Check if we need a new page (if y > page height - 100)
+      if (y > doc.page.height - 100) {
+        doc.addPage()
+        y = 50
+      }
       
       // Company contact info
       doc.fontSize(8)
