@@ -5,6 +5,7 @@ import { prisma } from '@/app/lib/db'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { fileTypeFromBuffer } from 'file-type'
+import { Readable } from 'stream';
 
 // Use require syntax to avoid TypeScript issues with formidable
 const formidable = require('formidable');
@@ -17,33 +18,60 @@ export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin')
 
   try {
+    // Instead of creating a new Request, we'll use the raw request body
     const formData = await new Promise<{ fields: any; files: any }>((resolve, reject) => {
       const form = formidable({
         maxFileSize: 5 * 1024 * 1024, // 5 MB size limit
         multiples: false, // Only one file allowed
+        keepExtensions: true,
       });
 
-      form.parse(request as any, (err: any, fields: any, files: any) => {
-        if (err) reject(err);
+      // Convert the Next.js request to a Node.js readable stream
+      const readableStream = Readable.from(request.body as any);
+      
+      // Set the request headers
+      const headers: any = {};
+      request.headers.forEach((value, key) => {
+        headers[key] = value;
+      });
+
+      // Add the stream and headers to the request-like object
+      const req = Object.assign(readableStream, {
+        headers,
+      });
+
+      form.parse(req, (err: any, fields: any, files: any) => {
+        if (err) {
+          reject(err);
+          return;
+        }
         resolve({ fields, files });
       });
     });
 
     const { fields, files } = formData;
 
-    const { 
-      jobId, 
-      firstName, 
-      lastName, 
-      email, 
-      phone, 
-      address, 
-      linkedInUrl, 
-      portfolioUrl,
-      createdBy 
-    } = fields;
+    // Helper function to get field value (handles arrays)
+    const getFieldValue = (field: any): string => {
+      if (Array.isArray(field)) {
+        return field[0] || '';
+      }
+      return field || '';
+    };
+
+    // Extract field values (handling potential arrays)
+    const jobId = getFieldValue(fields.jobId);
+    const firstName = getFieldValue(fields.firstName);
+    const lastName = getFieldValue(fields.lastName);
+    const email = getFieldValue(fields.email);
+    const phone = getFieldValue(fields.phone);
+    const address = getFieldValue(fields.address);
+    const linkedInUrl = getFieldValue(fields.linkedInUrl);
+    const portfolioUrl = getFieldValue(fields.portfolioUrl);
+    const createdBy = getFieldValue(fields.createdBy);
     
-    const cvFile = files.cv;
+    // Get the CV file
+    const cvFile = Array.isArray(files.cv) ? files.cv[0] : files.cv;
 
     // Validate required fields
     if (!jobId || !firstName || !lastName || !email) {
@@ -80,8 +108,28 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('CV file size exceeds the 5MB limit', 400), origin);
     }
 
+    // Read file buffer correctly
+    const fileBuffer = await new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      
+      // Create a readable stream from the file
+      const fs = require('fs');
+      const readStream = fs.createReadStream(cvFile.filepath);
+      
+      readStream.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
+      });
+      
+      readStream.on('end', () => {
+        resolve(Buffer.concat(chunks));
+      });
+      
+      readStream.on('error', (err: Error) => {
+        reject(err);
+      });
+    });
+
     // Check file type
-    const fileBuffer = Buffer.from(await cvFile.arrayBuffer());
     const fileType = await fileTypeFromBuffer(fileBuffer);
 
     const allowedMimeTypes = [
@@ -148,16 +196,21 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('You have already applied for this job', 400), origin);
     }
 
+    // Convert Buffer to a plain Uint8Array that Prisma expects
+    // This creates a new Uint8Array that's guaranteed to have ArrayBuffer, not SharedArrayBuffer
+    const uint8ArrayData = new Uint8Array(fileBuffer.length);
+    fileBuffer.copy(uint8ArrayData, 0, 0, fileBuffer.length);
+
     // Save the file into CandidateFile
     const fileData = await prisma.candidateFile.create({
       data: {
         companyId: job.companyId,
         candidateId: candidate.id,
         applicationId: null, // Will be linked after application creation
-        fileName: cvFile.originalFilename,
+        fileName: cvFile.originalFilename || 'cv.pdf',
         mimeType: fileType.mime,
         sizeBytes: cvFile.size,
-        data: fileBuffer,
+        data: uint8ArrayData, // Now using the properly typed Uint8Array
         type: 'CV',
         createdBy: createdBy || 'public_application',
       }
