@@ -3,13 +3,108 @@ import PDFDocument from 'pdfkit'
 import fs from 'fs'
 import path from 'path'
 
+const fontkit = require('fontkit') as {
+  openSync: (filePath: string) => { hasGlyphForCodePoint: (codePoint: number) => boolean }
+}
+
 function formatCurrency(n: number): string {
   const safe = Number.isFinite(n) ? n : 0
-  const formatted = safe.toLocaleString('en-NG', { 
+  return safe.toLocaleString('en-NG', {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 2 
+    maximumFractionDigits: 2,
   })
-  return `₦ ${formatted}`
+}
+
+function drawNairaSymbol(doc: PDFKit.PDFDocument, x: number, y: number, size: number, color: string) {
+  const symbolHeight = Math.max(size, 8)
+  const symbolWidth = symbolHeight * 0.72
+  const lineWidth = Math.max(0.8, symbolHeight * 0.08)
+  const barInset = lineWidth
+  const bar1Y = y + symbolHeight * 0.38
+  const bar2Y = y + symbolHeight * 0.62
+
+  doc.save()
+  doc.strokeColor(color)
+  doc.lineWidth(lineWidth)
+
+  doc.moveTo(x, y)
+    .lineTo(x, y + symbolHeight)
+    .moveTo(x, y + symbolHeight)
+    .lineTo(x + symbolWidth, y)
+    .moveTo(x + symbolWidth, y)
+    .lineTo(x + symbolWidth, y + symbolHeight)
+    .moveTo(x - barInset, bar1Y)
+    .lineTo(x + symbolWidth + barInset, bar1Y)
+    .moveTo(x - barInset, bar2Y)
+    .lineTo(x + symbolWidth + barInset, bar2Y)
+    .stroke()
+
+  doc.restore()
+}
+
+function drawCurrency(
+  doc: PDFKit.PDFDocument,
+  amount: number,
+  x: number,
+  y: number,
+  options: {
+    width?: number
+    align?: 'left' | 'right'
+    font: string
+    fontSize: number
+    color: string
+    useTextNairaSymbol?: boolean
+  }
+) {
+  const formatted = formatCurrency(amount)
+  const textWithNaira = `₦ ${formatted}`
+
+  if (options.useTextNairaSymbol) {
+    doc.font(options.font).fontSize(options.fontSize).fillColor(options.color)
+    if (options.align === 'right' && options.width) {
+      doc.text(textWithNaira, x, y, {
+        width: options.width,
+        align: 'right',
+        lineBreak: false,
+      })
+      return
+    }
+
+    doc.text(textWithNaira, x, y, {
+      lineBreak: false,
+    })
+    return
+  }
+
+  const symbolSize = Math.max(options.fontSize * 0.9, 8)
+  const symbolGap = Math.max(options.fontSize * 0.35, 3)
+  const symbolWidth = symbolSize * 0.72 + symbolGap
+
+  doc.font(options.font).fontSize(options.fontSize).fillColor(options.color)
+
+  if (options.align === 'right' && options.width) {
+    const textWidth = doc.widthOfString(formatted)
+    const startX = x + options.width - (symbolWidth + textWidth)
+    drawNairaSymbol(doc, startX, y + Math.max(options.fontSize * 0.08, 0.5), symbolSize, options.color)
+    doc.text(formatted, startX + symbolWidth, y, {
+      lineBreak: false,
+    })
+    return
+  }
+
+  drawNairaSymbol(doc, x, y + Math.max(options.fontSize * 0.08, 0.5), symbolSize, options.color)
+  doc.text(formatted, x + symbolWidth, y, {
+    lineBreak: false,
+  })
+}
+
+function fontHasNairaGlyph(fontPath: string): boolean {
+  try {
+    const font = fontkit.openSync(fontPath)
+    return !!font.hasGlyphForCodePoint(0x20A6)
+  } catch {
+    return false
+  }
 }
 
 function getMonthName(monthNumber: number): string {
@@ -105,29 +200,26 @@ export async function generateEnhancedPayslipPdf(
 
       let regularFont = 'Helvetica'
       let boldFont = 'Helvetica-Bold'
+      let useTextNairaSymbol = false
 
-      const regularFontPath = path.join(
-        process.cwd(),
-        'node_modules',
-        '@fontsource',
-        'noto-sans',
-        'files',
-        'noto-sans-latin-ext-400-normal.woff'
-      )
-      const boldFontPath = path.join(
-        process.cwd(),
-        'node_modules',
-        '@fontsource',
-        'noto-sans',
-        'files',
-        'noto-sans-latin-ext-700-normal.woff'
-      )
+      const regularCandidates = [
+        path.join(process.cwd(), 'public', 'payslips', 'fonts', 'LiberationSans-Regular.ttf'),
+        path.join(process.cwd(), 'node_modules', 'pdfjs-dist', 'standard_fonts', 'LiberationSans-Regular.ttf'),
+      ]
+      const boldCandidates = [
+        path.join(process.cwd(), 'public', 'payslips', 'fonts', 'LiberationSans-Bold.ttf'),
+        path.join(process.cwd(), 'node_modules', 'pdfjs-dist', 'standard_fonts', 'LiberationSans-Bold.ttf'),
+      ]
 
-      if (fs.existsSync(regularFontPath) && fs.existsSync(boldFontPath)) {
+      const regularFontPath = regularCandidates.find((fontPath) => fs.existsSync(fontPath))
+      const boldFontPath = boldCandidates.find((fontPath) => fs.existsSync(fontPath))
+
+      if (regularFontPath && boldFontPath) {
         doc.registerFont('PayslipRegular', regularFontPath)
         doc.registerFont('PayslipBold', boldFontPath)
         regularFont = 'PayslipRegular'
         boldFont = 'PayslipBold'
+        useTextNairaSymbol = fontHasNairaGlyph(regularFontPath) && fontHasNairaGlyph(boldFontPath)
       }
       
       const chunks: Buffer[] = []
@@ -239,10 +331,14 @@ export async function generateEnhancedPayslipPdf(
           .font(regularFont)
           .fillColor('#000000')
           .text(field.displayName, 50, y)
-          .text(formatCurrency(field.value), doc.page.width - 180, y, {
-            width: 130,
-            align: 'right'
-          })
+        drawCurrency(doc, field.value, doc.page.width - 180, y, {
+          width: 130,
+          align: 'right',
+          font: regularFont,
+          fontSize: 10,
+          color: '#000000',
+          useTextNairaSymbol,
+        })
         y += 18
       });
 
@@ -252,10 +348,14 @@ export async function generateEnhancedPayslipPdf(
         .font(boldFont)
         .fillColor('#0f5132')
         .text('Gross Salary', 50, y)
-        .text(formatCurrency(payroll.grossPay ?? 0), doc.page.width - 180, y, {
-          width: 130,
-          align: 'right'
-        })
+      drawCurrency(doc, payroll.grossPay ?? 0, doc.page.width - 180, y, {
+        width: 130,
+        align: 'right',
+        font: boldFont,
+        fontSize: 11,
+        color: '#0f5132',
+        useTextNairaSymbol,
+      })
 
       // ===== DEDUCTIONS SECTION =====
       y += 35
@@ -298,10 +398,14 @@ export async function generateEnhancedPayslipPdf(
           .font(regularFont)
           .fillColor('#000000')
           .text(field.displayName, 50, y)
-          .text(formatCurrency(field.value), doc.page.width - 180, y, {
-            width: 130,
-            align: 'right'
-          })
+        drawCurrency(doc, field.value, doc.page.width - 180, y, {
+          width: 130,
+          align: 'right',
+          font: regularFont,
+          fontSize: 10,
+          color: '#000000',
+          useTextNairaSymbol,
+        })
         y += 18
       });
 
@@ -311,10 +415,14 @@ export async function generateEnhancedPayslipPdf(
         .font(boldFont)
         .fillColor('#8b0000')
         .text('TOTAL DEDUCTIONS', 50, y)
-        .text(formatCurrency(totalDeductions), doc.page.width - 180, y, {
-          width: 130,
-          align: 'right'
-        })
+      drawCurrency(doc, totalDeductions, doc.page.width - 180, y, {
+        width: 130,
+        align: 'right',
+        font: boldFont,
+        fontSize: 11,
+        color: '#8b0000',
+        useTextNairaSymbol,
+      })
 
       // ===== NET SALARY & PAYMENT DETAILS =====
       y += 45
@@ -334,8 +442,13 @@ export async function generateEnhancedPayslipPdf(
         .font(boldFont)
         .text('Net Salary', 55, y + 15)
       
-      doc.fontSize(18)
-        .text(formatCurrency(payroll.netPay ?? 0), 55, y + 35)
+      drawCurrency(doc, payroll.netPay ?? 0, 55, y + 35, {
+        align: 'left',
+        font: boldFont,
+        fontSize: 18,
+        color: '#0b1f44',
+        useTextNairaSymbol,
+      })
 
       // Payment Details - Below Net Salary
       y += 85
@@ -364,10 +477,14 @@ export async function generateEnhancedPayslipPdf(
           .font(regularFont)
           .fillColor('#000000')
           .text(field.displayName, 50, y)
-          .text(formatCurrency(field.value), doc.page.width - 180, y, {
-            width: 130,
-            align: 'right'
-          })
+        drawCurrency(doc, field.value, doc.page.width - 180, y, {
+          width: 130,
+          align: 'right',
+          font: regularFont,
+          fontSize: 10,
+          color: '#000000',
+          useTextNairaSymbol,
+        })
         y += 18
       });
 
