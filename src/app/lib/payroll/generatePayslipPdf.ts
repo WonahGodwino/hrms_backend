@@ -1,5 +1,7 @@
 // src/app/lib/payroll/generatePayslipPdf.ts
 import PDFDocument from 'pdfkit'
+import fs from 'fs'
+import path from 'path'
 import type { GeneratePayslipInput, TemplateType } from './types'
 
 function formatCurrency(n: number) {
@@ -80,6 +82,34 @@ export async function generatePayslipPdf(
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({ margin: 40, size: 'A4' })
+
+      let regularFont = 'Helvetica'
+      let boldFont = 'Helvetica-Bold'
+
+      const regularFontPath = path.join(
+        process.cwd(),
+        'node_modules',
+        '@fontsource',
+        'noto-sans',
+        'files',
+        'noto-sans-latin-ext-400-normal.woff'
+      )
+      const boldFontPath = path.join(
+        process.cwd(),
+        'node_modules',
+        '@fontsource',
+        'noto-sans',
+        'files',
+        'noto-sans-latin-ext-700-normal.woff'
+      )
+
+      if (fs.existsSync(regularFontPath) && fs.existsSync(boldFontPath)) {
+        doc.registerFont('PayslipRegular', regularFontPath)
+        doc.registerFont('PayslipBold', boldFontPath)
+        regularFont = 'PayslipRegular'
+        boldFont = 'PayslipBold'
+      }
+
       const chunks: Buffer[] = []
       
       doc.on('data', (chunk) => chunks.push(chunk))
@@ -98,11 +128,11 @@ export async function generatePayslipPdf(
       
       doc.fillColor('#ffffff')
         .fontSize(18)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .text(staff.companyName || 'COMPANY NAME LTD', 40, 25)
       
       doc.fontSize(11)
-        .font('Helvetica')
+        .font(regularFont)
         .text('SALARY PAYSLIP', 40, 50)
       
       doc.fillColor('#ffffff')
@@ -120,9 +150,9 @@ export async function generatePayslipPdf(
       
       doc.fillColor('#000000')
         .fontSize(11)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .text('STAFF INFORMATION', 55, staffSectionTop + 5)
-        .font('Helvetica')
+        .font(regularFont)
         .text(`Name: ${staff.firstName} ${staff.lastName}`, 55, staffSectionTop + 25)
         .text(`Staff ID: ${staff.staffId}`, 55, staffSectionTop + 42)
         .text(`Email: ${staff.email}`, 55, staffSectionTop + 59)
@@ -137,7 +167,7 @@ export async function generatePayslipPdf(
       let currentY = staffSectionTop + 115
       
       doc.fontSize(12)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .fillColor('#1e3a5f')
         .text('EARNINGS', 40, currentY)
       
@@ -178,7 +208,7 @@ export async function generatePayslipPdf(
 
       doc.fontSize(10)
         .fillColor('#000000')
-        .font('Helvetica')
+        .font(regularFont)
 
       earnings.forEach(item => {
         if (item.value > 0) {
@@ -193,7 +223,7 @@ export async function generatePayslipPdf(
 
       currentY += 5
       doc.fontSize(11)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .fillColor('#0f5132')
         .text('Total Gross Pay', 50, currentY)
         .text(formatCurrency(payslipData.grossPay), doc.page.width - 180, currentY, {
@@ -204,7 +234,7 @@ export async function generatePayslipPdf(
       currentY += 35
       
       doc.fontSize(12)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .fillColor('#8b0000')
         .text('DEDUCTIONS', 40, currentY)
       
@@ -230,7 +260,7 @@ export async function generatePayslipPdf(
 
       doc.fontSize(10)
         .fillColor('#000000')
-        .font('Helvetica')
+        .font(regularFont)
 
       deductions.forEach(item => {
         if (item.value > 0) {
@@ -246,7 +276,7 @@ export async function generatePayslipPdf(
       const totalDeductions = payslipData.payee + payslipData.pension + (payslipData.deductions || 0)
       currentY += 5
       doc.fontSize(11)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .fillColor('#8b0000')
         .text('Total Deductions', 50, currentY)
         .text(formatCurrency(totalDeductions), doc.page.width - 180, currentY, {
@@ -261,7 +291,7 @@ export async function generatePayslipPdf(
       
       doc.fillColor('#0b1f44')
         .fontSize(14)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .text('NET SALARY PAYABLE', 55, currentY + 13)
       
       doc.text(formatCurrency(payslipData.netPay), doc.page.width - 200, currentY + 13, {
@@ -273,7 +303,7 @@ export async function generatePayslipPdf(
       
       doc.fillColor('#000000')
         .fontSize(10)
-        .font('Helvetica')
+        .font(regularFont)
         .text(`Working Days in Month: ${payslipData.daysInMonth}`, 50, currentY)
         .text(`Days Worked: ${payslipData.daysWorked}`, doc.page.width / 2 + 10, currentY)
 
@@ -286,7 +316,7 @@ export async function generatePayslipPdf(
       
       doc.fontSize(8)
         .fillColor('#666666')
-        .font('Helvetica')
+        .font(regularFont)
         .text(
           'This is a system-generated payslip. For any discrepancies, please contact HR department.',
           30,

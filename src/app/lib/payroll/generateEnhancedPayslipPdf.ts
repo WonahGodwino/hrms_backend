@@ -1,5 +1,7 @@
 // src/app/lib/payroll/generateEnhancedPayslipPdf.ts
 import PDFDocument from 'pdfkit'
+import fs from 'fs'
+import path from 'path'
 
 function formatCurrency(n: number): string {
   const safe = Number.isFinite(n) ? n : 0
@@ -7,7 +9,7 @@ function formatCurrency(n: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2 
   })
-  return `₦ ${formatted}` // Added space after naira sign
+  return `₦ ${formatted}`
 }
 
 function getMonthName(monthNumber: number): string {
@@ -100,6 +102,33 @@ export async function generateEnhancedPayslipPdf(
         margin: 40, 
         size: 'A4'
       })
+
+      let regularFont = 'Helvetica'
+      let boldFont = 'Helvetica-Bold'
+
+      const regularFontPath = path.join(
+        process.cwd(),
+        'node_modules',
+        '@fontsource',
+        'noto-sans',
+        'files',
+        'noto-sans-latin-ext-400-normal.woff'
+      )
+      const boldFontPath = path.join(
+        process.cwd(),
+        'node_modules',
+        '@fontsource',
+        'noto-sans',
+        'files',
+        'noto-sans-latin-ext-700-normal.woff'
+      )
+
+      if (fs.existsSync(regularFontPath) && fs.existsSync(boldFontPath)) {
+        doc.registerFont('PayslipRegular', regularFontPath)
+        doc.registerFont('PayslipBold', boldFontPath)
+        regularFont = 'PayslipRegular'
+        boldFont = 'PayslipBold'
+      }
       
       const chunks: Buffer[] = []
       
@@ -121,17 +150,17 @@ export async function generateEnhancedPayslipPdf(
       // Company Name
       doc.fillColor('#ffffff')
         .fontSize(20)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .text(companyInfo?.name || staff.companyName || 'COMPANY NAME LTD', 40, 25)
       
       doc.fontSize(14)
-        .font('Helvetica')
+        .font(regularFont)
         .text('PAYSLIP', 40, 55)
       
       // Right side info
       doc.fillColor('#ffffff')
         .fontSize(10)
-        .font('Helvetica')
+        .font(regularFont)
         .text(`Pay Period: ${getMonthName(payroll.periodMonth)} ${payroll.periodYear}`, 
               doc.page.width - 250, 42, { width: 200, align: 'right' })
         .text(`Generated: ${new Date().toLocaleDateString('en-NG')}`, 
@@ -145,12 +174,12 @@ export async function generateEnhancedPayslipPdf(
       
       doc.fillColor('#000000')
         .fontSize(12)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .text('EMPLOYEE INFORMATION', 55, y + 10)
         
       // Left column - Staff details
       doc.fontSize(10)
-        .font('Helvetica')
+        .font(regularFont)
         .text(`Staff ID: ${staff.staffId}`, 55, y + 30)
         .text(`Staff Name: ${staff.firstName} ${staff.lastName}`, 55, y + 47)
         .text(`Position: ${payroll.position || staff.position || staff.designation || 'N/A'}`, 55, y + 64)
@@ -167,7 +196,7 @@ export async function generateEnhancedPayslipPdf(
 
       // ===== EARNINGS SECTION =====
       doc.fontSize(14)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .fillColor('#1e3a5f')
         .text('EARNINGS', 40, y)
       
@@ -181,7 +210,7 @@ export async function generateEnhancedPayslipPdf(
 
       // Column headers
       doc.fontSize(10)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .fillColor('#333333')
         .text('Description', 50, y)
         .text('Amount', doc.page.width - 180, y, { width: 130, align: 'right' })
@@ -207,7 +236,7 @@ export async function generateEnhancedPayslipPdf(
       // Display ALL earnings fields (even zero values)
       earningsFields.forEach(field => {
         doc.fontSize(10)
-          .font('Helvetica')
+          .font(regularFont)
           .fillColor('#000000')
           .text(field.displayName, 50, y)
           .text(formatCurrency(field.value), doc.page.width - 180, y, {
@@ -220,7 +249,7 @@ export async function generateEnhancedPayslipPdf(
       // Gross Salary
       y += 5
       doc.fontSize(11)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .fillColor('#0f5132')
         .text('Gross Salary', 50, y)
         .text(formatCurrency(payroll.grossPay ?? 0), doc.page.width - 180, y, {
@@ -232,7 +261,7 @@ export async function generateEnhancedPayslipPdf(
       y += 35
       
       doc.fontSize(14)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .fillColor('#8b0000')
         .text('DEDUCTIONS', 40, y)
       
@@ -246,7 +275,7 @@ export async function generateEnhancedPayslipPdf(
 
       // Column headers
       doc.fontSize(10)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .fillColor('#333333')
         .text('Description', 50, y)
         .text('Amount', doc.page.width - 180, y, { width: 130, align: 'right' })
@@ -266,7 +295,7 @@ export async function generateEnhancedPayslipPdf(
       deductionFields.forEach(field => {
         totalDeductions += field.value
         doc.fontSize(10)
-          .font('Helvetica')
+          .font(regularFont)
           .fillColor('#000000')
           .text(field.displayName, 50, y)
           .text(formatCurrency(field.value), doc.page.width - 180, y, {
@@ -279,7 +308,7 @@ export async function generateEnhancedPayslipPdf(
       // Total Deductions
       y += 5
       doc.fontSize(11)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .fillColor('#8b0000')
         .text('TOTAL DEDUCTIONS', 50, y)
         .text(formatCurrency(totalDeductions), doc.page.width - 180, y, {
@@ -302,7 +331,7 @@ export async function generateEnhancedPayslipPdf(
       
       doc.fillColor('#0b1f44')
         .fontSize(16)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .text('Net Salary', 55, y + 15)
       
       doc.fontSize(18)
@@ -312,7 +341,7 @@ export async function generateEnhancedPayslipPdf(
       y += 85
       
       doc.fontSize(12)
-        .font('Helvetica-Bold')
+        .font(boldFont)
         .fillColor('#1e3a5f')
         .text('PAYMENT DETAILS', 40, y)
       
@@ -332,7 +361,7 @@ export async function generateEnhancedPayslipPdf(
 
       paymentFields.forEach(field => {
         doc.fontSize(10)
-          .font('Helvetica')
+          .font(regularFont)
           .fillColor('#000000')
           .text(field.displayName, 50, y)
           .text(formatCurrency(field.value), doc.page.width - 180, y, {
@@ -356,7 +385,7 @@ export async function generateEnhancedPayslipPdf(
       // Company contact info
       doc.fontSize(8)
         .fillColor('#666666')
-        .font('Helvetica')
+        .font(regularFont)
         .text(
           `${companyInfo?.name || staff.companyName} | ${companyInfo?.address || staff.companyAddress || ''} | Tel: ${companyInfo?.phone || staff.companyPhone || ''}`,
           40,
