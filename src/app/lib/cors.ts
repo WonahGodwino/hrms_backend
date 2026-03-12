@@ -3,8 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 
 const allowedOrigins = [
   'https://app.isurfglobal.com',  // Your frontend app
-  'https://247hr.co.uk/',       // Your frontend app
-  'http://localhost:5173',       // Local development
+  'https://247hr.co.uk',           // <--new allowed origin
+  'https://www.247hr.co.uk',       // Your frontend app
+  'http://localhost:5173',       // Local development http://localhost:5173
   'http://localhost:3000',        // Local development
   process.env.ALLOWED_ORIGINS?.split(',') || [],
 ].flat().filter(Boolean)
@@ -20,7 +21,7 @@ function isOriginAllowed(origin: string | null): boolean {
     return true
   }
 
-  if (origin.endsWith('.247hr.co.uk/')) {
+  if (origin.endsWith('.247hr.co.uk')) {
     console.log('[CORS] ✅ Origin allowed (subdomain):', origin)
     return true
   }
