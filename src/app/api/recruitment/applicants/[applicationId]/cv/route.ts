@@ -39,6 +39,8 @@ export async function GET(
 
     const companyId = String(user.companyId);
     const applicationId = params.applicationId;
+    const dispositionParam = request.nextUrl.searchParams.get("disposition");
+    const disposition = dispositionParam === "inline" ? "inline" : "attachment";
 
     // Find the CV file for this application within the same company
     // Priority: application.cvFileId if you use it
@@ -76,14 +78,13 @@ export async function GET(
     const filename = sanitizeFilename(file.fileName || "cv");
     const mimeType = file.mimeType || "application/octet-stream";
 
-    // Send as file download
-    // If you want inline PDF view, change `attachment` to `inline`
+    // Support either inline preview or forced download.
     const res = new NextResponse(file.data, {
       status: 200,
       headers: {
         "Content-Type": mimeType,
         "Content-Length": String(file.sizeBytes ?? file.data.length),
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": `${disposition}; filename="${filename}"`,
         "Cache-Control": "no-store",
       },
     });
