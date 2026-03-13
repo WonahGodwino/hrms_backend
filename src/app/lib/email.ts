@@ -12,7 +12,7 @@ const mg = mailgun.client({
 })
 
 const MAILGUN_DOMAIN = process.env.MAILGUN_DOMAIN || ''
-const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@ms.isurfglobal.com'
+const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@ms.hr247.co.uk'
 
 // ========== NEW: Generic sendEmail function ==========
 export async function sendEmail(options: {
@@ -103,7 +103,7 @@ export async function sendLeaveNotificationEmail(
     })
 
     const companyName = company?.companyName || 'Your Company'
-    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://app.isurfglobal.com'
+    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk'
     
     let subject: string
     let message: string
