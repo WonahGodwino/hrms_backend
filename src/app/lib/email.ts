@@ -433,7 +433,7 @@ export async function sendPayrollNotificationEmail(
 
     // === CRITICAL FIX: Use separate URLs for frontend and backend ===
     // Frontend URL - where your React app runs (for login/registration pages)
-    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://app.isurfglobal.com'
+    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk'
     // Backend URL - where your API/HRMS runs (for API endpoints)
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://hrms.isurfglobal.com'
     
