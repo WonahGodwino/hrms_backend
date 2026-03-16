@@ -4,10 +4,11 @@ import bcrypt from 'bcryptjs'
 import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { signToken } from '@/app/lib/auth'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+// import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 export async function OPTIONS(request: NextRequest) {
-  return handleCorsOptions(request)
+  // CORS is now handled by Nginx. No app-level CORS.
+  return new Response(null, { status: 204 })
 }
 
 export async function POST(request: NextRequest) {
@@ -18,10 +19,8 @@ export async function POST(request: NextRequest) {
     const { email, password, companyId } = body || {}
 
     if (!email || !password) {
-      return withCors(
-        ApiResponse.error('Email and password are required', 400),
-        origin
-      )
+      // return withCors(ApiResponse.error('Email and password are required', 400), origin)
+      return ApiResponse.error('Email and password are required', 400)
     }
 
     const cleanEmail = email.toLowerCase().trim()
@@ -47,61 +46,46 @@ export async function POST(request: NextRequest) {
 
       if (matches.length === 0) {
         // Email not found anywhere → generic invalid credentials
-        return withCors(
-          ApiResponse.error('Invalid credentials', 401),
-          origin
-        )
+        // return withCors(ApiResponse.error('Invalid credentials', 401), origin)
+        return ApiResponse.error('Invalid credentials', 401)
       }
 
       if (matches.length > 1) {
         // Same email in multiple companies: do NOT reveal that
         // Just treat it as invalid credentials
-        return withCors(
-          ApiResponse.error('Invalid credentials', 401),
-          origin
-        )
+        // return withCors(ApiResponse.error('Invalid credentials', 401), origin)
+        return ApiResponse.error('Invalid credentials', 401)
       }
 
       staff = matches[0]
     }
 
     if (!staff) {
-      return withCors(
-        ApiResponse.error('Invalid credentials', 401),
-        origin
-      )
+      return ApiResponse.error('Invalid credentials', 401)
     }
 
     if (!staff.isActive) {
-      return withCors(
-        ApiResponse.error('Account is deactivated', 403),
-        origin
-      )
+      // return withCors(ApiResponse.error('Account is deactivated', 403), origin)
+      return ApiResponse.error('Account is deactivated', 403)
     }
 
     // Enforce registration only for STAFF, not for SUPER_ADMIN / HR
     if (staff.role === 'STAFF' && !staff.isRegistered) {
-      return withCors(
-        ApiResponse.error('Complete registration before login', 403),
-        origin
-      )
+      // return withCors(ApiResponse.error('Complete registration before login', 403), origin)
+      return ApiResponse.error('Complete registration before login', 403)
     }
 
     // Guard nullable password (String? in schema)
     if (!staff.password) {
       // For safety, don’t leak that the account exists but has no password
-      return withCors(
-        ApiResponse.error('Invalid credentials', 401),
-        origin
-      )
+      // return withCors(ApiResponse.error('Invalid credentials', 401), origin)
+      return ApiResponse.error('Invalid credentials', 401)
     }
 
     const ok = await bcrypt.compare(password, staff.password)
     if (!ok) {
-      return withCors(
-        ApiResponse.error('Invalid credentials', 401),
-        origin
-      )
+      // return withCors(ApiResponse.error('Invalid credentials', 401), origin)
+      return ApiResponse.error('Invalid credentials', 401)
     }
 
     const token = signToken({
@@ -116,39 +100,35 @@ export async function POST(request: NextRequest) {
       where: { id: staff.companyId },
     })
 
-    return withCors(
-      ApiResponse.success(
-        {
-          token,
-          user: {
-            id: staff.id,
-            email: staff.email,
-            firstName: staff.firstName,
-            lastName: staff.lastName,
-            role: staff.role,
-            companyId: staff.companyId,
-            department: staff.department,
-            position: staff.position,
-            staffId: staff.staffId,
-          },
-          company: company
-            ? {
-                id: company.id,
-                companyName: company.companyName,
-                email: company.email,
-                phone: company.phone,
-                address: company.address,
-              }
-            : null,
+    // return withCors(ApiResponse.success({ ... }, 'Login successful'), origin)
+    return ApiResponse.success(
+      {
+        token,
+        user: {
+          id: staff.id,
+          email: staff.email,
+          firstName: staff.firstName,
+          lastName: staff.lastName,
+          role: staff.role,
+          companyId: staff.companyId,
+          department: staff.department,
+          position: staff.position,
+          staffId: staff.staffId,
         },
-        'Login successful'
-      ),
-      origin
+        company: company
+          ? {
+              id: company.id,
+              companyName: company.companyName,
+              email: company.email,
+              phone: company.phone,
+              address: company.address,
+            }
+          : null,
+      },
+      'Login successful'
     )
   } catch (error) {
-    return withCors(
-      handleApiError(error),
-      origin
-    )
+    // return withCors(handleApiError(error), origin)
+    return handleApiError(error)
   }
 }
