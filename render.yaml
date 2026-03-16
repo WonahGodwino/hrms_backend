@@ -19,6 +19,18 @@ services:
       - key: NEXTAUTH_URL
         value: https://$(RENDER_SERVICE_HOSTNAME)
 
+      - key: FRONTEND_URL
+        value: https://247hr.co.uk
+
+      - key: BACKEND_URL
+        value: https://hrms.isurfglobal.com
+
+      - key: NEXT_PUBLIC_FRONTEND_URL
+        value: https://247hr.co.uk
+
+      - key: NEXT_PUBLIC_BACKEND_URL
+        value: https://hrms.isurfglobal.com
+
       # Optional: email credentials (you can delete if unused)
       - key: SMTP_HOST
         value: smtp.gmail.com
