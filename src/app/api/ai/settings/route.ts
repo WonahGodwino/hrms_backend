@@ -3,10 +3,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { getUserFromToken } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+// import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 export async function OPTIONS(request: NextRequest) {
-  return handleCorsOptions(request)
+  // CORS is now handled by Nginx. No app-level CORS.
+  return new Response(null, { status: 204 })
 }
 
 export async function GET(request: NextRequest) {
@@ -120,7 +121,7 @@ export async function GET(request: NextRequest) {
   } catch (error: unknown) {
     const message = formatError(error)
     console.error('Error fetching AI settings:', error)
-    return withCors(ApiResponse.error(message, 500), origin)
+    return ApiResponse.error(message, 500)
   }
 }
 
@@ -247,7 +248,7 @@ export async function PUT(request: NextRequest) {
   } catch (error: unknown) {
     const message = formatError(error)
     console.error('Error updating AI settings:', error)
-    return withCors(ApiResponse.error(message, 500), origin)
+    return ApiResponse.error(message, 500)
   }
 }
 
@@ -300,6 +301,6 @@ export async function DELETE(request: NextRequest) {
   } catch (error: unknown) {
     const message = formatError(error)
     console.error('Error deleting AI settings:', error)
-    return withCors(ApiResponse.error(message, 500), origin)
+    return ApiResponse.error(message, 500)
   }
 }
