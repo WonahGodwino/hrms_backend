@@ -7,7 +7,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { requireRole } from '@/app/lib/auth'
 
 // Define allowed status transitions
-const ALLOWED_STATUSES = ['ACTIVE', 'CLOSED', 'DRAFT'] as const
+const ALLOWED_STATUSES = ['ACTIVE', 'CLOSED', 'DRAFT', 'EXPIRED'] as const
 type JobStatus = typeof ALLOWED_STATUSES[number]
 
 const STATUS_ALIASES: Record<string, JobStatus> = {
@@ -15,13 +15,26 @@ const STATUS_ALIASES: Record<string, JobStatus> = {
   CLOSE: 'CLOSED',
   CLOSED: 'CLOSED',
   DRAFT: 'DRAFT',
+  EXPIRE: 'EXPIRED',
+  EXPIRED: 'EXPIRED',
 }
 
 // Define valid transitions per role (optional business logic)
 const VALID_TRANSITIONS: Record<string, JobStatus[]> = {
-  'ACTIVE': ['CLOSED'],
-  'CLOSED': ['ACTIVE'],
-  'DRAFT': ['ACTIVE'],
+  'ACTIVE': ['CLOSED', 'DRAFT', 'EXPIRED'],
+  'CLOSED': ['ACTIVE', 'DRAFT'],
+  'DRAFT': ['ACTIVE', 'CLOSED'],
+  'EXPIRED': ['ACTIVE', 'CLOSED', 'DRAFT'],
+}
+
+function extractBearerToken(authHeader: string | null): string | null {
+  if (!authHeader) return null
+  const match = authHeader.match(/^Bearer\s+(.+)$/i)
+  return match?.[1]?.trim() || null
+}
+
+function mapAuthErrorStatus(message: string): number {
+  return message.toLowerCase().includes('insufficient permissions') ? 403 : 401
 }
 
 export async function OPTIONS(request: NextRequest) {
@@ -36,13 +49,18 @@ export async function GET(
   const origin = request.headers.get('origin')
   
   try {
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader) {
-      return withCors(ApiResponse.error('Authorization header missing', 401), origin)
+    const token = extractBearerToken(request.headers.get('authorization'))
+    if (!token) {
+      return withCors(ApiResponse.error('Invalid or missing Authorization header', 401), origin)
     }
 
-    const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    let user
+    try {
+      user = requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    } catch (authError) {
+      const message = formatError(authError)
+      return withCors(ApiResponse.error(message, mapAuthErrorStatus(message)), origin)
+    }
 
     const job = await prisma.job.findFirst({
       where: { 
@@ -91,13 +109,18 @@ export async function PATCH(
   
   try {
     // Auth
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader) {
-      return withCors(ApiResponse.error('Authorization header missing', 401), origin)
+    const token = extractBearerToken(request.headers.get('authorization'))
+    if (!token) {
+      return withCors(ApiResponse.error('Invalid or missing Authorization header', 401), origin)
     }
 
-    const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    let user
+    try {
+      user = requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    } catch (authError) {
+      const message = formatError(authError)
+      return withCors(ApiResponse.error(message, mapAuthErrorStatus(message)), origin)
+    }
 
     // Validate request body
     const body = await request.json()
@@ -112,7 +135,7 @@ export async function PATCH(
 
     if (!targetStatus || !ALLOWED_STATUSES.includes(targetStatus)) {
       return withCors(ApiResponse.error(
-        `Invalid status. Allowed values: ACTIVE, CLOSED (or CLOSE), DRAFT`,
+        `Invalid status. Allowed values: ACTIVE, CLOSED (or CLOSE), DRAFT, EXPIRED`,
         400
       ), origin)
     }

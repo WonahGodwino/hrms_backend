@@ -13,8 +13,8 @@ const mg = mailgun.client({
 
 const MAILGUN_DOMAIN = process.env.MAILGUN_DOMAIN || ''
 const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@ms.hr247.co.uk'
-const FRONTEND_URL = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk'
-const BACKEND_URL = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'https://hrms.isurfglobal.com'
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://247hr.co.uk'
+const BACKEND_URL = process.env.BACKEND_URL || 'https://hrms.isurfglobal.com'
 
 // ========== NEW: Generic sendEmail function ==========
 export async function sendEmail(options: {

@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { verify } from 'jsonwebtoken'
 
-const FRONTEND_URL = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk'
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://247hr.co.uk'
 
 // CORS headers helper
 function addCorsHeaders(response: NextResponse) {

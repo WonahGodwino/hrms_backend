@@ -6,6 +6,16 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
+function extractBearerToken(authHeader: string | null): string | null {
+  if (!authHeader) return null
+  const match = authHeader.match(/^Bearer\s+(.+)$/i)
+  return match?.[1]?.trim() || null
+}
+
+function mapAuthErrorStatus(message: string): number {
+  return message.toLowerCase().includes('insufficient permissions') ? 403 : 401
+}
+
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
@@ -16,13 +26,18 @@ export async function PUT(request: NextRequest, context: { params: { id: string 
   const { id } = context.params
 
   try {
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader) {
-      return withCors(ApiResponse.error('Authorization header missing', 401), origin)
+    const token = extractBearerToken(request.headers.get('authorization'))
+    if (!token) {
+      return withCors(ApiResponse.error('Invalid or missing Authorization header', 401), origin)
     }
 
-    const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN'])
+    let user
+    try {
+      user = requireRole(token, ['HR', 'SUPER_ADMIN'])
+    } catch (authError) {
+      const message = formatError(authError)
+      return withCors(ApiResponse.error(message, mapAuthErrorStatus(message)), origin)
+    }
 
     if (!user.companyId) {
       return withCors(ApiResponse.error('Company context missing for this user', 400), origin)
@@ -69,13 +84,18 @@ export async function DELETE(request: NextRequest, context: { params: { id: stri
   const { id } = context.params
 
   try {
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader) {
-      return withCors(ApiResponse.error('Authorization header missing', 401), origin)
+    const token = extractBearerToken(request.headers.get('authorization'))
+    if (!token) {
+      return withCors(ApiResponse.error('Invalid or missing Authorization header', 401), origin)
     }
 
-    const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN'])
+    let user
+    try {
+      user = requireRole(token, ['HR', 'SUPER_ADMIN'])
+    } catch (authError) {
+      const message = formatError(authError)
+      return withCors(ApiResponse.error(message, mapAuthErrorStatus(message)), origin)
+    }
 
     if (!user.companyId) {
       return withCors(ApiResponse.error('Company context missing for this user', 400), origin)
