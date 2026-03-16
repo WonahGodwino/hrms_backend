@@ -13,6 +13,8 @@ const mg = mailgun.client({
 
 const MAILGUN_DOMAIN = process.env.MAILGUN_DOMAIN || ''
 const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@ms.hr247.co.uk'
+const FRONTEND_URL = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk'
+const BACKEND_URL = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'https://hrms.isurfglobal.com'
 
 // ========== NEW: Generic sendEmail function ==========
 export async function sendEmail(options: {
@@ -103,7 +105,7 @@ export async function sendLeaveNotificationEmail(
     })
 
     const companyName = company?.companyName || 'Your Company'
-    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk'
+    const frontendUrl = FRONTEND_URL
     
     let subject: string
     let message: string
@@ -433,9 +435,9 @@ export async function sendPayrollNotificationEmail(
 
     // === CRITICAL FIX: Use separate URLs for frontend and backend ===
     // Frontend URL - where your React app runs (for login/registration pages)
-    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk'
+    const frontendUrl = FRONTEND_URL
     // Backend URL - where your API/HRMS runs (for API endpoints)
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://hrms.isurfglobal.com'
+    const backendUrl = BACKEND_URL
     
     let accessUrl = ''
     let callToAction = ''
@@ -816,8 +818,8 @@ export async function testEmailConfig(companyId?: string): Promise<{ success: bo
     )
 
     // Use separate URLs for testing
-    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://app.isurfglobal.com'
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://hrms.isurfglobal.com'
+    const frontendUrl = FRONTEND_URL
+    const backendUrl = BACKEND_URL
     
     // Unregistered user should go to backend API
     const testAccessUrl = `${backendUrl}/api/auth/payslip-access?token=${testToken}`
