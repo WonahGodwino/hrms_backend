@@ -125,7 +125,7 @@ export async function DELETE(request: NextRequest) {
 			},
 			data: {
 				isActive: false,
-				updatedBy: currentUser.email || currentUser.userId,
+				updatedBy: currentUser.userId,
 				updatedAt: new Date(),
 			},
 		});
