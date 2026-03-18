@@ -3,10 +3,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
-// import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
-  // CORS is now handled by Nginx. No app-level CORS.
-  return new Response(null, { status: 204 })
+export async function OPTIONS(request: NextRequest) {
+  return handleCorsOptions(request)
 }
 
 export async function GET(request: NextRequest) {
@@ -15,10 +15,7 @@ export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
-      // return withCors(
-        ApiResponse.error('Authorization header missing', 401),
-        origin
-      )
+      return withCors(ApiResponse.error('Authorization header missing', 401), origin)
     }
 
     const token = authHeader.replace('Bearer ', '')
@@ -133,7 +130,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // return withCors(
+    return withCors(
       ApiResponse.success(companies, 'Accessible companies retrieved successfully'),
       origin
     )
@@ -141,6 +138,6 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     const message = formatError(error)
     console.error('Error fetching accessible companies:', error)
-    // return withCors(ApiResponse.error(message, 500), origin)
+    return withCors(ApiResponse.error(message, 500), origin)
   }
 }

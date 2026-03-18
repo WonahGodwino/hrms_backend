@@ -31,6 +31,9 @@ export async function GET(request: NextRequest) {
     //   (expirationDate >= now) OR (expirationDate is null)
     const where: any = {
       status: "ACTIVE",
+      company: {
+        archived: 0,
+      },
       OR: [
         { expirationDate: { gte: now } },
         { expirationDate: null },

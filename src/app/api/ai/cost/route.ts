@@ -3,11 +3,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { getUserFromToken } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
-// import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { openaiUsageTracker } from '@/app/lib/openaiUsage'
 
-  // CORS is now handled by Nginx. No app-level CORS.
-  return new Response(null, { status: 204 })
+export async function OPTIONS(request: NextRequest) {
+  return handleCorsOptions(request)
 }
 
 export async function GET(request: NextRequest) {
@@ -16,10 +16,7 @@ export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
-      // return withCors(
-        ApiResponse.error('Authorization header missing', 401),
-        origin
-      )
+      return withCors(ApiResponse.error('Authorization header missing', 401), origin)
     }
 
     const token = authHeader.replace('Bearer ', '')
@@ -27,7 +24,7 @@ export async function GET(request: NextRequest) {
     
     // Check permissions
     if (!user || (user.role !== 'SUPER_ADMIN' && user.role !== 'HR' && user.role !== 'ADMIN')) {
-      // return withCors(
+      return withCors(
         ApiResponse.error('Insufficient permissions. Required role: SUPER_ADMIN, HR, or ADMIN', 403),
         origin
       )
@@ -48,16 +45,13 @@ export async function GET(request: NextRequest) {
     } else {
       // HR/ADMIN can only see their own company
       if (!user.companyId) {
-        // return withCors(
-          ApiResponse.error('Company context missing for HR/ADMIN user', 400),
-          origin
-        )
+        return withCors(ApiResponse.error('Company context missing for HR/ADMIN user', 400), origin)
       }
       targetCompanyId = user.companyId
       
       // HR/ADMIN cannot view other companies even if specified
       if (companyId && companyId !== user.companyId) {
-        // return withCors(
+        return withCors(
           ApiResponse.error('HR/ADMIN users can only view their own company data', 403),
           origin
         )
@@ -98,10 +92,7 @@ export async function GET(request: NextRequest) {
       })
       
       if (!company) {
-        // return withCors(
-          ApiResponse.error('Company not found', 404),
-          origin
-        )
+        return withCors(ApiResponse.error('Company not found', 404), origin)
       }
       companies = [company]
     }
@@ -120,14 +111,14 @@ export async function GET(request: NextRequest) {
       endDate
     )
 
-    // return withCors(
+    return withCors(
       ApiResponse.success(result, 'AI cost analysis retrieved successfully'),
       origin
     )
   } catch (error: unknown) {
     const message = formatError(error)
     console.error('Error fetching AI costs:', error)
-    // return withCors(ApiResponse.error(message, 500), origin)
+    return withCors(ApiResponse.error(message, 500), origin)
   }
 }
 

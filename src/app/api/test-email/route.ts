@@ -2,10 +2,10 @@
 import { NextRequest } from 'next/server'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
-// import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
-  // CORS is now handled by Nginx. No app-level CORS.
-  return new Response(null, { status: 204 })
+export async function OPTIONS(request: NextRequest) {
+  return handleCorsOptions(request)
 }
 
 export async function POST(req: NextRequest) {
@@ -20,10 +20,7 @@ export async function POST(req: NextRequest) {
     const netSalary = Number(body.netSalary ?? 150000)
 
     if (!testEmail) {
-      // return withCors(
-        ApiResponse.error('Email field is required', 400),
-        origin
-      )
+      return withCors(ApiResponse.error('Email field is required', 400), origin)
     }
 
     // Generate a test ID for the staff (using a fixed test ID)
@@ -55,7 +52,7 @@ export async function POST(req: NextRequest) {
     const result = await sendPayrollNotificationEmail(mockStaff, mockPayroll)
 
     if (!result.success) {
-      // return withCors(
+      return withCors(
         ApiResponse.error(
           `Email sending failed: ${result.error || 'Unknown error'}`,
           500
@@ -64,7 +61,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // return withCors(
+    return withCors(
       ApiResponse.success(
         {
           emailSentTo: testEmail,

@@ -219,6 +219,30 @@ model PayrollUpload {
   @@map("payroll_uploads")
 }
 
+// Add archived field to ALL related models
+model Job {
+  id             String           @id @default(cuid())
+  title          String
+  description    String           @db.Text
+  department     String
+  position       String
+  companyId      String
+  status         JobStatus        @default(ACTIVE)
+  expirationDate DateTime?
+  createdBy      String
+  createdAt      DateTime         @default(now())
+  updatedBy      String?
+  updatedAt      DateTime         @updatedAt
+  archived       Int?              @default(0)  // 0 = active, 1 = archived
+  applications   JobApplication[]
+  company        Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  keywords       Keyword[]
+
+  @@index([companyId, status])
+  @@index([companyId, archived])
+  @@map("jobs")
+}
+
 model JobApplication {
   id              String                    @id @default(cuid())
   companyId       String
@@ -238,6 +262,7 @@ model JobApplication {
   updatedAt       DateTime                  @updatedAt
   reviewedAt      DateTime?
   cvFileId        String?                   @unique
+  archived        Int?                       @default(0)  // Add this
   stageHistory    ApplicationStageHistory[]
   files           CandidateFile[]           @relation("ApplicationFiles")
   interviews      Interview[]
@@ -249,6 +274,7 @@ model JobApplication {
 
   @@unique([jobId, candidateId])
   @@index([companyId, jobId, status])
+  @@index([companyId, archived])  // Add index
   @@index([cvFileId])
   @@map("job_applications")
 }
@@ -265,12 +291,15 @@ model CandidateFile {
   data             Bytes
   createdBy        String?
   createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @default(now()) @updatedAt
+  archived         Int?               @default(0)  // Add this
   application      JobApplication?   @relation("ApplicationFiles", fields: [applicationId], references: [id])
   candidate        Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
   cvForApplication JobApplication?   @relation("ApplicationCVFile")
 
   @@index([companyId, candidateId])
+  @@index([companyId, archived])  // Add index
   @@index([applicationId])
   @@index([companyId, applicationId, type])
   @@map("candidate_files")
@@ -281,68 +310,12 @@ model Keyword {
   name        String @unique
   description String
   jobId       String
+  updatedAt   DateTime @default(now()) @updatedAt
+  archived    Int?    @default(0)  // Add this
   job         Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
+  @@index([jobId, archived])  // Add index
   @@map("keywords")
-}
-
-model Job {
-  id             String           @id @default(cuid())
-  title          String
-  description    String           @db.Text
-  department     String
-  position       String
-  companyId      String
-  status         JobStatus        @default(ACTIVE)
-  expirationDate DateTime?
-  createdBy      String
-  createdAt      DateTime         @default(now())
-  updatedBy      String?
-  updatedAt      DateTime         @updatedAt
-  applications   JobApplication[]
-  company        Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  keywords       Keyword[]
-
-  @@index([companyId, status])
-  @@map("jobs")
-}
-
-model Candidate {
-  id           String              @id @default(cuid())
-  companyId    String
-  firstName    String
-  lastName     String
-  email        String
-  phone        String?
-  address      String?
-  linkedInUrl  String?
-  portfolioUrl String?
-  createdBy    String?
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
-  documents    CandidateDocument[]
-  files        CandidateFile[]
-  company      Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  applications JobApplication[]
-  offers       Offer[]
-
-  @@unique([email, companyId])
-  @@index([companyId])
-  @@map("candidates")
-}
-
-model ApplicationStageHistory {
-  id            String             @id @default(cuid())
-  applicationId String
-  fromStatus    ApplicationStatus?
-  toStatus      ApplicationStatus
-  changedBy     String?
-  changedAt     DateTime           @default(now())
-  comment       String?
-  application   JobApplication     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  @@index([applicationId])
-  @@map("application_stage_history")
 }
 
 model Interview {
@@ -360,11 +333,12 @@ model Interview {
   createdBy     String?
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
+  archived      Int?              @default(0)  // Add this
   application   JobApplication   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([applicationId, scheduledAt])
-  @@index([companyId])
+  @@index([companyId, archived])  // Add index
   @@map("interviews")
 }
 
@@ -387,12 +361,14 @@ model Offer {
   updatedBy         String?
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
+  archived          Int?            @default(0)  // Add this
   application       JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   candidate         Candidate      @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   company           Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   onboarding        Onboarding?
 
   @@index([companyId, status])
+  @@index([companyId, archived])  // Add index
   @@map("offers")
 }
 
@@ -408,6 +384,7 @@ model Onboarding {
   updatedBy     String?
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
+  archived      Int?                 @default(0)  // Add this
   documents     CandidateDocument[]
   tasks         OnboardingTask[]
   company       Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -415,6 +392,7 @@ model Onboarding {
   staffRecord   StaffRecord?        @relation(fields: [staffRecordId], references: [id])
 
   @@index([companyId, status])
+  @@index([companyId, archived])  // Add index
   @@map("onboardings")
 }
 
@@ -431,9 +409,11 @@ model OnboardingTask {
   createdBy    String?
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
+  archived     Int?                  @default(0)  // Add this
   onboarding   Onboarding           @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
 
   @@index([onboardingId, status])
+  @@index([onboardingId, archived])  // Add index
   @@map("onboarding_tasks")
 }
 
@@ -447,35 +427,80 @@ model CandidateDocument {
   fileName     String
   uploadedBy   String?
   createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @default(now()) @updatedAt
+  archived     Int?                   @default(0)  // Add this
   candidate    Candidate             @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   company      Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  onboarding   Onboarding?           @relation(fields: [onboardingId], references: [id])
+  onboarding   Onboarding?            @relation(fields: [onboardingId], references: [id])
 
   @@index([candidateId, type])
-  @@index([companyId])
+  @@index([companyId, archived])  // Add index
   @@map("candidate_documents")
 }
 
-model AISettings {
-  id                     String   @id @default(cuid())
-  companyId              String   @unique
-  monthlyBudget          Float    @default(100.00)
-  costPerReview          Float    @default(0.02)
-  costAlertThreshold     Int      @default(80)
-  enabled                Boolean  @default(true)
-  defaultService         String   @default("openai")
-  defaultModel           String   @default("gpt-3.5-turbo")
-  autoShortlistThreshold Int      @default(75)
-  useForSeniorRoles      Boolean  @default(true)
-  useForTechnicalRoles   Boolean  @default(true)
-  useForManagerRoles     Boolean  @default(true)
-  notifyEmails           String[]
-  createdBy              String?
-  updatedBy              String?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
-  company                Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+// Don't forget Candidate model if you want to archive candidates too
+model Candidate {
+  id           String              @id @default(cuid())
+  companyId    String
+  firstName    String
+  lastName     String
+  email        String
+  phone        String?
+  address      String?
+  linkedInUrl  String?
+  portfolioUrl String?
+  createdBy    String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  archived     Int?                @default(0)  // Add this if you want to archive candidates
+  documents    CandidateDocument[]
+  files        CandidateFile[]
+  company      Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  applications JobApplication[]
+  offers       Offer[]
 
+  @@unique([email, companyId])
+  @@index([companyId, archived])  // Add index
+  @@map("candidates")
+}
+
+model ApplicationStageHistory {
+  id            String             @id @default(cuid())
+  applicationId String
+  fromStatus    ApplicationStatus?
+  toStatus      ApplicationStatus
+  changedBy     String?
+  changedAt     DateTime           @default(now())
+  updatedAt     DateTime           @default(now()) @updatedAt
+  comment       String?
+  archived      Int?               @default(0)  // Add this
+  application   JobApplication     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, archived])  // Add index
+  @@map("application_stage_history")
+}
+
+model AISettings {
+  id                    String   @id @default(cuid())
+  companyId             String   @unique
+  monthlyBudget         Float    @default(100.00)
+  costPerReview         Float    @default(0.02)
+  costAlertThreshold    Int      @default(80)
+  enabled               Boolean  @default(true)
+  defaultService        String   @default("openai")
+  defaultModel          String   @default("gpt-3.5-turbo")
+  autoShortlistThreshold Int     @default(75)
+  useForSeniorRoles     Boolean  @default(true)
+  useForTechnicalRoles  Boolean  @default(true)
+  useForManagerRoles    Boolean  @default(true)
+  notifyEmails          String[]
+  createdBy             String?
+  updatedBy             String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
   @@map("ai_settings")
 }
 
