@@ -5,7 +5,6 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
-import { groupFieldsBySection } from '@/app/lib/payroll/utils'
 
 function toCsv(data: any[][]): string {
   return data
@@ -101,6 +100,13 @@ export async function GET(request: NextRequest) {
       DEDUCTIONS: template.fields.filter(f => f.section === 'DEDUCTIONS')
     }
 
+    const getSampleValue = (dataType: string): string => {
+      if (dataType === 'Number') return '0.00'
+      if (dataType === 'Date') return new Date().toISOString().split('T')[0]
+      if (dataType === 'Percentage') return '0%'
+      return 'Sample'
+    }
+
     // Build worksheet data
     const worksheetData: any[][] = []
 
@@ -110,156 +116,80 @@ export async function GET(request: NextRequest) {
     worksheetData.push([`Created: ${new Date(template.createdAt).toLocaleDateString()}`])
     worksheetData.push([])
 
-    // STAFF DETAILS SECTION
-    worksheetData.push(['=== STAFF DETAILS ==='])
-    worksheetData.push([])
-
-    // Staff Details Headers
-    const staffDetailHeaders = [
+    // Single unified headers row across all sections
+    const baseStaffHeaders = [
       'Employee ID',
       'Department',
       'Name',
-      'Email',
-      ...sections.STAFF_DETAILS.map(f => 
-        f.required ? `${f.displayName}*` : f.displayName
-      )
+      'Email'
     ]
-    worksheetData.push(staffDetailHeaders)
+    const baseHeaderLookup = new Set(baseStaffHeaders.map((header) => header.toLowerCase()))
 
-    // Sample data for staff details
-    const staffDetailSample = [
+    const staffCustomFields = sections.STAFF_DETAILS.filter(
+      (field) => !baseHeaderLookup.has(field.displayName.toLowerCase())
+    )
+
+    const staffCustomHeaders = staffCustomFields.map((field) =>
+      field.required ? `${field.displayName}*` : field.displayName
+    )
+    const fixedHeaders = sections.FIXED_EARNINGS.map((field) =>
+      field.required
+        ? `${field.displayName}* [Fixed Earnings]`
+        : `${field.displayName} [Fixed Earnings]`
+    )
+    const earningsHeaders = sections.EARNINGS.map((field) =>
+      field.required
+        ? `${field.displayName}* [Variable Earnings]`
+        : `${field.displayName} [Variable Earnings]`
+    )
+    const deductionHeaders = sections.DEDUCTIONS.map((field) =>
+      field.required
+        ? `${field.displayName}* [Deductions]`
+        : `${field.displayName} [Deductions]`
+    )
+
+    const unifiedColumns = [
+      ...baseStaffHeaders.map((label) => ({ label, section: 'STAFF_DETAILS' as const })),
+      ...staffCustomHeaders.map((label) => ({ label, section: 'STAFF_DETAILS' as const })),
+      ...fixedHeaders.map((label) => ({ label, section: 'FIXED_EARNINGS' as const })),
+      ...earningsHeaders.map((label) => ({ label, section: 'EARNINGS' as const })),
+      ...deductionHeaders.map((label) => ({ label, section: 'DEDUCTIONS' as const }))
+    ]
+    const unifiedHeaders = unifiedColumns.map((column) => column.label)
+    worksheetData.push(unifiedHeaders)
+
+    // Single sample row aligned with unified headers
+    const unifiedSampleRow = [
       'EMP001',
       'IT',
       'John Doe',
       'john@example.com',
-      ...sections.STAFF_DETAILS.map(f => {
-        if (f.dataType === 'Number') return '0.00'
-        if (f.dataType === 'Date') return new Date().toISOString().split('T')[0]
-        if (f.dataType === 'Percentage') return '0%'
-        return 'Sample'
-      })
+      ...staffCustomFields.map((field) => getSampleValue(field.dataType)),
+      ...sections.FIXED_EARNINGS.map((field) => getSampleValue(field.dataType)),
+      ...sections.EARNINGS.map((field) => getSampleValue(field.dataType)),
+      ...sections.DEDUCTIONS.map((field) => getSampleValue(field.dataType))
     ]
-    worksheetData.push(staffDetailSample)
+    worksheetData.push(unifiedSampleRow)
     worksheetData.push([])
 
-    // FIXED EARNINGS SECTION
-    if (sections.FIXED_EARNINGS.length > 0) {
-      worksheetData.push(['=== FIXED EARNINGS ==='])
-      worksheetData.push([])
-
-      const fixedEarningsHeaders = [
-        'Employee ID',
-        ...sections.FIXED_EARNINGS.map(f => 
-          f.required ? `${f.displayName}*` : f.displayName
-        )
-      ]
-      worksheetData.push(fixedEarningsHeaders)
-
-      const fixedEarningsSample = [
-        'EMP001',
-        ...sections.FIXED_EARNINGS.map(() => '0.00')
-      ]
-      worksheetData.push(fixedEarningsSample)
-      worksheetData.push([])
-    }
-
-    // VARIABLE EARNINGS SECTION
-    if (sections.EARNINGS.length > 0) {
-      worksheetData.push(['=== VARIABLE EARNINGS ==='])
-      worksheetData.push([])
-
-      const earningsHeaders = [
-        'Employee ID',
-        ...sections.EARNINGS.map(f => 
-          f.required ? `${f.displayName}*` : f.displayName
-        )
-      ]
-      worksheetData.push(earningsHeaders)
-
-      const earningsSample = [
-        'EMP001',
-        ...sections.EARNINGS.map(() => '0.00')
-      ]
-      worksheetData.push(earningsSample)
-      worksheetData.push([])
-    }
-
-    // DEDUCTIONS SECTION
-    if (sections.DEDUCTIONS.length > 0) {
-      worksheetData.push(['=== DEDUCTIONS ==='])
-      worksheetData.push([])
-
-      const deductionsHeaders = [
-        'Employee ID',
-        ...sections.DEDUCTIONS.map(f => 
-          f.required ? `${f.displayName}*` : f.displayName
-        )
-      ]
-      worksheetData.push(deductionsHeaders)
-
-      const deductionsSample = [
-        'EMP001',
-        ...sections.DEDUCTIONS.map(() => '0.00')
-      ]
-      worksheetData.push(deductionsSample)
-      worksheetData.push([])
-    }
-
-    // Multiple staff rows
-    worksheetData.push(['=== ADD MORE STAFF BELOW ==='])
-    worksheetData.push([])
-
-    // Add 10 empty rows for data entry
-    for (let i = 0; i < 10; i++) {
-      const emptyRow: any[] = []
-      
-      // Staff Details columns
-      emptyRow.push(`EMP${String(i + 2).padStart(3, '0')}`)
-      emptyRow.push('')
-      emptyRow.push('')
-      emptyRow.push('')
-      sections.STAFF_DETAILS.forEach(() => emptyRow.push(''))
-      
-      // Fixed Earnings columns
-      if (sections.FIXED_EARNINGS.length > 0) {
-        emptyRow.push('') // Employee ID for Fixed Earnings
-        sections.FIXED_EARNINGS.forEach(() => emptyRow.push(''))
-      }
-      
-      // Variable Earnings columns
-      if (sections.EARNINGS.length > 0) {
-        emptyRow.push('') // Employee ID for Variable Earnings
-        sections.EARNINGS.forEach(() => emptyRow.push(''))
-      }
-      
-      // Deductions columns
-      if (sections.DEDUCTIONS.length > 0) {
-        emptyRow.push('') // Employee ID for Deductions
-        sections.DEDUCTIONS.forEach(() => emptyRow.push(''))
-      }
-      
-      worksheetData.push(emptyRow)
-    }
-
-    worksheetData.push([])
-    worksheetData.push([])
+    const referenceData: any[][] = []
 
     // INSTRUCTIONS
-    worksheetData.push(['=== INSTRUCTIONS ==='])
-    worksheetData.push(['1. Do not modify the section headers (=== SECTION NAME ===)'])
-    worksheetData.push(['2. Fields marked with * are required'])
-    worksheetData.push(['3. Employee ID must match existing employees in the system'])
-    worksheetData.push(['4. You can add multiple staff by copying the row structure'])
-    worksheetData.push(['5. Keep the Employee ID consistent across sections for each employee'])
-    worksheetData.push(['6. Upload the file through the payroll upload endpoint'])
-    worksheetData.push([])
+    referenceData.push(['=== INSTRUCTIONS ==='])
+    referenceData.push(['1. Do not modify the header row order'])
+    referenceData.push(['2. Fields marked with * are required'])
+    referenceData.push(['3. Employee ID must match existing employees in the system'])
+    referenceData.push(['4. Add one row per employee when entering actual payroll data'])
+    referenceData.push(['5. Leave values blank only when the field is not applicable'])
+    referenceData.push(['6. Upload the file through the payroll upload endpoint'])
+    referenceData.push([])
 
     // FIELD LIST
-    worksheetData.push(['=== TEMPLATE FIELDS ==='])
-    worksheetData.push(['Section', 'Field Name', 'Data Type', 'Required', 'Show on Payslip'])
+    referenceData.push(['=== TEMPLATE FIELDS ==='])
+    referenceData.push(['Section', 'Field Name', 'Data Type', 'Required', 'Show on Payslip'])
     
     template.fields.forEach(field => {
-      worksheetData.push([
+      referenceData.push([
         field.section.replace('_', ' '),
         field.displayName,
         field.dataType,
@@ -270,10 +200,7 @@ export async function GET(request: NextRequest) {
 
     // Set column widths
     const totalCols = Math.max(
-      staffDetailHeaders.length,
-      (sections.FIXED_EARNINGS.length + 1),
-      (sections.EARNINGS.length + 1),
-      (sections.DEDUCTIONS.length + 1),
+      unifiedHeaders.length,
       5
     )
 
@@ -287,6 +214,41 @@ export async function GET(request: NextRequest) {
 
     worksheet.columns = Array.from({ length: totalCols }, () => ({ width: 20 }))
 
+    // Color-code consolidated header columns by section for easier visual grouping.
+    const headerRowIndex = 5
+    const headerRow = worksheet.getRow(headerRowIndex)
+    const sectionStyles: Record<string, { fill: string; font: string }> = {
+      STAFF_DETAILS: { fill: 'FFDCEBFF', font: 'FF1E3A8A' },
+      FIXED_EARNINGS: { fill: 'FFE6F7EC', font: 'FF14532D' },
+      EARNINGS: { fill: 'FFFFF3D6', font: 'FF92400E' },
+      DEDUCTIONS: { fill: 'FFFDE2E2', font: 'FF991B1B' }
+    }
+
+    unifiedColumns.forEach((column, index) => {
+      const cell = headerRow.getCell(index + 1)
+      const style = sectionStyles[column.section]
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: style.fill }
+      }
+      cell.font = {
+        bold: true,
+        color: { argb: style.font }
+      }
+      cell.alignment = {
+        horizontal: 'center',
+        vertical: 'middle',
+        wrapText: true
+      }
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFBDBDBD' } },
+        left: { style: 'thin', color: { argb: 'FFBDBDBD' } },
+        bottom: { style: 'thin', color: { argb: 'FFBDBDBD' } },
+        right: { style: 'thin', color: { argb: 'FFBDBDBD' } }
+      }
+    })
+
     // Generate filename
     const sanitizedCompanyName = companyName.replace(/[^a-z0-9]/gi, '_').toLowerCase()
     const sanitizedTemplateName = template.templateName.replace(/[^a-z0-9]/gi, '_').toLowerCase()
@@ -295,7 +257,7 @@ export async function GET(request: NextRequest) {
 
     if (format === 'csv') {
       // Convert to CSV
-      const csv = toCsv(worksheetData)
+      const csv = toCsv([...worksheetData, [], ...referenceData])
       const csvBuffer = Buffer.from(csv, 'utf-8')
       
       const response = new NextResponse(csvBuffer, {
@@ -308,6 +270,12 @@ export async function GET(request: NextRequest) {
       })
       return withCors(response, origin)
     } else {
+      const referenceWorksheet = workbook.addWorksheet('Instructions & Fields')
+      referenceData.forEach((row) => {
+        referenceWorksheet.addRow(row)
+      })
+      referenceWorksheet.columns = Array.from({ length: 5 }, () => ({ width: 28 }))
+
       // Generate Excel file
       const arrayBuffer = await workbook.xlsx.writeBuffer()
       const uint8Array = new Uint8Array(arrayBuffer as ArrayBuffer)

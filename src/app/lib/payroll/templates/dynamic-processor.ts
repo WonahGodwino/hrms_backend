@@ -8,12 +8,18 @@ import ExcelJS from 'exceljs'
 function normalizeHeader(h: string): string {
   return h
     .toString()
+    .replace(/\[[^\]]*\]/g, ' ')
     .replace(/<[^>]*>/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/\n/g, ' ')
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '')
+}
+
+function isMetaRowMarker(value: any): boolean {
+  const normalized = normalizeHeader(value?.toString() || '')
+  return normalized === 'instructions' || normalized === 'templatefields'
 }
 
 function num(v: any): number {
@@ -162,21 +168,41 @@ export const processDynamicTemplate = {
         const lines = csvText.split(/\r?\n/).filter(l => l.trim())
         if (!lines.length) throw new Error('Empty CSV file')
 
-        const rawHeaders = splitCsvLine(lines[0])
-        
-        // Map CSV headers to template fields
-        const headerMapping: { colIndex: number; field: any }[] = []
-        rawHeaders.forEach((header, idx) => {
-          const normalized = normalizeHeader(header)
-          const field = headerMap[normalized]
-          if (field) {
-            headerMapping.push({ colIndex: idx, field })
+        let headerRowIndex = -1
+        let headerMapping: { colIndex: number; field: any }[] = []
+
+        // Find first row that matches template headers (supports title rows before headers).
+        for (let i = 0; i < lines.length; i++) {
+          const candidateHeaders = splitCsvLine(lines[i])
+          const candidateMapping: { colIndex: number; field: any }[] = []
+
+          candidateHeaders.forEach((header, idx) => {
+            const normalized = normalizeHeader(header)
+            const field = headerMap[normalized]
+            if (field) {
+              candidateMapping.push({ colIndex: idx, field })
+            }
+          })
+
+          if (candidateMapping.length > 0) {
+            headerRowIndex = i
+            headerMapping = candidateMapping
+            break
           }
-        })
+        }
+
+        if (headerRowIndex === -1) {
+          throw new Error('Could not find recognizable header row in CSV file')
+        }
 
         // Process data rows
-        for (let i = 1; i < lines.length; i++) {
+        for (let i = headerRowIndex + 1; i < lines.length; i++) {
           const values = splitCsvLine(lines[i])
+
+          if (isMetaRowMarker(values[0])) {
+            break
+          }
+
           const rowData: any = {}
           
           headerMapping.forEach(mapping => {
@@ -235,9 +261,18 @@ export const processDynamicTemplate = {
         // Data starts after header row
         dataStartRow = headerRowIndex + 1
 
+        let stopAtMetaSection = false
+
         // Process data rows
         worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+          if (stopAtMetaSection) return
           if (rowNumber < dataStartRow) return
+
+          const firstCell = row.getCell(1).value?.toString() || ''
+          if (isMetaRowMarker(firstCell)) {
+            stopAtMetaSection = true
+            return
+          }
 
           const rowData: any = {}
           
