@@ -7,7 +7,10 @@ import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 type BulkArchiveBody = {
+  id?: string
+  jobId?: string
   ids?: string[]
+  jobIds?: string[]
 }
 
 function extractBearerToken(authHeader: string | null): string | null {
@@ -21,7 +24,31 @@ function mapAuthErrorStatus(message: string): number {
 }
 
 function sanitizeIds(ids: string[]): string[] {
-  return [...new Set(ids.map((value) => value.trim()).filter(Boolean))]
+  return [...new Set(ids.flatMap((value) => value.split(',')).map((value) => value.trim()).filter(Boolean))]
+}
+
+function shouldUsePathId(pathId: string | undefined, body: BulkArchiveBody): boolean {
+  if (!pathId) return false
+
+  const normalized = pathId.trim().toLowerCase()
+  if (!normalized) return false
+
+  const placeholderSegments = new Set(['bulk', 'multiple', 'selected', 'delete', 'undefined', 'null'])
+  if (placeholderSegments.has(normalized)) {
+    return false
+  }
+
+  const bodyHasExplicitIds =
+    typeof body.id === 'string' ||
+    typeof body.jobId === 'string' ||
+    (Array.isArray(body.ids) && body.ids.length > 0) ||
+    (Array.isArray(body.jobIds) && body.jobIds.length > 0)
+
+  if (bodyHasExplicitIds && pathId.includes(',')) {
+    return false
+  }
+
+  return true
 }
 
 export async function OPTIONS(request: NextRequest) {
@@ -67,10 +94,12 @@ export async function DELETE(
       body = {}
     }
 
-    // Combine URL param with body IDs
     const requestedIds = sanitizeIds([
-      params.id,
+      ...(shouldUsePathId(params.id, body) ? [params.id] : []),
+      ...(typeof body.id === 'string' ? [body.id] : []),
+      ...(typeof body.jobId === 'string' ? [body.jobId] : []),
       ...(Array.isArray(body.ids) ? body.ids : []),
+      ...(Array.isArray(body.jobIds) ? body.jobIds : []),
     ])
 
     if (requestedIds.length === 0) {
