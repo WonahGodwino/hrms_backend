@@ -1,6 +1,6 @@
+// src/app/lib/payroll/generateEnhancedPayslipPdf.ts
 import fs from 'fs';
 import path from 'path';
-// src/app/lib/payroll/generateEnhancedPayslipPdf.ts
 import PDFDocument from 'pdfkit';
 
 const fontkit = require('fontkit') as {
@@ -306,6 +306,13 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 
 			// ===== STAFF INFORMATION SECTION =====
 			let y = 120;
+			const contentBottomLimit = doc.page.height - doc.page.margins.bottom - 110;
+			const ensureSpace = (requiredHeight: number, nextPageTopY: number = 50) => {
+				if (y + requiredHeight > contentBottomLimit) {
+					doc.addPage();
+					y = nextPageTopY;
+				}
+			};
 
 			doc.roundedRect(40, y, doc.page.width - 80, 140, 6).fill('#f3f6fb');
 
@@ -378,6 +385,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 
 			// Display ALL earnings fields (even zero values)
 			earningsFields.forEach((field) => {
+				ensureSpace(18);
 				doc.fontSize(10).font(regularFont).fillColor('#000000').text(field.displayName, 50, y);
 				drawCurrency(doc, field.value, doc.page.width - 180, y, {
 					width: 130,
@@ -390,6 +398,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 			});
 
 			// Gross Salary
+			ensureSpace(22);
 			y += 5;
 			doc.fontSize(11).font(boldFont).fillColor('#0f5132').text('Gross Salary', 50, y);
 			drawCurrency(doc, summary?.grossPay ?? payroll.grossPay ?? 0, doc.page.width - 180, y, {
@@ -401,6 +410,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 			});
 
 			// ===== DEDUCTIONS SECTION =====
+			ensureSpace(90);
 			y += 35;
 
 			doc.fontSize(14).font(boldFont).fillColor('#8b0000').text('DEDUCTIONS', 40, y);
@@ -440,6 +450,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 
 			// Display ALL deduction fields
 			deductionFields.forEach((field) => {
+				ensureSpace(18);
 				totalDeductions += field.value;
 				doc.fontSize(10).font(regularFont).fillColor('#000000').text(field.displayName, 50, y);
 				drawCurrency(doc, field.value, doc.page.width - 180, y, {
@@ -453,6 +464,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 			});
 
 			// Total Deductions
+			ensureSpace(22);
 			y += 5;
 			doc.fontSize(11).font(boldFont).fillColor('#8b0000').text('TOTAL DEDUCTIONS', 50, y);
 			drawCurrency(doc, summary?.totalDeductions ?? totalDeductions, doc.page.width - 180, y, {
@@ -464,6 +476,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 			});
 
 			// ===== NET SALARY & PAYMENT DETAILS =====
+			ensureSpace(170);
 			y += 35;
 
 			// Check if we need a new page
@@ -508,6 +521,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 			];
 
 			paymentFields.forEach((field) => {
+				ensureSpace(18);
 				doc.fontSize(10).font(regularFont).fillColor('#000000').text(field.displayName, 50, y);
 				drawCurrency(doc, field.value, doc.page.width - 180, y, {
 					width: 130,
@@ -520,15 +534,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 			});
 
 			// ===== FOOTER SECTION =====
-			const footerY = doc.page.height - 60;
-
-			// Only add footer if we're not past it
-			if (y < footerY - 20) {
-				y = footerY;
-			} else {
-				doc.addPage();
-				y = doc.page.height - 80;
-			}
+			const footerY = doc.page.height - doc.page.margins.bottom - 35;
 
 			// Company contact info
 			doc
@@ -538,7 +544,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 				.text(
 					`${companyInfo?.name || staff.companyName} | ${companyInfo?.address || staff.companyAddress || ''} | Tel: ${companyInfo?.phone || staff.companyPhone || ''}`,
 					40,
-					y,
+					footerY,
 					{ align: 'center', width: doc.page.width - 80 }
 				);
 
@@ -546,13 +552,13 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 			doc
 				.fontSize(7)
 				.fillColor('#999999')
-				.text('This is a computer-generated document. No signature is required.', 40, y + 15, { align: 'center', width: doc.page.width - 80 });
+				.text('This is a computer-generated document. No signature is required.', 40, footerY + 12, { align: 'center', width: doc.page.width - 80 });
 
 			// Page info
 			doc
 				.fontSize(7)
 				.fillColor('#999999')
-				.text(`Generated on ${new Date().toLocaleString('en-NG')} | Page 1 of 1`, 40, y + 30, { align: 'center', width: doc.page.width - 80 });
+				.text(`Generated on ${new Date().toLocaleString('en-NG')} | Page 1 of 1`, 40, footerY + 24, { align: 'center', width: doc.page.width - 80 });
 
 			doc.end();
 
