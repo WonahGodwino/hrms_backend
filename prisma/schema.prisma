@@ -211,7 +211,7 @@ model PayrollTemplate {
   uploads       PayrollTemplateUpload[]
   payrollUploads PayrollUpload[]
 
-  @@unique([companyId])
+  //@@unique([companyId]) removing the unique companyId constraint
   @@index([companyId])
   @@index([isSystem])
   @@index([createdAt])
