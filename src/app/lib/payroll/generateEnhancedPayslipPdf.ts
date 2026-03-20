@@ -147,6 +147,15 @@ function getMonthName(monthNumber: number): string {
 	return months[monthNumber - 1] || 'Unknown';
 }
 
+type PayslipLineItem = {
+	label: string;
+	value: number;
+	type?: 'earnings' | 'deduction';
+	dataType?: string;
+	isCustom?: boolean;
+	section?: string;
+};
+
 export interface GeneratePayslipInput {
 	staff: {
 		staffId: string;
@@ -207,15 +216,24 @@ export interface GeneratePayslipInput {
 		logo?: string;
 		taxId?: string;
 	};
+	earnings?: PayslipLineItem[];
+	deductions?: PayslipLineItem[];
+	summary?: {
+		grossPay: number;
+		totalDeductions: number;
+		netPay: number;
+	};
+	templateName?: string;
 }
 
 export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): Promise<{ pdfBuffer: Uint8Array; fileName: string }> {
-	const { staff, payroll, companyInfo } = input;
+	const { staff, payroll, companyInfo, earnings, deductions, summary, templateName } = input;
 
 	console.log('PDF Generator - Generating payslip for:', {
 		staffId: staff.staffId,
 		daysInMonth: payroll.daysInMonth,
 		daysWorked: payroll.daysWorked,
+		templateName,
 	});
 
 	const fileName = `payslip-${staff.staffId}-${payroll.periodMonth.toString().padStart(2, '0')}-${payroll.periodYear}.pdf`;
@@ -291,6 +309,10 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 
 			doc.roundedRect(40, y, doc.page.width - 80, 140, 6).fill('#f3f6fb');
 
+
+			if (templateName) {
+				doc.fontSize(9).font(regularFont).text(`Template: ${templateName}`, doc.page.width - 250, 76, { width: 200, align: 'right' });
+			}
 			doc
 				.fillColor('#000000')
 				.fontSize(12)
@@ -339,20 +361,20 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 			y += 20;
 
 			// ALL EARNINGS FIELDS - SHOW ALL EVEN IF ZERO
-			const earningsFields = [
-				{ displayName: 'Prorated Gross Pay', value: payroll.proratedGrossPay ?? payroll.basicSalary ?? 0 },
-				{ displayName: 'Overtime Income (OI)', value: payroll.overtimeIncome ?? 0 },
-				{ displayName: 'Communication Allowance (CA)', value: payroll.communicationAllowance ?? 0 },
-				{ displayName: 'Transportation Allowance (TA)', value: payroll.transportationAllowance ?? payroll.transportAllowance ?? 0 },
-				{ displayName: 'Outstanding Income (OI)', value: payroll.outstandingIncome ?? 0 },
-				{ displayName: 'Performance Bonus (PB)', value: payroll.bonusKPI ?? 0 },
-				// { displayName: 'Housing Allowance', value: payroll.housingAllowance ?? 0 },
-				{ displayName: 'Other Allowances', value: payroll.otherAllowances ?? 0 },
-				// { displayName: 'Dressing Allowance', value: payroll.dressingAllowance ?? 0 },
-				// { displayName: 'Leave Allowance', value: payroll.leaveAllowance ?? 0 },
-				// { displayName: 'Entertainment Allowance', value: payroll.entertainmentAllowance ?? 0 },
-				// { displayName: 'Utility Allowance', value: payroll.utilityAllowance ?? 0 },
-			];
+			const earningsFields = earnings && earnings.length > 0
+				? earnings.map((item) => ({
+					displayName: item.label,
+					value: item.value,
+				}))
+				: [
+					{ displayName: 'Prorated Gross Pay', value: payroll.proratedGrossPay ?? payroll.basicSalary ?? 0 },
+					{ displayName: 'Overtime Income (OI)', value: payroll.overtimeIncome ?? 0 },
+					{ displayName: 'Communication Allowance (CA)', value: payroll.communicationAllowance ?? 0 },
+					{ displayName: 'Transportation Allowance (TA)', value: payroll.transportationAllowance ?? payroll.transportAllowance ?? 0 },
+					{ displayName: 'Outstanding Income (OI)', value: payroll.outstandingIncome ?? 0 },
+					{ displayName: 'Performance Bonus (PB)', value: payroll.bonusKPI ?? 0 },
+					{ displayName: 'Other Allowances', value: payroll.otherAllowances ?? 0 },
+				];
 
 			// Display ALL earnings fields (even zero values)
 			earningsFields.forEach((field) => {
@@ -370,7 +392,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 			// Gross Salary
 			y += 5;
 			doc.fontSize(11).font(boldFont).fillColor('#0f5132').text('Gross Salary', 50, y);
-			drawCurrency(doc, payroll.grossPay ?? 0, doc.page.width - 180, y, {
+			drawCurrency(doc, summary?.grossPay ?? payroll.grossPay ?? 0, doc.page.width - 180, y, {
 				width: 130,
 				align: 'right',
 				font: boldFont,
@@ -403,11 +425,16 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 			y += 20;
 
 			// ALL DEDUCTION FIELDS - SHOW ALL EVEN IF ZERO
-			const deductionFields = [
-				{ displayName: 'Employee Pension Deduction', value: payroll.pension ?? 0 },
-				{ displayName: 'Payee', value: payroll.payee ?? 0 },
-				{ displayName: 'Other Deductions', value: payroll.deductions ?? 0 },
-			];
+			const deductionFields = deductions && deductions.length > 0
+				? deductions.map((item) => ({
+					displayName: item.label,
+					value: item.value,
+				}))
+				: [
+					{ displayName: 'Employee Pension Deduction', value: payroll.pension ?? 0 },
+					{ displayName: 'Payee', value: payroll.payee ?? 0 },
+					{ displayName: 'Other Deductions', value: payroll.deductions ?? 0 },
+				];
 
 			let totalDeductions = 0;
 
@@ -428,7 +455,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 			// Total Deductions
 			y += 5;
 			doc.fontSize(11).font(boldFont).fillColor('#8b0000').text('TOTAL DEDUCTIONS', 50, y);
-			drawCurrency(doc, totalDeductions, doc.page.width - 180, y, {
+			drawCurrency(doc, summary?.totalDeductions ?? totalDeductions, doc.page.width - 180, y, {
 				width: 130,
 				align: 'right',
 				font: boldFont,
@@ -454,13 +481,12 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 				.font(boldFont)
 				.text('Net Salary', 55, y + 15);
 
-			drawCurrency(doc, payroll.netPay ?? 0, 55, y + 35, {
+			drawCurrency(doc, summary?.netPay ?? payroll.netPay ?? 0, 55, y + 35, {
 				align: 'left',
 				font: boldFont,
 				fontSize: 18,
 				color: '#0b1f44',
 			});
-
 			// Payment Details - Below Net Salary
 			y += 85;
 

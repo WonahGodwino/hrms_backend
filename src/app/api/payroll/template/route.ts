@@ -5,7 +5,7 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
-import { PAYROLL_TEMPLATES, PayrollTemplateType } from '@/app/lib/payroll/templates/types'
+import { PAYROLL_TEMPLATES } from '@/app/lib/payroll/templates/types'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -27,15 +27,17 @@ export async function GET(request: NextRequest) {
     const user = requireRole(token, ['HR', 'SUPER_ADMIN','ADMIN'])
 
     // Get template type from query parameter
-    const templateType = request.nextUrl.searchParams.get('type') as PayrollTemplateType
+    const templateTypeParam = request.nextUrl.searchParams.get('type')
     const format = request.nextUrl.searchParams.get('format') || 'excel'
     
-    if (!templateType || !PAYROLL_TEMPLATES[templateType]) {
+    if (!templateTypeParam || !(templateTypeParam in PAYROLL_TEMPLATES)) {
       return withCors(
         ApiResponse.error('Valid template type is required. Supported types: ISURF_STANDARD, BLUERIDGE', 400),
         origin
       )
     }
+
+    const templateType = templateTypeParam as keyof typeof PAYROLL_TEMPLATES
 
     // Get current date for default month/year
     const now = new Date()

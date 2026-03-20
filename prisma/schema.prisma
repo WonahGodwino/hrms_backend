@@ -17,8 +17,13 @@ model Company {
   archived               Int                      @default(0)
   createdBy              String
   createdAt              DateTime                 @default(now())
-  updatedAt              DateTime?                @updatedAt
+  updatedAt              DateTime?                 @updatedAt
   workWeekPattern        String?                  @db.VarChar(20)
+  
+  // Relations
+  payrollTemplates       PayrollTemplate[]
+  payrollData            PayrollData[]
+  payrollTemplateUploads PayrollTemplateUpload[]
   aiSettings             AISettings?
   aiUsageLogs            AIUsageLog[]
   attendances            Attendance[]
@@ -71,7 +76,8 @@ model StaffRecord {
   updatedBy                       String?
   managerId                       String?
   
-  // Relations with matching relation names
+  // Relations
+  payrollData                     PayrollData[]
   attendances                     Attendance[]
   leaveRequestsToApproveAsManager LeaveRequest[]      @relation("LeaveRequestManagerApprover")
   leaveRequests                   LeaveRequest[]      @relation("LeaveRequestStaff")
@@ -130,26 +136,34 @@ model Payroll {
   communicationAllowance Decimal?    @db.Decimal(18, 2)
   transportationAllowance Decimal?   @db.Decimal(18, 2)
   outstandingIncome      Decimal?    @db.Decimal(18, 2)
+  walletPayment          Decimal?    @db.Decimal(18, 2)
+  commercialPayment      Decimal?    @db.Decimal(18, 2)
   
-  // NEW FIELDS - Add these
-  walletPayment          Decimal?    @db.Decimal(18, 2)  // Maps to "Pay OPay"
-  commercialPayment      Decimal?    @db.Decimal(18, 2)  // Maps to "Bank Payment"
+  // NEW: JSON field for custom fields from dynamic templates
+  customFields           Json?      
+  templateType           String?     @default("ISURF_STANDARD")
+  templateId             String?     // Reference to the dynamic template used
   
   status                 String      @default("PROCESSED")
-  templateType           String?     @default("ISURF_STANDARD")
   uploadedBy             String
   createdAt              DateTime    @default(now())
   updatedAt              DateTime    @updatedAt
-  company                Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  staffRecord            StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+  
+  // Relations
+  company                Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staffRecord            StaffRecord      @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+  template               PayrollTemplate? @relation(fields: [templateId], references: [id])
   payslips               Payslip[]
   emailLogs              EmailLog[]
 
   @@unique([staffRecordId, month, year, companyId])
   @@index([companyId, year, month])
+  @@index([templateType])
+  @@index([templateId])
   @@map("payrolls")
 }
 
+// Update Payslip model to include relation back to Payroll
 model Payslip {
   id            String      @id @default(cuid())
   payrollId     String
@@ -168,6 +182,7 @@ model Payslip {
   updatedAt     DateTime    @default(now()) @updatedAt
   updatedBy     String?
   createdBy     String?
+  // Relations
   company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   payroll       Payroll     @relation(fields: [payrollId], references: [id], onDelete: Cascade)
   staffRecord   StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
@@ -176,6 +191,112 @@ model Payslip {
   @@index([staffRecordId, year, month])
   @@map("payslips")
 }
+
+model PayrollTemplate {
+  id            String   @id @default(cuid())
+  companyId     String
+  templateName  String
+  sections      Json     // Store the entire template structure as JSON
+  isSystem      Boolean  @default(false) // For templates available to all companies
+  createdBy     String
+  updatedBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relations
+  company       Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  fields        PayrollTemplateField[]
+  payrollData   PayrollData[]
+  payrolls      Payroll[]
+  uploads       PayrollTemplateUpload[]
+  payrollUploads PayrollUpload[]
+
+  @@unique([companyId])
+  @@index([companyId])
+  @@index([isSystem])
+  @@index([createdAt])
+  @@map("payroll_templates")
+}
+
+model PayrollTemplateField {
+  id              String   @id @default(cuid())
+  templateId      String
+  section         String   // STAFF_DETAILS, FIXED_EARNINGS, EARNINGS, DEDUCTIONS
+  displayName     String
+  systemField     String
+  dataType        String   // Text, Number, Date, Percentage, etc.
+  required        Boolean  @default(false)
+  aliases         Json?    // Store as array
+  showOnPayslip   Boolean  @default(false)
+  order           Int
+  createdBy       String
+  updatedBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  template        PayrollTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, systemField])
+  @@index([templateId, section])
+  @@index([templateId, order])
+  @@map("payroll_template_fields")
+}
+
+model PayrollData {
+  id              String   @id @default(cuid())
+  companyId       String
+  templateId      String
+  staffId         String
+  payPeriod       String   // Format: YYYY-MM
+  data            Json     // Store all payroll data for the staff
+  status          String   @default("DRAFT") // DRAFT, PROCESSED, APPROVED, PAID
+  processedBy     String?
+  processedAt     DateTime?
+  createdBy       String
+  updatedBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  company         Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  template        PayrollTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  staff           StaffRecord     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, staffId, payPeriod])
+  @@index([companyId, payPeriod, status])
+  @@index([templateId, payPeriod])
+  @@index([createdAt])
+  @@map("payroll_data")
+}
+
+
+model PayrollTemplateUpload {
+  id                String   @id @default(cuid())
+  companyId         String
+  templateId        String
+  fileName          String
+  filePath          String
+  processedFilePath String?
+  processedFileName String?
+  totalRecords      Int
+  successful        Int
+  failed            Int
+  errors            String[]
+  createdBy         String
+  updatedBy         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  // Relations
+  company           Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  template          PayrollTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@index([templateId])
+  @@map("payroll_template_uploads")
+}
+
 
 model StaffUpload {
   id           String   @id @default(cuid())
@@ -195,6 +316,7 @@ model StaffUpload {
   @@map("staff_uploads")
 }
 
+// Update PayrollUpload model to include template reference
 model PayrollUpload {
   id                String   @id @default(cuid())
   companyId         String
@@ -203,6 +325,7 @@ model PayrollUpload {
   processedFilePath String?
   processedFileName String?
   templateType      String   @default("ISURF_STANDARD")
+  templateId        String?  // Reference to dynamic template if used
   sendEmails        Boolean  @default(true)
   totalRecords      Int
   successful        Int
@@ -214,8 +337,10 @@ model PayrollUpload {
   errors            String[]
   uploadedBy        String
   createdAt         DateTime @default(now())
-  company           Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
+  
+  // Relations
+  company           Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  template          PayrollTemplate? @relation(fields: [templateId], references: [id])
   @@map("payroll_uploads")
 }
 

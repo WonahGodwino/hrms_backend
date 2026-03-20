@@ -29,10 +29,20 @@ function createPool() {
   }
 
   let ssl: any = false
+  const caPath = path.join(process.cwd(), 'certs', 'aiven-ca.pem')
 
-  if (process.env.NODE_ENV === 'production') {
-    const caPath = path.join(process.cwd(), 'certs', 'aiven-ca.pem')
+  let sslRequested = false
+  try {
+    const databaseUrl = new URL(process.env.DATABASE_URL)
+    sslRequested =
+      databaseUrl.searchParams.has('sslmode') ||
+      databaseUrl.searchParams.get('ssl') === '1' ||
+      databaseUrl.searchParams.get('ssl') === 'true'
+  } catch {
+    sslRequested = false
+  }
 
+  if (process.env.NODE_ENV === 'production' || sslRequested) {
     ssl = fs.existsSync(caPath)
       ? {
           ca: fs.readFileSync(caPath, 'utf8'),

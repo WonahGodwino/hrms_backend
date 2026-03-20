@@ -1,9 +1,44 @@
 // src/app/lib/payroll/templates/types.ts
 
-export type PayrollTemplateType = 'ISURF_STANDARD' | 'BLUERIDGE';
+// Template types
+export type PayrollTemplateType = 'ISURF_STANDARD' | 'BLUERIDGE' | 'DYNAMIC';
 
+// Interface for template fields (used in dynamic templates)
+export interface TemplateField {
+  id: string;
+  displayName: string;
+  systemField: string;
+  dataType: string;
+  required: boolean;
+  section: string;
+  aliases?: string[];
+  showOnPayslip?: boolean;
+  order?: number;
+}
+
+// Interface for custom field values stored in Payroll.customFields
+export interface CustomFieldValue {
+  value: any;
+  displayName: string;
+  dataType: string;
+  section: string;
+  required: boolean;
+  showOnPayslip: boolean;
+}
+
+// Interface for payslip display items
+export interface PayslipDisplayItem {
+  label: string;
+  value: number;
+  type: 'earnings' | 'deduction';
+  dataType: string;
+  isCustom: boolean;
+  section?: string;
+}
+
+// Interface for fixed template configuration
 export interface TemplateConfig {
-  id: PayrollTemplateType;
+  id: Exclude<PayrollTemplateType, 'DYNAMIC'>;
   name: string;
   description: string;
   requiredColumns: string[];
@@ -23,7 +58,7 @@ export interface TemplateConfig {
   };
 }
 
-// Make sure this interface is exported
+// Interface for parsed payroll row (used in fixed templates)
 export interface ParsedPayrollRow {
   rowNumber: number;
   staffId: string;
@@ -66,7 +101,76 @@ export interface ParsedPayrollRow {
   position?: string;
 }
 
-export const PAYROLL_TEMPLATES: Record<PayrollTemplateType, TemplateConfig> = {
+// Interface for dynamic payroll data
+export interface DynamicPayrollData {
+  staffId: string;
+  staffName: string;
+  email: string;
+  month: string;
+  year: number;
+  periodMonth: number;
+  periodYear: number;
+  customFields: Record<string, CustomFieldValue>;
+  earningsList: PayslipDisplayItem[];
+  deductionsList: PayslipDisplayItem[];
+  totals: {
+    grossPay: number;
+    totalDeductions: number;
+    netPay: number;
+  };
+}
+
+// Processing result interface (used by both fixed and dynamic processors)
+export interface ProcessingResult {
+  successful: number;
+  failed: number;
+  payslipsGenerated: number;
+  payslipsUpdated: number;
+  emailsSent: number;
+  emailAttempts: number;
+  emailFailures: Array<{
+    rowNumber: number;
+    email: string;
+    error: string;
+    staffName: string;
+    staffId: string;
+  }>;
+  processedRecords: Array<{
+    staffId: string;
+    staffName: string;
+    month: string;
+    year: number;
+    netSalary: number;
+    grossPay?: number;
+    totalDeductions?: number;
+    status: 'PROCESSED' | 'UPDATED';
+    emailSent: boolean;
+    emailStatus: 'SENT' | 'FAILED' | 'SKIPPED';
+    payslipId: string;
+    fileName: string;
+    earningsCount?: number;
+    deductionsCount?: number;
+    templateFields?: number;
+    [key: string]: any;
+  }>;
+  failedRecords: any[];
+  errors: string[];
+}
+
+// Template processor interface
+export interface TemplateProcessor {
+  processFile(
+    buffer: Buffer,
+    fileExtension: string,
+    companyId: string,
+    user: any,
+    sendEmails: boolean,
+    templateId?: string
+  ): Promise<ProcessingResult>;
+}
+
+// Fixed templates configuration
+export const PAYROLL_TEMPLATES: Record<Exclude<PayrollTemplateType, 'DYNAMIC'>, TemplateConfig> = {
   ISURF_STANDARD: {
     id: 'ISURF_STANDARD',
     name: 'Isurf Standard Template',
@@ -160,7 +264,6 @@ export const PAYROLL_TEMPLATES: Record<PayrollTemplateType, TemplateConfig> = {
       'position verify (coe)': 'Position verify (coe)',
       'resumption date': 'Resumption Date',
       'exit date': 'Exit Date',
-      // FIXED: Add all possible variations including HTML line breaks
       'working<br>days': 'Working Days',
       'working days': 'Working Days',
       'workingdays': 'Working Days',
@@ -247,3 +350,46 @@ export const PAYROLL_TEMPLATES: Record<PayrollTemplateType, TemplateConfig> = {
     }
   }
 };
+
+// Helper function to check if a template is fixed (non-dynamic)
+export function isFixedTemplate(type: string): boolean {
+  return type === 'ISURF_STANDARD' || type === 'BLUERIDGE';
+}
+
+// Helper function to get template config
+export function getTemplateConfig(type: PayrollTemplateType): TemplateConfig | null {
+  if (type === 'DYNAMIC') return null;
+  return PAYROLL_TEMPLATES[type];
+}
+
+// Helper function to validate template type
+export function isValidTemplateType(type: string): type is PayrollTemplateType {
+  return type === 'ISURF_STANDARD' || type === 'BLUERIDGE' || type === 'DYNAMIC';
+}
+
+// Helper function to create a payslip display item from custom field
+export function createPayslipItemFromCustomField(
+  field: CustomFieldValue,
+  type: 'earnings' | 'deduction'
+): PayslipDisplayItem {
+  return {
+    label: field.displayName,
+    value: typeof field.value === 'number' ? field.value : Number(field.value) || 0,
+    type,
+    dataType: field.dataType,
+    isCustom: true,
+    section: field.section
+  };
+}
+
+// Helper function to calculate totals from payslip items
+export function calculatePayslipTotals(
+  earnings: PayslipDisplayItem[],
+  deductions: PayslipDisplayItem[]
+): { grossPay: number; totalDeductions: number; netPay: number } {
+  const grossPay = earnings.reduce((sum, item) => sum + item.value, 0);
+  const totalDeductions = deductions.reduce((sum, item) => sum + item.value, 0);
+  const netPay = grossPay - totalDeductions;
+  
+  return { grossPay, totalDeductions, netPay };
+}
