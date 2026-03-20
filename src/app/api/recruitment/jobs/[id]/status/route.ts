@@ -124,7 +124,7 @@ export async function PATCH(
 
     // Validate request body
     const body = await request.json()
-    const { status } = body
+    const { status, expirationDate } = body
 
     const normalizedStatus = typeof status === 'string' ? status.trim().toUpperCase() : ''
     const targetStatus = STATUS_ALIASES[normalizedStatus]
@@ -138,6 +138,16 @@ export async function PATCH(
         `Invalid status. Allowed values: ACTIVE, CLOSED (or CLOSE), DRAFT, EXPIRED`,
         400
       ), origin)
+    }
+
+    // Validate expirationDate if provided
+    let newExpirationDate: Date | undefined
+    if (expirationDate !== undefined) {
+      const parsedDate = new Date(expirationDate)
+      if (isNaN(parsedDate.getTime())) {
+        return withCors(ApiResponse.error('Invalid expirationDate format. Use ISO 8601 date string.', 400), origin)
+      }
+      newExpirationDate = parsedDate
     }
 
     const jobId = params.id
@@ -174,8 +184,24 @@ export async function PATCH(
 
     // Business rule: Can't make expired job active without updating expiration
     if (targetStatus === 'ACTIVE' && job.expirationDate && job.expirationDate < new Date()) {
+      if (!newExpirationDate) {
+        return withCors(ApiResponse.error(
+          'Cannot activate expired job. Please provide a new expirationDate in the future.',
+          400
+        ), origin)
+      }
+      if (newExpirationDate < new Date()) {
+        return withCors(ApiResponse.error(
+          'New expirationDate must be in the future.',
+          400
+        ), origin)
+      }
+    }
+
+    // When reopening to ACTIVE, recommend expirationDate update for new expiry
+    if (targetStatus === 'ACTIVE' && newExpirationDate && newExpirationDate < new Date()) {
       return withCors(ApiResponse.error(
-        'Cannot activate expired job. Please update expiration date first.',
+        'Provided expirationDate must be in the future.',
         400
       ), origin)
     }
@@ -189,17 +215,19 @@ export async function PATCH(
       ), origin)
     }
 
-    // Update job status
+    // Update job status and optionally expirationDate
     const updatedJob = await prisma.job.update({
       where: { id: jobId },
       data: {
         status: targetStatus,
+        ...(newExpirationDate !== undefined && { expirationDate: newExpirationDate }),
         updatedAt: new Date(),
       },
       select: {
         id: true,
         title: true,
         status: true,
+        expirationDate: true,
         updatedAt: true,
         company: {
           select: { id: true, companyName: true }
@@ -209,16 +237,18 @@ export async function PATCH(
 
     // Determine public board status
     const isPubliclyVisible = targetStatus === 'ACTIVE'
+    const expirationUpdated = newExpirationDate !== undefined
     
     return withCors(ApiResponse.success(
       {
         ...updatedJob,
         isPubliclyVisible,
+        expirationDateUpdated: expirationUpdated,
         message: isPubliclyVisible 
-          ? 'Job is now visible on the public board'
+          ? `Job is now visible on the public board${expirationUpdated ? ' with updated expiration date' : ''}`
           : 'Job has been removed from the public board'
       },
-      `Job status updated to ${targetStatus.toLowerCase()} successfully`
+      `Job status updated to ${targetStatus.toLowerCase()}${expirationUpdated ? ' and expiration date updated' : ''} successfully`
     ), origin)
 
   } catch (error) {

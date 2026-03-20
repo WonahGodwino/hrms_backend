@@ -2,7 +2,7 @@
 
 export type ApiDoc = {
   id: string
-  group: 'Auth' | 'Staff' | 'Payroll' | 'Payslip & Profile' | 'Leaves' | 'Company' | 'Admin'
+  group: 'Auth' | 'Staff' | 'Payroll' | 'Dynamic Payroll' | 'Payslip & Profile' | 'Leaves' | 'Company' | 'Admin'
   method: 'GET' | 'POST' | 'PUT' | 'DELETE'
   path: string
   title: string
@@ -11,7 +11,7 @@ export type ApiDoc = {
   input?: string
   output?: string
   sample?: any
-  contentType?: 'json' | 'form-data' | 'file' // Add file for direct file downloads
+  contentType?: 'json' | 'form-data' | 'file'
   deprecated?: boolean
   alternative?: string
 }
@@ -136,6 +136,20 @@ export const apiDocs: ApiDoc[] = [
       'JSON: { success, message, data: { companies: [ { id, companyName, email, phone, taxId, createdAt, archived } ], pagination: { page, pageSize, total, totalPages } } }'
   },
 
+  {
+    id: 'company-accessible',
+    group: 'Company',
+    method: 'GET',
+    path: '/api/companies/accessible',
+    title: 'Get accessible companies',
+    description:
+      'Returns list of companies the current user has access to based on their role and assignments.',
+    auth: 'Authorization: Bearer <token>',
+    input: 'No body',
+    output:
+      'JSON: { success, message, data: [ { id, companyName, email, phone, address, taxId, logo } ] }'
+  },
+
   // ======================
   // STAFF
   // ======================
@@ -243,6 +257,253 @@ export const apiDocs: ApiDoc[] = [
   },
 
   // ======================
+  // DYNAMIC PAYROLL TEMPLATES
+  // ======================
+
+  {
+    id: 'dynamic-templates-list',
+    group: 'Dynamic Payroll',
+    method: 'GET',
+    path: '/api/payroll/template/dynamic',
+    title: 'List dynamic payroll templates',
+    description:
+      'Returns all templates for a company. Includes system templates (ISURF_STANDARD, BLUERIDGE) when includeSystem=true. Shows usage counts for each template.',
+    auth: 'Authorization: Bearer <HR | SUPER_ADMIN | ADMIN token>',
+    input: 'Query params: companyId (required), includeSystem (optional, default false)',
+    output:
+      'JSON: { success, message, data: [ { id, companyId, templateName, isSystem, sections, fields, _count: { payrolls, payrollData }, createdAt, updatedAt } ] }',
+    sample: {
+      companyId: "company_123",
+      includeSystem: "true"
+    }
+  },
+
+  {
+    id: 'dynamic-template-get',
+    group: 'Dynamic Payroll',
+    method: 'GET',
+    path: '/api/payroll/template/dynamic/[id]',
+    title: 'Get single dynamic template',
+    description:
+      'Returns complete template details including all fields and sections. Access restricted to company owners or system templates.',
+    auth: 'Authorization: Bearer <HR | SUPER_ADMIN | ADMIN token>',
+    input: 'Path param: id = Template.id, Query param: companyId',
+    output:
+      'JSON: { success, message, data: { id, companyId, templateName, sections, isSystem, fields: [ { id, displayName, systemField, dataType, required, aliases, showOnPayslip, order } ], createdAt, updatedAt } }'
+  },
+
+  {
+    id: 'dynamic-template-create',
+    group: 'Dynamic Payroll',
+    method: 'POST',
+    path: '/api/payroll/template/dynamic',
+    title: 'Create dynamic payroll template',
+    description:
+      'Creates a new custom payroll template for a company. Supports sections: STAFF_DETAILS, FIXED_EARNINGS, EARNINGS, DEDUCTIONS. Each section can have multiple fields with custom properties.',
+    auth: 'Authorization: Bearer <HR | SUPER_ADMIN | ADMIN token>',
+    input: 'JSON body with template structure',
+    output:
+      'JSON: { success, message, data: { id, companyId, templateName, sections, fields, createdAt } }',
+    sample: {
+      companyId: "company_123",
+      templateName: "Executive Compensation Package",
+      isSystem: false,
+      sections: {
+        STAFF_DETAILS: [
+          { displayName: "Employee ID", systemField: "employee_id", dataType: "Text", required: true, showOnPayslip: false },
+          { displayName: "Full Name", systemField: "full_name", dataType: "Text", required: true, showOnPayslip: false },
+          { displayName: "Email", systemField: "email", dataType: "Text", required: true, showOnPayslip: false }
+        ],
+        FIXED_EARNINGS: [
+          { displayName: "Basic Salary", systemField: "basic_salary", dataType: "Number", required: true, showOnPayslip: true },
+          { displayName: "Housing Allowance", systemField: "housing_allowance", dataType: "Number", required: true, showOnPayslip: true }
+        ],
+        EARNINGS: [
+          { displayName: "Performance Bonus", systemField: "performance_bonus", dataType: "Number", required: false, showOnPayslip: true }
+        ],
+        DEDUCTIONS: [
+          { displayName: "PAYE Tax", systemField: "paye_tax", dataType: "Number", required: true, showOnPayslip: true },
+          { displayName: "Pension", systemField: "pension", dataType: "Number", required: true, showOnPayslip: true }
+        ]
+      }
+    }
+  },
+
+  {
+    id: 'dynamic-template-update',
+    group: 'Dynamic Payroll',
+    method: 'PUT',
+    path: '/api/payroll/templates/dynamic',
+    title: 'Update dynamic payroll template',
+    description:
+      'Updates an existing template. Replaces all fields with new definitions. Cannot update templates that are in use.',
+    auth: 'Authorization: Bearer <HR | SUPER_ADMIN | ADMIN token>',
+    input: 'JSON body: { templateId, templateName?, sections? }',
+    output:
+      'JSON: { success, message, data: { id, templateName, sections, fields, updatedAt } }',
+    sample: {
+      templateId: "cm8n3k5qk0003gklj4h7y8z9y",
+      templateName: "Executive Compensation Package v2",
+      sections: {
+        STAFF_DETAILS: [
+          { displayName: "Employee ID", systemField: "employee_id", dataType: "Text", required: true, showOnPayslip: false },
+          { displayName: "Full Name", systemField: "full_name", dataType: "Text", required: true, showOnPayslip: false }
+        ],
+        FIXED_EARNINGS: [
+          { displayName: "Basic Salary", systemField: "basic_salary", dataType: "Number", required: true, showOnPayslip: true }
+        ],
+        EARNINGS: [],
+        DEDUCTIONS: [
+          { displayName: "PAYE Tax", systemField: "paye_tax", dataType: "Number", required: true, showOnPayslip: true }
+        ]
+      }
+    }
+  },
+
+  {
+    id: 'dynamic-template-delete',
+    group: 'Dynamic Payroll',
+    method: 'DELETE',
+    path: '/api/payroll/templates/dynamic',
+    title: 'Delete dynamic payroll template',
+    description:
+      'Deletes a template. Cannot delete templates that have been used in payroll processing (have payroll records).',
+    auth: 'Authorization: Bearer <HR | SUPER_ADMIN | ADMIN token>',
+    input: 'Query param: templateId',
+    output: 'JSON: { success, message, data: null }'
+  },
+
+  {
+    id: 'dynamic-template-download',
+    group: 'Dynamic Payroll',
+    method: 'GET',
+    path: '/api/payroll/template/dynamic/download',
+    title: 'Download dynamic payroll template',
+    description:
+      'Downloads the template as Excel or CSV file with all fields, sample data, and instructions. Includes all sections with required field markers (*).',
+    auth: 'Authorization: Bearer <HR | SUPER_ADMIN | ADMIN token>',
+    input: 'Query params: templateId (required), companyId (required), format (excel | csv, default excel)',
+    output: 'Excel (.xlsx) or CSV file with template structure',
+    contentType: 'file'
+  },
+
+  // ======================
+  // PAYROLL
+  // ======================
+
+  {
+    id: 'payroll-upload',
+    group: 'Payroll',
+    method: 'POST',
+    path: '/api/payroll/upload',
+    title: 'Upload payroll and generate payslips',
+    description:
+      'HR uploads payroll Excel/CSV for one company. Supports both fixed templates (ISURF_STANDARD, BLUERIDGE) and dynamic templates. System parses rows, creates/updates Payroll entries, generates payslip PDFs, optionally sends notification emails, and records failed rows in PayrollUpload.',
+    auth: 'Authorization: Bearer <HR | SUPER_ADMIN token>',
+    input: 'multipart/form-data: file = .xlsx or .csv payroll file, companyId, sendEmails = "true" | "false", templateType (for fixed), templateId (for dynamic)',
+    output:
+      'JSON: { success, message, data: { uploadId, templateType, templateId, templateName, summary: { totalProcessed, successful, failed, payslipsGenerated, payslipsUpdated, emailsSent, emailAttempts, emailFailures, processingTimeMs }, failedRecordsCount, downloadLinks: { failedRecords, original }, filePaths: { original, processed } } }',
+    contentType: 'form-data'
+  },
+
+  {
+    id: 'payroll-template-fixed',
+    group: 'Payroll',
+    method: 'GET',
+    path: '/api/payroll/template',
+    title: 'Download fixed payroll template',
+    description:
+      '[DEPRECATED] Returns the standard ISURF payroll Excel template. Use dynamic templates endpoint instead.',
+    auth: 'Authorization: Bearer <HR | SUPER_ADMIN token>',
+    input: 'No body',
+    output: 'Excel file (.xlsx)',
+    contentType: 'file',
+    deprecated: true,
+    alternative: '/api/payroll/template/dynamic/download'
+  },
+
+  {
+    id: 'payroll-download-failed',
+    group: 'Payroll',
+    method: 'GET',
+    path: '/api/payroll/download-failed/[id]',
+    title: 'Download failed payroll records',
+    description:
+      'Downloads the Excel file containing all rows that could not be processed for a given PayrollUpload batch. Enforced by companyId from JWT.',
+    auth: 'Authorization: Bearer <HR | SUPER_ADMIN token>',
+    input: 'Path param: id = PayrollUpload.id',
+    output:
+      'Excel file (.xlsx) of failed rows, or JSON error if not found or not owned by your company.',
+    contentType: 'file'
+  },
+
+  {
+    id: 'payroll-history',
+    group: 'Payroll',
+    method: 'GET',
+    path: '/api/payroll/history',
+    title: 'Get payroll upload history',
+    description:
+      'Returns a list of all payroll uploads for the current company with their processing results.',
+    auth: 'Authorization: Bearer <HR | SUPER_ADMIN token>',
+    input: 'Optional query: page, pageSize',
+    output:
+      'JSON: { success, message, data: { uploads: [ { id, fileName, totalRecords, successful, failed, createdAt, templateType, templateName } ], pagination: { page, pageSize, total } } }'
+  },
+
+  // ======================
+  // PAYSLIP / PROFILE
+  // ======================
+
+  {
+    id: 'profile-payslips',
+    group: 'Payslip & Profile',
+    method: 'GET',
+    path: '/api/profile/payslips',
+    title: 'Get payslip history for logged-in staff',
+    description:
+      'Returns all payslips belonging to the authenticated staff member. Includes template information (type, name) and optional detailed breakdown of earnings/deductions. Supports dynamic templates with custom fields.',
+    auth: 'Authorization: Bearer <STAFF | HR | SUPER_ADMIN token>',
+    input: 'Optional query: year, month, page, limit, includeDetails (true/false), minAmount, maxAmount, startDate, endDate',
+    output:
+      'JSON: { success, message, data: { staff, payslips: [ { id, month, year, grossPay, netPay, createdAt, fileName, downloadUrl, templateType, templateName, isDynamic, earningsBreakdown?, deductionsBreakdown?, totals? } ], summary: { totalPayslips, totalGrossPay, totalNetPay, earliestPayslip, latestPayslip }, availableYears: [], pagination } }',
+    sample: {
+      includeDetails: "true",
+      year: "2024",
+      month: "March"
+    }
+  },
+
+  {
+    id: 'payslip-download',
+    group: 'Payslip & Profile',
+    method: 'GET',
+    path: '/api/payslips/[id]/download',
+    title: 'Download a payslip PDF',
+    description:
+      'Streams a single payslip PDF. Staff can only download their own payslips for their company; HR/SUPER_ADMIN can download any payslip within their company. Returns enhanced headers with payslip metadata including template info.',
+    auth: 'Authorization: Bearer <token>',
+    input: 'Path param: id = Payslip.id',
+    output:
+      'PDF file with headers: X-Payslip-Info (JSON), X-Payslip-Details (base64), Content-Disposition',
+    contentType: 'file'
+  },
+
+  {
+    id: 'payslip-view',
+    group: 'Payslip & Profile',
+    method: 'GET',
+    path: '/api/payslips/[id]',
+    title: 'Get payslip details',
+    description:
+      'Returns details about a specific payslip including file information, payroll data, and template info.',
+    auth: 'Authorization: Bearer <token>',
+    input: 'Path param: id = Payslip.id',
+    output:
+      'JSON: { success, message, data: { id, fileName, filePath, month, year, grossPay, netPay, createdAt, templateType, templateName, isDynamic, staff: { id, staffId, firstName, lastName, department, position } } }'
+  },
+
+  // ======================
   // LEAVES
   // ======================
 
@@ -347,115 +608,6 @@ export const apiDocs: ApiDoc[] = [
   },
 
   // ======================
-  // PAYROLL
-  // ======================
-
-  {
-    id: 'payroll-upload',
-    group: 'Payroll',
-    method: 'POST',
-    path: '/api/payroll/upload',
-    title: 'Upload payroll and generate payslips',
-    description:
-      'HR uploads payroll Excel/CSV for one company. System parses rows, creates/updates Payroll entries, generates payslip PDFs (Payslip table), optionally sends notification emails, and records failed rows in PayrollUpload. Multi-company aware via JWT companyId.',
-    auth: 'Authorization: Bearer <HR | SUPER_ADMIN token>',
-    input: 'multipart/form-data: file = .xlsx or .csv payroll file, sendEmails = "true" | "false" (optional)',
-    output:
-      'JSON: { success, message, data: { uploadId, summary: { totalProcessed, successful, failed, payslipsGenerated, payslipsUpdated, emailsSent, emailAttempts, emailFailures }, failedRecordsCount, downloadLinks: { failedRecords }, filePaths: { original, processed } } }',
-    contentType: 'form-data'
-  },
-
-  {
-    id: 'payroll-template',
-    group: 'Payroll',
-    method: 'GET',
-    path: '/api/payroll/template',
-    title: 'Download payroll template',
-    description:
-      'Returns the standard payroll Excel template that HR should populate and upload for the current company.',
-    auth: 'Authorization: Bearer <HR | SUPER_ADMIN token>',
-    input: 'No body',
-    output: 'Excel file (.xlsx)',
-    contentType: 'file'
-  },
-
-  {
-    id: 'payroll-download-failed',
-    group: 'Payroll',
-    method: 'GET',
-    path: '/api/payroll/download-failed/[id]',
-    title: 'Download failed payroll records',
-    description:
-      'Downloads the Excel file containing all rows that could not be processed for a given PayrollUpload batch. Enforced by companyId from JWT.',
-    auth: 'Authorization: Bearer <HR | SUPER_ADMIN token>',
-    input: 'Path param: id = PayrollUpload.id',
-    output:
-      'Excel file (.xlsx) of failed rows, or JSON error if not found or not owned by your company.',
-    contentType: 'file'
-  },
-
-  {
-    id: 'payroll-history',
-    group: 'Payroll',
-    method: 'GET',
-    path: '/api/payroll/history',
-    title: 'Get payroll upload history',
-    description:
-      'Returns a list of all payroll uploads for the current company with their processing results.',
-    auth: 'Authorization: Bearer <HR | SUPER_ADMIN token>',
-    input: 'Optional query: page, pageSize',
-    output:
-      'JSON: { success, message, data: { uploads: [ { id, fileName, totalRecords, successful, failed, createdAt } ], pagination: { page, pageSize, total } } }'
-  },
-
-  // ======================
-  // PAYSLIP / PROFILE
-  // ======================
-
-  {
-    id: 'profile-payslips',
-    group: 'Payslip & Profile',
-    method: 'GET',
-    path: '/api/profile/payslips',
-    title: 'Get payslip history for logged-in staff',
-    description:
-      'Returns all payslips belonging to the authenticated staff member for their current company. Ideal for the staff self-service profile page.',
-    auth: 'Authorization: Bearer <STAFF | HR | SUPER_ADMIN token>',
-    input: 'Optional query: year, month',
-    output:
-      'JSON: { success, message, data: { staffId, email, companyId, payslips: [ { id, payrollId, month, year, grossPay, netPay, createdAt, fileName, downloadUrl } ] } }'
-  },
-
-  {
-    id: 'payslip-download',
-    group: 'Payslip & Profile',
-    method: 'GET',
-    path: '/api/payslips/[id]/download',
-    title: 'Download a payslip PDF',
-    description:
-      'Streams a single payslip PDF. Staff can only download their own payslips for their company; HR/SUPER_ADMIN can download any payslip within their company.',
-    auth: 'Authorization: Bearer <token>',
-    input: 'Path param: id = Payslip.id',
-    output:
-      'PDF file (Content-Type: application/pdf) or JSON error if unauthorized or not in the same company.',
-    contentType: 'file'
-  },
-
-  {
-    id: 'payslip-view',
-    group: 'Payslip & Profile',
-    method: 'GET',
-    path: '/api/payslips/[id]',
-    title: 'Get payslip details',
-    description:
-      'Returns details about a specific payslip including file information and payroll data.',
-    auth: 'Authorization: Bearer <token>',
-    input: 'Path param: id = Payslip.id',
-    output:
-      'JSON: { success, message, data: { id, fileName, filePath, month, year, grossPay, netPay, createdAt, staff: { id, staffId, firstName, lastName } } }'
-  },
-
-  // ======================
   // ADMIN
   // ======================
 
@@ -487,9 +639,39 @@ export const apiDocs: ApiDoc[] = [
       'JSON: { success, message, data: { status: "healthy" | "degraded", timestamp, services: { database: "connected" | "disconnected", storage: "available" | "low", email: "operational" | "issues" } } }'
   },
 
+  {
+    id: 'admin-seed-templates',
+    group: 'Admin',
+    method: 'POST',
+    path: '/api/admin/seed-templates',
+    title: 'Seed system payroll templates',
+    description:
+      'SUPER_ADMIN only. Seeds the database with system templates (ISURF_STANDARD, BLUERIDGE) if they don\'t exist. Can force update with --force flag.',
+    auth: 'Authorization: Bearer <SUPER_ADMIN token>',
+    input: 'Optional query: force (true/false)',
+    output:
+      'JSON: { success, message, data: { created, existing, failed } }'
+  },
+
   // ======================
   // DEPRECATED ENDPOINTS
   // ======================
+
+  {
+    id: 'payroll-template-old',
+    group: 'Payroll',
+    method: 'GET',
+    path: '/api/payroll/template',
+    title: '[DEPRECATED] Download fixed payroll template',
+    description:
+      'This endpoint is deprecated. Please use the dynamic template system with /api/payroll/templates/dynamic/download instead.',
+    auth: 'Authorization: Bearer <HR | SUPER_ADMIN token>',
+    input: 'No body',
+    output: 'Excel file (.xlsx)',
+    contentType: 'file',
+    deprecated: true,
+    alternative: '/api/payroll/template/dynamic/download'
+  },
 
   {
     id: 'leaves-deprecated-post',

@@ -296,23 +296,30 @@ export async function GET(request: NextRequest) {
     if (format === 'csv') {
       // Convert to CSV
       const csv = toCsv(worksheetData)
+      const csvBuffer = Buffer.from(csv, 'utf-8')
       
-      const response = new NextResponse(csv)
-      response.headers.set('Content-Type', 'text/csv')
-      response.headers.set('Content-Disposition', `attachment; filename="${filename}.csv"`)
-      response.headers.set('X-Template-Id', templateId)
-      response.headers.set('X-Template-Name', encodeURIComponent(template.templateName))
+      const response = new NextResponse(csvBuffer, {
+        headers: {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${filename}.csv"`,
+          'X-Template-Id': templateId,
+          'X-Template-Name': encodeURIComponent(template.templateName)
+        }
+      })
       return withCors(response, origin)
     } else {
       // Generate Excel file
       const arrayBuffer = await workbook.xlsx.writeBuffer()
-      const buffer = Buffer.from(arrayBuffer as ArrayBuffer)
+      const uint8Array = new Uint8Array(arrayBuffer as ArrayBuffer)
       
-      const response = new NextResponse(buffer)
-      response.headers.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-      response.headers.set('Content-Disposition', `attachment; filename="${filename}.xlsx"`)
-      response.headers.set('X-Template-Id', templateId)
-      response.headers.set('X-Template-Name', encodeURIComponent(template.templateName))
+      const response = new NextResponse(uint8Array, {
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `attachment; filename="${filename}.xlsx"`,
+          'X-Template-Id': templateId,
+          'X-Template-Name': encodeURIComponent(template.templateName)
+        }
+      })
       return withCors(response, origin)
     }
 
