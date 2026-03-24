@@ -1,0 +1,1371 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Company {
+  id                     String                   @id @default(cuid())
+  companyName            String
+  address                String?
+  phone                  String?
+  email                  String
+  logo                   String?
+  taxId                  String?
+  archived               Int                      @default(0)
+  createdBy              String
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime?                @updatedAt
+  workWeekPattern        String?                  @db.VarChar(20)
+  
+  // Relations
+  payrollTemplates       PayrollTemplate[]
+  payrollData            PayrollData[]
+  payrollTemplateUploads PayrollTemplateUpload[]
+  aiSettings             AISettings?
+  aiUsageLogs            AIUsageLog[]
+  attendances            Attendance[]
+  candidateDocuments     CandidateDocument[]
+  candidateFiles         CandidateFile[]
+  candidates             Candidate[]
+  interviews             Interview[]
+  applications           JobApplication[]
+  jobs                   Job[]
+  notifications          Notification[]
+  leave_blackout_periods leave_blackout_periods[]
+  leavePolicies          LeavePolicy[]
+  leave_uploads          leave_uploads[]
+  offers                 Offer[]
+  onboardings            Onboarding[]
+  payrollUploads         PayrollUpload[]
+  payrolls               Payroll[]
+  payslips               Payslip[]
+  publicHolidays         PublicHoliday[]
+  staff                  StaffRecord[]
+  staffUploads           StaffUpload[]
+  userCompanies          UserCompany[]
+  emailLogs              EmailLog[]
+  payPeriods             PayPeriod[]
+  employeeSalaries       EmployeeSalary[]
+  payValidations         PayValidation[]
+  overtimeEntries        OvertimeEntry[]
+  deductionEntries       DeductionEntry[]
+  computedPayslips       ComputedPayslip[]
+  employeeTaxProfiles EmployeeTaxProfile[]
+taxFilingSchedules  TaxFilingSchedule[]
+annualReturns       AnnualReturn[]
+taxProfileUploads   TaxProfileUpload[]
+
+  @@map("companies")
+}
+
+model StaffRecord {
+  id                              String              @id @default(cuid())
+  staffId                         String
+  email                           String
+  firstName                       String
+  lastName                        String
+  department                      String
+  position                        String
+  phone                           String?
+  bankName                        String?
+  accountNumber                   String?
+  bvn                             String?
+  password                        String?
+  isRegistered                    Boolean             @default(false)
+  role                            String              @default("STAFF")
+  isActive                        Boolean             @default(true)
+  companyId                       String
+  createdBy                       String
+  createdAt                       DateTime            @default(now())
+  updatedAt                       DateTime            @updatedAt
+  encodedId                       String?
+  updatedBy                       String?
+  managerId                       String?
+  
+  // Relations
+  payrollData                     PayrollData[]
+  attendances                     Attendance[]
+  leaveRequestsToApproveAsManager LeaveRequest[]      @relation("LeaveRequestManagerApprover")
+  leaveRequests                   LeaveRequest[]      @relation("LeaveRequestStaff")
+  leaveRequestsAsHandover         LeaveRequest[]      @relation("LeaveRequestHandover")
+  onboardings                     Onboarding[]
+  payrolls                        Payroll[]
+  payslips                        Payslip[]
+  leaveBalances                   StaffLeaveBalance[]
+  company                         Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  manager                         StaffRecord?        @relation("StaffManagers", fields: [managerId], references: [id])
+  directReports                   StaffRecord[]       @relation("StaffManagers")
+  userCompanies                   UserCompany[]
+  notifications                   Notification[]
+  emailLogs                       EmailLog[]
+  employeeSalaries                EmployeeSalary[]
+  payValidationsAsStaff           PayValidation[]     @relation("PayValidationStaff")
+  payValidationsAsSupervisor      PayValidation[]     @relation("PayValidationSupervisor")
+  overtimeEntries                 OvertimeEntry[]
+  deductionEntries                DeductionEntry[]
+  computedPayslips                ComputedPayslip[]
+  taxProfile EmployeeTaxProfile?
+
+  @@unique([staffId, companyId])
+  @@unique([email, companyId])
+  @@map("staff_records")
+}
+
+model Payroll {
+  id                     String      @id @default(cuid())
+  companyId              String
+  staffRecordId          String
+  month                  String
+  year                   Int
+  grossPay               Decimal?    @db.Decimal(18, 2)
+  basicSalary            Decimal?    @db.Decimal(18, 2)
+  housing                Decimal?    @db.Decimal(18, 2)
+  transport              Decimal?    @db.Decimal(18, 2)
+  dressing               Decimal?    @db.Decimal(18, 2)
+  leaveAllowance         Decimal?    @db.Decimal(18, 2)
+  entertainment          Decimal?    @db.Decimal(18, 2)
+  utility                Decimal?    @db.Decimal(18, 2)
+  otherAllowance         Decimal?    @db.Decimal(18, 2)
+  proratedGrossPay       Decimal?    @db.Decimal(18, 2)
+  proratedGrossWithExtra Decimal?    @db.Decimal(18, 2)
+  annualPension          Decimal?    @db.Decimal(18, 2)
+  annualGrossPay         Decimal?    @db.Decimal(18, 2)
+  consolidatedRelief     Decimal?    @db.Decimal(18, 2)
+  taxableIncome          Decimal?    @db.Decimal(18, 2)
+  deductions             Decimal?    @db.Decimal(18, 2)
+  payee                  Decimal?    @db.Decimal(18, 2)
+  pensionDeduction       Decimal?    @db.Decimal(18, 2)
+  bonusKPI               Decimal?    @db.Decimal(18, 2)
+  netSalary              Decimal?    @db.Decimal(18, 2)
+  finalGross             Decimal?    @db.Decimal(18, 2)
+  medicalContribution    Decimal?    @db.Decimal(18, 2)
+  employerPension        Decimal?    @db.Decimal(18, 2)
+  nsitf                  Decimal?    @db.Decimal(18, 2)
+  proratedSubTotal       Decimal?    @db.Decimal(18, 2)
+  managementFee          Decimal?    @db.Decimal(18, 2)
+  vatOnManagementFee     Decimal?    @db.Decimal(18, 2)
+  totalInvoiceValue      Decimal?    @db.Decimal(18, 2)
+  overtimeIncome         Decimal?    @db.Decimal(18, 2)
+  communicationAllowance Decimal?    @db.Decimal(18, 2)
+  transportationAllowance Decimal?   @db.Decimal(18, 2)
+  outstandingIncome      Decimal?    @db.Decimal(18, 2)
+  walletPayment          Decimal?    @db.Decimal(18, 2)
+  commercialPayment      Decimal?    @db.Decimal(18, 2)
+  customFields           Json?      
+  templateType           String?     @default("ISURF_STANDARD")
+  templateId             String?
+  status                 String      @default("PROCESSED")
+  uploadedBy             String
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+  
+  // Relations
+  company                Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staffRecord            StaffRecord      @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+  template               PayrollTemplate? @relation(fields: [templateId], references: [id])
+  payslips               Payslip[]
+  emailLogs              EmailLog[]
+
+  @@unique([staffRecordId, month, year, companyId])
+  @@index([companyId, year, month])
+  @@index([templateType])
+  @@index([templateId])
+  @@map("payrolls")
+}
+
+model Payslip {
+  id            String      @id @default(cuid())
+  payrollId     String
+  staffRecordId String
+  companyId     String
+  fileData      Bytes?
+  fileName      String
+  fileType      String      @default("application/pdf")
+  fileSize      Int?
+  filePath      String?
+  month         String
+  year          Int
+  grossPay      Decimal?    @db.Decimal(18, 2)
+  netPay        Decimal?    @db.Decimal(18, 2)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @default(now()) @updatedAt
+  updatedBy     String?
+  createdBy     String?
+  
+  // Relations
+  company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payroll       Payroll     @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+  staffRecord   StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+  emailLogs     EmailLog[]
+
+  @@index([staffRecordId, year, month])
+  @@map("payslips")
+}
+
+model PayrollTemplate {
+  id            String   @id @default(cuid())
+  companyId     String
+  templateName  String
+  sections      Json
+  isSystem      Boolean  @default(false)
+  createdBy     String
+  updatedBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relations
+  company       Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  fields        PayrollTemplateField[]
+  payrollData   PayrollData[]
+  payrolls      Payroll[]
+  uploads       PayrollTemplateUpload[]
+  payrollUploads PayrollUpload[]
+
+  @@index([companyId])
+  @@index([isSystem])
+  @@index([createdAt])
+  @@map("payroll_templates")
+}
+
+model PayrollTemplateField {
+  id              String   @id @default(cuid())
+  templateId      String
+  section         String
+  displayName     String
+  systemField     String
+  dataType        String
+  required        Boolean  @default(false)
+  aliases         Json?
+  showOnPayslip   Boolean  @default(false)
+  order           Int
+  createdBy       String
+  updatedBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  template        PayrollTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, systemField])
+  @@index([templateId, section])
+  @@index([templateId, order])
+  @@map("payroll_template_fields")
+}
+
+model PayrollData {
+  id              String   @id @default(cuid())
+  companyId       String
+  templateId      String
+  staffId         String
+  payPeriod       String
+  data            Json
+  status          String   @default("DRAFT")
+  processedBy     String?
+  processedAt     DateTime?
+  createdBy       String
+  updatedBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  company         Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  template        PayrollTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  staff           StaffRecord     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, staffId, payPeriod])
+  @@index([companyId, payPeriod, status])
+  @@index([templateId, payPeriod])
+  @@index([createdAt])
+  @@map("payroll_data")
+}
+
+model PayrollTemplateUpload {
+  id                String   @id @default(cuid())
+  companyId         String
+  templateId        String
+  fileName          String
+  filePath          String
+  processedFilePath String?
+  processedFileName String?
+  totalRecords      Int
+  successful        Int
+  failed            Int
+  errors            String[]
+  createdBy         String
+  updatedBy         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  // Relations
+  company           Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  template          PayrollTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@index([templateId])
+  @@map("payroll_template_uploads")
+}
+
+model StaffUpload {
+  id           String   @id @default(cuid())
+  companyId    String
+  fileName     String
+  filePath     String
+  processedFilePath String?
+  processedFileName String?
+  totalRecords Int
+  successful   Int
+  failed       Int
+  errors       String[]
+  uploadedBy   String
+  createdAt    DateTime @default(now())
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("staff_uploads")
+}
+
+model PayrollUpload {
+  id                String   @id @default(cuid())
+  companyId         String
+  fileName          String
+  filePath          String
+  processedFilePath String?
+  processedFileName String?
+  templateType      String   @default("ISURF_STANDARD")
+  templateId        String?
+  sendEmails        Boolean  @default(true)
+  totalRecords      Int
+  successful        Int
+  failed            Int
+  payslipsGenerated Int?
+  payslipsUpdated   Int?
+  emailsSent        Int?
+  emailAttempts     Int?
+  errors            String[]
+  uploadedBy        String
+  createdAt         DateTime @default(now())
+  
+  // Relations
+  company           Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  template          PayrollTemplate? @relation(fields: [templateId], references: [id])
+  
+  @@map("payroll_uploads")
+}
+
+model Job {
+  id             String           @id @default(cuid())
+  title          String
+  description    String           @db.Text
+  department     String
+  position       String
+  companyId      String
+  status         JobStatus        @default(ACTIVE)
+  expirationDate DateTime?
+  createdBy      String
+  createdAt      DateTime         @default(now())
+  updatedBy      String?
+  updatedAt      DateTime         @updatedAt
+  archived       Int?              @default(0)
+  applications   JobApplication[]
+  company        Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  keywords       Keyword[]
+
+  @@index([companyId, status])
+  @@index([companyId, archived])
+  @@map("jobs")
+}
+
+model JobApplication {
+  id              String                    @id @default(cuid())
+  companyId       String
+  jobId           String
+  candidateId     String
+  cvFilePath      String
+  cvFileName      String?
+  parsedCvContent String?
+  status          ApplicationStatus         @default(SUBMITTED)
+  score           Int?
+  notes           String?
+  metadata        Json?
+  reviewedBy      String?
+  createdBy       String?
+  updatedBy       String?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  reviewedAt      DateTime?
+  cvFileId        String?                   @unique
+  archived        Int?                       @default(0)
+  stageHistory    ApplicationStageHistory[]
+  files           CandidateFile[]           @relation("ApplicationFiles")
+  interviews      Interview[]
+  candidate       Candidate                 @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  company         Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  cvFile          CandidateFile?            @relation("ApplicationCVFile", fields: [cvFileId], references: [id])
+  job             Job                       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  offer           Offer?
+
+  @@unique([jobId, candidateId])
+  @@index([companyId, jobId, status])
+  @@index([companyId, archived])
+  @@index([cvFileId])
+  @@map("job_applications")
+}
+
+model CandidateFile {
+  id               String            @id @default(cuid())
+  companyId        String
+  candidateId      String
+  applicationId    String?
+  type             CandidateFileType @default(CV)
+  fileName         String
+  mimeType         String
+  sizeBytes        Int
+  data             Bytes
+  createdBy        String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @default(now()) @updatedAt
+  archived         Int?               @default(0)
+  application      JobApplication?   @relation("ApplicationFiles", fields: [applicationId], references: [id])
+  candidate        Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  cvForApplication JobApplication?   @relation("ApplicationCVFile")
+
+  @@index([companyId, candidateId])
+  @@index([companyId, archived])
+  @@index([applicationId])
+  @@index([companyId, applicationId, type])
+  @@map("candidate_files")
+}
+
+model Keyword {
+  id          String @id @default(cuid())
+  name        String @unique
+  description String
+  jobId       String
+  updatedAt   DateTime @default(now()) @updatedAt
+  archived    Int?    @default(0)
+  job         Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, archived])
+  @@map("keywords")
+}
+
+model Interview {
+  id            String           @id @default(cuid())
+  applicationId String
+  companyId     String
+  type          InterviewType    @default(VIDEO)
+  scheduledAt   DateTime
+  durationMins  Int?
+  meetingLink   String?
+  location      String?
+  interviewers  String[]
+  notes         String?
+  outcome       InterviewOutcome @default(PENDING)
+  createdBy     String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  archived      Int?              @default(0)
+  application   JobApplication   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, scheduledAt])
+  @@index([companyId, archived])
+  @@map("interviews")
+}
+
+model Offer {
+  id                String         @id @default(cuid())
+  companyId         String
+  applicationId     String         @unique
+  candidateId       String
+  status            OfferStatus    @default(DRAFT)
+  proposedStartDate DateTime?
+  employmentType    String?
+  salary            Decimal?       @db.Decimal(18, 2)
+  currency          String?
+  offerLetterPath   String?
+  offerLetterName   String?
+  sentAt            DateTime?
+  acceptedAt        DateTime?
+  declinedAt        DateTime?
+  createdBy         String?
+  updatedBy         String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  archived          Int?            @default(0)
+  application       JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  candidate         Candidate      @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  company           Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  onboarding        Onboarding?
+
+  @@index([companyId, status])
+  @@index([companyId, archived])
+  @@map("offers")
+}
+
+model Onboarding {
+  id            String              @id @default(cuid())
+  companyId     String
+  offerId       String              @unique
+  status        OnboardingStatus    @default(NOT_STARTED)
+  startDate     DateTime?
+  completedAt   DateTime?
+  staffRecordId String?
+  createdBy     String?
+  updatedBy     String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  archived      Int?                 @default(0)
+  documents     CandidateDocument[]
+  tasks         OnboardingTask[]
+  company       Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  offer         Offer               @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  staffRecord   StaffRecord?        @relation(fields: [staffRecordId], references: [id])
+
+  @@index([companyId, status])
+  @@index([companyId, archived])
+  @@map("onboardings")
+}
+
+model OnboardingTask {
+  id           String               @id @default(cuid())
+  onboardingId String
+  title        String
+  description  String?
+  department   String?
+  assigneeId   String?
+  dueDate      DateTime?
+  status       OnboardingTaskStatus @default(PENDING)
+  completedAt  DateTime?
+  createdBy    String?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  archived     Int?                  @default(0)
+  onboarding   Onboarding           @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
+
+  @@index([onboardingId, status])
+  @@index([onboardingId, archived])
+  @@map("onboarding_tasks")
+}
+
+model CandidateDocument {
+  id           String                @id @default(cuid())
+  companyId    String
+  candidateId  String
+  onboardingId String?
+  type         CandidateDocumentType @default(OTHER)
+  filePath     String
+  fileName     String
+  uploadedBy   String?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @default(now()) @updatedAt
+  archived     Int?                   @default(0)
+  candidate    Candidate             @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  company      Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  onboarding   Onboarding?            @relation(fields: [onboardingId], references: [id])
+
+  @@index([candidateId, type])
+  @@index([companyId, archived])
+  @@map("candidate_documents")
+}
+
+model Candidate {
+  id           String              @id @default(cuid())
+  companyId    String
+  firstName    String
+  lastName     String
+  email        String
+  phone        String?
+  address      String?
+  linkedInUrl  String?
+  portfolioUrl String?
+  createdBy    String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  archived     Int?                @default(0)
+  documents    CandidateDocument[]
+  files        CandidateFile[]
+  company      Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  applications JobApplication[]
+  offers       Offer[]
+
+  @@unique([email, companyId])
+  @@index([companyId, archived])
+  @@map("candidates")
+}
+
+model ApplicationStageHistory {
+  id            String             @id @default(cuid())
+  applicationId String
+  fromStatus    ApplicationStatus?
+  toStatus      ApplicationStatus
+  changedBy     String?
+  changedAt     DateTime           @default(now())
+  updatedAt     DateTime           @default(now()) @updatedAt
+  comment       String?
+  archived      Int?               @default(0)
+  application   JobApplication     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, archived])
+  @@map("application_stage_history")
+}
+
+model AISettings {
+  id                    String   @id @default(cuid())
+  companyId             String   @unique
+  monthlyBudget         Float    @default(100.00)
+  costPerReview         Float    @default(0.02)
+  costAlertThreshold    Int      @default(80)
+  enabled               Boolean  @default(true)
+  defaultService        String   @default("openai")
+  defaultModel          String   @default("gpt-3.5-turbo")
+  autoShortlistThreshold Int     @default(75)
+  useForSeniorRoles     Boolean  @default(true)
+  useForTechnicalRoles  Boolean  @default(true)
+  useForManagerRoles    Boolean  @default(true)
+  notifyEmails          String[]
+  createdBy             String?
+  updatedBy             String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("ai_settings")
+}
+
+model AIUsageLog {
+  id            String   @id @default(cuid())
+  companyId     String
+  applicationId String?
+  service       String
+  model         String
+  tokensUsed    Int
+  cost          Float
+  endpoint      String
+  inputLength   Int
+  outputLength  Int
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([createdAt])
+  @@map("ai_usage_logs")
+}
+
+model UserCompany {
+  id        String      @id @default(cuid())
+  userId    String
+  companyId String
+  role      String      @default("HR")
+  createdBy String?
+  updatedBy String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user      StaffRecord @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, companyId])
+  @@index([userId])
+  @@index([companyId])
+  @@index([role])
+  @@map("user_companies")
+}
+
+model PasswordReset {
+  id           String   @id @default(cuid())
+  email        String
+  otp          String
+  otpExpiresAt DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  attempts     Int      @default(0)
+  companyId    String
+  isUsed       Boolean  @default(false)
+  notes        String?
+
+  @@unique([email, companyId])
+  @@index([email])
+  @@index([companyId])
+}
+
+model Attendance {
+  id             String      @id @default(cuid())
+  companyId      String
+  staffId        String
+  date           DateTime
+  signInTime     DateTime?
+  signOutTime    DateTime?
+  recordedById   String?
+  recordedByRole String?
+  method         String?
+  notes          String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  status         String?     @default("PRESENT")
+  company        Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staffRecord    StaffRecord @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, staffId, date])
+  @@index([companyId, date])
+  @@index([staffId, date])
+  @@index([status, date])
+  @@map("attendances")
+}
+
+model LeavePolicy {
+  id                     String                   @id @default(cuid())
+  companyId              String
+  name                   String
+  description            String?
+  maxDays                Int
+  carryOver              Int                      @default(0)
+  isPaid                 Boolean                  @default(true)
+  accrualRate            Float?
+  minEmploymentMonths    Int                      @default(0)
+  requiresApproval       Boolean                  @default(true)
+  approvalWorkflow       String                   @default("MANAGER_THEN_HR")
+  noticePeriod           Int                      @default(7)
+  documentationRequired  Boolean                  @default(false)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  allowHalfDays          Boolean                  @default(true)
+  maxConsecutiveDays     Int?
+  requireManagerComments Boolean                  @default(false)
+  seasonalRestrictions   String?
+  leave_blackout_periods leave_blackout_periods[]
+  company                Company                  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leaveTypes             LeaveType[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+  @@map("leave_policies")
+}
+
+model LeaveType {
+  id                 String              @id @default(cuid())
+  policyId           String
+  name               String
+  code               String
+  description        String?
+  color              String?
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  leaveRequests      LeaveRequest[]
+  policy             LeavePolicy         @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  staffLeaveBalances StaffLeaveBalance[]
+
+  @@unique([policyId, name])
+  @@index([policyId])
+  @@map("leave_types")
+}
+
+model StaffLeaveBalance {
+  id            String      @id @default(cuid())
+  staffRecordId String
+  leaveTypeId   String
+  year          Int
+  totalDays     Int
+  usedDays      Int         @default(0)
+  pendingDays   Int         @default(0)
+  carriedOver   Int         @default(0)
+  expiresAt     DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  leaveType     LeaveType   @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  staffRecord   StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+
+  @@unique([staffRecordId, leaveTypeId, year])
+  @@index([staffRecordId, year])
+  @@index([leaveTypeId])
+  @@map("staff_leave_balances")
+}
+
+model LeaveRequest {
+  id                String       @id @default(cuid())
+  referenceNumber   String?      @unique
+  staffRecordId     String
+  leaveTypeId       String
+  startDate         DateTime
+  endDate           DateTime
+  totalDays         Decimal      @db.Decimal(5, 1)
+  reason            String
+  emergencyContact  String?
+  contactPhone      String?
+  status            String       @default("PENDING")
+  currentStep       String       @default("MANAGER")
+  managerApproverId String?
+  managerApprovedAt DateTime?
+  managerApprovedBy String?
+  managerComments   String?
+  hrApproverUserId  String?
+  hrApproverRole    String?
+  hrApprovedAt      DateTime?
+  hrApprovedBy      String?
+  hrComments        String?
+  rejectionReason   String?
+  rejectedByStep    String?
+  rejectedById      String?
+  handoverTo        String?
+  handoverStaffId   String?
+  handoverNotes     String?
+  attachmentUrl     String?
+  fileName          String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  createdBy         String
+  updatedBy         String?
+  
+  // Relations
+  leaveType         LeaveType    @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  managerApprover   StaffRecord? @relation("LeaveRequestManagerApprover", fields: [managerApproverId], references: [id])
+  staffRecord       StaffRecord  @relation("LeaveRequestStaff", fields: [staffRecordId], references: [id], onDelete: Cascade)
+  handoverStaff     StaffRecord? @relation("LeaveRequestHandover", fields: [handoverStaffId], references: [id])
+
+  @@index([staffRecordId, startDate])
+  @@index([status, startDate])
+  @@index([managerApproverId, status])
+  @@index([hrApproverUserId, status])
+  @@map("leave_requests")
+}
+
+model PublicHoliday {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  date        DateTime
+  description String?
+  isRecurring Boolean  @default(false)
+  country     String?
+  state       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, date, name])
+  @@index([companyId, date])
+  @@map("public_holidays")
+}
+
+model leave_blackout_periods {
+  id                     String       @id
+  companyId              String
+  policyId               String?
+  name                   String
+  startDate              DateTime
+  endDate                DateTime
+  reason                 String?
+  appliesToAllLeaveTypes Boolean      @default(true)
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime
+  companies              Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leave_policies         LeavePolicy? @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, startDate, endDate])
+  @@index([policyId])
+}
+
+model leave_uploads {
+  id                     String   @id @default(cuid())
+  companyId              String
+  fileName               String
+  filePath               String
+  policiesCreated        Int      @default(0)
+  policiesFailed         Int      @default(0)
+  leaveTypesCreated      Int      @default(0)
+  leaveTypesFailed       Int      @default(0)
+  holidaysCreated        Int      @default(0)
+  holidaysFailed         Int      @default(0)
+  uploadedBy             String
+  createdAt              DateTime @default(now())
+  blackoutPeriodsCreated Int      @default(0)
+  blackoutPeriodsFailed  Int      @default(0)
+  blackoutPeriodsUpdated Int      @default(0)
+  failedRecords          Json?
+  holidaysUpdated        Int      @default(0)
+  leaveTypesUpdated      Int      @default(0)
+  policiesUpdated        Int      @default(0)
+  companies              Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id         String   @id @default(cuid())
+  userId     String
+  companyId  String
+  type       String
+  title      String
+  message    String
+  data       Json?
+  read       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user    StaffRecord @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([companyId])
+  @@map("notifications")
+}
+
+model EmailLog {
+  id          String   @id @default(cuid())
+  companyId   String
+  staffId     String?
+  payrollId   String?
+  payslipId   String?
+  emailType   String
+  recipient   String
+  status      String
+  sentBy      String?
+  error       String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  company     Company      @relation(fields: [companyId], references: [id])
+  staff       StaffRecord? @relation(fields: [staffId], references: [id])
+  payroll     Payroll?     @relation(fields: [payrollId], references: [id])
+  payslip     Payslip?     @relation(fields: [payslipId], references: [id])
+
+  @@index([companyId])
+  @@index([staffId])
+  @@index([payrollId])
+  @@index([payslipId])
+  @@index([createdAt])
+}
+
+// ==================== PAYROLL ENGINE MODULE ====================
+
+model PayPeriod {
+  id                     String          @id @default(cuid())
+  companyId              String
+  year                   Int
+  month                  Int
+  periodName             String
+  startDate              DateTime
+  endDate                DateTime
+  validationWindowStart  DateTime?
+  validationWindowEnd    DateTime?
+  status                 PayPeriodStatus @default(DRAFT)
+  standardMonthlyHours   Int             @default(176)
+  createdBy              String
+  approvedBy             String?
+  approvedAt             DateTime?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+
+  company                Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  computedPayslips       ComputedPayslip[]
+  payValidations         PayValidation[]
+  overtimeEntries        OvertimeEntry[]
+  deductionEntries       DeductionEntry[]
+  taxFilingSchedules TaxFilingSchedule[]
+
+  @@unique([companyId, year, month])
+  @@index([companyId, status])
+  @@map("pay_periods")
+}
+
+model EmployeeSalary {
+  id                       String           @id @default(cuid())
+  staffId                  String
+  companyId                String
+  employeeCategory         EmployeeCategory @default(REGULAR)
+  basicSalary              Decimal          @db.Decimal(18, 2)
+  housingAllowance         Decimal          @default(0) @db.Decimal(18, 2)
+  transportAllowance       Decimal          @default(0) @db.Decimal(18, 2)
+  dressingAllowance        Decimal          @default(0) @db.Decimal(18, 2)
+  leaveAllowance           Decimal          @default(0) @db.Decimal(18, 2)
+  entertainmentAllowance   Decimal          @default(0) @db.Decimal(18, 2)
+  utilityAllowance         Decimal          @default(0) @db.Decimal(18, 2)
+  otherAllowances          Decimal          @default(0) @db.Decimal(18, 2)
+  annualRent               Decimal          @default(0) @db.Decimal(18, 2)
+  bankName                 String?
+  accountNumber            String?
+  accountName              String?
+  pensionFundAdministrator String?
+  pensionPin               String?
+  isActive                 Boolean          @default(true)
+  effectiveDate            DateTime?
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+
+  staff                    StaffRecord      @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  company                  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([staffId, companyId, isActive])
+  @@index([companyId])
+  @@map("employee_salaries")
+}
+
+model PayValidation {
+  id            String           @id @default(cuid())
+  payPeriodId   String
+  staffId       String
+  supervisorId  String?
+  departmentId  String?
+  companyId     String
+  status        ValidationStatus @default(PENDING)
+  reason        String?
+  validatedAt   DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  payPeriod     PayPeriod        @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+  staff         StaffRecord      @relation("PayValidationStaff", fields: [staffId], references: [id], onDelete: Cascade)
+  supervisor    StaffRecord?     @relation("PayValidationSupervisor", fields: [supervisorId], references: [id])
+  company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([payPeriodId, staffId])
+  @@index([payPeriodId, status])
+  @@index([payPeriodId, supervisorId])
+  @@index([companyId])
+  @@map("pay_validations")
+}
+
+model OvertimeEntry {
+  id            String    @id @default(cuid())
+  payPeriodId   String
+  staffId       String
+  companyId     String
+  overtimeHours Decimal   @db.Decimal(10, 2)
+  multiplier    Decimal   @default(1.5) @db.Decimal(5, 2)
+  date          DateTime?
+  description   String?
+  sourceFileId  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  payPeriod     PayPeriod   @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+  staff         StaffRecord @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([payPeriodId, staffId])
+  @@index([companyId])
+  @@index([sourceFileId])
+  @@map("overtime_entries")
+}
+
+model DeductionEntry {
+  id            String        @id @default(cuid())
+  payPeriodId   String
+  staffId       String
+  companyId     String
+  deductionType DeductionType
+  amount        Decimal       @db.Decimal(18, 2)
+  description   String?
+  sourceFileId  String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  payPeriod     PayPeriod     @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+  staff         StaffRecord   @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([payPeriodId, staffId])
+  @@index([payPeriodId, deductionType])
+  @@index([companyId])
+  @@index([sourceFileId])
+  @@map("deduction_entries")
+}
+
+model ComputedPayslip {
+  id                          String          @id @default(cuid())
+  payPeriodId                 String
+  staffId                     String
+  companyId                   String
+  employeeName                String?
+  employeeEmail               String?
+  departmentId                String?
+  departmentName              String?
+
+  // Earnings
+  basicSalary                 Decimal         @default(0) @db.Decimal(18, 2)
+  housingAllowance            Decimal         @default(0) @db.Decimal(18, 2)
+  transportAllowance          Decimal         @default(0) @db.Decimal(18, 2)
+  dressingAllowance           Decimal         @default(0) @db.Decimal(18, 2)
+  leaveAllowance              Decimal         @default(0) @db.Decimal(18, 2)
+  entertainmentAllowance      Decimal         @default(0) @db.Decimal(18, 2)
+  utilityAllowance            Decimal         @default(0) @db.Decimal(18, 2)
+  otherAllowances             Decimal         @default(0) @db.Decimal(18, 2)
+  overtimeEarnings            Decimal         @default(0) @db.Decimal(18, 2)
+  bonusKpi                    Decimal         @default(0) @db.Decimal(18, 2)
+  grossSalary                 Decimal         @default(0) @db.Decimal(18, 2)
+
+  // Statutory Deductions
+  pensionEmployee             Decimal         @default(0) @db.Decimal(18, 2)
+  pensionEmployer             Decimal         @default(0) @db.Decimal(18, 2)
+  nhf                         Decimal         @default(0) @db.Decimal(18, 2)
+  nhis                        Decimal         @default(0) @db.Decimal(18, 2)
+  totalStatutoryDeductions    Decimal         @default(0) @db.Decimal(18, 2)
+
+  // Tax Calculation
+  annualGrossIncome           Decimal         @default(0) @db.Decimal(18, 2)
+  rentRelief                  Decimal         @default(0) @db.Decimal(18, 2)
+  consolidatedReliefAllowance Decimal         @default(0) @db.Decimal(18, 2)
+  annualChargeableIncome      Decimal         @default(0) @db.Decimal(18, 2)
+  annualPAYE                  Decimal         @default(0) @db.Decimal(18, 2)
+  monthlyPAYE                 Decimal         @default(0) @db.Decimal(18, 2)
+
+  // Other Deductions
+  unionDues                   Decimal         @default(0) @db.Decimal(18, 2)
+  cooperativeDeduction        Decimal         @default(0) @db.Decimal(18, 2)
+  loanRepayment               Decimal         @default(0) @db.Decimal(18, 2)
+  otherDeductions             Decimal         @default(0) @db.Decimal(18, 2)
+  totalDeductions             Decimal         @default(0) @db.Decimal(18, 2)
+
+  // Net Salary
+  netSalary                   Decimal         @default(0) @db.Decimal(18, 2)
+
+  // Status
+  paymentStatus               PaymentStatus   @default(PENDING)
+  validationStatus            ValidationStatus?
+  withheldReason              String?
+
+  // Banking Details
+  bankName                    String?
+  accountNumber               String?
+  accountName                 String?
+  pensionFundAdministrator    String?
+  pensionPin                  String?
+
+  createdAt                   DateTime        @default(now())
+  updatedAt                   DateTime        @updatedAt
+
+  payPeriod                   PayPeriod       @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+  staff                       StaffRecord     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  company                     Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([payPeriodId, staffId])
+  @@index([payPeriodId, paymentStatus])
+  @@index([payPeriodId, departmentId])
+  @@index([staffId])
+  @@index([companyId])
+  @@map("computed_payslips")
+}
+
+// Employee Tax Profile - stores tax residency info for state-by-state filing
+model EmployeeTaxProfile {
+  id               String    @id @default(cuid())
+  staffId          String    @unique  // One-to-one with StaffRecord
+  companyId        String
+  stateOfResidence String    // Nigerian state: 'Lagos', 'Ogun', 'FCT', etc.
+  jtbTin           String?   // 13-digit JTB Tax Identification Number
+  tinVerified      Boolean   @default(false)
+  lockedState      String?   // State locked on Jan 1st per PITA rules
+  lockedDate       DateTime? // When the state was locked
+  pfaName          String?   // Pension Fund Administrator name
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  staff            StaffRecord @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  company          Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, stateOfResidence])
+  @@map("employee_tax_profiles")
+}
+
+// Tax Filing Schedule - tracks monthly PAYE filings per state
+model TaxFilingSchedule {
+  id               String       @id @default(cuid())
+  companyId        String
+  payPeriodId      String
+  stateIrs         String       // e.g., 'LIRS', 'OGIRS', 'FCT-IRS'
+  stateCode        String       // e.g., 'LA', 'OG', 'FC'
+  stateName        String       // e.g., 'Lagos', 'Ogun', 'FCT'
+  totalEmployees   Int
+  totalTaxAmount   Decimal      @db.Decimal(15, 2)
+  totalGrossIncome Decimal      @db.Decimal(15, 2)
+  status           FilingStatus @default(PENDING)
+  filedAt          DateTime?
+  filedBy          String?
+  paymentReference String?
+  filePath         String?      // Path to generated schedule file
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  company          Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payPeriod        PayPeriod    @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, payPeriodId, stateCode])
+  @@index([companyId, status])
+  @@index([payPeriodId])
+  @@map("tax_filing_schedules")
+}
+
+// Annual Return - tracks Form H1 submissions per state per year
+model AnnualReturn {
+  id               String       @id @default(cuid())
+  companyId        String
+  year             Int
+  stateIrs         String       // e.g., 'LIRS', 'OGIRS', 'FCT-IRS'
+  stateCode        String       // e.g., 'LA', 'OG', 'FC'
+  stateName        String       // e.g., 'Lagos', 'Ogun', 'FCT'
+  totalEmployees   Int
+  totalGrossIncome Decimal      @db.Decimal(15, 2)
+  totalTaxPaid     Decimal      @db.Decimal(15, 2)
+  status           FilingStatus @default(PENDING)
+  filedAt          DateTime?
+  filedBy          String?
+  formH1FilePath   String?      // Path to generated Form H1 file
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  company          Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, year, stateCode])
+  @@index([companyId, year])
+  @@map("annual_returns")
+}
+
+// Tax Profile Upload - tracks bulk imports of employee tax profiles
+model TaxProfileUpload {
+  id             String   @id @default(cuid())
+  companyId      String
+  fileName       String
+  filePath       String
+  totalRecords   Int
+  successful     Int
+  failed         Int
+  errors         String[]
+  failedFilePath String?
+  uploadedBy     String
+  createdAt      DateTime @default(now())
+
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("tax_profile_uploads")
+}
+
+// ==================== ENUMS ====================
+
+enum FilingStatus {
+  PENDING
+  GENERATED
+  FILED
+  CONFIRMED
+}
+
+enum JobStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+  EXPIRED
+}
+
+enum ApplicationStatus {
+  SUBMITTED
+  REVIEWING
+  SHORTLISTED
+  INTERVIEWING
+  OFFERED
+  HIRED
+  REJECTED
+  WITHDRAWN
+}
+
+enum InterviewType {
+  PHONE
+  VIDEO
+  ONSITE
+}
+
+enum InterviewOutcome {
+  PENDING
+  PASSED
+  FAILED
+  NO_SHOW
+}
+
+enum OfferStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  WITHDRAWN
+}
+
+enum OnboardingStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum OnboardingTaskStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+  BLOCKED
+}
+
+enum CandidateDocumentType {
+  CV
+  COVER_LETTER
+  ID_CARD
+  CERTIFICATE
+  OFFER_LETTER
+  CONTRACT
+  NDA
+  OTHER
+}
+
+enum CandidateFileType {
+  CV
+  COVER_LETTER
+  OTHER
+}
+
+enum PayPeriodStatus {
+  DRAFT
+  VALIDATION_OPEN
+  VALIDATION_CLOSED
+  COMPUTING
+  REVIEW
+  APPROVED
+  PAID
+}
+
+enum ValidationStatus {
+  PENDING
+  YES_FOR_PAYMENT
+  NO_FOR_PAYMENT
+}
+
+enum PaymentStatus {
+  PENDING
+  ACTIVE
+  WITHHELD
+  PAID
+}
+
+enum EmployeeCategory {
+  REGULAR
+  CONTRACT
+}
+
+enum DeductionType {
+  UNION_DUES
+  COOPERATIVE
+  LOAN
+  SALARY_ADVANCE
+  OTHER
+}
+
+enum ReportType {
+  BANK_SCHEDULE
+  WITHHELD_SALARIES
+  PAYE_SCHEDULE
+  PENSION_SCHEDULE
+  NHF_SCHEDULE
+  ITF_SCHEDULE
+  NSITF_SCHEDULE
+  COST_CENTRE_SUMMARY
+}
