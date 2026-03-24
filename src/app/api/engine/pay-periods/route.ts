@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/app/lib/auth'
+import { requireRoleAsync } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { z } from 'zod'
 import * as payPeriodService from '@/app/lib/payroll-engine/pay-period'
@@ -35,6 +35,13 @@ const querySchema = z.object({
   limit: z.coerce.number().default(10),
 })
 
+function getErrorStatus(message: string): number {
+  if (message.includes('Authentication required') || message.includes('Invalid or expired token')) return 401
+  if (message.includes('Insufficient permissions')) return 403
+  if (message.includes('not associated with a company') || message.includes('Validation failed')) return 400
+  return 500
+}
+
 // OPTIONS - CORS preflight
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -57,7 +64,7 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR'])
+    const user = await requireRoleAsync(token, ['SUPER_ADMIN', 'ADMIN', 'HR'])
 
     if (!user.companyId) {
       return withCors(
@@ -125,11 +132,12 @@ export async function POST(request: NextRequest) {
       origin
     )
   } catch (error: any) {
-    console.error('Create pay period error:', error?.message || String(error))
+    const message = error?.message || String(error)
+    console.error('Create pay period error:', message)
     return withCors(
       NextResponse.json(
-        { success: false, message: error.message || 'Failed to create payroll period' },
-        { status: 500 }
+        { success: false, message: message || 'Failed to create payroll period' },
+        { status: getErrorStatus(message) }
       ),
       origin
     )
@@ -153,7 +161,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER'])
+    const user = await requireRoleAsync(token, ['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER'])
 
     if (!user.companyId) {
       return withCors(
@@ -188,11 +196,12 @@ export async function GET(request: NextRequest) {
       origin
     )
   } catch (error: any) {
-    console.error('Get pay periods error:', error?.message || String(error))
+    const message = error?.message || String(error)
+    console.error('Get pay periods error:', message)
     return withCors(
       NextResponse.json(
-        { success: false, message: error.message || 'Failed to fetch payroll periods' },
-        { status: 500 }
+        { success: false, message: message || 'Failed to fetch payroll periods' },
+        { status: getErrorStatus(message) }
       ),
       origin
     )
