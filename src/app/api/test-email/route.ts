@@ -20,10 +20,7 @@ export async function POST(req: NextRequest) {
     const netSalary = Number(body.netSalary ?? 150000)
 
     if (!testEmail) {
-      return withCors(
-        ApiResponse.error('Email field is required', 400),
-        origin
-      )
+      return withCors(ApiResponse.error('Email field is required', 400), origin)
     }
 
     // Generate a test ID for the staff (using a fixed test ID)

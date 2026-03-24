@@ -1,6 +1,4 @@
 // src/app/lib/mailgun.ts
-import fetch from "node-fetch";
-
 interface EmailOptions {
   to: string;
   subject: string;

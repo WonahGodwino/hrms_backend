@@ -1,4 +1,4 @@
-// src/app/lib/payroll/types.ts
+// src/app/lib/payroll/templates/types.ts
 
 export type PayrollTemplateType = 'ISURF_STANDARD' | 'BLUERIDGE';
 
@@ -160,8 +160,17 @@ export const PAYROLL_TEMPLATES: Record<PayrollTemplateType, TemplateConfig> = {
       'position verify (coe)': 'Position verify (coe)',
       'resumption date': 'Resumption Date',
       'exit date': 'Exit Date',
+      // FIXED: Add all possible variations including HTML line breaks
+      'working<br>days': 'Working Days',
       'working days': 'Working Days',
+      'workingdays': 'Working Days',
+      'working_days': 'Working Days',
+      'working-days': 'Working Days',
+      'worked<br>days': 'Worked Days',
       'worked days': 'Worked Days',
+      'workeddays': 'Worked Days',
+      'worked_days': 'Worked Days',
+      'worked-days': 'Worked Days',
       'basic salary before verify(coe)': 'Basic Salary before Verify(coe)',
       'basic salary adjustment difference': 'basic Salary adjustment difference',
       'target performance bonus before verify(coe)': 'Target Performance Bonus before Verify(coe)',

@@ -37,7 +37,10 @@ export async function GET(request: NextRequest) {
     const take = Number(searchParams.get('take') || '50')
     const skip = Number(searchParams.get('skip') || '0')
 
-    const where: any = { companyId: user.companyId }
+    const where: any = {
+      companyId: user.companyId,
+      company: { archived: 0 },
+    }
     if (status) where.status = status
 
     const [jobs, total] = await Promise.all([

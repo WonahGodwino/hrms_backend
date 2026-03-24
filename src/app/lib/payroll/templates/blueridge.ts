@@ -2,7 +2,7 @@
 import ExcelJS from 'exceljs'
 import { prisma } from '@/app/lib/db'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
-import { generateEnhancedPayslipPdf } from '@/app/lib/payroll/generateEnhancedPayslipPdf'
+import { generateEnhancedPayslipPdf, type GeneratePayslipInput } from '../generateEnhancedPayslipPdf'
 import type { ParsedPayrollRow } from '@/app/lib/payroll/types'
 import { PAYROLL_TEMPLATES } from './types'
 
@@ -531,7 +531,7 @@ export const processBlueridgeTemplate = {
         console.log(`[BLUERIDGE_PROCESSOR] Row ${displayRowNumber}: ParsedRow daysInMonth=${parsedRow.daysInMonth}, daysWorked=${parsedRow.daysWorked}`)
 
         // Generate payslip PDF
-        const pdfResult = await generateEnhancedPayslipPdf({
+        const payslipInput: GeneratePayslipInput = {
           staff: {
             staffId: staffRecord.staffId,
             firstName: staffRecord.firstName,
@@ -555,7 +555,9 @@ export const processBlueridgeTemplate = {
             logo: company.logo || '',
             taxId: company.taxId || ''
           } : undefined
-        })
+        }
+
+        const pdfResult = await generateEnhancedPayslipPdf(payslipInput)
 
         const pdfBuffer = pdfResult.pdfBuffer
         const payslipFileName = pdfResult.fileName

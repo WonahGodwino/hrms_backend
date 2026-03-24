@@ -16,10 +16,7 @@ export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
-      return withCors(
-        ApiResponse.error('Authorization header missing', 401),
-        origin
-      )
+      return withCors(ApiResponse.error('Authorization header missing', 401), origin)
     }
 
     const token = authHeader.replace('Bearer ', '')
@@ -48,10 +45,7 @@ export async function GET(request: NextRequest) {
     } else {
       // HR/ADMIN can only see their own company
       if (!user.companyId) {
-        return withCors(
-          ApiResponse.error('Company context missing for HR/ADMIN user', 400),
-          origin
-        )
+        return withCors(ApiResponse.error('Company context missing for HR/ADMIN user', 400), origin)
       }
       targetCompanyId = user.companyId
       
@@ -98,10 +92,7 @@ export async function GET(request: NextRequest) {
       })
       
       if (!company) {
-        return withCors(
-          ApiResponse.error('Company not found', 404),
-          origin
-        )
+        return withCors(ApiResponse.error('Company not found', 404), origin)
       }
       companies = [company]
     }

@@ -32,16 +32,19 @@ export async function GET(request: NextRequest) {
 
     // Build where clause
     const where: any = {
-      // Exclude staff with role "STAFF" by default
-      role: {
-        not: includeStaffRole ? undefined : 'STAFF'
-      },
+      // Never return the currently authenticated admin/hr/super admin.
+      id: { not: currentUser.userId },
       // Only active staff
       isActive: true,
       // Only from non-archived companies
       company: {
         archived: 0
       }
+    }
+
+    // Exclude staff role by default
+    if (!includeStaffRole) {
+      where.role = { not: 'STAFF' }
     }
 
     // Apply role filter if specified (e.g., "HR" or "ADMIN")
@@ -61,12 +64,15 @@ export async function GET(request: NextRequest) {
       ]
     }
 
-    // For non-SUPER_ADMIN users, restrict to their assigned companies
+    // For non-SUPER_ADMIN users, restrict to their assigned companies.
+    // No assignment means no accessible staff records.
     if (currentUser.role !== 'SUPER_ADMIN') {
       // Get current user's company assignments using userId from AuthUser
       const userAssignments = await prisma.userCompany.findMany({
         where: { 
-          userId: currentUser.userId
+          userId: currentUser.userId,
+          role: currentUser.role === 'HR' ? 'HR' : { in: ['ADMIN', 'HR'] },
+          company: { archived: 0 }
         },
         select: { companyId: true }
       })
@@ -85,8 +91,18 @@ export async function GET(request: NextRequest) {
               totalPages: 0,
               hasNextPage: false,
               hasPrevPage: false
+            },
+            filters: {
+              roles: [],
+              includeStaffRole
+            },
+            meta: {
+              searchQuery: search || '',
+              accessLevel: currentUser.role,
+              canViewAll: false,
+              searchedBy: currentUser.email || currentUser.userId
             }
-          }, 'No staff records found for your companies'),
+          }, 'No staff records found for your assigned companies'),
           origin
         )
       }

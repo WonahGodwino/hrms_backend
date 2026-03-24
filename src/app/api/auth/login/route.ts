@@ -18,10 +18,7 @@ export async function POST(request: NextRequest) {
     const { email, password, companyId } = body || {}
 
     if (!email || !password) {
-      return withCors(
-        ApiResponse.error('Email and password are required', 400),
-        origin
-      )
+      return withCors(ApiResponse.error('Email and password are required', 400), origin)
     }
 
     const cleanEmail = email.toLowerCase().trim()
@@ -47,61 +44,40 @@ export async function POST(request: NextRequest) {
 
       if (matches.length === 0) {
         // Email not found anywhere → generic invalid credentials
-        return withCors(
-          ApiResponse.error('Invalid credentials', 401),
-          origin
-        )
+        return withCors(ApiResponse.error('Invalid credentials', 401), origin)
       }
 
       if (matches.length > 1) {
         // Same email in multiple companies: do NOT reveal that
         // Just treat it as invalid credentials
-        return withCors(
-          ApiResponse.error('Invalid credentials', 401),
-          origin
-        )
+        return withCors(ApiResponse.error('Invalid credentials', 401), origin)
       }
 
       staff = matches[0]
     }
 
     if (!staff) {
-      return withCors(
-        ApiResponse.error('Invalid credentials', 401),
-        origin
-      )
+      return withCors(ApiResponse.error('Invalid credentials', 401), origin)
     }
 
     if (!staff.isActive) {
-      return withCors(
-        ApiResponse.error('Account is deactivated', 403),
-        origin
-      )
+      return withCors(ApiResponse.error('Account is deactivated', 403), origin)
     }
 
     // Enforce registration only for STAFF, not for SUPER_ADMIN / HR
     if (staff.role === 'STAFF' && !staff.isRegistered) {
-      return withCors(
-        ApiResponse.error('Complete registration before login', 403),
-        origin
-      )
+      return withCors(ApiResponse.error('Complete registration before login', 403), origin)
     }
 
     // Guard nullable password (String? in schema)
     if (!staff.password) {
       // For safety, don’t leak that the account exists but has no password
-      return withCors(
-        ApiResponse.error('Invalid credentials', 401),
-        origin
-      )
+      return withCors(ApiResponse.error('Invalid credentials', 401), origin)
     }
 
     const ok = await bcrypt.compare(password, staff.password)
     if (!ok) {
-      return withCors(
-        ApiResponse.error('Invalid credentials', 401),
-        origin
-      )
+      return withCors(ApiResponse.error('Invalid credentials', 401), origin)
     }
 
     const token = signToken({
@@ -146,9 +122,6 @@ export async function POST(request: NextRequest) {
       origin
     )
   } catch (error) {
-    return withCors(
-      handleApiError(error),
-      origin
-    )
+    return withCors(handleApiError(error), origin)
   }
 }

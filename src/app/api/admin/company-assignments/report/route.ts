@@ -4,7 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { withCors } from '@/app/lib/cors'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 
 export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
@@ -188,7 +188,7 @@ async function generateAssignmentsReport(
   })
 
   // Create workbook
-  const wb = XLSX.utils.book_new()
+  const wb = new ExcelJS.Workbook()
   
   // Add metadata sheet
   const metadata = [
@@ -229,11 +229,12 @@ async function generateAssignmentsReport(
     metadata.push([company, count])
   })
 
-  const metadataWs = XLSX.utils.aoa_to_sheet(metadata)
-  XLSX.utils.book_append_sheet(wb, metadataWs, 'Report Info')
+  const metadataWs = wb.addWorksheet('Report Info')
+  appendAoaRows(metadataWs, metadata)
 
   // Create main data sheet
-  const ws = XLSX.utils.json_to_sheet(reportData, { skipHeader: false })
+  const ws = wb.addWorksheet('Assignments')
+  appendJsonRows(ws, reportData)
 
   // Set column widths
   const colWidths = [
@@ -263,11 +264,9 @@ async function generateAssignmentsReport(
     { wch: 20 },  // Last Updated
     { wch: 25 }   // Updated By
   ]
-  ws['!cols'] = colWidths
+  setWorksheetColumnWidths(ws, colWidths)
 
-  XLSX.utils.book_append_sheet(wb, ws, 'Assignments')
-
-  return await createFileResponse(wb, format, currentUser, 'assignments', origin)
+  return await createFileResponse(wb, format, currentUser, 'assignments', origin, reportData)
 }
 
 // Generate coverage report for SUPER_ADMIN only
@@ -393,7 +392,7 @@ async function generateCoverageReport(
   })
 
   // Create workbook
-  const wb = XLSX.utils.book_new()
+  const wb = new ExcelJS.Workbook()
   
   // Add metadata sheet with summary
   const summary = [
@@ -438,11 +437,12 @@ async function generateCoverageReport(
     })
   }
 
-  const summaryWs = XLSX.utils.aoa_to_sheet(summary)
-  XLSX.utils.book_append_sheet(wb, summaryWs, 'Executive Summary')
+  const summaryWs = wb.addWorksheet('Executive Summary')
+  appendAoaRows(summaryWs, summary)
 
   // Create coverage data sheet
-  const ws = XLSX.utils.json_to_sheet(coverageData, { skipHeader: false })
+  const ws = wb.addWorksheet('Company Coverage')
+  appendJsonRows(ws, coverageData)
 
   // Set column widths for coverage report
   const colWidths = [
@@ -476,9 +476,7 @@ async function generateCoverageReport(
     { wch: 12 },   // Created At
     { wch: 12 },   // Last Updated
   ]
-  ws['!cols'] = colWidths
-
-  XLSX.utils.book_append_sheet(wb, ws, 'Company Coverage')
+  setWorksheetColumnWidths(ws, colWidths)
 
   // Add uncovered companies sheet
   if (uncoveredCompaniesList.length > 0) {
@@ -498,7 +496,8 @@ async function generateCoverageReport(
       'Days Since Creation': Math.floor((new Date().getTime() - new Date(company['Created At']).getTime()) / (1000 * 60 * 60 * 24))
     }))
 
-    const uncoveredWs = XLSX.utils.json_to_sheet(uncoveredData, { skipHeader: false })
+    const uncoveredWs = wb.addWorksheet('High Risk Companies')
+    appendJsonRows(uncoveredWs, uncoveredData)
     
     const uncoveredWidths = [
       { wch: 5 },    // S/N
@@ -515,21 +514,72 @@ async function generateCoverageReport(
       { wch: 12 },   // Created At
       { wch: 15 },   // Days Since Creation
     ]
-    uncoveredWs['!cols'] = uncoveredWidths
-
-    XLSX.utils.book_append_sheet(wb, uncoveredWs, 'High Risk Companies')
+    setWorksheetColumnWidths(uncoveredWs, uncoveredWidths)
   }
 
-  return await createFileResponse(wb, format, currentUser, 'coverage', origin)
+  return await createFileResponse(wb, format, currentUser, 'coverage', origin, coverageData)
+}
+
+function appendAoaRows(
+  worksheet: ExcelJS.Worksheet,
+  rows: Array<Array<string | number>>
+) {
+  rows.forEach((row) => worksheet.addRow(row))
+}
+
+function appendJsonRows(
+  worksheet: ExcelJS.Worksheet,
+  rows: Array<Record<string, unknown>>
+) {
+  if (rows.length === 0) {
+    return
+  }
+
+  const headers = Object.keys(rows[0])
+  worksheet.addRow(headers)
+
+  rows.forEach((row) => {
+    worksheet.addRow(headers.map((header) => row[header] ?? ''))
+  })
+}
+
+function setWorksheetColumnWidths(
+  worksheet: ExcelJS.Worksheet,
+  columns: Array<{ wch: number }>
+) {
+  worksheet.columns = columns.map((column) => ({ width: column.wch }))
+}
+
+function toCsv(rows: Array<Record<string, unknown>>): string {
+  if (rows.length === 0) {
+    return ''
+  }
+
+  const headers = Object.keys(rows[0])
+  const escapeCsv = (value: unknown) => {
+    const text = String(value ?? '')
+    if (/[",\n\r]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`
+    }
+    return text
+  }
+
+  const lines = [
+    headers.map(escapeCsv).join(','),
+    ...rows.map((row) => headers.map((header) => escapeCsv(row[header])).join(',')),
+  ]
+
+  return lines.join('\n')
 }
 
 // Helper function to create file response
 async function createFileResponse(
-  wb: XLSX.WorkBook,
+  wb: ExcelJS.Workbook,
   format: string,
   currentUser: any,
   reportType: string,
-  origin: string | null
+  origin: string | null,
+  csvData: Array<Record<string, unknown>>
 ): Promise<NextResponse> {
   // Generate buffer based on format
   let buffer: Buffer
@@ -541,13 +591,13 @@ async function createFileResponse(
   const typeSuffix = reportType === 'coverage' ? '-coverage' : '-assignments'
 
   if (format === 'csv') {
-    const ws = wb.Sheets[wb.SheetNames[1]] // Get first data sheet
-    const csv = XLSX.utils.sheet_to_csv(ws)
+    const csv = toCsv(csvData)
     buffer = Buffer.from(csv, 'utf8')
     contentType = 'text/csv'
     filename = `company${typeSuffix}-${userPrefix}${timestamp}.csv`
   } else {
-    buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+    const xlsxBuffer = await wb.xlsx.writeBuffer()
+    buffer = Buffer.from(xlsxBuffer as ArrayBuffer)
     contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     filename = `company${typeSuffix}-${userPrefix}${timestamp}.xlsx`
   }

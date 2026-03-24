@@ -3,9 +3,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { verify } from 'jsonwebtoken'
 
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://247hr.co.uk'
+
 // CORS headers helper
 function addCorsHeaders(response: NextResponse) {
-  response.headers.set('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || 'https://app.isurfglobal.com')
+  response.headers.set('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || FRONTEND_URL)
   response.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization')
   response.headers.set('Access-Control-Allow-Credentials', 'true')
@@ -23,7 +25,7 @@ export async function GET(request: NextRequest) {
     const token = searchParams.get('token')
 
     if (!token) {
-      const errorUrl = new URL('/auth/error', process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://app.isurfglobal.com')
+      const errorUrl = new URL('/auth/error', FRONTEND_URL)
       errorUrl.searchParams.set('message', 'Invalid access link')
       return addCorsHeaders(NextResponse.redirect(errorUrl))
     }
@@ -36,13 +38,13 @@ export async function GET(request: NextRequest) {
     const decoded = verify(token, jwtSecret) as any
 
     if (decoded.purpose !== 'payslip_access') {
-      const errorUrl = new URL('/auth/error', process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://app.isurfglobal.com')
+      const errorUrl = new URL('/auth/error', FRONTEND_URL)
       errorUrl.searchParams.set('message', 'Invalid access token')
       return addCorsHeaders(NextResponse.redirect(errorUrl))
     }
 
     if (!decoded.sub || !decoded.email || !decoded.staffId || !decoded.companyId) {
-      const errorUrl = new URL('/auth/error', process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://app.isurfglobal.com')
+      const errorUrl = new URL('/auth/error', FRONTEND_URL)
       errorUrl.searchParams.set('message', 'Invalid token data. Missing required fields.')
       return addCorsHeaders(NextResponse.redirect(errorUrl))
     }
@@ -64,7 +66,7 @@ export async function GET(request: NextRequest) {
       hasPayslipId: !!payslipId
     })
 
-    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://app.isurfglobal.com'
+    const frontendUrl = FRONTEND_URL
 
     // Find staff record using compound unique constraint
     let staff = await prisma.staffRecord.findUnique({
@@ -185,7 +187,7 @@ export async function GET(request: NextRequest) {
       errorMessage = 'Invalid or tampered access link'
     }
     
-    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://app.isurfglobal.com'
+    const frontendUrl = FRONTEND_URL
     const errorUrl = new URL('/auth/error', frontendUrl)
     errorUrl.searchParams.set('message', errorMessage)
     return addCorsHeaders(NextResponse.redirect(errorUrl))

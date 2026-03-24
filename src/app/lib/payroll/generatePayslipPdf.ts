@@ -261,6 +261,13 @@ export async function generatePayslipPdf(
               doc.page.width / 2 + 10, staffSectionTop + 59)
 
       let currentY = staffSectionTop + 115
+      const contentBottomLimit = doc.page.height - (doc.page.margins?.bottom ?? 40) - 80
+      const ensureSpace = (needed: number) => {
+        if (currentY + needed > contentBottomLimit) {
+          doc.addPage()
+          currentY = 50
+        }
+      }
       
       doc.fontSize(12)
         .font(boldFont)
@@ -308,6 +315,7 @@ export async function generatePayslipPdf(
 
       earnings.forEach(item => {
         if (item.value > 0) {
+          ensureSpace(18)
           doc.text(item.label, 50, currentY)
           drawCurrency(doc, item.value, doc.page.width - 180, currentY, {
             width: 130,
@@ -368,6 +376,7 @@ export async function generatePayslipPdf(
 
       deductions.forEach(item => {
         if (item.value > 0) {
+          ensureSpace(18)
           doc.text(item.label, 50, currentY)
           drawCurrency(doc, item.value, doc.page.width - 180, currentY, {
             width: 130,
@@ -397,6 +406,7 @@ export async function generatePayslipPdf(
       })
 
       currentY += 45
+      ensureSpace(140)
       
       doc.roundedRect(40, currentY, doc.page.width - 80, 45, 6)
         .fill('#e8f0ff')
@@ -416,6 +426,7 @@ export async function generatePayslipPdf(
       })
 
       currentY += 70
+      ensureSpace(25)
       
       doc.fillColor('#000000')
         .fontSize(10)
@@ -428,7 +439,7 @@ export async function generatePayslipPdf(
         doc.text(`Attendance Rate: ${attendanceRate}%`, doc.page.width - 180, currentY)
       }
 
-      const footerY = doc.page.height - 40
+      const footerY = doc.page.height - (doc.page.margins?.bottom ?? 40) - 35
       
       doc.fontSize(8)
         .fillColor('#666666')
@@ -443,9 +454,9 @@ export async function generatePayslipPdf(
       doc.fontSize(8)
         .fillColor('#999999')
         .text(
-          `Page 1 of 1 • Template: ${templateType}`,
+          `Template: ${templateType} • System Generated`,
           30,
-          doc.page.height - 20,
+          footerY + 12,
           { align: 'center', width: doc.page.width - 85 }
         )
 

@@ -7,9 +7,17 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import ExcelJS from 'exceljs'
-import { PAYROLL_TEMPLATES, PayrollTemplateType } from '@/app/lib/payroll/templates/types'
+import { 
+  PAYROLL_TEMPLATES, 
+  PayrollTemplateType,
+  isFixedTemplate,
+  isValidTemplateType,
+  getTemplateConfig
+} from '@/app/lib/payroll/templates/types'
 import { processIsurfStandardTemplate } from '@/app/lib/payroll/templates/isurf-standard'
 import { processBlueridgeTemplate } from '@/app/lib/payroll/templates/blueridge'
+import { processDynamicTemplate } from '@/app/lib/payroll/templates/dynamic-processor'
+import { createPayrollUploadRecord } from '@/app/lib/payroll/templates/utils'
 
 function getRelativePath(absolutePath: string): string {
   const projectRoot = process.cwd()
@@ -30,6 +38,72 @@ async function ensureUploadDirectories() {
   return { baseDir, uploadsDir, payrollDir }
 }
 
+async function generateFailedRecordsFile(
+  failedRecords: any[],
+  payrollDir: string
+): Promise<string | null> {
+  if (failedRecords.length === 0) return null
+
+  const failedWorkbook = new ExcelJS.Workbook()
+  const failedWorksheet = failedWorkbook.addWorksheet('Failed Records')
+
+  // Get all unique headers from failed records
+  const headersSet = new Set<string>()
+  failedRecords.forEach(record => {
+    Object.keys(record).forEach(k => headersSet.add(k))
+  })
+
+  const headers = Array.from(headersSet)
+  failedWorksheet.columns = headers.map((h) => ({
+    header: h,
+    key: h,
+    width: 25,
+  }))
+
+  failedRecords.forEach((record) => {
+    failedWorksheet.addRow(record)
+  })
+
+  // Style the header row
+  const headerRow = failedWorksheet.getRow(1)
+  headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+  headerRow.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFDC3545' },
+  }
+
+  const failedFileName = `failed-payroll-${Date.now()}.xlsx`
+  const failedFilePath = path.join(payrollDir, failedFileName)
+
+  const failedBuffer = await failedWorkbook.xlsx.writeBuffer()
+  await writeFile(failedFilePath, Buffer.from(failedBuffer as any))
+
+  return getRelativePath(failedFilePath)
+}
+
+async function validateCompanyAccess(
+  user: any,
+  companyId: string,
+  role: string
+): Promise<boolean> {
+  if (user.role === 'SUPER_ADMIN') return true
+
+  if (user.role === 'STAFF') {
+    return user.companyId === companyId
+  }
+
+  const userCompany = await (prisma as any).userCompany.findFirst({
+    where: {
+      userId: user.userId,
+      companyId: companyId,
+      role: { in: [role, 'ALL'] }
+    }
+  })
+
+  return !!userCompany
+}
+
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
@@ -47,9 +121,9 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
+    const user = await requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
-    // Get template type from URL query parameter FIRST
+    // Parse request
     const url = new URL(request.url)
     let templateType = url.searchParams.get('type') as PayrollTemplateType | null
 
@@ -57,83 +131,80 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file') as File | null
     const sendEmails = formData.get('sendEmails') === 'true'
     const companyIdParam = formData.get('companyId') as string | null
+    const templateId = formData.get('templateId') as string | null // For dynamic templates
     
-    // If templateType not in query params, try form data (for backward compatibility)
+    // Get template type from form data if not in URL
     if (!templateType) {
       templateType = formData.get('templateType') as PayrollTemplateType | null
     }
 
     let companyId: string | null = companyIdParam
 
-    if (!templateType || !PAYROLL_TEMPLATES[templateType]) {
+    // Validate template type
+    if (!templateType || !isValidTemplateType(templateType)) {
+      // If not a valid fixed template, check if it's a dynamic template ID
+      if (templateId) {
+        templateType = 'DYNAMIC'
+      } else {
+        return withCors(
+          ApiResponse.error(
+            'Valid template type or template ID is required. Supported types: ISURF_STANDARD, BLUERIDGE, or select a dynamic template',
+            400
+          ),
+          origin
+        )
+      }
+    }
+
+    // Validate company selection
+    if (!companyIdParam) {
       return withCors(
-        ApiResponse.error('Valid template type is required. Supported types: ISURF_STANDARD, BLUERIDGE', 400),
+        ApiResponse.error('Company selection is required', 400),
         origin
       )
     }
 
-    if (user.role === 'HR') {
-      // HR now needs to select a company and validate access through user_companies
-      const selectedCompanyId = formData.get('companyId') as string | null
-      
-      if (!selectedCompanyId) {
-        return withCors(
-          ApiResponse.error('Company selection is required', 400),
-          origin
-        )
-      }
-
-      // Validate HR has access to this company through user_companies
-      const hasAccess = await prisma.userCompany.findFirst({
+    // If dynamic template, verify the template exists
+    if (templateType === 'DYNAMIC' && templateId) {
+      const dynamicTemplate = await prisma.payrollTemplate.findFirst({
         where: {
-          userId: user.userId,
-          companyId: selectedCompanyId,
-          role: { in: ['HR', 'ALL'] }
+          id: templateId,
+          OR: [
+            { companyId: companyIdParam },
+            { isSystem: true } // System templates available to all companies
+          ]
+        },
+        include: {
+          fields: true
         }
       })
 
-      if (!hasAccess) {
+      if (!dynamicTemplate) {
         return withCors(
-          ApiResponse.error('You do not have HR access for this company', 403),
+          ApiResponse.error('Dynamic template not found or not accessible', 404),
           origin
         )
       }
 
-      companyId = selectedCompanyId
-    } 
-    else if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') {
-      if (!companyId) {
-        return withCors(
-          ApiResponse.error('Company selection is required for administrators', 400),
-          origin
-        )
-      }
-
-      if (user.role === 'ADMIN') {
-        const hasAccess = await prisma.userCompany.findFirst({
-          where: {
-            userId: user.userId,
-            companyId: companyId,
-            role: { in: ['ADMIN', 'ALL'] }
-          }
-        })
-
-        if (!hasAccess) {
-          return withCors(
-            ApiResponse.error('You do not have access to upload payroll for this company', 403),
-            origin
-          )
-        }
-      }
+      console.log(`[PAYROLL_UPLOAD] Using dynamic template: ${dynamicTemplate.templateName}`, {
+        fieldCount: dynamicTemplate.fields.length
+      })
     }
 
-    if (!companyId) {
+    // Validate user access to company
+    const userRole = user.role === 'HR' ? 'HR' : user.role === 'ADMIN' ? 'ADMIN' : 'ALL'
+    const hasAccess = await validateCompanyAccess(user, companyIdParam, userRole)
+    
+    if (!hasAccess) {
       return withCors(
-        ApiResponse.error('Company context is missing', 400),
+        ApiResponse.error(`You do not have ${userRole} access for this company`, 403),
         origin
       )
     }
 
+    companyId = companyIdParam
+
+    // Verify company exists and is not archived
     const company = await prisma.company.findFirst({
       where: {
         id: companyId,
@@ -148,6 +219,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Validate file
     if (!file) {
       return withCors(
         ApiResponse.error('File is required', 400),
@@ -174,99 +246,95 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    let processor
-    switch (templateType) {
-      case 'ISURF_STANDARD':
-        processor = processIsurfStandardTemplate
-        break
-      case 'BLUERIDGE':
-        processor = processBlueridgeTemplate
-        break
-      default:
-        return withCors(
-          ApiResponse.error('Unsupported template type', 400),
-          origin
-        )
-    }
-
-    const results = await processor.processFile(
-      buffer,
-      fileExtension || '',
-      companyId,
-      user,
-      sendEmails
-    )
-
-    let processedFilePath: string | null = null
-
-    if (results.failedRecords.length > 0) {
-      const failedWorkbook = new ExcelJS.Workbook()
-      const failedWorksheet = failedWorkbook.addWorksheet('Failed Records')
-
-      const headersSet = new Set<string>()
-      
-      results.failedRecords.forEach(record => {
-        Object.keys(record).forEach(k => headersSet.add(k))
-      })
-
-      const headers = Array.from(headersSet)
-      failedWorksheet.columns = headers.map((h) => ({
-        header: h,
-        key: h,
-        width: 25,
-      }))
-
-      results.failedRecords.forEach((record) => {
-        failedWorksheet.addRow(record)
-      })
-
-      const headerRow = failedWorksheet.getRow(1)
-      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
-      headerRow.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFDC3545' },
-      }
-
-      const failedFileName = `failed-payroll-${Date.now()}.xlsx`
-      const failedFilePath = path.join(payrollDir, failedFileName)
-
-      const failedBuffer = await failedWorkbook.xlsx.writeBuffer()
-      await writeFile(failedFilePath, Buffer.from(failedBuffer as any))
-
-      processedFilePath = getRelativePath(failedFilePath)
-    }
-
-    const originalFileName = `payroll-upload-${Date.now()}-${templateType}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
+    // Save original file
+    const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
+    const originalFileName = `payroll-upload-${Date.now()}-${templateType}-${sanitizedFileName}`
     const originalFilePath = path.join(payrollDir, originalFileName)
     await writeFile(originalFilePath, buffer)
-
     const relativeOriginalPath = getRelativePath(originalFilePath)
 
-    const uploadRecord = await prisma.payrollUpload.create({
-      data: {
-        companyId: companyId,
-        fileName: file.name,
-        filePath: relativeOriginalPath,
-        processedFilePath: processedFilePath || null,
-        processedFileName: processedFilePath ? path.basename(processedFilePath) : null,
-        templateType: templateType,
-        sendEmails: sendEmails,
-        totalRecords: results.successful + results.failed,
+    // Process file based on template type
+    let results
+    const startTime = Date.now()
+
+    try {
+      if (templateType === 'ISURF_STANDARD') {
+        console.log('[PAYROLL_UPLOAD] Processing ISURF_STANDARD template')
+        results = await processIsurfStandardTemplate.processFile(
+          buffer,
+          fileExtension || '',
+          companyId,
+          user,
+          sendEmails
+        )
+      } 
+      else if (templateType === 'BLUERIDGE') {
+        console.log('[PAYROLL_UPLOAD] Processing BLUERIDGE template')
+        results = await processBlueridgeTemplate.processFile(
+          buffer,
+          fileExtension || '',
+          companyId,
+          user,
+          sendEmails
+        )
+      } 
+      else if (templateType === 'DYNAMIC') {
+        console.log('[PAYROLL_UPLOAD] Processing DYNAMIC template')
+        results = await processDynamicTemplate.processFile(
+          buffer,
+          fileExtension || '',
+          companyId,
+          user,
+          sendEmails,
+          templateId || undefined
+        )
+      } 
+      else {
+        throw new Error(`Unsupported template type: ${templateType}`)
+      }
+
+      const processingTime = Date.now() - startTime
+      console.log(`[PAYROLL_UPLOAD] Processing completed in ${processingTime}ms`, {
+        templateType,
         successful: results.successful,
         failed: results.failed,
-        payslipsGenerated: results.payslipsGenerated > 0 ? results.payslipsGenerated : null,
-        payslipsUpdated: results.payslipsUpdated > 0 ? results.payslipsUpdated : null,
-        emailsSent: sendEmails ? results.emailsSent : null,
-        emailAttempts: sendEmails ? results.emailAttempts : null,
-        errors: results.errors,
-        uploadedBy: user.userId,
-      },
-    })
+        payslipsGenerated: results.payslipsGenerated
+      })
 
+    } catch (processingError: any) {
+      console.error('[PAYROLL_UPLOAD] Processing error:', processingError)
+      return withCors(
+        ApiResponse.error(`Error processing file: ${processingError.message}`, 500),
+        origin
+      )
+    }
+
+    // Generate failed records file if needed
+    let processedFilePath: string | null = null
+    if (results.failedRecords.length > 0) {
+      processedFilePath = await generateFailedRecordsFile(results.failedRecords, payrollDir)
+    }
+
+    // Create upload record
+    const uploadRecord = await createPayrollUploadRecord(
+      companyId,
+      file.name,
+      relativeOriginalPath,
+      templateType,
+      sendEmails,
+      results,
+      user.userId,
+      processedFilePath
+    )
+
+    // Prepare response
     const responseData = {
       uploadId: uploadRecord.id,
       templateType: templateType,
+      templateId: templateId,
+      templateName: templateType === 'DYNAMIC' && templateId 
+        ? (await prisma.payrollTemplate.findUnique({ where: { id: templateId } }))?.templateName 
+        : PAYROLL_TEMPLATES[templateType as keyof typeof PAYROLL_TEMPLATES]?.name,
       sendEmails: sendEmails,
       summary: {
         totalProcessed: results.successful + results.failed,
@@ -277,12 +345,14 @@ export async function POST(request: NextRequest) {
         emailsSent: sendEmails ? results.emailsSent : 0,
         emailAttempts: sendEmails ? results.emailAttempts : 0,
         emailFailures: results.emailFailures.length,
+        processingTimeMs: Date.now() - startTime
       },
       failedRecordsCount: results.failedRecords.length,
       downloadLinks: {
         failedRecords: results.failedRecords.length > 0 
           ? `/api/payroll/download-failed/${uploadRecord.id}`
           : null,
+        original: `/api/payroll/download-original/${uploadRecord.id}`
       },
       filePaths: {
         original: relativeOriginalPath,
@@ -290,11 +360,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.log('[PAYROLL_UPLOAD] Completed successfully for uploadId', uploadRecord.id, {
+    // Log completion
+    console.log('[PAYROLL_UPLOAD] Completed successfully', {
+      uploadId: uploadRecord.id,
       templateType,
-      sendEmails,
       companyId,
-      userId: user.userId
+      userId: user.userId,
+      summary: responseData.summary
     })
 
     return withCors(
@@ -304,6 +376,7 @@ export async function POST(request: NextRequest) {
       ),
       origin
     )
+
   } catch (error) {
     console.error('[PAYROLL_UPLOAD] Top-level error:', error)
     return withCors(handleApiError(error), origin)

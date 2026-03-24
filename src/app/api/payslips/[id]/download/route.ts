@@ -1,9 +1,12 @@
 // src/app/api/payslips/[id]/download/route.ts
 import { NextRequest, NextResponse } from 'next/server'
+import type { Prisma } from '@prisma/client'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { getPayslipDisplayFields, calculateTotals } from '@/app/lib/payroll/templates/utils'
+import type { CustomFieldValue } from '@/app/lib/payroll/templates/types'
 
 type RouteParams = {
   params: {
@@ -43,7 +46,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const { id } = params
 
-    // Fetch payslip with only necessary data including specific staff record fields
+    // Fetch payslip with complete payroll data including template info
     const payslip = await prisma.payslip.findUnique({
       where: { id },
       select: {
@@ -56,16 +59,57 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         fileData: true,
         month: true,
         year: true,
+        grossPay: true,
+        netPay: true,
+        // Include payroll with custom fields and template
+        payroll: {
+          select: {
+            id: true,
+            templateType: true,
+            templateId: true,
+            customFields: true,
+            grossPay: true,
+            netSalary: true,
+            basicSalary: true,
+            housing: true,
+            transport: true,
+            payee: true,
+            pensionDeduction: true,
+            // Include template for dynamic templates
+            template: {
+              select: {
+                id: true,
+                templateName: true,
+                isSystem: true
+              }
+            }
+          }
+        },
         // Only select necessary staff record fields
         staffRecord: {
           select: {
-            id: true, // For STAFF authorization (compare with user.userId)
-            email: true, // For fallback authorization and X-Payslip-Info
-            firstName: true, // For X-Payslip-Info
-            lastName: true, // For X-Payslip-Info
-            companyId: true, // For company context
+            id: true,
+            staffId: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            department: true,
+            position: true,
+            companyId: true,
           }
         },
+        // Include company info
+        company: {
+          select: {
+            id: true,
+            companyName: true,
+            logo: true,
+            address: true,
+            phone: true,
+            email: true,
+            taxId: true
+          }
+        }
       },
     })
 
@@ -173,11 +217,63 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       )
     }
 
+    // Prepare enhanced payslip info for response headers
+    type PayslipInfo = {
+      staffName: string
+      staffId: string
+      department: string | null
+      position: string | null
+      month: string
+      year: number
+      companyName: string | undefined
+      templateType: string
+      templateName: string | undefined
+      grossPay: number | Prisma.Decimal
+      netPay: number | Prisma.Decimal
+      isDynamic: boolean
+      earningsCount?: number
+      deductionsCount?: number
+    }
+
+    let payslipInfo: PayslipInfo = {
+      staffName: `${payslip.staffRecord.firstName} ${payslip.staffRecord.lastName}`,
+      staffId: payslip.staffRecord.staffId,
+      department: payslip.staffRecord.department,
+      position: payslip.staffRecord.position,
+      month: payslip.month,
+      year: payslip.year,
+      companyName: payslip.company?.companyName,
+      templateType: payslip.payroll?.templateType || 'UNKNOWN',
+      templateName: payslip.payroll?.template?.templateName,
+      grossPay: payslip.grossPay || payslip.payroll?.grossPay || 0,
+      netPay: payslip.netPay || payslip.payroll?.netSalary || 0,
+      isDynamic: payslip.payroll?.templateType === 'DYNAMIC'
+    }
+
+    // For dynamic templates, extract custom fields info
+    if (payslip.payroll?.templateType === 'DYNAMIC' && payslip.payroll?.customFields) {
+      const customFields = payslip.payroll.customFields
+      if (typeof customFields === 'object' && customFields !== null && !Array.isArray(customFields)) {
+        const { earnings, deductions } = getPayslipDisplayFields(
+          customFields as unknown as Record<string, CustomFieldValue>
+        )
+      const totals = calculateTotals(earnings, deductions)
+      
+      payslipInfo = {
+        ...payslipInfo,
+        earningsCount: earnings.length,
+        deductionsCount: deductions.length,
+        grossPay: totals.grossPay,
+        netPay: totals.netPay
+      }
+      }
+    }
+
     // Convert Buffer to Uint8Array for Response
     const fileBuffer = payslip.fileData
     const uint8Array = new Uint8Array(fileBuffer)
 
-    // Determine content type from database field or file extension
+    // Determine content type
     const extension = payslip.fileName.toLowerCase().endsWith('.pdf') ? '.pdf' : 
                      payslip.fileName.toLowerCase().endsWith('.xlsx') ? '.xlsx' : 
                      payslip.fileName.toLowerCase().endsWith('.docx') ? '.docx' : 
@@ -185,7 +281,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     
     let contentType = payslip.fileType || 'application/octet-stream'
     
-    // Fallback content type based on file extension if not stored in database
+    // Fallback content type based on file extension
     if (contentType === 'application/octet-stream') {
       if (extension === '.pdf') contentType = 'application/pdf'
       else if (extension === '.xlsx') contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -193,12 +289,23 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       else if (extension === '.doc') contentType = 'application/msword'
     }
 
-    // Clean filename for download (remove special characters)
+    // Clean filename for download
     const cleanFileName = payslip.fileName
-      .replace(/[^\w\s.-]/g, '_') // Replace special chars with underscore
-      .replace(/\s+/g, '_')       // Replace spaces with underscore
+      .replace(/[^\w\s.-]/g, '_')
+      .replace(/\s+/g, '_')
 
-    // Create response with file - using attachment for forced download
+    // Create enhanced payslip info header
+    const payslipInfoString = JSON.stringify({
+      name: payslipInfo.staffName,
+      id: payslipInfo.staffId,
+      period: `${payslipInfo.month} ${payslipInfo.year}`,
+      company: payslipInfo.companyName,
+      template: payslipInfo.templateName || payslipInfo.templateType,
+      net: payslipInfo.netPay,
+      gross: payslipInfo.grossPay
+    })
+
+    // Create response with file
     const response = new NextResponse(uint8Array, {
       status: 200,
       headers: {
@@ -209,15 +316,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         'Pragma': 'no-cache',
         'Expires': '0',
         'X-Content-Type-Options': 'nosniff',
-        'Access-Control-Expose-Headers': 'Content-Disposition, X-Payslip-Info',
+        'Access-Control-Expose-Headers': 'Content-Disposition, X-Payslip-Info, X-Payslip-Details',
+        'X-Payslip-Info': payslipInfoString,
+        'X-Payslip-Details': Buffer.from(JSON.stringify({
+          templateType: payslipInfo.templateType,
+          isDynamic: payslipInfo.isDynamic,
+          earningsCount: payslipInfo.earningsCount || 0,
+          deductionsCount: payslipInfo.deductionsCount || 0
+        })).toString('base64')
       },
     })
-
-    // Add payslip info header if we have the data
-    response.headers.set(
-      'X-Payslip-Info', 
-      `${payslip.staffRecord.firstName} ${payslip.staffRecord.lastName} - ${payslip.month} ${payslip.year}`
-    )
 
     return withCors(response, origin)
   } catch (error) {

@@ -28,16 +28,28 @@ function createPool() {
     throw new Error('DATABASE_URL is not set')
   }
 
-  // Always enable SSL for Aiven cloud database
+  let ssl: any = false
   const caPath = path.join(process.cwd(), 'certs', 'aiven-ca.pem')
 
-  // Check if CA certificate exists (for production), otherwise just disable certificate verification
-  const ssl = fs.existsSync(caPath)
-    ? {
-        ca: fs.readFileSync(caPath, 'utf8'),
-        rejectUnauthorized: false,
-      }
-    : { rejectUnauthorized: false }
+  let sslRequested = false
+  try {
+    const databaseUrl = new URL(process.env.DATABASE_URL)
+    sslRequested =
+      databaseUrl.searchParams.has('sslmode') ||
+      databaseUrl.searchParams.get('ssl') === '1' ||
+      databaseUrl.searchParams.get('ssl') === 'true'
+  } catch {
+    sslRequested = false
+  }
+
+  if (process.env.NODE_ENV === 'production' || sslRequested) {
+    ssl = fs.existsSync(caPath)
+      ? {
+          ca: fs.readFileSync(caPath, 'utf8'),
+          rejectUnauthorized: false,
+        }
+      : { rejectUnauthorized: false }
+  }
 
   return new Pool({
     connectionString: process.env.DATABASE_URL,

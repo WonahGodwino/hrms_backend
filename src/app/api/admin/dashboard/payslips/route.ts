@@ -65,6 +65,8 @@ export async function GET(request: NextRequest) {
 
     // Get user's assigned companies from UserCompany table
     let userAssignedCompanyIds: string[] = []
+    let ownStaffRecordId: string | null = null
+    let ownCompanyId: string | null = null
     
     if (user.role === 'HR' || user.role === 'ADMIN') {
       const userAssignments = await prisma.userCompany.findMany({
@@ -76,13 +78,16 @@ export async function GET(request: NextRequest) {
       })
       
       userAssignedCompanyIds = userAssignments.map(a => a.companyId)
-      
-      if (userAssignedCompanyIds.length === 0) {
-        return withCors(
-          ApiResponse.error(`${user.role} user is not assigned to any company yet`, 403),
-          origin
-        )
-      }
+
+      // Keep an own-record fallback so HR/ADMIN can still see only their own payslip
+      // even when they are not assigned to any company via user_companies.
+      const ownStaffRecord = await prisma.staffRecord.findUnique({
+        where: { id: user.userId },
+        select: { id: true, companyId: true }
+      })
+
+      ownStaffRecordId = ownStaffRecord?.id ?? null
+      ownCompanyId = ownStaffRecord?.companyId ?? null
     }
 
     // Build base where clause
@@ -95,19 +100,48 @@ export async function GET(request: NextRequest) {
 
     // Company filtering based on role
     if (user.role === 'HR' || user.role === 'ADMIN') {
-      // HR/ADMIN can only access companies they're assigned to
-      whereClause.companyId = { in: userAssignedCompanyIds }
-      
-      // If a specific companyId is requested, validate that user has access to it
+      // HR/ADMIN can view:
+      // 1) payslips for companies assigned in user_companies
+      // 2) their own payslip only (fallback when unassigned)
+      const visibilityOr: any[] = []
+
+      if (userAssignedCompanyIds.length > 0) {
+        visibilityOr.push({ companyId: { in: userAssignedCompanyIds } })
+      }
+      if (ownStaffRecordId) {
+        visibilityOr.push({ staffRecordId: ownStaffRecordId })
+      }
+
+      if (visibilityOr.length === 0) {
+        return withCors(
+          ApiResponse.error('No payslip access scope configured for this user', 403),
+          origin
+        )
+      }
+
+      whereClause.AND = [
+        ...(whereClause.AND || []),
+        { OR: visibilityOr }
+      ]
+
+      // If a specific companyId is requested, allow it only if assigned
+      // or it's the user's own company (then restrict to own payslip).
       if (requestedCompanyId) {
-        if (!userAssignedCompanyIds.includes(requestedCompanyId)) {
+        const hasAssignedAccess = userAssignedCompanyIds.includes(requestedCompanyId)
+        const isOwnCompany = ownCompanyId === requestedCompanyId
+
+        if (!hasAssignedAccess && !isOwnCompany) {
           return withCors(
             ApiResponse.error(`You don't have access to company ${requestedCompanyId}`, 403),
             origin
           )
         }
-        // If companyId filter is provided and user has access, use it
-        whereClause.companyId = requestedCompanyId
+
+        whereClause.AND.push({ companyId: requestedCompanyId })
+
+        if (!hasAssignedAccess && isOwnCompany && ownStaffRecordId) {
+          whereClause.AND.push({ staffRecordId: ownStaffRecordId })
+        }
       }
     } else if (user.role === 'SUPER_ADMIN') {
       // SUPER_ADMIN can filter by company if provided
@@ -122,7 +156,7 @@ export async function GET(request: NextRequest) {
       if (user.role === 'HR' || user.role === 'ADMIN') {
         const staffRecord = await prisma.staffRecord.findUnique({
           where: { id: staffRecordId },
-          select: { companyId: true }
+          select: { id: true, companyId: true }
         })
         
         if (!staffRecord) {
@@ -131,8 +165,12 @@ export async function GET(request: NextRequest) {
             origin
           )
         }
-        
-        if (!userAssignedCompanyIds.includes(staffRecord.companyId)) {
+
+        const canAccessRequestedStaff =
+          userAssignedCompanyIds.includes(staffRecord.companyId) ||
+          (ownStaffRecordId !== null && staffRecord.id === ownStaffRecordId)
+
+        if (!canAccessRequestedStaff) {
           return withCors(
             ApiResponse.error('You do not have access to this staff member', 403),
             origin
@@ -142,18 +180,25 @@ export async function GET(request: NextRequest) {
       
       whereClause.staffRecordId = staffRecordId
     } else if (staffId) {
-      // Find staffRecordId by staffId
-      const staffWhere: any = { staffId: staffId }
-      
-      // For HR/ADMIN, also filter by accessible companies
+      // Find staffRecordId by staffId and enforce access scope
+      let staffRecord: { id: string; companyId: string } | null = null
+
       if (user.role === 'HR' || user.role === 'ADMIN') {
-        staffWhere.companyId = { in: userAssignedCompanyIds }
+        const matchingStaffRecords = await prisma.staffRecord.findMany({
+          where: { staffId },
+          select: { id: true, companyId: true }
+        })
+
+        staffRecord =
+          matchingStaffRecords.find(s => ownStaffRecordId !== null && s.id === ownStaffRecordId) ||
+          matchingStaffRecords.find(s => userAssignedCompanyIds.includes(s.companyId)) ||
+          null
+      } else {
+        staffRecord = await prisma.staffRecord.findFirst({
+          where: { staffId },
+          select: { id: true, companyId: true }
+        })
       }
-      
-      const staffRecord = await prisma.staffRecord.findFirst({
-        where: staffWhere,
-        select: { id: true, companyId: true }
-      })
       
       if (!staffRecord) {
         return withCors(
@@ -241,19 +286,27 @@ export async function GET(request: NextRequest) {
         orderBy: { companyName: 'asc' }
       });
     } else if (user.role === 'HR' || user.role === 'ADMIN') {
-      // HR/ADMIN can only see companies they're assigned to
-      const assignedCompanies = await prisma.company.findMany({
-        where: {
-          id: { in: userAssignedCompanyIds },
-          archived: 0
-        },
-        select: {
-          id: true,
-          companyName: true,
-        },
-        orderBy: { companyName: 'asc' }
-      });
-      companies = assignedCompanies;
+      // HR/ADMIN company filter list = assigned companies + own company fallback
+      const visibleCompanyIds = Array.from(
+        new Set([
+          ...userAssignedCompanyIds,
+          ...(ownCompanyId ? [ownCompanyId] : [])
+        ])
+      )
+
+      if (visibleCompanyIds.length > 0) {
+        companies = await prisma.company.findMany({
+          where: {
+            id: { in: visibleCompanyIds },
+            archived: 0
+          },
+          select: {
+            id: true,
+            companyName: true,
+          },
+          orderBy: { companyName: 'asc' }
+        })
+      }
     }
 
     return withCors(
