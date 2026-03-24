@@ -123,14 +123,23 @@ export const processDynamicTemplate = {
     }
 
     // Get template with fields - ONLY these fields will be used
-    const template = await prisma.payrollTemplate.findUnique({
-      where: templateId ? { id: templateId } : { companyId },
-      include: {
-        fields: {
-          orderBy: { order: 'asc' }
-        }
-      }
-    })
+    const template = templateId
+      ? await prisma.payrollTemplate.findUnique({
+          where: { id: templateId },
+          include: {
+            fields: {
+              orderBy: { order: 'asc' }
+            }
+          }
+        })
+      : await prisma.payrollTemplate.findFirst({
+          where: { companyId },
+          include: {
+            fields: {
+              orderBy: { order: 'asc' }
+            }
+          }
+        })
 
     if (!template) {
       throw new Error(`No template found for ${templateId ? 'ID: ' + templateId : 'company: ' + companyId}`)
