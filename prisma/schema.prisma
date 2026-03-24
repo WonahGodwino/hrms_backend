@@ -45,6 +45,10 @@ model Company {
   payrollTemplates       PayrollTemplate[]
   payrollData            PayrollData[]
   payrollTemplateUploads PayrollTemplateUpload[]
+  employeeTaxProfiles    EmployeeTaxProfile[]
+  taxFilingSchedules     TaxFilingSchedule[]
+  annualReturns          AnnualReturn[]
+  taxProfileUploads      TaxProfileUpload[]
 
   // Payroll Engine relations
   payPeriods             PayPeriod[]
@@ -97,6 +101,7 @@ model StaffRecord {
   notifications                    Notification[]
   emailLogs                       EmailLog[]
   payrollData                     PayrollData[]
+  taxProfile                      EmployeeTaxProfile?
 
   // Payroll Engine relations
   employeeSalaries                EmployeeSalary[]
@@ -787,11 +792,108 @@ model leave_uploads {
   companies              Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 }
 
+model EmployeeTaxProfile {
+  id               String      @id @default(cuid())
+  staffId          String      @unique
+  companyId        String
+  stateOfResidence String
+  jtbTin           String?
+  tinVerified      Boolean     @default(false)
+  lockedState      String?
+  lockedDate       DateTime?
+  pfaName          String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  staff            StaffRecord @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  company          Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, stateOfResidence])
+  @@map("employee_tax_profiles")
+}
+
+model TaxFilingSchedule {
+  id               String       @id @default(cuid())
+  companyId        String
+  payPeriodId      String
+  stateIrs         String
+  stateCode        String
+  stateName        String
+  totalEmployees   Int
+  totalTaxAmount   Decimal      @db.Decimal(15, 2)
+  totalGrossIncome Decimal      @db.Decimal(15, 2)
+  status           FilingStatus @default(PENDING)
+  filedAt          DateTime?
+  filedBy          String?
+  paymentReference String?
+  filePath         String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  company          Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payPeriod        PayPeriod    @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, payPeriodId, stateCode])
+  @@index([companyId, status])
+  @@index([payPeriodId])
+  @@map("tax_filing_schedules")
+}
+
+model AnnualReturn {
+  id               String       @id @default(cuid())
+  companyId        String
+  year             Int
+  stateIrs         String
+  stateCode        String
+  stateName        String
+  totalEmployees   Int
+  totalGrossIncome Decimal      @db.Decimal(15, 2)
+  totalTaxPaid     Decimal      @db.Decimal(15, 2)
+  status           FilingStatus @default(PENDING)
+  filedAt          DateTime?
+  filedBy          String?
+  formH1FilePath   String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  company          Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, year, stateCode])
+  @@index([companyId, year])
+  @@map("annual_returns")
+}
+
+model TaxProfileUpload {
+  id             String   @id @default(cuid())
+  companyId      String
+  fileName       String
+  filePath       String
+  totalRecords   Int
+  successful     Int
+  failed         Int
+  errors         String[]
+  failedFilePath String?
+  uploadedBy     String
+  createdAt      DateTime @default(now())
+
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("tax_profile_uploads")
+}
+
 enum PayrollStatus {
   DRAFT
   PROCESSED
   PAID
   FAILED
+}
+
+enum FilingStatus {
+  PENDING
+  GENERATED
+  FILED
+  CONFIRMED
 }
 
 enum JobStatus {
@@ -1087,6 +1189,7 @@ model PayPeriod {
   payValidations         PayValidation[]
   overtimeEntries        OvertimeEntry[]
   deductionEntries       DeductionEntry[]
+  taxFilingSchedules     TaxFilingSchedule[]
 
   @@unique([companyId, year, month])
   @@index([companyId, status])
