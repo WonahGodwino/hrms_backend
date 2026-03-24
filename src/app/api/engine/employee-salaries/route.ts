@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/app/lib/auth'
+import { requireRoleAsync } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { z } from 'zod'
 import * as employeeSalaryService from '@/app/lib/payroll-engine/employee-salary'
@@ -38,6 +38,13 @@ const querySchema = z.object({
   employeeCategory: z.string().optional(),
 })
 
+function getErrorStatus(message: string): number {
+  if (message.includes('Authentication required') || message.includes('Invalid or expired token')) return 401
+  if (message.includes('Insufficient permissions')) return 403
+  if (message.includes('not associated with a company') || message.includes('Validation failed')) return 400
+  return 500
+}
+
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
@@ -58,7 +65,7 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['SUPER_ADMIN', 'ADMIN'])
+    const user = await requireRoleAsync(token, ['SUPER_ADMIN', 'ADMIN'])
 
     if (!user.companyId) {
       return withCors(
@@ -97,11 +104,12 @@ export async function POST(request: NextRequest) {
       origin
     )
   } catch (error: any) {
-    console.error('Create salary structure error:', error?.message || String(error))
+    const message = error?.message || String(error)
+    console.error('Create salary structure error:', message)
     return withCors(
       NextResponse.json(
-        { success: false, message: error.message || 'Failed to create salary structure' },
-        { status: 500 }
+        { success: false, message: message || 'Failed to create salary structure' },
+        { status: getErrorStatus(message) }
       ),
       origin
     )
@@ -124,7 +132,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['SUPER_ADMIN', 'ADMIN'])
+    const user = await requireRoleAsync(token, ['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER'])
 
     if (!user.companyId) {
       return withCors(
@@ -159,11 +167,12 @@ export async function GET(request: NextRequest) {
       origin
     )
   } catch (error: any) {
-    console.error('Get salary structures error:', error?.message || String(error))
+    const message = error?.message || String(error)
+    console.error('Get salary structures error:', message)
     return withCors(
       NextResponse.json(
-        { success: false, message: error.message || 'Failed to fetch salary structures' },
-        { status: 500 }
+        { success: false, message: message || 'Failed to fetch salary structures' },
+        { status: getErrorStatus(message) }
       ),
       origin
     )
