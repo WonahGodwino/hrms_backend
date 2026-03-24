@@ -1,1 +1,131 @@
-// src/app/lib/payroll-engine/tax-filing/tin-validator.ts// JTB Tax Identification Number (TIN) Validationexport interface TinValidationResult {  valid: boolean  error?: string  formatted?: string}/** * Validate JTB TIN format * * Nigeria's Joint Tax Board (JTB) TIN is a 13-digit unique identifier * Format: NNNNNNNN-NNNN (8 digits, hyphen, 4 digits) or 13 digits without hyphen */export function validateJtbTin(tin: string | null | undefined): TinValidationResult {  // Empty TIN is valid (TIN is optional)  if (!tin || tin.trim() === '') {    return { valid: true }  }  // Remove any whitespace  const cleanTin = tin.replace(/\s/g, '')  // Remove hyphens for validation  const digitsOnly = cleanTin.replace(/-/g, '')  // Check if all remaining characters are digits  if (!/^\d+$/.test(digitsOnly)) {    return {      valid: false,      error: 'TIN must contain only digits (and optional hyphen)'    }  }  // Check length - must be exactly 13 digits  if (digitsOnly.length !== 13) {    return {      valid: false,      error: `TIN must be exactly 13 digits. Provided: ${digitsOnly.length} digits`    }  }  // Check for obviously invalid patterns  if (/^0{13}$/.test(digitsOnly)) {    return {      valid: false,      error: 'TIN cannot be all zeros'    }  }  // All checks passed  return {    valid: true,    formatted: formatTin(digitsOnly)  }}/** * Format TIN for display (with hyphen) * Converts 1234567890123 to 12345678-90123 */export function formatTin(tin: string): string {  if (!tin) return ''  // Remove any existing formatting  const digitsOnly = tin.replace(/[^0-9]/g, '')  if (digitsOnly.length !== 13) {    return tin // Return as-is if not valid length  }  // Format as XXXXXXXX-XXXXX (8-5 pattern commonly used)  return `${digitsOnly.slice(0, 8)}-${digitsOnly.slice(8)}`}/** * Strip formatting from TIN (return digits only) */export function stripTinFormatting(tin: string): string {  if (!tin) return ''  return tin.replace(/[^0-9]/g, '')}/** * Mask TIN for display (show only last 4 digits) * 12345678-90123 becomes *********0123 */export function maskTin(tin: string): string {  if (!tin) return ''  const digitsOnly = stripTinFormatting(tin)  if (digitsOnly.length < 4) {    return '*'.repeat(digitsOnly.length)  }  const lastFour = digitsOnly.slice(-4)  const maskedPart = '*'.repeat(digitsOnly.length - 4)  return maskedPart + lastFour}/** * Compare two TINs (ignoring formatting) */export function compareTins(tin1: string, tin2: string): boolean {  return stripTinFormatting(tin1) === stripTinFormatting(tin2)}/** * Check if TIN looks like a valid Nigerian TIN * This is a basic format check, not a verification against JTB database */export function isValidTinFormat(tin: string | null | undefined): boolean {  const result = validateJtbTin(tin)  return result.valid}/** * Generate validation error message for bulk import */export function getTinValidationMessage(tin: string, rowNumber: number): string | null {  const result = validateJtbTin(tin)  if (!result.valid) {    return `Row ${rowNumber}: Invalid TIN "${tin}" - ${result.error}`  }  return null}
+// src/app/lib/payroll-engine/tax-filing/tin-validator.ts
+// JTB Tax Identification Number (TIN) Validation
+
+export interface TinValidationResult {
+  valid: boolean
+  error?: string
+  formatted?: string
+}
+
+/**
+ * Validate JTB TIN format
+ *
+ * Nigeria's Joint Tax Board (JTB) TIN is a 13-digit unique identifier
+ * Format: NNNNNNNN-NNNN (8 digits, hyphen, 4 digits) or 13 digits without hyphen
+ */
+export function validateJtbTin(tin: string | null | undefined): TinValidationResult {
+  // Empty TIN is valid (TIN is optional)
+  if (!tin || tin.trim() === '') {
+    return { valid: true }
+  }
+
+  // Remove any whitespace
+  const cleanTin = tin.replace(/\s/g, '')
+
+  // Remove hyphens for validation
+  const digitsOnly = cleanTin.replace(/-/g, '')
+
+  // Check if all remaining characters are digits
+  if (!/^\d+$/.test(digitsOnly)) {
+    return {
+      valid: false,
+      error: 'TIN must contain only digits (and optional hyphen)'
+    }
+  }
+
+  // Check length - must be exactly 13 digits
+  if (digitsOnly.length !== 13) {
+    return {
+      valid: false,
+      error: `TIN must be exactly 13 digits. Provided: ${digitsOnly.length} digits`
+    }
+  }
+
+  // Check for obviously invalid patterns
+  if (/^0{13}$/.test(digitsOnly)) {
+    return {
+      valid: false,
+      error: 'TIN cannot be all zeros'
+    }
+  }
+
+  // All checks passed
+  return {
+    valid: true,
+    formatted: formatTin(digitsOnly)
+  }
+}
+
+/**
+ * Format TIN for display (with hyphen)
+ * Converts 1234567890123 to 12345678-90123
+ */
+export function formatTin(tin: string): string {
+  if (!tin) return ''
+
+  // Remove any existing formatting
+  const digitsOnly = tin.replace(/[^0-9]/g, '')
+
+  if (digitsOnly.length !== 13) {
+    return tin // Return as-is if not valid length
+  }
+
+  // Format as XXXXXXXX-XXXXX (8-5 pattern commonly used)
+  return `${digitsOnly.slice(0, 8)}-${digitsOnly.slice(8)}`
+}
+
+/**
+ * Strip formatting from TIN (return digits only)
+ */
+export function stripTinFormatting(tin: string): string {
+  if (!tin) return ''
+  return tin.replace(/[^0-9]/g, '')
+}
+
+/**
+ * Mask TIN for display (show only last 4 digits)
+ * 12345678-90123 becomes *********0123
+ */
+export function maskTin(tin: string): string {
+  if (!tin) return ''
+
+  const digitsOnly = stripTinFormatting(tin)
+
+  if (digitsOnly.length < 4) {
+    return '*'.repeat(digitsOnly.length)
+  }
+
+  const lastFour = digitsOnly.slice(-4)
+  const maskedPart = '*'.repeat(digitsOnly.length - 4)
+
+  return maskedPart + lastFour
+}
+
+/**
+ * Compare two TINs (ignoring formatting)
+ */
+export function compareTins(tin1: string, tin2: string): boolean {
+  return stripTinFormatting(tin1) === stripTinFormatting(tin2)
+}
+
+/**
+ * Check if TIN looks like a valid Nigerian TIN
+ * This is a basic format check, not a verification against JTB database
+ */
+export function isValidTinFormat(tin: string | null | undefined): boolean {
+  const result = validateJtbTin(tin)
+  return result.valid
+}
+
+/**
+ * Generate validation error message for bulk import
+ */
+export function getTinValidationMessage(tin: string, rowNumber: number): string | null {
+  const result = validateJtbTin(tin)
+
+  if (!result.valid) {
+    return `Row ${rowNumber}: Invalid TIN "${tin}" - ${result.error}`
+  }
+
+  return null
+}
