@@ -182,10 +182,14 @@ export async function GET(request: NextRequest) {
     })
 
     const result = await payPeriodService.getPayPeriods(user.companyId, query)
+    const isEmpty = result.total === 0
 
     return withCors(
       NextResponse.json({
         success: true,
+        message: isEmpty
+          ? 'No payroll periods found. Create a payroll period to continue.'
+          : 'Payroll periods fetched successfully',
         data: result.data,
         pagination: {
           total: result.total,

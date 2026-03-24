@@ -153,10 +153,14 @@ export async function GET(request: NextRequest) {
     })
 
     const result = await employeeSalaryService.getAllSalaryStructures(user.companyId, query)
+    const isEmpty = result.total === 0
 
     return withCors(
       NextResponse.json({
         success: true,
+        message: isEmpty
+          ? 'No salary structures found. Create a salary structure to continue.'
+          : 'Salary structures fetched successfully',
         data: result.data,
         pagination: {
           total: result.total,
