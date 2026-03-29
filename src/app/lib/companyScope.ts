@@ -31,12 +31,28 @@ export function scopedPrisma(companyId: string) {
           ...args,
           where: { ...(args.where || {}), companyId },
         }),
-      upsert: (args: any) =>
-        prisma.payroll.upsert({
-          ...args,
-          create: { ...args.create, companyId },
-          update: { ...args.update, companyId },
-        }),
+      upsert: async (args: any) => {
+        // Payroll no longer has a unique (staffRecordId, month, year, companyId)
+        // constraint, so avoid DB-level ON CONFLICT upsert for this model.
+        const where = args?.where || {}
+
+        if (where.id) {
+          const existing = await prisma.payroll.findUnique({ where: { id: where.id } })
+          if (existing) {
+            return prisma.payroll.update({
+              where: { id: where.id },
+              data: { ...(args.update || {}), companyId },
+            })
+          }
+          return prisma.payroll.create({
+            data: { ...(args.create || {}), companyId },
+          })
+        }
+
+        return prisma.payroll.create({
+          data: { ...(args.create || {}), companyId },
+        })
+      },
     },
 
     payslip: {
