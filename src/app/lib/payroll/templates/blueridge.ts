@@ -117,7 +117,8 @@ export const processBlueridgeTemplate = {
     fileExtension: string,
     companyId: string,
     user: any,
-    sendEmails: boolean
+    sendEmails: boolean,
+    overwriteExisting: boolean = false
   ) {
     const templateConfig = PAYROLL_TEMPLATES.BLUERIDGE
     const canonicalMap = templateConfig.canonicalHeaders
@@ -401,92 +402,59 @@ export const processBlueridgeTemplate = {
           });
         }
 
-        const payrollRecord = await prisma.payroll.upsert({
-          where: {
-            staffRecordId_month_year_companyId: {
-              staffRecordId: staffRecord.id,
-              month: monthName,
-              year,
-              companyId: companyId,
-            },
-          },
-          update: {
-            grossPay,
-            basicSalary,
-            housing,
-            transport,
-            otherAllowance,
-            payee,
-            pensionDeduction: pension,
-            netSalary,
-            status: 'PROCESSED',
-            uploadedBy: user.userId,
-            updatedAt: new Date(),
-            deductions,
-            bonusKPI,
-            finalGross: grossPay,
-            overtimeIncome,
-            communicationAllowance,
-            transportationAllowance,
-            outstandingIncome,
-            dressing: dressingAllowance,
-            leaveAllowance,
-            entertainment: entertainmentAllowance,
-            utility: utilityAllowance,
-            proratedGrossPay,
-            walletPayment,
-            commercialPayment,
-            employerPension: num(getCell(row, 'Employer Pension Contribution', canonicalMap)),
-            managementFee: num(getCell(row, 'Management Fees', canonicalMap)),
-            vatOnManagementFee: num(getCell(row, 'VAT on Management Fees', canonicalMap)),
-            totalInvoiceValue: num(getCell(row, 'Total Cost', canonicalMap)),
-            templateType: 'BLUERIDGE',
-          },
-          create: {
-            companyId: companyId,
-            staffRecordId: staffRecord.id,
-            month: monthName,
-            year,
-            grossPay,
-            basicSalary,
-            housing,
-            transport,
-            otherAllowance,
-            payee,
-            pensionDeduction: pension,
-            netSalary,
-            status: 'PROCESSED',
-            uploadedBy: user.userId,
-            deductions,
-            bonusKPI,
-            finalGross: grossPay,
-            overtimeIncome,
-            communicationAllowance,
-            transportationAllowance,
-            outstandingIncome,
-            dressing: dressingAllowance,
-            leaveAllowance,
-            entertainment: entertainmentAllowance,
-            utility: utilityAllowance,
-            proratedGrossPay,
-            walletPayment,
-            commercialPayment,
-            employerPension: num(getCell(row, 'Employer Pension Contribution', canonicalMap)),
-            managementFee: num(getCell(row, 'Management Fees', canonicalMap)),
-            vatOnManagementFee: num(getCell(row, 'VAT on Management Fees', canonicalMap)),
-            totalInvoiceValue: num(getCell(row, 'Total Cost', canonicalMap)),
-            templateType: 'BLUERIDGE',
-          },
-        })
+        const payrollData = {
+          companyId: companyId,
+          staffRecordId: staffRecord.id,
+          month: monthName,
+          year,
+          grossPay,
+          basicSalary,
+          housing,
+          transport,
+          otherAllowance,
+          payee,
+          pensionDeduction: pension,
+          netSalary,
+          status: 'PROCESSED',
+          uploadedBy: user.userId,
+          deductions,
+          bonusKPI,
+          finalGross: grossPay,
+          overtimeIncome,
+          communicationAllowance,
+          transportationAllowance,
+          outstandingIncome,
+          dressing: dressingAllowance,
+          leaveAllowance,
+          entertainment: entertainmentAllowance,
+          utility: utilityAllowance,
+          proratedGrossPay,
+          walletPayment,
+          commercialPayment,
+          employerPension: num(getCell(row, 'Employer Pension Contribution', canonicalMap)),
+          managementFee: num(getCell(row, 'Management Fees', canonicalMap)),
+          vatOnManagementFee: num(getCell(row, 'VAT on Management Fees', canonicalMap)),
+          totalInvoiceValue: num(getCell(row, 'Total Cost', canonicalMap)),
+          templateType: 'BLUERIDGE',
+        }
 
-        const existingPayslip = await prisma.payslip.findFirst({
-          where: {
-            staffRecordId: staffRecord.id,
-            month: monthName,
-            year,
-            companyId: companyId,
-          },
-        })
+        let payrollRecord
+        if (overwriteExisting) {
+          const existingPayroll = await prisma.payroll.findFirst({
+            where: { staffRecordId: staffRecord.id, month: monthName, year, companyId: companyId },
+            orderBy: { createdAt: 'desc' },
+          })
+          if (existingPayroll) {
+            payrollRecord = await prisma.payroll.update({
+              where: { id: existingPayroll.id },
+              data: { ...payrollData, updatedAt: new Date() },
+            })
+          } else {
+            payrollRecord = await prisma.payroll.create({ data: payrollData })
+          }
+        } else {
+          payrollRecord = await prisma.payroll.create({ data: payrollData })
+        }
 
         let payslipId = ''
         let isUpdate = false
@@ -578,20 +546,38 @@ export const processBlueridgeTemplate = {
           filePath: `/database/payslips/${staffRecord.staffId}/${year}/${monthName}/${payslipFileName}`,
         }
 
-        if (existingPayslip) {
-          isUpdate = true
-          payslipId = existingPayslip.id
-          
-          await prisma.payslip.update({
-            where: { id: existingPayslip.id },
-            data: {
-              ...payslipData,
-              updatedBy: user.userId,
-              updatedAt: new Date(),
+        if (overwriteExisting) {
+          const existingPayslip = await prisma.payslip.findFirst({
+            where: {
+              payrollId: payrollRecord.id,
+              staffRecordId: staffRecord.id,
+              month: monthName,
+              year,
+              companyId: companyId,
             },
           })
-
-          results.payslipsUpdated++
+          if (existingPayslip) {
+            isUpdate = true
+            payslipId = existingPayslip.id
+            await prisma.payslip.update({
+              where: { id: existingPayslip.id },
+              data: { ...payslipData, updatedBy: user.userId, updatedAt: new Date() },
+            })
+            results.payslipsUpdated++
+          } else {
+            const newPayslip = await prisma.payslip.create({
+              data: {
+                ...payslipData,
+                staffRecordId: staffRecord.id,
+                companyId: companyId,
+                month: monthName,
+                year,
+                createdBy: user.userId,
+                updatedBy: user.userId,
+              },
+            })
+            payslipId = newPayslip.id
+          }
         } else {
           const newPayslip = await prisma.payslip.create({
             data: {
@@ -604,7 +590,6 @@ export const processBlueridgeTemplate = {
               updatedBy: user.userId,
             },
           })
-          
           payslipId = newPayslip.id
         }
 

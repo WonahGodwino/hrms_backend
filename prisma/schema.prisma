@@ -173,7 +173,7 @@ model Payroll {
   payslips               Payslip[]
   emailLogs              EmailLog[]
 
-  @@unique([staffRecordId, month, year, companyId])
+  @@index([staffRecordId, month, year, companyId])
   @@index([companyId, year, month])
   @@index([templateType])
   @@index([templateId])
@@ -235,6 +235,7 @@ model PayrollUpload {
   templateType      String   @default("ISURF_STANDARD")
   templateId        String?
   sendEmails        Boolean  @default(true)
+  overwriteExisting Boolean  @default(false)
   totalRecords      Int
   successful        Int
   failed            Int

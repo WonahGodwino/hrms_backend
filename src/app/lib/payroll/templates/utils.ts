@@ -278,7 +278,8 @@ export async function createPayrollUploadRecord(
   results: ProcessingResult,
   userId: string,
   processedFilePath?: string | null,
-  templateId?: string | null
+  templateId?: string | null,
+  overwriteExisting?: boolean
 ) {
   return await prisma.payrollUpload.create({
     data: {
@@ -290,6 +291,7 @@ export async function createPayrollUploadRecord(
       templateType,
       templateId: templateId || null,
       sendEmails,
+      overwriteExisting: overwriteExisting ?? false,
       totalRecords: results.successful + results.failed,
       successful: results.successful,
       failed: results.failed,

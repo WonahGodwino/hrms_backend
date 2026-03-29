@@ -107,7 +107,8 @@ export const processDynamicTemplate = {
     companyId: string,
     user: any,
     sendEmails: boolean,
-    templateId?: string
+    templateId?: string,
+    overwriteExisting: boolean = false
   ): Promise<ProcessingResult> {
     const results: ProcessingResult = {
       successful: 0,
@@ -492,25 +493,23 @@ export const processDynamicTemplate = {
         })
 
         // Create or update payroll record with ONLY customFields
-        const payrollRecord = await prisma.payroll.upsert({
-          where: {
-            staffRecordId_month_year_companyId: {
-              staffRecordId: staffRecord.id,
-              month: monthName,
-              year,
-              companyId: companyId,
-            },
-          },
-          update: {
-            ...templateData,
-            customFields: customFields,
-            updatedAt: new Date(),
-          },
-          create: {
-            ...templateData,
-            customFields: customFields,
-          },
-        })
+        let payrollRecord
+        if (overwriteExisting) {
+          const existingPayroll = await prisma.payroll.findFirst({
+            where: { staffRecordId: staffRecord.id, month: monthName, year, companyId: companyId },
+            orderBy: { createdAt: 'desc' },
+          })
+          if (existingPayroll) {
+            payrollRecord = await prisma.payroll.update({
+              where: { id: existingPayroll.id },
+              data: { ...templateData, customFields: customFields, updatedAt: new Date() },
+            })
+          } else {
+            payrollRecord = await prisma.payroll.create({ data: { ...templateData, customFields: customFields } })
+          }
+        } else {
+          payrollRecord = await prisma.payroll.create({ data: { ...templateData, customFields: customFields } })
+        }
 
         // Prepare data for payslip - ONLY fields marked for payslip display
         const earningsForPayslip: any[] = []
@@ -538,15 +537,6 @@ export const processDynamicTemplate = {
         const totalEarnings = earningsForPayslip.reduce((sum, item) => sum + item.value, 0)
         const totalDeductions = deductionsForPayslip.reduce((sum, item) => sum + item.value, 0)
         const netPay = totalEarnings - totalDeductions
-
-        const existingPayslip = await prisma.payslip.findFirst({
-          where: {
-            staffRecordId: staffRecord.id,
-            month: monthName,
-            year,
-            companyId: companyId,
-          },
-        })
 
         let payslipId = ''
         let isUpdate = false
@@ -639,20 +629,38 @@ export const processDynamicTemplate = {
           filePath: `/database/payslips/${staffRecord.staffId}/${year}/${monthName}/${payslipFileName}`,
         }
 
-        if (existingPayslip) {
-          isUpdate = true
-          payslipId = existingPayslip.id
-          
-          await prisma.payslip.update({
-            where: { id: existingPayslip.id },
-            data: {
-              ...payslipData,
-              updatedBy: user.userId,
-              updatedAt: new Date(),
+        if (overwriteExisting) {
+          const existingPayslip = await prisma.payslip.findFirst({
+            where: {
+              payrollId: payrollRecord.id,
+              staffRecordId: staffRecord.id,
+              month: monthName,
+              year,
+              companyId: companyId,
             },
           })
-
-          results.payslipsUpdated++
+          if (existingPayslip) {
+            isUpdate = true
+            payslipId = existingPayslip.id
+            await prisma.payslip.update({
+              where: { id: existingPayslip.id },
+              data: { ...payslipData, updatedBy: user.userId, updatedAt: new Date() },
+            })
+            results.payslipsUpdated++
+          } else {
+            const newPayslip = await prisma.payslip.create({
+              data: {
+                ...payslipData,
+                staffRecordId: staffRecord.id,
+                companyId: companyId,
+                month: monthName,
+                year,
+                createdBy: user.userId,
+                updatedBy: user.userId,
+              },
+            })
+            payslipId = newPayslip.id
+          }
         } else {
           const newPayslip = await prisma.payslip.create({
             data: {
@@ -665,7 +673,6 @@ export const processDynamicTemplate = {
               updatedBy: user.userId,
             },
           })
-          
           payslipId = newPayslip.id
         }
 

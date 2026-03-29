@@ -132,6 +132,7 @@ export async function POST(request: NextRequest) {
     const sendEmails = formData.get('sendEmails') === 'true'
     const companyIdParam = formData.get('companyId') as string | null
     const templateId = formData.get('templateId') as string | null // For dynamic templates
+    const overwriteExisting = formData.get('overwriteExisting') === 'true'
     
     // Get template type from form data if not in URL
     if (!templateType) {
@@ -265,7 +266,8 @@ export async function POST(request: NextRequest) {
           fileExtension || '',
           companyId,
           user,
-          sendEmails
+          sendEmails,
+          overwriteExisting
         )
       } 
       else if (templateType === 'BLUERIDGE') {
@@ -275,7 +277,8 @@ export async function POST(request: NextRequest) {
           fileExtension || '',
           companyId,
           user,
-          sendEmails
+          sendEmails,
+          overwriteExisting
         )
       } 
       else if (templateType === 'DYNAMIC') {
@@ -286,7 +289,8 @@ export async function POST(request: NextRequest) {
           companyId,
           user,
           sendEmails,
-          templateId || undefined
+          templateId || undefined,
+          overwriteExisting
         )
       } 
       else {
@@ -324,7 +328,9 @@ export async function POST(request: NextRequest) {
       sendEmails,
       results,
       user.userId,
-      processedFilePath
+      processedFilePath,
+      templateId,
+      overwriteExisting
     )
 
     // Prepare response
@@ -336,6 +342,7 @@ export async function POST(request: NextRequest) {
         ? (await prisma.payrollTemplate.findUnique({ where: { id: templateId } }))?.templateName 
         : PAYROLL_TEMPLATES[templateType as keyof typeof PAYROLL_TEMPLATES]?.name,
       sendEmails: sendEmails,
+      overwriteExisting: overwriteExisting,
       summary: {
         totalProcessed: results.successful + results.failed,
         successful: results.successful,
