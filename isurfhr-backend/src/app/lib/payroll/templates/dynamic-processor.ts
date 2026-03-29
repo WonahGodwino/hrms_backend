@@ -492,25 +492,28 @@ export const processDynamicTemplate = {
         })
 
         // Create or update payroll record with ONLY customFields
-        const payrollRecord = await prisma.payroll.upsert({
-          where: {
-            staffRecordId_month_year_companyId: {
-              staffRecordId: staffRecord.id,
-              month: monthName,
-              year,
-              companyId: companyId,
-            },
-          },
-          update: {
-            ...templateData,
-            customFields: customFields,
-            updatedAt: new Date(),
-          },
-          create: {
-            ...templateData,
-            customFields: customFields,
-          },
+        let payrollRecord
+        const existingPayroll = await prisma.payroll.findFirst({
+          where: { staffRecordId: staffRecord.id, month: monthName, year, companyId: companyId },
+          orderBy: { createdAt: 'desc' },
         })
+        if (existingPayroll) {
+          payrollRecord = await prisma.payroll.update({
+            where: { id: existingPayroll.id },
+            data: {
+              ...templateData,
+              customFields: customFields,
+              updatedAt: new Date(),
+            },
+          })
+        } else {
+          payrollRecord = await prisma.payroll.create({
+            data: {
+              ...templateData,
+              customFields: customFields,
+            },
+          })
+        }
 
         // Prepare data for payslip - ONLY fields marked for payslip display
         const earningsForPayslip: any[] = []

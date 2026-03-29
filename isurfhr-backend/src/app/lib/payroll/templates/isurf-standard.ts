@@ -292,78 +292,52 @@ export const processIsurfStandardTemplate = {
         )
         const periodMonth = monthNameToNumber(monthName)
 
-        const payrollRecord = await prisma.payroll.upsert({
-          where: {
-            staffRecordId_month_year_companyId: {
-              staffRecordId: staffRecord.id,
-              month: monthName,
-              year,
-              companyId: companyId,
-            },
-          },
-          update: {
-            companyId: companyId,
-            month: monthName,
-            year,
-            grossPay,
-            proratedGrossPay: num(getCell(row, 'Prorated Gross Pay', canonicalMap)),
-            basicSalary,
-            housing,
-            transport,
-            dressing,
-            leaveAllowance,
-            entertainment,
-            utility,
-            deductions: deduction,
-            payee,
-            pensionDeduction: pension,
-            bonusKPI,
-            netSalary,
-            finalGross: num(getCell(row, 'FINAL GROSS', canonicalMap)),
-            medicalContribution: num(getCell(row, 'Medical Contribution', canonicalMap)),
-            employerPension: num(getCell(row, 'Employer Pension', canonicalMap)),
-            nsitf: num(getCell(row, 'NSITF', canonicalMap)),
-            // Note: 'Prorated Sub Total Invoice' field doesn't exist in model - removed
-            managementFee: num(getCell(row, 'Mgt Fee', canonicalMap)),
-            vatOnManagementFee: num(getCell(row, 'Vat on Management Fee @7.5%', canonicalMap)),
-            totalInvoiceValue: num(getCell(row, 'Total Invoice Value', canonicalMap)),
-            status: 'PROCESSED',
-            uploadedBy: user.userId,
-            updatedAt: new Date(),
-            templateType: 'ISURF_STANDARD',
-          },
-          create: {
-            companyId: companyId,
-            staffRecordId: staffRecord.id,
-            month: monthName,
-            year,
-            grossPay,
-            proratedGrossPay: num(getCell(row, 'Prorated Gross Pay', canonicalMap)),
-            basicSalary,
-            housing,
-            transport,
-            dressing,
-            leaveAllowance,
-            entertainment,
-            utility,
-            deductions: deduction,
-            payee,
-            pensionDeduction: pension,
-            bonusKPI,
-            netSalary,
-            finalGross: num(getCell(row, 'FINAL GROSS', canonicalMap)),
-            medicalContribution: num(getCell(row, 'Medical Contribution', canonicalMap)),
-            employerPension: num(getCell(row, 'Employer Pension', canonicalMap)),
-            nsitf: num(getCell(row, 'NSITF', canonicalMap)),
-            // Note: 'Prorated Sub Total Invoice' field doesn't exist in model - removed
-            managementFee: num(getCell(row, 'Mgt Fee', canonicalMap)),
-            vatOnManagementFee: num(getCell(row, 'Vat on Management Fee @7.5%', canonicalMap)),
-            totalInvoiceValue: num(getCell(row, 'Total Invoice Value', canonicalMap)),
-            status: 'PROCESSED',
-            uploadedBy: user.userId,
-            templateType: 'ISURF_STANDARD',
-          },
+        const payrollData = {
+          companyId: companyId,
+          month: monthName,
+          year,
+          grossPay,
+          proratedGrossPay: num(getCell(row, 'Prorated Gross Pay', canonicalMap)),
+          basicSalary,
+          housing,
+          transport,
+          dressing,
+          leaveAllowance,
+          entertainment,
+          utility,
+          deductions: deduction,
+          payee,
+          pensionDeduction: pension,
+          bonusKPI,
+          netSalary,
+          finalGross: num(getCell(row, 'FINAL GROSS', canonicalMap)),
+          medicalContribution: num(getCell(row, 'Medical Contribution', canonicalMap)),
+          employerPension: num(getCell(row, 'Employer Pension', canonicalMap)),
+          nsitf: num(getCell(row, 'NSITF', canonicalMap)),
+          // Note: 'Prorated Sub Total Invoice' field doesn't exist in model - removed
+          managementFee: num(getCell(row, 'Mgt Fee', canonicalMap)),
+          vatOnManagementFee: num(getCell(row, 'Vat on Management Fee @7.5%', canonicalMap)),
+          totalInvoiceValue: num(getCell(row, 'Total Invoice Value', canonicalMap)),
+          status: 'PROCESSED',
+          uploadedBy: user.userId,
+          templateType: 'ISURF_STANDARD',
+        }
+
+        let payrollRecord
+        const existingPayroll = await prisma.payroll.findFirst({
+          where: { staffRecordId: staffRecord.id, month: monthName, year, companyId: companyId },
+          orderBy: { createdAt: 'desc' },
         })
+        if (existingPayroll) {
+          payrollRecord = await prisma.payroll.update({
+            where: { id: existingPayroll.id },
+            data: { ...payrollData, updatedAt: new Date() },
+          })
+        } else {
+          payrollRecord = await prisma.payroll.create({
+            data: { ...payrollData, staffRecordId: staffRecord.id },
+          })
+        }
 
         const existingPayslip = await prisma.payslip.findFirst({
           where: {
