@@ -549,12 +549,12 @@ export const processBlueridgeTemplate = {
         if (overwriteExisting) {
           const existingPayslip = await prisma.payslip.findFirst({
             where: {
-              payrollId: payrollRecord.id,
               staffRecordId: staffRecord.id,
               month: monthName,
               year,
               companyId: companyId,
             },
+            orderBy: { createdAt: 'desc' },
           })
           if (existingPayslip) {
             isUpdate = true
