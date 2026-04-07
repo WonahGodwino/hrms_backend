@@ -361,10 +361,24 @@ export const processDynamicTemplate = {
       })
     }
 
+    const getFieldByIntent = (includeTokens: string[], excludeTokens: string[] = []) => {
+      return template.fields.find((f) => {
+        const normalizedSystem = normalizeHeader(f.systemField || '')
+        const normalizedDisplay = normalizeHeader(f.displayName || '')
+        const haystacks = [normalizedSystem, normalizedDisplay]
+
+        const hasInclude = includeTokens.some((token) => haystacks.some((value) => value.includes(token)))
+        if (!hasInclude) return false
+
+        const hasExclude = excludeTokens.some((token) => haystacks.some((value) => value.includes(token)))
+        return !hasExclude
+      })
+    }
+
     const staffIdField = getTemplateField(['staffid', 'employeeid'])
     const nameField = getTemplateField(['staffname', 'employeename', 'fullname', 'name'])
     const emailField = getTemplateField(['email'])
-    const payPeriodField = getTemplateField(['payperiod', 'salarymonth', 'paymonth'])
+    const payPeriodField = getFieldByIntent(['payperiod', 'salarymonth', 'paymonth'])
       || template.fields.find((f) => {
         const normalizedSystem = normalizeHeader(f.systemField || '')
         const normalizedDisplay = normalizeHeader(f.displayName || '')
@@ -372,8 +386,14 @@ export const processDynamicTemplate = {
         const isDaysInMonth = normalizedSystem.includes('daysinmonth') || normalizedDisplay.includes('daysinmonth')
         return containsMonth && !isDaysInMonth
       })
-    const daysInMonthField = getTemplateField(['numberofdaysinamonth', 'daysinmonth', 'noofdaysinamonth'])
-    const daysWorkedField = getTemplateField(['numberofdaysworked', 'daysworked', 'noofdaysworked', 'dayspresent'])
+    const daysInMonthField = getFieldByIntent(
+      ['numberofdaysinamonth', 'daysinmonth', 'noofdaysinamonth'],
+      ['daysworked', 'numberofdaysworked', 'noofdaysworked', 'dayspresent']
+    )
+    const daysWorkedField = getFieldByIntent(
+      ['numberofdaysworked', 'daysworked', 'noofdaysworked', 'dayspresent'],
+      ['daysinmonth', 'numberofdaysinamonth', 'noofdaysinamonth']
+    )
 
     for (let index = 0; index < data.length; index++) {
       const row = data[index]
