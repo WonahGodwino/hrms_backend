@@ -25,8 +25,31 @@ function isMetaRowMarker(value: any): boolean {
 function num(v: any): number {
   if (v === null || v === undefined || v === '') return 0
   if (typeof v === 'number' && !isNaN(v)) return v
+  if (typeof v === 'object') {
+    if ('result' in v) return num((v as any).result)
+    if ('text' in v) return num((v as any).text)
+    if (Array.isArray((v as any).richText)) {
+      const richText = (v as any).richText.map((part: any) => part?.text || '').join('')
+      return num(richText)
+    }
+  }
   const parsed = Number(v)
   return Number.isFinite(parsed) ? parsed : 0
+}
+
+function valueToString(v: any): string {
+  if (v === null || v === undefined) return ''
+  if (typeof v === 'string') return v.trim()
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v).trim()
+  if (v instanceof Date) return v.toISOString().split('T')[0]
+  if (typeof v === 'object') {
+    if ('result' in v) return valueToString((v as any).result)
+    if ('text' in v) return valueToString((v as any).text)
+    if (Array.isArray((v as any).richText)) {
+      return (v as any).richText.map((part: any) => part?.text || '').join('').trim()
+    }
+  }
+  return String(v).trim()
 }
 
 function monthNameToNumber(month: string): number {
@@ -38,11 +61,21 @@ function monthNameToNumber(month: string): number {
   ]
   const idx = months.indexOf(normalized)
   if (idx >= 0) return idx + 1
+
+  const includedMonthIndex = months.findIndex((name) => normalized.includes(name))
+  if (includedMonthIndex >= 0) return includedMonthIndex + 1
   
   const asNumber = Number(normalized)
   if (Number.isFinite(asNumber) && asNumber >= 1 && asNumber <= 12) {
     return asNumber
   }
+
+  try {
+    const date = new Date(month)
+    if (!isNaN(date.getTime())) {
+      return date.getMonth() + 1
+    }
+  } catch {}
   
   return new Date().getMonth() + 1
 }
@@ -320,13 +353,27 @@ export const processDynamicTemplate = {
       }
     })
 
-    // Group fields by section for organization
-    const fieldsBySection = {
-      STAFF_DETAILS: template.fields.filter(f => f.section === 'STAFF_DETAILS'),
-      FIXED_EARNINGS: template.fields.filter(f => f.section === 'FIXED_EARNINGS'),
-      EARNINGS: template.fields.filter(f => f.section === 'EARNINGS'),
-      DEDUCTIONS: template.fields.filter(f => f.section === 'DEDUCTIONS')
+    const getTemplateField = (keywords: string[]) => {
+      return template.fields.find((f) => {
+        const normalizedSystem = normalizeHeader(f.systemField || '')
+        const normalizedDisplay = normalizeHeader(f.displayName || '')
+        return keywords.some((keyword) => normalizedSystem.includes(keyword) || normalizedDisplay.includes(keyword))
+      })
     }
+
+    const staffIdField = getTemplateField(['staffid', 'employeeid'])
+    const nameField = getTemplateField(['staffname', 'employeename', 'fullname', 'name'])
+    const emailField = getTemplateField(['email'])
+    const payPeriodField = getTemplateField(['payperiod', 'salarymonth', 'paymonth'])
+      || template.fields.find((f) => {
+        const normalizedSystem = normalizeHeader(f.systemField || '')
+        const normalizedDisplay = normalizeHeader(f.displayName || '')
+        const containsMonth = normalizedSystem.includes('month') || normalizedDisplay.includes('month')
+        const isDaysInMonth = normalizedSystem.includes('daysinmonth') || normalizedDisplay.includes('daysinmonth')
+        return containsMonth && !isDaysInMonth
+      })
+    const daysInMonthField = getTemplateField(['numberofdaysinamonth', 'daysinmonth', 'noofdaysinamonth'])
+    const daysWorkedField = getTemplateField(['numberofdaysworked', 'daysworked', 'noofdaysworked', 'dayspresent'])
 
     for (let index = 0; index < data.length; index++) {
       const row = data[index]
@@ -335,45 +382,32 @@ export const processDynamicTemplate = {
       let rawEmail = ''
       let staffId = ''
       let monthValue = ''
+      let daysInMonth = 0
+      let daysWorked = 0
       
       try {
-        // Get staff identification fields from template
-        const staffIdField = template.fields.find(f => 
-          f.systemField.toLowerCase().includes('staffid') || 
-          f.systemField.toLowerCase().includes('employeeid') ||
-          f.displayName.toLowerCase().includes('staff id') ||
-          f.displayName.toLowerCase().includes('employee id')
-        )
-        
-        const nameField = template.fields.find(f => 
-          f.systemField.toLowerCase().includes('name') || 
-          f.displayName.toLowerCase().includes('name')
-        )
-        
-        const emailField = template.fields.find(f => 
-          f.systemField.toLowerCase().includes('email') || 
-          f.displayName.toLowerCase().includes('email')
-        )
-        
-        const monthField = template.fields.find(f => 
-          f.systemField.toLowerCase().includes('month') || 
-          f.displayName.toLowerCase().includes('month')
-        )
-
         if (staffIdField) {
-          staffId = row[staffIdField.systemField]?.toString().trim() || ''
+          staffId = valueToString(row[staffIdField.systemField])
         }
         
         if (nameField) {
-          rawName = row[nameField.systemField]?.toString().trim() || ''
+          rawName = valueToString(row[nameField.systemField])
         }
         
         if (emailField) {
-          rawEmail = row[emailField.systemField]?.toString().trim() || ''
+          rawEmail = valueToString(row[emailField.systemField])
         }
         
-        if (monthField) {
-          monthValue = row[monthField.systemField]?.toString().trim() || ''
+        if (payPeriodField) {
+          monthValue = valueToString(row[payPeriodField.systemField])
+        }
+
+        if (daysInMonthField) {
+          daysInMonth = num(row[daysInMonthField.systemField])
+        }
+
+        if (daysWorkedField) {
+          daysWorked = num(row[daysWorkedField.systemField])
         }
 
         // Validate required fields from template
@@ -573,8 +607,8 @@ export const processDynamicTemplate = {
             payee: 0,
             pension: 0,
             netPay: netPay,
-            daysInMonth: 0,
-            daysWorked: 0,
+            daysInMonth,
+            daysWorked,
             rawRow: row,
             bonusKPI: 0,
             deductions: totalDeductions,
