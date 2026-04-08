@@ -52,6 +52,15 @@ function valueToString(v: any): string {
   return String(v).trim()
 }
 
+function normalizeWords(input: string): string[] {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+}
+
 function monthNameToNumber(month: string): number {
   if (!month) return new Date().getMonth() + 1
   const normalized = month.toString().trim().toLowerCase()
@@ -375,6 +384,80 @@ export const processDynamicTemplate = {
       })
     }
 
+    const buildFieldSearchText = (field: any): string => {
+      const aliasText = Array.isArray(field.aliases)
+        ? field.aliases.filter((a: any) => typeof a === 'string').join(' ')
+        : ''
+      return `${field.systemField || ''} ${field.displayName || ''} ${aliasText}`.trim()
+    }
+
+    const pickBestAttendanceField = (
+      mode: 'daysInMonth' | 'daysWorked',
+      excludedFieldIds: Set<string> = new Set()
+    ) => {
+      let bestField: any = null
+      let bestScore = -1
+
+      template.fields.forEach((field) => {
+        const fieldId = String(field.id || '')
+        if (fieldId && excludedFieldIds.has(fieldId)) return
+
+        const rawText = buildFieldSearchText(field)
+        const normalized = normalizeHeader(rawText)
+        const words = new Set(normalizeWords(rawText))
+
+        const hasDayWord = words.has('day') || words.has('days') || normalized.includes('day')
+        if (!hasDayWord) return
+
+        const hasMonthSignal =
+          words.has('month') ||
+          normalized.includes('month') ||
+          normalized.includes('daysinmonth') ||
+          normalized.includes('daysinthemonth') ||
+          normalized.includes('monthdays')
+
+        const hasWorkedSignal =
+          words.has('worked') ||
+          words.has('work') ||
+          words.has('working') ||
+          words.has('present') ||
+          words.has('attendance') ||
+          words.has('attended') ||
+          normalized.includes('daysworked') ||
+          normalized.includes('workingdays') ||
+          normalized.includes('dayspresent') ||
+          normalized.includes('attendancedays')
+
+        let score = 0
+
+        if (mode === 'daysInMonth') {
+          if (normalized.includes('numberofdaysinamonth')) score += 10
+          if (normalized.includes('daysinmonth')) score += 8
+          if (normalized.includes('daysinthemonth')) score += 8
+          if (normalized.includes('monthdays')) score += 7
+          if (hasMonthSignal) score += 4
+          if (hasWorkedSignal) score -= 8
+        } else {
+          if (normalized.includes('numberofdaysworked')) score += 10
+          if (normalized.includes('daysworked')) score += 8
+          if (normalized.includes('workingdays')) score += 8
+          if (normalized.includes('dayspresent')) score += 8
+          if (normalized.includes('attendancedays')) score += 7
+          if (hasWorkedSignal) score += 4
+          if (hasMonthSignal && !hasWorkedSignal) score -= 8
+        }
+
+        if (score <= 0) return
+
+        if (score > bestScore) {
+          bestField = field
+          bestScore = score
+        }
+      })
+
+      return bestField
+    }
+
     const staffIdField = getTemplateField(['staffid', 'employeeid'])
     const nameField = getTemplateField(['staffname', 'employeename', 'fullname', 'name'])
     const emailField = getTemplateField(['email'])
@@ -386,14 +469,21 @@ export const processDynamicTemplate = {
         const isDaysInMonth = normalizedSystem.includes('daysinmonth') || normalizedDisplay.includes('daysinmonth')
         return containsMonth && !isDaysInMonth
       })
-    const daysInMonthField = getFieldByIntent(
-      ['numberofdaysinamonth', 'daysinmonth', 'noofdaysinamonth'],
-      ['daysworked', 'numberofdaysworked', 'noofdaysworked', 'dayspresent']
+    const strictDaysInMonthField = getFieldByIntent(
+      ['numberofdaysinamonth', 'daysinmonth', 'noofdaysinamonth', 'daysinthemonth', 'monthdays'],
+      ['daysworked', 'numberofdaysworked', 'noofdaysworked', 'dayspresent', 'workingdays']
     )
-    const daysWorkedField = getFieldByIntent(
-      ['numberofdaysworked', 'daysworked', 'noofdaysworked', 'dayspresent'],
-      ['daysinmonth', 'numberofdaysinamonth', 'noofdaysinamonth']
+    const strictDaysWorkedField = getFieldByIntent(
+      ['numberofdaysworked', 'daysworked', 'noofdaysworked', 'dayspresent', 'workingdays', 'attendancedays'],
+      ['daysinmonth', 'numberofdaysinamonth', 'noofdaysinamonth', 'daysinthemonth', 'monthdays']
     )
+
+    const usedAttendanceFieldIds = new Set<string>()
+    const daysInMonthField = strictDaysInMonthField || pickBestAttendanceField('daysInMonth', usedAttendanceFieldIds)
+    if (daysInMonthField?.id) {
+      usedAttendanceFieldIds.add(String(daysInMonthField.id))
+    }
+    const daysWorkedField = strictDaysWorkedField || pickBestAttendanceField('daysWorked', usedAttendanceFieldIds)
 
     for (let index = 0; index < data.length; index++) {
       const row = data[index]
