@@ -235,12 +235,35 @@ export async function GET(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = requireRole(token, ['SUPER_ADMIN', 'ADMIN'])
 
+    let adminCompanyScope: string[] = []
+    if (user.role === 'ADMIN') {
+      const adminAssignments = await prisma.userCompany.findMany({
+        where: { userId: user.userId },
+        select: { companyId: true }
+      })
+      adminCompanyScope = adminAssignments.map((assignment) => assignment.companyId)
+
+      if (adminCompanyScope.length === 0) {
+        return withCors(
+          ApiResponse.error('No companies assigned to your account', 403),
+          origin
+        )
+      }
+    }
+
     const { searchParams } = new URL(request.url)
     const userId = searchParams.get('userId')
     const companyId = searchParams.get('companyId')
 
     // If both userId and companyId are provided, get specific assignment
     if (userId && companyId) {
+      if (user.role === 'ADMIN' && !adminCompanyScope.includes(companyId)) {
+        return withCors(
+          ApiResponse.error('Access denied to selected company', 403),
+          origin
+        )
+      }
+
       const assignment = await prisma.userCompany.findUnique({
         where: {
           userId_companyId: {
@@ -283,7 +306,10 @@ export async function GET(request: NextRequest) {
     // If only userId is provided, get all companies for that user
     if (userId) {
       const userAssignments = await prisma.userCompany.findMany({
-        where: { userId },
+        where: {
+          userId,
+          ...(user.role === 'ADMIN' ? { companyId: { in: adminCompanyScope } } : {})
+        },
         include: {
           company: {
             select: {
@@ -306,6 +332,13 @@ export async function GET(request: NextRequest) {
 
     // If only companyId is provided, get all users for that company
     if (companyId) {
+      if (user.role === 'ADMIN' && !adminCompanyScope.includes(companyId)) {
+        return withCors(
+          ApiResponse.error('Access denied to selected company', 403),
+          origin
+        )
+      }
+
       const companyAssignments = await prisma.userCompany.findMany({
         where: { companyId },
         include: {
@@ -329,10 +362,36 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // If no specific parameters, get all assignments (only for SUPER_ADMIN)
-    if (user.role !== 'SUPER_ADMIN') {
+    // If no specific parameters, SUPER_ADMIN gets all; ADMIN gets scoped assignments.
+    if (user.role === 'ADMIN') {
+      const scopedAssignments = await prisma.userCompany.findMany({
+        where: {
+          companyId: { in: adminCompanyScope }
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true
+            }
+          },
+          company: {
+            select: {
+              id: true,
+              companyName: true,
+              email: true
+            }
+          }
+        },
+        orderBy: {
+          createdAt: 'desc'
+        }
+      })
+
       return withCors(
-        ApiResponse.error('Only SUPER_ADMIN can view all assignments', 403),
+        ApiResponse.success(scopedAssignments, 'Scoped assignments retrieved successfully'),
         origin
       )
     }
