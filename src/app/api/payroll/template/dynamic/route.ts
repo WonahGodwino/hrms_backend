@@ -5,6 +5,38 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
+function normalizeTemplateSectionKey(sectionName: string): string {
+  const normalized = sectionName
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_')
+
+  if (normalized === 'FIXED_VALUE') return 'FIXED_VALUE'
+  if (normalized === 'FIXED_EARNINGS') return 'FIXED_EARNINGS'
+  if (normalized === 'STAFF_DETAILS') return 'STAFF_DETAILS'
+  if (normalized === 'EARNINGS') return 'EARNINGS'
+  if (normalized === 'DEDUCTIONS') return 'DEDUCTIONS'
+
+  return normalized
+}
+
+function normalizeTemplateSections(sections: any): Record<string, any[]> {
+  const normalizedSections: Record<string, any[]> = {
+    STAFF_DETAILS: [],
+    FIXED_EARNINGS: [],
+    FIXED_VALUE: [],
+    EARNINGS: [],
+    DEDUCTIONS: []
+  }
+
+  Object.entries(sections || {}).forEach(([key, value]) => {
+    const normalizedKey = normalizeTemplateSectionKey(key)
+    if (!(normalizedKey in normalizedSections)) return
+    normalizedSections[normalizedKey] = Array.isArray(value) ? value : []
+  })
+
+  return normalizedSections
+}
+
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
@@ -92,12 +124,14 @@ export async function POST(request: NextRequest) {
     const user = await requireRole(token, ['SUPER_ADMIN', 'HR', 'ADMIN'])
 
     const body = await request.json()
-    const { 
+    const {
       companyId, 
       templateName,
       sections,
       isSystem = false 
     } = body
+
+    const normalizedSections = normalizeTemplateSections(sections)
 
     // Validation
     if (!companyId) {
@@ -151,7 +185,7 @@ export async function POST(request: NextRequest) {
         data: {
           companyId: isSystem ? 'SYSTEM' : companyId, // Use 'SYSTEM' as placeholder for system templates
           templateName,
-          sections,
+          sections: normalizedSections,
           isSystem,
           createdBy: user.userId
         }
@@ -162,10 +196,10 @@ export async function POST(request: NextRequest) {
       let order = 0
 
       // Expected sections
-      const sectionOrder = ['STAFF_DETAILS', 'FIXED_EARNINGS', 'EARNINGS', 'DEDUCTIONS']
+      const sectionOrder = ['STAFF_DETAILS', 'FIXED_EARNINGS', 'FIXED_VALUE', 'EARNINGS', 'DEDUCTIONS']
 
       for (const sectionName of sectionOrder) {
-        const sectionFields = sections[sectionName] || []
+        const sectionFields = normalizedSections[sectionName] || []
         
         for (const field of sectionFields) {
           // Validate required field properties
@@ -237,11 +271,13 @@ export async function PUT(request: NextRequest) {
     const user = await requireRole(token, ['SUPER_ADMIN', 'HR', 'ADMIN'])
 
     const body = await request.json()
-    const { 
+    const {
       templateId,
       templateName,
       sections
     } = body
+
+    const normalizedSections = sections ? normalizeTemplateSections(sections) : null
 
     if (!templateId) {
       return withCors(ApiResponse.error('Template ID is required', 400), origin)
@@ -277,21 +313,21 @@ export async function PUT(request: NextRequest) {
         where: { id: templateId },
         data: {
           templateName: templateName || existingTemplate.templateName,
-          sections: sections || existingTemplate.sections,
+          sections: normalizedSections ? (normalizedSections as any) : ((existingTemplate.sections ?? {}) as any),
           updatedBy: user.userId,
           updatedAt: new Date()
         }
       })
 
       // Create new fields if provided
-      if (sections) {
+      if (normalizedSections) {
         const fields: any[] = []
         let order = 0
 
-        const sectionOrder = ['STAFF_DETAILS', 'FIXED_EARNINGS', 'EARNINGS', 'DEDUCTIONS']
+        const sectionOrder = ['STAFF_DETAILS', 'FIXED_EARNINGS', 'FIXED_VALUE', 'EARNINGS', 'DEDUCTIONS']
 
         for (const sectionName of sectionOrder) {
-          const sectionFields = sections[sectionName] || []
+          const sectionFields = normalizedSections[sectionName] || []
           
           for (const field of sectionFields) {
             fields.push({

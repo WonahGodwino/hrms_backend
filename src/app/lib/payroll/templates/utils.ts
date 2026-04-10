@@ -8,6 +8,10 @@ import type {
   ProcessingResult
 } from './types'
 
+function normalizeSection(section?: string): string {
+  return (section || '').toUpperCase().replace(/[\s-]+/g, '_')
+}
+
 /**
  * Get payroll record with custom fields and related data
  */
@@ -112,16 +116,18 @@ export function getPayslipDisplayFields(
     
     if (value <= 0) return
 
+    const normalizedSection = normalizeSection(field.section)
+
     const item: PayslipDisplayItem = {
       label: field.displayName,
       value,
       dataType: field.dataType,
       isCustom: true,
-      section: field.section,
-      type: field.section === 'DEDUCTIONS' ? 'deduction' : 'earnings'
+      section: normalizedSection,
+      type: normalizedSection === 'DEDUCTIONS' ? 'deduction' : 'earnings'
     }
 
-    if (field.section === 'DEDUCTIONS') {
+    if (normalizedSection === 'DEDUCTIONS') {
       deductions.push(item)
     } else {
       earnings.push(item)
@@ -152,7 +158,10 @@ export function calculateTotals(
   totalDeductions: number
   netPay: number
 } {
-  const grossPay = earnings.reduce((sum, item) => sum + item.value, 0)
+  // FIXED_VALUE items are informational and must not affect gross/net pay calculations.
+  const grossPay = earnings
+    .filter((item) => item.section !== 'FIXED_VALUE')
+    .reduce((sum, item) => sum + item.value, 0)
   const totalDeductions = deductions.reduce((sum, item) => sum + item.value, 0)
   const netPay = grossPay - totalDeductions
 

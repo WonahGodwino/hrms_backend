@@ -2,6 +2,10 @@
 import { prisma } from '@/app/lib/db'
 import type { CustomFieldValue, PayslipDisplayItem } from './templates/types'
 
+function normalizeSection(section?: string): string {
+  return (section || '').toUpperCase().replace(/[\s-]+/g, '_')
+}
+
 function isCustomFieldValue(value: unknown): value is CustomFieldValue {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as Record<string, unknown>
@@ -57,16 +61,18 @@ export async function getPayslipWithDetails(payslipId: string) {
       
       if (value <= 0) return
 
+      const normalizedSection = normalizeSection(field.section)
+
       const item: PayslipDisplayItem = {
         label: field.displayName,
         value,
         dataType: field.dataType,
         isCustom: true,
-        section: field.section,
-        type: field.section === 'DEDUCTIONS' ? 'deduction' : 'earnings'
+        section: normalizedSection,
+        type: normalizedSection === 'DEDUCTIONS' ? 'deduction' : 'earnings'
       }
 
-      if (field.section === 'DEDUCTIONS') {
+      if (normalizedSection === 'DEDUCTIONS') {
         deductions.push(item)
       } else {
         earnings.push(item)

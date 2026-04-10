@@ -6,6 +6,10 @@ import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
 
+function normalizeSection(section: string): string {
+  return (section || '').toUpperCase().replace(/[\s-]+/g, '_')
+}
+
 function toCsv(data: any[][]): string {
   return data
     .map((row) =>
@@ -94,10 +98,11 @@ export async function GET(request: NextRequest) {
 
     // Group fields by section
     const sections = {
-      STAFF_DETAILS: template.fields.filter(f => f.section === 'STAFF_DETAILS'),
-      FIXED_EARNINGS: template.fields.filter(f => f.section === 'FIXED_EARNINGS'),
-      EARNINGS: template.fields.filter(f => f.section === 'EARNINGS'),
-      DEDUCTIONS: template.fields.filter(f => f.section === 'DEDUCTIONS')
+      STAFF_DETAILS: template.fields.filter(f => normalizeSection(f.section) === 'STAFF_DETAILS'),
+      FIXED_EARNINGS: template.fields.filter(f => normalizeSection(f.section) === 'FIXED_EARNINGS'),
+      FIXED_VALUE: template.fields.filter(f => normalizeSection(f.section) === 'FIXED_VALUE'),
+      EARNINGS: template.fields.filter(f => normalizeSection(f.section) === 'EARNINGS'),
+      DEDUCTIONS: template.fields.filter(f => normalizeSection(f.section) === 'DEDUCTIONS')
     }
 
     const getSampleValue = (dataType: string): string => {
@@ -137,6 +142,11 @@ export async function GET(request: NextRequest) {
         ? `${field.displayName}* [Fixed Earnings]`
         : `${field.displayName} [Fixed Earnings]`
     )
+    const fixedValueHeaders = sections.FIXED_VALUE.map((field) =>
+      field.required
+        ? `${field.displayName}* [Fixed Value]`
+        : `${field.displayName} [Fixed Value]`
+    )
     const earningsHeaders = sections.EARNINGS.map((field) =>
       field.required
         ? `${field.displayName}* [Variable Earnings]`
@@ -152,6 +162,7 @@ export async function GET(request: NextRequest) {
       ...baseStaffHeaders.map((label) => ({ label, section: 'STAFF_DETAILS' as const })),
       ...staffCustomHeaders.map((label) => ({ label, section: 'STAFF_DETAILS' as const })),
       ...fixedHeaders.map((label) => ({ label, section: 'FIXED_EARNINGS' as const })),
+      ...fixedValueHeaders.map((label) => ({ label, section: 'FIXED_VALUE' as const })),
       ...earningsHeaders.map((label) => ({ label, section: 'EARNINGS' as const })),
       ...deductionHeaders.map((label) => ({ label, section: 'DEDUCTIONS' as const }))
     ]
@@ -166,6 +177,7 @@ export async function GET(request: NextRequest) {
       'john@example.com',
       ...staffCustomFields.map((field) => getSampleValue(field.dataType)),
       ...sections.FIXED_EARNINGS.map((field) => getSampleValue(field.dataType)),
+      ...sections.FIXED_VALUE.map((field) => getSampleValue(field.dataType)),
       ...sections.EARNINGS.map((field) => getSampleValue(field.dataType)),
       ...sections.DEDUCTIONS.map((field) => getSampleValue(field.dataType))
     ]
@@ -220,6 +232,7 @@ export async function GET(request: NextRequest) {
     const sectionStyles: Record<string, { fill: string; font: string }> = {
       STAFF_DETAILS: { fill: 'FFDCEBFF', font: 'FF1E3A8A' },
       FIXED_EARNINGS: { fill: 'FFE6F7EC', font: 'FF14532D' },
+      FIXED_VALUE: { fill: 'FFE3F2FD', font: 'FF0C4A6E' },
       EARNINGS: { fill: 'FFFFF3D6', font: 'FF92400E' },
       DEDUCTIONS: { fill: 'FFFDE2E2', font: 'FF991B1B' }
     }

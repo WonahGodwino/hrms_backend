@@ -17,6 +17,10 @@ function normalizeHeader(h: string): string {
     .replace(/[^a-z0-9]/g, '')
 }
 
+function normalizeSection(section: string): string {
+  return (section || '').toUpperCase().replace(/[\s-]+/g, '_')
+}
+
 function isMetaRowMarker(value: any): boolean {
   const normalized = normalizeHeader(value?.toString() || '')
   return normalized === 'instructions' || normalized === 'templatefields'
@@ -658,10 +662,12 @@ export const processDynamicTemplate = {
         // Prepare data for payslip - ONLY fields marked for payslip display
         const earningsForPayslip: any[] = []
         const deductionsForPayslip: any[] = []
+        const fixedValuesForPayslip: any[] = []
 
         // Group fields by section for payslip
         Object.values(customFields).forEach((field: any) => {
           if (field.showOnPayslip && field.value && num(field.value) > 0) {
+            const fieldSection = normalizeSection(field.section)
             const payslipItem = {
               label: field.displayName,
               value: num(field.value),
@@ -669,15 +675,17 @@ export const processDynamicTemplate = {
               isCustom: true
             }
 
-            if (field.section === 'FIXED_EARNINGS' || field.section === 'EARNINGS') {
+            if (fieldSection === 'FIXED_EARNINGS' || fieldSection === 'EARNINGS') {
               earningsForPayslip.push({ ...payslipItem, type: 'earnings' })
-            } else if (field.section === 'DEDUCTIONS') {
+            } else if (fieldSection === 'FIXED_VALUE') {
+              fixedValuesForPayslip.push({ ...payslipItem, type: 'earnings', section: 'FIXED_VALUE' })
+            } else if (fieldSection === 'DEDUCTIONS') {
               deductionsForPayslip.push({ ...payslipItem, type: 'deduction' })
             }
           }
         })
 
-        // Calculate totals from template fields only
+        // FIXED_VALUE fields are informational: displayed on payslip but excluded from payroll totals.
         const totalEarnings = earningsForPayslip.reduce((sum, item) => sum + item.value, 0)
         const totalDeductions = deductionsForPayslip.reduce((sum, item) => sum + item.value, 0)
         const netPay = totalEarnings - totalDeductions
@@ -742,7 +750,7 @@ export const processDynamicTemplate = {
             taxId: company.taxId || ''
           } : undefined,
           // Pass ONLY template fields to payslip
-          earnings: earningsForPayslip,
+          earnings: [...earningsForPayslip, ...fixedValuesForPayslip],
           deductions: deductionsForPayslip,
           summary: {
             grossPay: totalEarnings,

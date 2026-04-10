@@ -299,7 +299,7 @@ export const apiDocs: ApiDoc[] = [
     path: '/api/payroll/template/dynamic',
     title: 'Create dynamic payroll template',
     description:
-      'Creates a new custom payroll template for a company. Supports sections: STAFF_DETAILS, FIXED_EARNINGS, EARNINGS, DEDUCTIONS. Each section can have multiple fields with custom properties.',
+      'Creates a new custom payroll template for a company. Supports sections: STAFF_DETAILS, FIXED_EARNINGS, FIXED_VALUE, EARNINGS, DEDUCTIONS. Each section can have multiple fields with custom properties.',
     auth: 'Authorization: Bearer <HR | SUPER_ADMIN | ADMIN token>',
     input: 'JSON body with template structure',
     output:
@@ -317,6 +317,9 @@ export const apiDocs: ApiDoc[] = [
         FIXED_EARNINGS: [
           { displayName: "Basic Salary", systemField: "basic_salary", dataType: "Number", required: true, showOnPayslip: true },
           { displayName: "Housing Allowance", systemField: "housing_allowance", dataType: "Number", required: true, showOnPayslip: true }
+        ],
+        FIXED_VALUE: [
+          { displayName: "Loan Code", systemField: "loan_code", dataType: "Text", required: false, showOnPayslip: true }
         ],
         EARNINGS: [
           { displayName: "Performance Bonus", systemField: "performance_bonus", dataType: "Number", required: false, showOnPayslip: true }
@@ -352,6 +355,7 @@ export const apiDocs: ApiDoc[] = [
         FIXED_EARNINGS: [
           { displayName: "Basic Salary", systemField: "basic_salary", dataType: "Number", required: true, showOnPayslip: true }
         ],
+        FIXED_VALUE: [],
         EARNINGS: [],
         DEDUCTIONS: [
           { displayName: "PAYE Tax", systemField: "paye_tax", dataType: "Number", required: true, showOnPayslip: true }
