@@ -455,6 +455,26 @@ export const apiDocs: ApiDoc[] = [
       'JSON: { success, message, data: { uploads: [ { id, fileName, totalRecords, successful, failed, createdAt, templateType, templateName } ], pagination: { page, pageSize, total } } }'
   },
 
+  {
+    id: 'payroll-salary-summary-admin',
+    group: 'Payroll',
+    method: 'GET',
+    path: '/api/admin/dashboard/reporting/salary-summary',
+    title: 'Get salary summary analytics (HR/ADMIN/SUPER_ADMIN)',
+    description:
+      'Returns salary statistics for paid months only, aggregated both per staff and per month. Supports period filtering by monthly, quarterly, and yearly. HR is restricted to one assigned company. ADMIN can select one assigned company using companyId (defaults to first assigned when omitted). SUPER_ADMIN can query all companies or a selected company.',
+    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
+    input: 'Optional query: companyId, period (monthly|quarterly|yearly), year, month (for monthly), quarter (for quarterly), staffRecordId',
+    output:
+      'JSON: { success, message, data: { filters: { companyId, requestedCompanyId, period, year, month?, quarter?, staffRecordId? }, companyContext: { role, accessibleCompanies: [ { companyId, companyName } ], selectedCompanyId }, perMonth: [ { month, year, totalBasePay, totalGrossPay, totalNetSalary, totalTax, totalPension, totalBonus, staffCount } ], perStaff: [ { staffRecordId, staffId, staffName, department, position, monthsPaid, totalBasePay, totalGrossPay, totalNetSalary, totalTax, totalPension, totalBonus } ], summary: { totalBasePay, totalGrossPay, totalNetSalary, totalTax, totalPension, totalBonus }, metrics: { monthsCovered, staffCovered, currency } } }',
+    sample: {
+      period: "quarterly",
+      year: "2026",
+      quarter: "2",
+      companyId: "company_123"
+    }
+  },
+
   // ======================
   // PAYSLIP / PROFILE
   // ======================
@@ -475,6 +495,25 @@ export const apiDocs: ApiDoc[] = [
       includeDetails: "true",
       year: "2024",
       month: "March"
+    }
+  },
+
+  {
+    id: 'profile-salary-summary',
+    group: 'Payslip & Profile',
+    method: 'GET',
+    path: '/api/profile/salary-summary',
+    title: 'Get monthly salary summary for logged-in staff',
+    description:
+      'Returns month-by-month salary metrics for paid months only, plus aggregate totals for dashboard cards. Supports both standard and dynamic payroll templates.',
+    auth: 'Authorization: Bearer <STAFF token>',
+    input: 'Optional query: year, fromYear, toYear',
+    output:
+      'JSON: { success, message, data: { monthly: [ { month, year, basePay, grossPay, netPay, totalTax, pension, bonus, templateType } ], summary: { totalGrossPay, totalNetSalary, totalTax }, metrics: { monthsPaid, currency } } }',
+    sample: {
+      year: "2026",
+      fromYear: "2025",
+      toYear: "2026"
     }
   },
 
