@@ -104,7 +104,7 @@ export const apiDocs: ApiDoc[] = [
     id: 'company-register',
     group: 'Company',
     method: 'POST',
-    path: '/api/companies/register',
+    path: '/api/auth/companies/register',
     title: 'Register new company',
     description:
       'SUPER_ADMIN only. Creates a new company and initializes default AI settings.',
@@ -149,100 +149,6 @@ export const apiDocs: ApiDoc[] = [
     input: 'No body',
     output:
       'JSON: { success, message, data: [ { id, companyName, email, phone, address, taxId, logo, baseCurrency, currencySymbol } ] }'
-  },
-
-  {
-    id: 'admin-currency-catalog',
-    group: 'Admin',
-    method: 'GET',
-    path: '/api/admin/settings/currencies',
-    title: 'List supported currencies',
-    description:
-      'Returns internationally supported currency options for dropdowns, including code, name, and display symbol.',
-    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
-    input: 'No body',
-    output:
-      'JSON: { success, message, data: { currencies: [ { code, name, symbol } ], total } }'
-  },
-
-  {
-    id: 'admin-company-base-currency',
-    group: 'Admin',
-    method: 'GET',
-    path: '/api/admin/settings/currency',
-    title: 'Get company base currency',
-    description:
-      'Returns the company base currency used for money display (payslips, dashboards, reports). HR/ADMIN are scoped to assigned companies. SUPER_ADMIN can specify companyId.',
-    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
-    input: 'Optional query: companyId (required for SUPER_ADMIN when managing multiple companies)',
-    output:
-      'JSON: { success, message, data: { companyId, companyName, baseCurrency, currencySymbol, updatedAt } }'
-  },
-
-  {
-    id: 'admin-company-base-currency-update',
-    group: 'Admin',
-    method: 'PUT',
-    path: '/api/admin/settings/currency',
-    title: 'Set company base currency',
-    description:
-      'Updates company base currency. Money views should use this value to format all currency symbols consistently.',
-    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
-    input: 'JSON body: { baseCurrency, companyId? } (companyId required for SUPER_ADMIN when managing multiple companies)',
-    output:
-      'JSON: { success, message, data: { companyId, companyName, baseCurrency, currencySymbol, updatedAt } }',
-    sample: {
-      baseCurrency: 'USD',
-      companyId: 'company_123'
-    }
-  },
-
-  {
-    id: 'admin-exchange-rates-list',
-    group: 'Admin',
-    method: 'GET',
-    path: '/api/admin/settings/exchange-rates',
-    title: 'List saved exchange rates',
-    description:
-      'Returns company-saved FX rates used for business conversions. Defaults baseCurrency to company base currency.',
-    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
-    input: 'Optional query: companyId, baseCurrency',
-    output:
-      'JSON: { success, message, data: { companyId, companyName, baseCurrency, baseCurrencySymbol, rates: [ { id, pair, baseCurrency, quoteCurrency, quoteCurrencySymbol, rate, source, fetchedAt, updatedAt } ] } }'
-  },
-
-  {
-    id: 'admin-exchange-rates-save',
-    group: 'Admin',
-    method: 'POST',
-    path: '/api/admin/settings/exchange-rates',
-    title: 'Create or update exchange rate',
-    description:
-      'Saves manual FX rate or fetches and saves live FX rate for a currency pair. Upserts per company/base/quote pair.',
-    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
-    input: 'JSON body: { quoteCurrency, rate?, fetchLive?, baseCurrency?, companyId? }',
-    output:
-      'JSON: { success, message, data: { id, companyId, companyName, pair, baseCurrency, quoteCurrency, rate, source, fetchedAt, updatedAt } }',
-    sample: {
-      baseCurrency: 'NGN',
-      quoteCurrency: 'EUR',
-      fetchLive: true,
-      companyId: 'company_123'
-    }
-  },
-
-  {
-    id: 'admin-exchange-rates-live',
-    group: 'Admin',
-    method: 'GET',
-    path: '/api/admin/settings/exchange-rates/live',
-    title: 'Fetch live exchange rate',
-    description:
-      'Fetches live FX quote for a base/quote pair without saving it, useful for the Fetch Live button.',
-    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
-    input: 'Query: quoteCurrency (required), baseCurrency?, companyId?',
-    output:
-      'JSON: { success, message, data: { companyId, companyName, baseCurrency, baseCurrencySymbol, quoteCurrency, quoteCurrencySymbol, pair, rate, source, asOf } }'
   },
 
   // ======================
@@ -808,6 +714,100 @@ export const apiDocs: ApiDoc[] = [
     input: 'Optional query: force (true/false)',
     output:
       'JSON: { success, message, data: { created, existing, failed } }'
+  },
+
+  {
+    id: 'admin-currency-catalog',
+    group: 'Admin',
+    method: 'GET',
+    path: '/api/admin/settings/currencies',
+    title: 'List supported currencies',
+    description:
+      'Returns internationally supported currency options for dropdowns, including code, name, and display symbol.',
+    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
+    input: 'No body',
+    output:
+      'JSON: { success, message, data: { currencies: [ { code, name, symbol } ], total } }'
+  },
+
+  {
+    id: 'admin-company-base-currency',
+    group: 'Admin',
+    method: 'GET',
+    path: '/api/admin/settings/currency',
+    title: 'Get company base currency',
+    description:
+      'Returns the company base currency used for money display (payslips, dashboards, reports). HR/ADMIN are scoped to assigned companies. SUPER_ADMIN can specify companyId.',
+    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
+    input: 'Optional query: companyId (required for SUPER_ADMIN when managing multiple companies)',
+    output:
+      'JSON: { success, message, data: { companyId, companyName, baseCurrency, currencySymbol, updatedAt } }'
+  },
+
+  {
+    id: 'admin-company-base-currency-update',
+    group: 'Admin',
+    method: 'PUT',
+    path: '/api/admin/settings/currency',
+    title: 'Set company base currency',
+    description:
+      'Updates company base currency. Money views should use this value to format all currency symbols consistently.',
+    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
+    input: 'JSON body: { baseCurrency, companyId? } (companyId required for SUPER_ADMIN when managing multiple companies)',
+    output:
+      'JSON: { success, message, data: { companyId, companyName, baseCurrency, currencySymbol, updatedAt } }',
+    sample: {
+      baseCurrency: 'USD',
+      companyId: 'company_123'
+    }
+  },
+
+  {
+    id: 'admin-exchange-rates-list',
+    group: 'Admin',
+    method: 'GET',
+    path: '/api/admin/settings/exchange-rates',
+    title: 'List saved exchange rates',
+    description:
+      'Returns company-saved FX rates used for business conversions. Defaults baseCurrency to company base currency.',
+    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
+    input: 'Optional query: companyId, baseCurrency',
+    output:
+      'JSON: { success, message, data: { companyId, companyName, baseCurrency, baseCurrencySymbol, rates: [ { id, pair, baseCurrency, quoteCurrency, quoteCurrencySymbol, rate, source, fetchedAt, updatedAt } ] } }'
+  },
+
+  {
+    id: 'admin-exchange-rates-save',
+    group: 'Admin',
+    method: 'POST',
+    path: '/api/admin/settings/exchange-rates',
+    title: 'Create or update exchange rate',
+    description:
+      'Saves manual FX rate or fetches and saves live FX rate for a currency pair. Upserts per company/base/quote pair.',
+    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
+    input: 'JSON body: { quoteCurrency, rate?, fetchLive?, baseCurrency?, companyId? }',
+    output:
+      'JSON: { success, message, data: { id, companyId, companyName, pair, baseCurrency, quoteCurrency, rate, source, fetchedAt, updatedAt } }',
+    sample: {
+      baseCurrency: 'NGN',
+      quoteCurrency: 'EUR',
+      fetchLive: true,
+      companyId: 'company_123'
+    }
+  },
+
+  {
+    id: 'admin-exchange-rates-live',
+    group: 'Admin',
+    method: 'GET',
+    path: '/api/admin/settings/exchange-rates/live',
+    title: 'Fetch live exchange rate',
+    description:
+      'Fetches live FX quote for a base/quote pair without saving it, useful for the Fetch Live button.',
+    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
+    input: 'Query: quoteCurrency (required), baseCurrency?, companyId?',
+    output:
+      'JSON: { success, message, data: { companyId, companyName, baseCurrency, baseCurrencySymbol, quoteCurrency, quoteCurrencySymbol, pair, rate, source, asOf } }'
   },
 
   // ======================
