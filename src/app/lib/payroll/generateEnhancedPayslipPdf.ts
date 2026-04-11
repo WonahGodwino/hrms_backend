@@ -2,18 +2,19 @@
 import fs from 'fs';
 import path from 'path';
 import PDFDocument from 'pdfkit';
+import { normalizeCurrencyCode } from '@/app/lib/currency';
 
 const fontkit = require('fontkit') as {
 	openSync: (filePath: string) => { hasGlyphForCodePoint: (codePoint: number) => boolean };
 };
 
-function formatCurrency(n: number): string {
+function formatCurrency(n: number, currencyCode: string): string {
 	const safe = Number.isFinite(n) ? n : 0;
-	// Use 'NGN' as text instead of the symbol
-	return new Intl.NumberFormat('en-NG', {
+	const code = normalizeCurrencyCode(currencyCode || 'NGN');
+	return new Intl.NumberFormat('en', {
 		style: 'currency',
-		currency: 'NGN',
-		currencyDisplay: 'code', // This will show 'NGN' instead of '₦'
+		currency: code,
+		currencyDisplay: 'symbol',
 		minimumFractionDigits: 2,
 		maximumFractionDigits: 2,
 	}).format(safe);
@@ -112,9 +113,10 @@ function drawCurrency(
 		font: string;
 		fontSize: number;
 		color: string;
+		currencyCode?: string;
 	}
 ) {
-	const formatted = formatCurrency(amount);
+	const formatted = formatCurrency(amount, options.currencyCode || 'NGN');
 
 	doc.font(options.font).fontSize(options.fontSize).fillColor(options.color);
 
@@ -170,6 +172,7 @@ export interface GeneratePayslipInput {
 		companyPhone: string;
 		companyLogo?: string;
 		companyTaxId?: string;
+		baseCurrency?: string;
 	};
 	payroll: {
 		rowNumber: number;
@@ -215,6 +218,7 @@ export interface GeneratePayslipInput {
 		email: string;
 		logo?: string;
 		taxId?: string;
+		baseCurrency?: string;
 	};
 	earnings?: PayslipLineItem[];
 	deductions?: PayslipLineItem[];
@@ -228,6 +232,7 @@ export interface GeneratePayslipInput {
 
 export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): Promise<{ pdfBuffer: Uint8Array; fileName: string }> {
 	const { staff, payroll, companyInfo, earnings, deductions, summary, templateName } = input;
+	const currencyCode = normalizeCurrencyCode(companyInfo?.baseCurrency || staff.baseCurrency || 'NGN');
 
 	console.log('PDF Generator - Generating payslip for:', {
 		staffId: staff.staffId,
@@ -393,6 +398,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 					font: regularFont,
 					fontSize: 10,
 					color: '#000000',
+					currencyCode,
 				});
 				y += 18;
 			});
@@ -407,6 +413,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 				font: boldFont,
 				fontSize: 11,
 				color: '#0f5132',
+				currencyCode,
 			});
 
 			// ===== DEDUCTIONS SECTION =====
@@ -459,6 +466,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 					font: regularFont,
 					fontSize: 10,
 					color: '#000000',
+					currencyCode,
 				});
 				y += 18;
 			});
@@ -473,6 +481,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 				font: boldFont,
 				fontSize: 11,
 				color: '#8b0000',
+				currencyCode,
 			});
 
 			// ===== NET SALARY & PAYMENT DETAILS =====
@@ -499,6 +508,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 				font: boldFont,
 				fontSize: 18,
 				color: '#0b1f44',
+				currencyCode,
 			});
 			// Payment Details - Below Net Salary
 			y += 85;
@@ -529,6 +539,7 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 					font: regularFont,
 					fontSize: 10,
 					color: '#000000',
+					currencyCode,
 				});
 				y += 18;
 			});

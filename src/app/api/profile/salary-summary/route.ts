@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 
 import { requireAuth } from '@/app/lib/auth'
+import { getCurrencySymbol, normalizeCurrencyCode } from '@/app/lib/currency'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { prisma } from '@/app/lib/db'
 import type { CustomFieldValue } from '@/app/lib/payroll/templates/types'
@@ -95,6 +96,13 @@ export async function GET(request: NextRequest) {
     if (!user.companyId) {
       return withCors(ApiResponse.error('Company context missing for current user', 400), origin)
     }
+
+    const company = await prisma.company.findUnique({
+      where: { id: user.companyId as string },
+      select: { baseCurrency: true }
+    })
+
+    const currency = normalizeCurrencyCode(company?.baseCurrency || 'NGN')
 
     const { searchParams } = new URL(request.url)
     const yearParam = searchParams.get('year')
@@ -218,7 +226,8 @@ export async function GET(request: NextRequest) {
           summary,
           metrics: {
             monthsPaid: monthlyOutput.length,
-            currency: 'NGN'
+            currency,
+            currencySymbol: getCurrencySymbol(currency)
           }
         },
         'Salary summary fetched successfully'

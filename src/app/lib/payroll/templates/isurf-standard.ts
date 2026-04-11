@@ -194,6 +194,7 @@ export const processIsurfStandardTemplate = {
         phone: true,
         logo: true as any,
         taxId: true as any,
+        baseCurrency: true as any,
       }
     })
 
@@ -383,6 +384,7 @@ export const processIsurfStandardTemplate = {
             companyPhone: company?.phone || '',
             companyLogo: company?.logo || '',
             companyTaxId: company?.taxId || '',
+            baseCurrency: (company as any)?.baseCurrency || 'NGN',
           },
           payroll: parsedRow,
           templateType: 'ISURF_STANDARD',

@@ -3,6 +3,7 @@ import formData from 'form-data'
 import Mailgun from 'mailgun.js'
 import { prisma } from '@/app/lib/db'
 import { sign } from 'jsonwebtoken'
+import { normalizeCurrencyCode } from '@/app/lib/currency'
 
 // Initialize Mailgun
 const mailgun = new Mailgun(formData)
@@ -400,15 +401,17 @@ export async function sendPayrollNotificationEmail(
 
     // Fetch company name from database
     let companyName = 'Your Company' // Default fallback
+    let companyBaseCurrency = 'NGN'
     
     try {
       const company = await prisma.company.findUnique({
         where: { id: staff.companyId },
-        select: { companyName: true }
+        select: { companyName: true, baseCurrency: true as any }
       })
       
       if (company) {
         companyName = company.companyName
+        companyBaseCurrency = normalizeCurrencyCode((company as any).baseCurrency || 'NGN')
       } else {
         console.warn(`⚠️ Company not found for ID: ${staff.companyId}, using default name`)
       }
@@ -466,9 +469,16 @@ export async function sendPayrollNotificationEmail(
 
     const greeting = `Dear ${staff.firstName} ${staff.lastName},`
 
+    const formattedNetSalary = new Intl.NumberFormat('en', {
+      style: 'currency',
+      currency: companyBaseCurrency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(Number(payroll.netSalary || 0))
+
     const message = payroll.isUpdate
-      ? `Your payslip for ${payroll.month} ${payroll.year} has been updated. Your net salary is ₦${payroll.netSalary.toLocaleString('en-NG')}.`
-      : `Your payslip for ${payroll.month} ${payroll.year} is now available. Your net salary is ₦${payroll.netSalary.toLocaleString('en-NG')}.`
+      ? `Your payslip for ${payroll.month} ${payroll.year} has been updated. Your net salary is ${formattedNetSalary}.`
+      : `Your payslip for ${payroll.month} ${payroll.year} is now available. Your net salary is ${formattedNetSalary}.`
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -597,11 +607,11 @@ export async function sendPayrollNotificationEmail(
             <p>${message}</p>
             
             <div class="salary-amount">
-              ₦${payroll.netSalary.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+              ${formattedNetSalary}
             </div>
             
             <div class="info-box">
-              <strong>💰 Your Net Salary:</strong> ₦${payroll.netSalary.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+              <strong>💰 Your Net Salary:</strong> ${formattedNetSalary}
             </div>
             
             <div style="text-align: center;">
@@ -653,7 +663,7 @@ export async function sendPayrollNotificationEmail(
 
 ${message}
 
-Your net salary: ₦${payroll.netSalary.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+Your net salary: ${formattedNetSalary}
 
 ${staff.isRegistered ? 
 `To view your payslip, please login to your account:

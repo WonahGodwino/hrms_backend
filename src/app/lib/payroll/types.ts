@@ -71,6 +71,7 @@ export type GeneratePayslipInput = {
     companyPhone?: string
     companyLogo?: string
     companyTaxId?: string
+    baseCurrency?: string
   }
   payroll: ParsedPayrollRow
   templateType?: PayrollTemplateType

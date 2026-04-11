@@ -31,7 +31,7 @@ export async function generateAnnualReturns(
   // Get company info
   const company = await prisma.company.findUnique({
     where: { id: companyId },
-    select: { id: true, companyName: true, taxId: true, address: true },
+    select: { id: true, companyName: true, taxId: true, address: true, baseCurrency: true },
   })
 
   if (!company) {
@@ -175,7 +175,7 @@ export async function buildFormH1Data(
 ): Promise<FormH1Data | null> {
   const company = await prisma.company.findUnique({
     where: { id: companyId },
-    select: { id: true, companyName: true, taxId: true, address: true },
+    select: { id: true, companyName: true, taxId: true, address: true, baseCurrency: true },
   })
 
   if (!company) {
@@ -283,6 +283,7 @@ export async function buildFormH1Data(
       name: company.companyName,
       taxId: company.taxId,
       address: company.address,
+      baseCurrency: (company as any).baseCurrency || 'NGN',
     },
     year,
     stateCode,
@@ -442,7 +443,7 @@ async function generateFormH1Excel(data: FormH1Data): Promise<Buffer> {
   // Summary
   const summaryRow = headerRow + data.employees.length + 3
   worksheet.getCell(`A${summaryRow}`).value = `Total Employees: ${data.totals.employeeCount}`
-  worksheet.getCell(`A${summaryRow + 1}`).value = `Total Tax Deducted: ${formatCurrency(data.totals.totalTaxDeducted)}`
+  worksheet.getCell(`A${summaryRow + 1}`).value = `Total Tax Deducted: ${formatCurrency(data.totals.totalTaxDeducted, data.companyInfo.baseCurrency)}`
   worksheet.getCell(`A${summaryRow + 2}`).value = `Generated: ${new Date().toISOString()}`
 
   // Freeze panes
@@ -733,9 +734,9 @@ export async function markAnnualReturnFiled(
 }
 
 // Helper
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
+function formatCurrency(amount: number, currency: string): string {
+  return new Intl.NumberFormat('en', {
     style: 'currency',
-    currency: 'NGN',
+    currency,
   }).format(amount)
 }

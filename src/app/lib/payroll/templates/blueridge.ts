@@ -219,6 +219,7 @@ export const processBlueridgeTemplate = {
         phone: true,
         logo: true,
         taxId: true,
+        baseCurrency: true,
       }
     })
 
@@ -513,6 +514,7 @@ export const processBlueridgeTemplate = {
             companyPhone: company?.phone || '',
             companyLogo: company?.logo || '',
             companyTaxId: company?.taxId || '',
+            baseCurrency: (company as any)?.baseCurrency || 'NGN',
           },
           payroll: parsedRow,
           companyInfo: company ? {
@@ -521,7 +523,8 @@ export const processBlueridgeTemplate = {
             phone: company.phone || '',
             email: company.email || '',
             logo: company.logo || '',
-            taxId: company.taxId || ''
+            taxId: company.taxId || '',
+            baseCurrency: (company as any).baseCurrency || 'NGN'
           } : undefined
         }
 

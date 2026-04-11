@@ -2,13 +2,14 @@
 import PDFDocument from 'pdfkit'
 import fs from 'fs'
 import path from 'path'
+import { getCurrencySymbol, normalizeCurrencyCode } from '@/app/lib/currency'
 import type { GeneratePayslipInput, TemplateType } from './types'
 
 const fontkit = require('fontkit') as {
   openSync: (filePath: string) => { hasGlyphForCodePoint: (codePoint: number) => boolean }
 }
 
-function formatCurrency(n: number) {
+function formatAmount(n: number) {
   const safe = Number.isFinite(n) ? n : 0
   return safe.toLocaleString('en-NG', {
     minimumFractionDigits: 2,
@@ -55,15 +56,18 @@ function drawCurrency(
     fontSize: number
     color: string
     useTextNairaSymbol?: boolean
+    currencyCode?: string
   }
 ) {
-  const formatted = formatCurrency(amount)
-  const textWithNaira = `₦ ${formatted}`
+  const currencyCode = normalizeCurrencyCode(options.currencyCode || 'NGN')
+  const formatted = formatAmount(amount)
+  const textWithSymbol = `${getCurrencySymbol(currencyCode)} ${formatted}`
+  const isNaira = currencyCode === 'NGN'
 
-  if (options.useTextNairaSymbol) {
+  if (!isNaira || options.useTextNairaSymbol) {
     doc.font(options.font).fontSize(options.fontSize).fillColor(options.color)
     if (options.align === 'right' && options.width) {
-      doc.text(textWithNaira, x, y, {
+      doc.text(textWithSymbol, x, y, {
         width: options.width,
         align: 'right',
         lineBreak: false,
@@ -71,7 +75,7 @@ function drawCurrency(
       return
     }
 
-    doc.text(textWithNaira, x, y, {
+    doc.text(textWithSymbol, x, y, {
       lineBreak: false,
     })
     return
@@ -172,6 +176,7 @@ export async function generatePayslipPdf(
   input: GeneratePayslipInput
 ): Promise<{ pdfBuffer: Uint8Array; fileName: string }> {
   const { staff, payroll, templateType = 'ISURF_STANDARD' } = input
+  const currencyCode = normalizeCurrencyCode(staff.baseCurrency || 'NGN')
 
   const payslipData = preparePayslipData(payroll, templateType)
 
@@ -324,6 +329,7 @@ export async function generatePayslipPdf(
             fontSize: 10,
             color: '#000000',
             useTextNairaSymbol,
+            currencyCode,
           })
           currentY += 18
         }
@@ -341,6 +347,7 @@ export async function generatePayslipPdf(
         fontSize: 11,
         color: '#0f5132',
         useTextNairaSymbol,
+        currencyCode,
       })
 
       currentY += 35
@@ -385,6 +392,7 @@ export async function generatePayslipPdf(
             fontSize: 10,
             color: '#000000',
             useTextNairaSymbol,
+            currencyCode,
           })
           currentY += 18
         }
@@ -403,6 +411,7 @@ export async function generatePayslipPdf(
         fontSize: 11,
         color: '#8b0000',
         useTextNairaSymbol,
+        currencyCode,
       })
 
       currentY += 45
@@ -423,6 +432,7 @@ export async function generatePayslipPdf(
         fontSize: 14,
         color: '#0b1f44',
         useTextNairaSymbol,
+        currencyCode,
       })
 
       currentY += 70

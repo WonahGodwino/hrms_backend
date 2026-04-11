@@ -14,6 +14,7 @@ model Company {
   email                  String
   logo                   String?
   taxId                  String?
+  baseCurrency           String                   @default("NGN") @db.VarChar(3)
   archived               Int                      @default(0)
   createdBy              String
   createdAt              DateTime                 @default(now())
@@ -49,6 +50,7 @@ model Company {
   taxFilingSchedules     TaxFilingSchedule[]
   annualReturns          AnnualReturn[]
   taxProfileUploads      TaxProfileUpload[]
+  exchangeRates          CompanyExchangeRate[]
 
   // Payroll Engine relations
   payPeriods             PayPeriod[]
@@ -59,6 +61,26 @@ model Company {
   computedPayslips       ComputedPayslip[]
 
   @@map("companies")
+}
+
+model CompanyExchangeRate {
+  id            String   @id @default(cuid())
+  companyId     String
+  baseCurrency  String   @db.VarChar(3)
+  quoteCurrency String   @db.VarChar(3)
+  rate          Decimal  @db.Decimal(20, 8)
+  source        String?  @default("MANUAL")
+  fetchedAt     DateTime?
+  createdBy     String?
+  updatedBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, baseCurrency, quoteCurrency])
+  @@index([companyId, updatedAt])
+  @@index([companyId, baseCurrency])
+  @@map("company_exchange_rates")
 }
 
 model StaffRecord {

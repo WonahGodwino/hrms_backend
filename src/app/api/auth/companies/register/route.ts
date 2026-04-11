@@ -1,6 +1,7 @@
 // src/app/api/companies/register/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
+import { isValidCurrencyCode, normalizeCurrencyCode } from '@/app/lib/currency'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { verifyToken } from '@/app/lib/auth'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
@@ -48,8 +49,20 @@ export async function POST(request: NextRequest) {
       phone,
       email,
       logo,
-      taxId
+      taxId,
+      baseCurrency
     } = body || {}
+
+    const normalizedBaseCurrency = baseCurrency
+      ? String(baseCurrency).trim().toUpperCase()
+      : 'NGN'
+
+    if (!isValidCurrencyCode(normalizedBaseCurrency)) {
+      return withCors(
+        ApiResponse.error('Invalid baseCurrency. Use a valid ISO 4217 code', 400),
+        origin
+      )
+    }
 
     // 4. Validate required fields
     if (!companyName || !companyName.trim()) {
@@ -95,6 +108,7 @@ export async function POST(request: NextRequest) {
         email: email?.toLowerCase().trim() || null,
         logo: logo?.trim() || null,
         taxId: taxId?.trim() || null,
+        baseCurrency: normalizeCurrencyCode(normalizedBaseCurrency),
         createdBy: decoded.email || 'SUPER_ADMIN',
         archived: 0
       }
@@ -134,6 +148,7 @@ export async function POST(request: NextRequest) {
             phone: company.phone,
             address: company.address,
             taxId: company.taxId,
+            baseCurrency: company.baseCurrency,
             createdAt: company.createdAt
           },
           message: 'Company registered successfully'

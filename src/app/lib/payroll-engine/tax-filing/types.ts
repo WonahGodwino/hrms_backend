@@ -100,6 +100,7 @@ export interface MonthlyScheduleData {
     name: string
     taxId: string | null
     address: string | null
+    baseCurrency: string
   }
   employees: EmployeeScheduleRow[]
   totals: {
@@ -164,6 +165,7 @@ export interface FormH1Data {
     name: string
     taxId: string | null
     address: string | null
+    baseCurrency: string
   }
   year: number
   stateCode: string

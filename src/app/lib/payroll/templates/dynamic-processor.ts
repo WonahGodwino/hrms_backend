@@ -363,6 +363,7 @@ export const processDynamicTemplate = {
         phone: true,
         logo: true,
         taxId: true,
+        baseCurrency: true,
       }
     })
 
@@ -708,6 +709,7 @@ export const processDynamicTemplate = {
             companyPhone: company?.phone || '',
             companyLogo: company?.logo || '',
             companyTaxId: company?.taxId || '',
+            baseCurrency: (company as any)?.baseCurrency || 'NGN',
           },
           payroll: {
             rowNumber: displayRowNumber,
@@ -747,7 +749,8 @@ export const processDynamicTemplate = {
             phone: company.phone || '',
             email: company.email || '',
             logo: company.logo || '',
-            taxId: company.taxId || ''
+            taxId: company.taxId || '',
+            baseCurrency: (company as any).baseCurrency || 'NGN'
           } : undefined,
           // Pass ONLY template fields to payslip
           earnings: [...earningsForPayslip, ...fixedValuesForPayslip],

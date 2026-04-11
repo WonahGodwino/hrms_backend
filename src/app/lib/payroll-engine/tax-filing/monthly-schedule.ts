@@ -228,7 +228,7 @@ async function generateScheduleExcel(data: MonthlyScheduleData): Promise<Buffer>
   // Add summary at bottom
   const summaryRow = totalsRowNum + 2
   worksheet.getCell(`A${summaryRow}`).value = `Total Employees: ${data.totals.employeeCount}`
-  worksheet.getCell(`A${summaryRow + 1}`).value = `Total Tax Payable: ${formatCurrency(data.totals.taxAmount)}`
+  worksheet.getCell(`A${summaryRow + 1}`).value = `Total Tax Payable: ${formatCurrency(data.totals.taxAmount, data.company.baseCurrency)}`
   worksheet.getCell(`A${summaryRow + 2}`).value = `Generated: ${new Date().toISOString()}`
 
   // Freeze panes
@@ -370,9 +370,9 @@ export async function confirmSchedule(
 
 // ==================== HELPER FUNCTIONS ====================
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
+function formatCurrency(amount: number, currency: string): string {
+  return new Intl.NumberFormat('en', {
     style: 'currency',
-    currency: 'NGN',
+    currency,
   }).format(amount)
 }

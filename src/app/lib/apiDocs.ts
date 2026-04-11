@@ -110,15 +110,16 @@ export const apiDocs: ApiDoc[] = [
       'SUPER_ADMIN only. Creates a new company and initializes default AI settings.',
     auth: 'Authorization: Bearer <SUPER_ADMIN token>',
     input:
-      'JSON body: { companyName, address?, phone?, email?, logo?, taxId? }',
+      'JSON body: { companyName, address?, phone?, email?, logo?, taxId?, baseCurrency? (ISO 4217, e.g. NGN, USD, EUR) }',
     output:
-      'JSON: { success, message, data: { company: { id, companyName, email, phone, address, taxId, createdAt } } }',
+      'JSON: { success, message, data: { company: { id, companyName, email, phone, address, taxId, baseCurrency, createdAt } } }',
     sample: {
       companyName: "Acme Corporation",
       address: "123 Business St, City, Country",
       phone: "+1234567890",
       email: "contact@acme.com",
-      taxId: "TAX123456"
+      taxId: "TAX123456",
+      baseCurrency: "NGN"
     }
   },
 
@@ -147,7 +148,101 @@ export const apiDocs: ApiDoc[] = [
     auth: 'Authorization: Bearer <token>',
     input: 'No body',
     output:
-      'JSON: { success, message, data: [ { id, companyName, email, phone, address, taxId, logo } ] }'
+      'JSON: { success, message, data: [ { id, companyName, email, phone, address, taxId, logo, baseCurrency, currencySymbol } ] }'
+  },
+
+  {
+    id: 'admin-currency-catalog',
+    group: 'Admin',
+    method: 'GET',
+    path: '/api/admin/settings/currencies',
+    title: 'List supported currencies',
+    description:
+      'Returns internationally supported currency options for dropdowns, including code, name, and display symbol.',
+    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
+    input: 'No body',
+    output:
+      'JSON: { success, message, data: { currencies: [ { code, name, symbol } ], total } }'
+  },
+
+  {
+    id: 'admin-company-base-currency',
+    group: 'Admin',
+    method: 'GET',
+    path: '/api/admin/settings/currency',
+    title: 'Get company base currency',
+    description:
+      'Returns the company base currency used for money display (payslips, dashboards, reports). HR/ADMIN are scoped to assigned companies. SUPER_ADMIN can specify companyId.',
+    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
+    input: 'Optional query: companyId (required for SUPER_ADMIN when managing multiple companies)',
+    output:
+      'JSON: { success, message, data: { companyId, companyName, baseCurrency, currencySymbol, updatedAt } }'
+  },
+
+  {
+    id: 'admin-company-base-currency-update',
+    group: 'Admin',
+    method: 'PUT',
+    path: '/api/admin/settings/currency',
+    title: 'Set company base currency',
+    description:
+      'Updates company base currency. Money views should use this value to format all currency symbols consistently.',
+    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
+    input: 'JSON body: { baseCurrency, companyId? } (companyId required for SUPER_ADMIN when managing multiple companies)',
+    output:
+      'JSON: { success, message, data: { companyId, companyName, baseCurrency, currencySymbol, updatedAt } }',
+    sample: {
+      baseCurrency: 'USD',
+      companyId: 'company_123'
+    }
+  },
+
+  {
+    id: 'admin-exchange-rates-list',
+    group: 'Admin',
+    method: 'GET',
+    path: '/api/admin/settings/exchange-rates',
+    title: 'List saved exchange rates',
+    description:
+      'Returns company-saved FX rates used for business conversions. Defaults baseCurrency to company base currency.',
+    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
+    input: 'Optional query: companyId, baseCurrency',
+    output:
+      'JSON: { success, message, data: { companyId, companyName, baseCurrency, baseCurrencySymbol, rates: [ { id, pair, baseCurrency, quoteCurrency, quoteCurrencySymbol, rate, source, fetchedAt, updatedAt } ] } }'
+  },
+
+  {
+    id: 'admin-exchange-rates-save',
+    group: 'Admin',
+    method: 'POST',
+    path: '/api/admin/settings/exchange-rates',
+    title: 'Create or update exchange rate',
+    description:
+      'Saves manual FX rate or fetches and saves live FX rate for a currency pair. Upserts per company/base/quote pair.',
+    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
+    input: 'JSON body: { quoteCurrency, rate?, fetchLive?, baseCurrency?, companyId? }',
+    output:
+      'JSON: { success, message, data: { id, companyId, companyName, pair, baseCurrency, quoteCurrency, rate, source, fetchedAt, updatedAt } }',
+    sample: {
+      baseCurrency: 'NGN',
+      quoteCurrency: 'EUR',
+      fetchLive: true,
+      companyId: 'company_123'
+    }
+  },
+
+  {
+    id: 'admin-exchange-rates-live',
+    group: 'Admin',
+    method: 'GET',
+    path: '/api/admin/settings/exchange-rates/live',
+    title: 'Fetch live exchange rate',
+    description:
+      'Fetches live FX quote for a base/quote pair without saving it, useful for the Fetch Live button.',
+    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
+    input: 'Query: quoteCurrency (required), baseCurrency?, companyId?',
+    output:
+      'JSON: { success, message, data: { companyId, companyName, baseCurrency, baseCurrencySymbol, quoteCurrency, quoteCurrencySymbol, pair, rate, source, asOf } }'
   },
 
   // ======================
@@ -456,6 +551,25 @@ export const apiDocs: ApiDoc[] = [
   },
 
   {
+    id: 'admin-dashboard-cards',
+    group: 'Admin',
+    method: 'GET',
+    path: '/api/admin/dashboard/cards',
+    title: 'Get dashboard cards (HR/ADMIN/SUPER_ADMIN)',
+    description:
+      'Returns the 4 dashboard card metrics: myCompanies, totalStaff, payslipsThisMonth, and hrManagers. For HR/ADMIN, myCompanies reflects assigned companies. For SUPER_ADMIN, myCompanies reflects all active companies. Optional companyId scopes other card metrics to one accessible company.',
+    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
+    input: 'Optional query: year, month, companyId',
+    output:
+      'JSON: { success, message, data: { period: { year, month }, companyContext: { role, myCompanies, selectedCompanyId, scopedCompanyIds, currency, currencySymbol }, cards: { myCompanies, totalStaff, payslipsThisMonth, hrManagers, currency, currencySymbol } } }',
+    sample: {
+      year: '2026',
+      month: '4',
+      companyId: 'company_123'
+    }
+  },
+
+  {
     id: 'payroll-salary-summary-admin',
     group: 'Payroll',
     method: 'GET',
@@ -466,7 +580,7 @@ export const apiDocs: ApiDoc[] = [
     auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
     input: 'Optional query: companyId, period (monthly|quarterly|yearly), year, month (for monthly), quarter (for quarterly), staffRecordId',
     output:
-      'JSON: { success, message, data: { filters: { companyId, requestedCompanyId, period, year, month?, quarter?, staffRecordId? }, companyContext: { role, accessibleCompanies: [ { companyId, companyName } ], selectedCompanyId }, perMonth: [ { month, year, totalBasePay, totalGrossPay, totalNetSalary, totalTax, totalPension, totalBonus, staffCount } ], perStaff: [ { staffRecordId, staffId, staffName, department, position, monthsPaid, totalBasePay, totalGrossPay, totalNetSalary, totalTax, totalPension, totalBonus } ], summary: { totalBasePay, totalGrossPay, totalNetSalary, totalTax, totalPension, totalBonus }, metrics: { monthsCovered, staffCovered, currency } } }',
+      'JSON: { success, message, data: { filters: { companyId, requestedCompanyId, period, year, month?, quarter?, staffRecordId? }, companyContext: { role, accessibleCompanies: [ { companyId, companyName } ], selectedCompanyId }, perMonth: [ { month, year, totalBasePay, totalGrossPay, totalNetSalary, totalTax, totalPension, totalBonus, staffCount } ], perStaff: [ { staffRecordId, staffId, staffName, department, position, monthsPaid, totalBasePay, totalGrossPay, totalNetSalary, totalTax, totalPension, totalBonus } ], summary: { totalBasePay, totalGrossPay, totalNetSalary, totalTax, totalPension, totalBonus }, metrics: { monthsCovered, staffCovered, currency, currencySymbol? } } }',
     sample: {
       period: "quarterly",
       year: "2026",
@@ -505,11 +619,11 @@ export const apiDocs: ApiDoc[] = [
     path: '/api/profile/salary-summary',
     title: 'Get monthly salary summary for logged-in staff',
     description:
-      'Returns month-by-month salary metrics for paid months only, plus aggregate totals for dashboard cards. Supports both standard and dynamic payroll templates.',
+      'STAFF-only endpoint for dashboard salary cards. Returns one consolidated record per month/year (latest payslip per month), includes only paid/processed payroll months, supports both standard and dynamic templates, and aggregates totals for gross pay, net salary, and tax.',
     auth: 'Authorization: Bearer <STAFF token>',
-    input: 'Optional query: year, fromYear, toYear',
+    input: 'Optional query: year, fromYear, toYear. If year is provided it takes precedence; otherwise fromYear/toYear are used as inclusive range filters.',
     output:
-      'JSON: { success, message, data: { monthly: [ { month, year, basePay, grossPay, netPay, totalTax, pension, bonus, templateType } ], summary: { totalGrossPay, totalNetSalary, totalTax }, metrics: { monthsPaid, currency } } }',
+      'JSON: { success, message, data: { monthly: [ { month, year, basePay, grossPay, netPay, totalTax, pension, bonus, templateType } ], summary: { totalGrossPay, totalNetSalary, totalTax }, metrics: { monthsPaid, currency, currencySymbol } } }. Common errors: 401 missing/invalid token, 403 non-STAFF role, 400 missing company context.',
     sample: {
       year: "2026",
       fromYear: "2025",

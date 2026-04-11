@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
+import { getCurrencySymbol, normalizeCurrencyCode } from '@/app/lib/currency'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -29,6 +30,7 @@ export async function GET(request: NextRequest) {
       phone: true,
       address: true,
       taxId: true,
+      baseCurrency: true,
     }
 
     // Try to query with logo, fallback without if error occurs
@@ -111,7 +113,8 @@ export async function GET(request: NextRequest) {
                 phone: company.phone,
                 address: company.address,
                 logo: company.logo, // Will be undefined if field doesn't exist
-                taxId: company.taxId
+                taxId: company.taxId,
+                baseCurrency: company.baseCurrency
               }
             })
             .filter((company: any) => company !== null)
@@ -130,8 +133,18 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const withCurrencyInfo = companies.map((company: any) => {
+      const currency = normalizeCurrencyCode(company.baseCurrency || 'NGN')
+
+      return {
+        ...company,
+        baseCurrency: currency,
+        currencySymbol: getCurrencySymbol(currency)
+      }
+    })
+
     return withCors(
-      ApiResponse.success(companies, 'Accessible companies retrieved successfully'),
+      ApiResponse.success(withCurrencyInfo, 'Accessible companies retrieved successfully'),
       origin
     )
 

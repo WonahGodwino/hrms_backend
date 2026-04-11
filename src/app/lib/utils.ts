@@ -62,10 +62,13 @@ export const handleApiError = (error: any) => {
   return ApiResponse.error(message, 500)
 }
 
-export const formatCurrency = (amount: number): string => {
-  return `₦${amount
-    .toFixed(2)
-    .replace(/\d(?=(\d{3})+\.)/g, '$&,')}`
+export const formatCurrency = (amount: number, currency: string = 'NGN'): string => {
+  return new Intl.NumberFormat('en', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(amount)
 }
 
 export const validateEmail = (email: string): boolean => {

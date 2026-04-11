@@ -128,6 +128,7 @@ export async function buildMonthlyScheduleData(
       companyName: true,
       taxId: true,
       address: true,
+      baseCurrency: true,
     },
   })
 
@@ -171,6 +172,7 @@ export async function buildMonthlyScheduleData(
       name: company.companyName,
       taxId: company.taxId,
       address: company.address,
+      baseCurrency: (company as any).baseCurrency || 'NGN',
     },
     employees,
     totals,

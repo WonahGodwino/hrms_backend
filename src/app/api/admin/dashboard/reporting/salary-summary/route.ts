@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 
 import { requireRole } from '@/app/lib/auth'
+import { getCurrencySymbol, normalizeCurrencyCode } from '@/app/lib/currency'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { prisma } from '@/app/lib/db'
 import type { CustomFieldValue } from '@/app/lib/payroll/templates/types'
@@ -429,6 +430,39 @@ export async function GET(request: NextRequest) {
       }
     )
 
+    let responseCurrency = 'NGN'
+    let responseCurrencySymbol: string | null = getCurrencySymbol(responseCurrency)
+
+    if (targetCompanyIds.length === 1) {
+      const selectedCompany = await (prisma as any).company.findUnique({
+        where: { id: targetCompanyIds[0] },
+        select: { baseCurrency: true }
+      })
+      responseCurrency = normalizeCurrencyCode(selectedCompany?.baseCurrency || 'NGN')
+      responseCurrencySymbol = getCurrencySymbol(responseCurrency)
+    } else {
+      const currencies = await (prisma as any).company.findMany({
+        where: { id: { in: targetCompanyIds } },
+        select: { baseCurrency: true },
+        distinct: ['baseCurrency']
+      })
+      const unique: string[] = Array.from(
+        new Set(
+          (currencies as Array<{ baseCurrency?: string }>).map((item) =>
+            normalizeCurrencyCode(item.baseCurrency || 'NGN')
+          )
+        )
+      )
+
+      if (unique.length === 1) {
+        responseCurrency = unique[0]
+        responseCurrencySymbol = getCurrencySymbol(responseCurrency)
+      } else {
+        responseCurrency = 'MIXED'
+        responseCurrencySymbol = null
+      }
+    }
+
     return withCors(
       ApiResponse.success(
         {
@@ -452,7 +486,8 @@ export async function GET(request: NextRequest) {
           metrics: {
             monthsCovered: perMonth.length,
             staffCovered: perStaff.length,
-            currency: 'NGN'
+            currency: responseCurrency,
+            currencySymbol: responseCurrencySymbol
           }
         },
         'Salary summary fetched successfully'
