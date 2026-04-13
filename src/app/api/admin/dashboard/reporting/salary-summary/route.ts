@@ -8,6 +8,8 @@ import type { CustomFieldValue } from '@/app/lib/payroll/templates/types'
 import { getPayslipDisplayFields, calculateTotals } from '@/app/lib/payroll/utils'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 
+import { getPeriodMonthCandidates, type SalarySummaryPeriod } from './period-filter'
+
 type AggregatedSalaryRow = {
   month: string
   year: number
@@ -179,7 +181,7 @@ export async function GET(request: NextRequest) {
     const user = await requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR'])
 
     const { searchParams } = new URL(request.url)
-    const period = (searchParams.get('period') || 'monthly').toLowerCase()
+    const period = (searchParams.get('period') || 'monthly').toLowerCase() as SalarySummaryPeriod
     const companyId = searchParams.get('companyId')
     const staffRecordId = searchParams.get('staffRecordId')
 
@@ -194,11 +196,15 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    if (period === 'monthly' && (month < 1 || month > 12)) {
+    if (!Number.isInteger(year) || year < 1900 || year > 3000) {
+      return withCors(ApiResponse.error('Year must be a valid number', 400), origin)
+    }
+
+    if (period === 'monthly' && (!Number.isInteger(month) || month < 1 || month > 12)) {
       return withCors(ApiResponse.error('Month must be between 1 and 12', 400), origin)
     }
 
-    if (period === 'quarterly' && (quarter < 1 || quarter > 4)) {
+    if (period === 'quarterly' && (!Number.isInteger(quarter) || quarter < 1 || quarter > 4)) {
       return withCors(ApiResponse.error('Quarter must be between 1 and 4', 400), origin)
     }
 
@@ -246,11 +252,21 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const quarterRange = getQuarterRange(quarter)
+    const periodMonthCandidates = getPeriodMonthCandidates(period, month, quarter)
+
     const payslips = await prisma.payslip.findMany({
       where: {
         companyId: { in: targetCompanyIds },
         ...(staffRecordId ? { staffRecordId } : {}),
         year,
+        ...(period !== 'yearly'
+          ? {
+              month: {
+                in: periodMonthCandidates
+              }
+            }
+          : {}),
       },
       include: {
         staffRecord: {
@@ -280,7 +296,6 @@ export async function GET(request: NextRequest) {
       orderBy: [{ year: 'desc' }, { createdAt: 'desc' }]
     })
 
-    const quarterRange = getQuarterRange(quarter)
     const rows: AggregatedSalaryRow[] = []
     const monthStaffDedup = new Set<string>()
 
