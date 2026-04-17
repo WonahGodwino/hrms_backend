@@ -7,6 +7,7 @@ import ExcelJS from 'exceljs'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/helpers'
 
 // -----------------------------
 // Helpers (robust CSV + Excel cell parsing)
@@ -42,16 +43,32 @@ function splitCsvLine(line: string) {
 function cellToString(value: any): string {
   if (value === null || value === undefined) return ''
 
+  // CellRichTextValue: { richText: [...] }
   if (typeof value === 'object' && Array.isArray(value?.richText)) {
     return value.richText.map((t: any) => t?.text || '').join('').trim()
   }
 
-  if (typeof value === 'object' && value?.text) {
-    return String(value.text).trim()
+  // CellHyperlinkValue: { text: string | CellRichTextValue, hyperlink: string }
+  // text can itself be a richText object, so handle that before calling String()
+  if (typeof value === 'object' && value?.text !== undefined && value?.text !== null) {
+    if (typeof value.text === 'object' && Array.isArray(value.text?.richText)) {
+      return value.text.richText.map((t: any) => t?.text || '').join('').trim()
+    }
+    if (typeof value.text === 'object') {
+      // nested object that's not richText — fall through to hyperlink
+    } else {
+      return String(value.text).trim()
+    }
   }
 
+  // CellFormulaValue: { formula: ..., result: ... }
   if (typeof value === 'object' && value?.result !== undefined) {
     return String(value.result).trim()
+  }
+
+  // Unknown object — return empty rather than "[object Object]"
+  if (typeof value === 'object') {
+    return ''
   }
 
   return String(value).trim()
@@ -59,6 +76,13 @@ function cellToString(value: any): string {
 
 function cleanEmail(raw: any): string {
   let s = cellToString(raw)
+
+  // Fallback: if text extraction yielded nothing, try the hyperlink property
+  // e.g. ExcelJS returns { text: {}, hyperlink: 'mailto:user@example.com' }
+  if (!s && typeof raw === 'object' && raw?.hyperlink) {
+    s = String(raw.hyperlink)
+  }
+
   s = s.replace(/\u00A0/g, ' ').trim()
   if (s.toLowerCase().startsWith('mailto:')) {
     s = s.slice('mailto:'.length).trim()
@@ -418,6 +442,20 @@ export async function POST(request: NextRequest) {
             isActive: true,
           },
         })
+
+        // In-app welcome notification for newly onboarded staff.
+        await createNotification(
+          staffRecord.id,
+          NOTIFICATION_TYPES.WELCOME_STAFF,
+          `Welcome to ${company.companyName}`,
+          `Hi ${staffRecord.firstName} ${staffRecord.lastName}, welcome to ${company.companyName}. We are excited to have you on board.`,
+          {
+            source: 'STAFF_UPLOAD',
+            companyName: company.companyName,
+            staffId: staffRecord.staffId
+          },
+          companyId as string
+        )
 
         results.records.push(staffRecord)
         results.successful++
