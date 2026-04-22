@@ -1,13 +1,29 @@
 // src/app/api/attendance/daily/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/app/lib/auth";
-import { withCors, handleCorsOptions, getCorsHeaders } from "@/app/lib/cors";
+import { withCors, handleCorsOptions } from "@/app/lib/cors";
 
 // Utility function to get the start of the day
 function startOfDay(date = new Date()) {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
   return d;
+}
+
+function toDateKey(date: Date): string {
+  return startOfDay(date).toISOString().split("T")[0];
+}
+
+type AttendanceStatus = "PRESENT" | "LATE" | "PARTIAL" | "ABSENT";
+
+function deriveAttendanceStatus(record: {
+  status: string | null;
+  signInTime: Date | null;
+}): AttendanceStatus {
+  if (!record.signInTime) return "ABSENT";
+  if (record.status === "LATE") return "LATE";
+  if (record.status === "HALF_DAY" || record.status === "PARTIAL") return "PARTIAL";
+  return "PRESENT";
 }
 
 export async function OPTIONS(request: NextRequest) {
@@ -86,6 +102,7 @@ export async function POST(req: NextRequest) {
         lastName: true,
         position: true,
         department: true,
+        companyId: true,
         encodedId: true,
       },
     });
@@ -187,18 +204,26 @@ export async function POST(req: NextRequest) {
         timestamp: now.toISOString(),
         attendance: {
           id: attendanceRecord.id,
-          date: attendanceRecord.date,
+          date: toDateKey(attendanceRecord.date),
           signInAt: attendanceRecord.signInTime,
           signOutAt: attendanceRecord.signOutTime,
           method: attendanceRecord.method,
+          status: deriveAttendanceStatus(attendanceRecord),
+          rawStatus: attendanceRecord.status,
+          notes: attendanceRecord.notes,
+          createdAt: attendanceRecord.createdAt,
+          updatedAt: attendanceRecord.updatedAt,
         },
         staff: {
           id: staff.id,
           staffId: staff.staffId,
           name: `${staff.firstName} ${staff.lastName}`,
+          firstName: staff.firstName,
+          lastName: staff.lastName,
           email: staff.email,
           position: staff.position,
           department: staff.department,
+          companyId: staff.companyId,
         },
         recordedBy: {
           id: adminUser.userId,

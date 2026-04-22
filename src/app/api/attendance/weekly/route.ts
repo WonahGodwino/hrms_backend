@@ -71,6 +71,15 @@ export async function GET(req: NextRequest) {
       return withCors(response, origin);
     }
 
+    const hasAccess = await validateCompanyAccess(user, companyId);
+    if (!hasAccess) {
+      const response = NextResponse.json({
+        success: false,
+        message: "No access to this company"
+      }, { status: 403 });
+      return withCors(response, origin);
+    }
+
     // Determine date range
     let dateRange: { start: Date; end: Date };
     
@@ -395,4 +404,29 @@ function getBusinessDaysCount(startDate: Date, endDate: Date): number {
   }
 
   return count;
+}
+
+async function validateCompanyAccess(user: any, companyId: string): Promise<boolean> {
+  const { prisma } = await import("@/app/lib/prisma");
+
+  if (user.role === 'SUPER_ADMIN') {
+    return true;
+  }
+
+  if (user.role === 'HR') {
+    return user.companyId === companyId;
+  }
+
+  if (user.role === 'ADMIN') {
+    const userCompany = await prisma.userCompany.findFirst({
+      where: {
+        userId: user.userId,
+        companyId,
+        role: { in: ['ADMIN', 'ALL'] }
+      }
+    });
+    return !!userCompany;
+  }
+
+  return false;
 }
