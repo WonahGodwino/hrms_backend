@@ -1,21 +1,52 @@
-// src/app/api/user/companies/route.ts
-// Get companies assigned to the authenticated user and switch company context
-import { NextRequest } from 'next/server'
+// src/app/api/admin/switch_company/route.ts
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { 
   requireRole, 
   createAuthPayloadWithCompanies, 
   signToken, 
-  checkCompanyAccess,
-  AuthUser
+  checkCompanyAccess
 } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+
+// Types
+interface CompanyInfo {
+  id: string
+  companyName: string
+  email: string | null
+  phone?: string | null
+  address?: string | null
+  logo?: string | null
+  taxId?: string | null
+  isCurrent?: boolean
+}
+
+interface UserInfo {
+  id: string
+  email: string
+  firstName: string
+  lastName: string
+  role: string
+  companyId: string | null
+}
+
+interface SwitchCompanyResponse {
+  token: string
+  selectedCompany: CompanyInfo
+  user: UserInfo
+  accessibleCompanies: CompanyInfo[]
+  expiresIn: string
+  switchedAt: string
+}
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
+/**
+ * GET: Get all companies accessible to the authenticated user
+ */
 export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
 
@@ -31,29 +62,20 @@ export async function GET(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = requireRole(token, ['ADMIN', 'HR', 'SUPER_ADMIN', 'STAFF'])
 
-    // Parse query parameters
     const { searchParams } = new URL(request.url)
     const includeAll = searchParams.get('includeAll') === 'true'
 
-    let companies: Array<{
-      id: string
-      companyName: string
-      email?: string
-      isCurrent?: boolean
-    }> = []
+    let companies: CompanyInfo[] = []
 
     switch (user.role) {
-      case 'SUPER_ADMIN':
+      case 'SUPER_ADMIN': {
         if (includeAll) {
-          companies = await prisma.company.findMany({
+          const allCompanies = await prisma.company.findMany({
             where: { archived: 0 },
-            select: {
-              id: true,
-              companyName: true,
-              email: true,
-            },
+            select: { id: true, companyName: true, email: true },
             orderBy: { companyName: 'asc' }
           })
+          companies = allCompanies
         } else {
           const userAssignments = await prisma.userCompany.findMany({
             where: { userId: user.userId },
@@ -63,102 +85,58 @@ export async function GET(request: NextRequest) {
           const companyIds = userAssignments.map(a => a.companyId)
           
           if (companyIds.length > 0) {
-            companies = await prisma.company.findMany({
-              where: {
-                id: { in: companyIds },
-                archived: 0
-              },
-              select: {
-                id: true,
-                companyName: true,
-                email: true,
-              },
+            const assignedCompanies = await prisma.company.findMany({
+              where: { id: { in: companyIds }, archived: 0 },
+              select: { id: true, companyName: true, email: true },
               orderBy: { companyName: 'asc' }
             })
+            companies = assignedCompanies
           } else {
-            companies = await prisma.company.findMany({
+            const allCompanies = await prisma.company.findMany({
               where: { archived: 0 },
-              select: {
-                id: true,
-                companyName: true,
-                email: true,
-              },
+              select: { id: true, companyName: true, email: true },
               orderBy: { companyName: 'asc' }
             })
+            companies = allCompanies
           }
         }
         break
+      }
 
       case 'ADMIN':
-      case 'HR':
+      case 'HR': {
         const userAssignments = await prisma.userCompany.findMany({
           where: { 
             userId: user.userId,
-            role: user.role
+            role: user.role === 'HR' ? 'HR' : { in: ['ADMIN', 'HR'] }
           },
-          select: { companyId: true }
-        })
-        
-        const companyIds = userAssignments.map(a => a.companyId)
-        
-        if (companyIds.length === 0) {
-          return withCors(
-            ApiResponse.error(`${user.role} user is not assigned to any company`, 404),
-            origin
-          )
-        }
-        
-        companies = await prisma.company.findMany({
-          where: {
-            id: { in: companyIds },
-            archived: 0
-          },
-          select: {
-            id: true,
-            companyName: true,
-            email: true,
-          },
-          orderBy: { companyName: 'asc' }
-        })
-        break
-
-      case 'STAFF':
-        const staffRecord = await prisma.staffRecord.findUnique({
-          where: { id: user.userId },
-          select: { companyId: true }
-        })
-        
-        if (!staffRecord) {
-          return withCors(
-            ApiResponse.error('Staff record not found', 404),
-            origin
-          )
-        }
-        
-        const company = await prisma.company.findUnique({
-          where: { 
-            id: staffRecord.companyId,
-            archived: 0
-          },
-          select: {
-            id: true,
-            companyName: true,
-            email: true,
+          include: {
+            company: {
+              select: { id: true, companyName: true, email: true }
+            }
           }
         })
         
-        if (!company) {
-          return withCors(
-            ApiResponse.error('Company not found or archived', 404),
-            origin
-          )
-        }
-        
-        companies = [company]
+        companies = userAssignments.map(a => a.company)
         break
+      }
+
+      case 'STAFF': {
+        const staffRecord = await prisma.staffRecord.findUnique({
+          where: { id: user.userId },
+          include: {
+            company: { select: { id: true, companyName: true, email: true } }
+          }
+        })
+        
+        if (staffRecord?.company) {
+          companies = [staffRecord.company]
+        }
+        break
+      }
     }
 
-    // Mark the current company if user has one
+    // Mark current company
     if (user.companyId) {
       companies = companies.map(company => ({
         ...company,
@@ -166,26 +144,34 @@ export async function GET(request: NextRequest) {
       }))
     }
 
+    let currentCompany: CompanyInfo | null = null
+    if (user.companyId) {
+      const current = await prisma.company.findUnique({
+        where: { id: user.companyId, archived: 0 },
+        select: { id: true, companyName: true, email: true }
+      })
+      if (current) currentCompany = current
+    }
+
     return withCors(
-      ApiResponse.success(
-        {
-          companies,
-          userRole: user.role,
-          currentCompanyId: user.companyId || null,
-          totalCompanies: companies.length,
-        },
-        'Companies fetched successfully'
-      ),
+      ApiResponse.success({
+        companies,
+        currentCompany,
+        userRole: user.role,
+        totalCompanies: companies.length,
+        requiresCompanySelection: (user.role === 'ADMIN' || user.role === 'HR') && companies.length > 0 && !user.companyId
+      }),
       origin
     )
   } catch (error) {
-    return withCors(
-      handleApiError(error),
-      origin
-    )
+    console.error('[GET /api/admin/switch_company] Error:', error)
+    return withCors(handleApiError(error), origin)
   }
 }
 
+/**
+ * POST: Switch to a different company
+ */
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin')
 
@@ -211,16 +197,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Verify company exists and is not archived
-    const company = await prisma.company.findUnique({
-      where: { 
-        id: companyId,
-        archived: 0
-      },
+    // Verify company exists and is active
+    const company = await prisma.company.findFirst({
+      where: { id: companyId, archived: 0 },
       select: {
         id: true,
         companyName: true,
         email: true,
+        phone: true,
+        address: true,
+        logo: true,
+        taxId: true,
       }
     })
 
@@ -231,8 +218,27 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Verify user has access to this company using checkCompanyAccess
-    const hasAccess = await checkCompanyAccess(user.userId, companyId, user.role)
+    // Verify user access
+    let hasAccess = false
+
+    if (user.role === 'SUPER_ADMIN') {
+      hasAccess = true
+    } else if (user.role === 'STAFF') {
+      const staffRecord = await prisma.staffRecord.findUnique({
+        where: { id: user.userId },
+        select: { companyId: true }
+      })
+      hasAccess = staffRecord?.companyId === companyId
+    } else {
+      const assignment = await prisma.userCompany.findFirst({
+        where: {
+          userId: user.userId,
+          companyId,
+          role: user.role === 'HR' ? 'HR' : { in: ['ADMIN', 'HR'] }
+        }
+      })
+      hasAccess = !!assignment
+    }
 
     if (!hasAccess) {
       return withCors(
@@ -241,14 +247,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get user's current information from database
+    // Get user details
     const staffRecord = await prisma.staffRecord.findUnique({
       where: { id: user.userId },
-      select: {
-        id: true,
-        email: true,
-        role: true,
-      }
+      select: { id: true, email: true, firstName: true, lastName: true, role: true }
     })
 
     if (!staffRecord) {
@@ -258,72 +260,71 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // For ADMIN/HR users, get their specific role in this company
+    // Get user's role in this company
     let userRoleInCompany = user.role
-    
     if (user.role === 'ADMIN' || user.role === 'HR') {
       const userCompany = await prisma.userCompany.findUnique({
-        where: {
-          userId_companyId: {
-            userId: user.userId,
-            companyId: companyId
-          }
-        },
+        where: { userId_companyId: { userId: user.userId, companyId } },
         select: { role: true }
       })
-      
-      if (userCompany) {
-        userRoleInCompany = userCompany.role
-      }
+      if (userCompany) userRoleInCompany = userCompany.role
     }
 
-    // Create new JWT payload with updated company context
-    // DO NOT add permissions to the token since frontend doesn't use them
+    // Generate new token
     const authPayload = await createAuthPayloadWithCompanies(
       staffRecord.id,
       staffRecord.email,
       userRoleInCompany,
       companyId
     )
-    // Note: We're NOT adding permissions to keep JWT simple and compatible
-
-    // Generate new JWT token with updated company context
     const newToken = signToken(authPayload)
 
-    // Return the new token and updated user info
+    // Get accessible companies for dropdown
+    let accessibleCompanies: CompanyInfo[] = []
+    
+    if (user.role === 'SUPER_ADMIN') {
+      accessibleCompanies = await prisma.company.findMany({
+        where: { archived: 0 },
+        select: { id: true, companyName: true, email: true },
+        orderBy: { companyName: 'asc' }
+      })
+    } else if (user.role === 'ADMIN' || user.role === 'HR') {
+      const assignments = await prisma.userCompany.findMany({
+        where: { userId: user.userId, role: user.role === 'HR' ? 'HR' : { in: ['ADMIN', 'HR'] } },
+        include: { company: { select: { id: true, companyName: true, email: true } } }
+      })
+      accessibleCompanies = assignments.map(a => a.company)
+    }
+
+    const response: SwitchCompanyResponse = {
+      token: newToken,
+      selectedCompany: company,
+      user: {
+        id: staffRecord.id,
+        email: staffRecord.email,
+        firstName: staffRecord.firstName,
+        lastName: staffRecord.lastName,
+        role: userRoleInCompany,
+        companyId,
+      },
+      accessibleCompanies,
+      expiresIn: '7d',
+      switchedAt: new Date().toISOString(),
+    }
+
     return withCors(
-      ApiResponse.success(
-        {
-          token: newToken,
-          user: {
-            id: staffRecord.id,
-            email: staffRecord.email,
-            role: userRoleInCompany,
-            companyId: companyId,
-            companyName: company.companyName,
-            // Frontend doesn't use permissions, so we don't return them
-          },
-          company: {
-            id: company.id,
-            name: company.companyName,
-            email: company.email,
-          },
-          expiresIn: '7d',
-          message: 'Company context switched successfully'
-        },
-        'Company context updated. Use the new token for subsequent requests.'
-      ),
+      ApiResponse.success(response, 'Company switched successfully'),
       origin
     )
   } catch (error) {
-    return withCors(
-      handleApiError(error),
-      origin
-    )
+    console.error('[POST /api/admin/switch_company] Error:', error)
+    return withCors(handleApiError(error), origin)
   }
 }
 
-// Simple endpoint to refresh token with current context
+/**
+ * PATCH: Refresh token with current company context
+ */
 export async function PATCH(request: NextRequest) {
   const origin = request.headers.get('origin')
 
@@ -339,14 +340,9 @@ export async function PATCH(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = requireRole(token, ['ADMIN', 'HR', 'SUPER_ADMIN', 'STAFF'])
 
-    // Get user from database
     const staffRecord = await prisma.staffRecord.findUnique({
       where: { id: user.userId },
-      select: {
-        id: true,
-        email: true,
-        role: true,
-      }
+      select: { id: true, email: true, firstName: true, lastName: true, role: true }
     })
 
     if (!staffRecord) {
@@ -356,39 +352,98 @@ export async function PATCH(request: NextRequest) {
       )
     }
 
-    // Create new JWT payload with current context
-    // DO NOT add permissions to the token
+    let currentCompany: CompanyInfo | null = null
+    if (user.companyId) {
+      currentCompany = await prisma.company.findUnique({
+        where: { id: user.companyId, archived: 0 },
+        select: { id: true, companyName: true, email: true }
+      })
+    }
+
     const authPayload = await createAuthPayloadWithCompanies(
       staffRecord.id,
       staffRecord.email,
       user.role,
-      user.companyId
+      user.companyId || undefined
     )
-
     const newToken = signToken(authPayload)
 
     return withCors(
-      ApiResponse.success(
-        {
-          token: newToken,
-          user: {
-            id: staffRecord.id,
-            email: staffRecord.email,
-            role: user.role,
-            companyId: user.companyId,
-            // No permissions returned
-          },
-          expiresIn: '7d',
-          message: 'Token refreshed with current context'
+      ApiResponse.success({
+        token: newToken,
+        user: {
+          id: staffRecord.id,
+          email: staffRecord.email,
+          firstName: staffRecord.firstName,
+          lastName: staffRecord.lastName,
+          role: user.role,
+          companyId: user.companyId || null,
         },
-        'Token refreshed successfully'
-      ),
+        currentCompany,
+        expiresIn: '7d',
+      }, 'Token refreshed successfully'),
       origin
     )
   } catch (error) {
+    console.error('[PATCH /api/admin/switch_company] Error:', error)
+    return withCors(handleApiError(error), origin)
+  }
+}
+
+/**
+ * DELETE: Clear company context
+ */
+export async function DELETE(request: NextRequest) {
+  const origin = request.headers.get('origin')
+
+  try {
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader) {
+      return withCors(
+        ApiResponse.error('Authorization header missing', 401),
+        origin
+      )
+    }
+
+    const token = authHeader.replace('Bearer ', '')
+    const user = requireRole(token, ['ADMIN', 'HR', 'SUPER_ADMIN', 'STAFF'])
+
+    const staffRecord = await prisma.staffRecord.findUnique({
+      where: { id: user.userId },
+      select: { id: true, email: true, firstName: true, lastName: true, role: true }
+    })
+
+    if (!staffRecord) {
+      return withCors(
+        ApiResponse.error('User record not found', 404),
+        origin
+      )
+    }
+
+    const authPayload = await createAuthPayloadWithCompanies(
+      staffRecord.id,
+      staffRecord.email,
+      user.role,
+      undefined
+    )
+    const newToken = signToken(authPayload)
+
     return withCors(
-      handleApiError(error),
+      ApiResponse.success({
+        token: newToken,
+        user: {
+          id: staffRecord.id,
+          email: staffRecord.email,
+          firstName: staffRecord.firstName,
+          lastName: staffRecord.lastName,
+          role: user.role,
+          companyId: null,
+        },
+      }, 'Company context cleared'),
       origin
     )
+  } catch (error) {
+    console.error('[DELETE /api/admin/switch_company] Error:', error)
+    return withCors(handleApiError(error), origin)
   }
 }
