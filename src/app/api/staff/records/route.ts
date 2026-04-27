@@ -1,5 +1,4 @@
 // src/app/api/staff/records/route.ts
-// src/app/api/staff/records/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
@@ -23,7 +22,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '').trim()
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'MANAGER', 'ADMIN'])
+    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'MANAGER', 'ADMIN', 'STAFF'])
 
     const { searchParams } = new URL(request.url)
     const page = parseInt(searchParams.get('page') || '1', 10)
@@ -32,7 +31,7 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search')
     const includeInactive = searchParams.get('includeInactive') === 'true'
     
-    // IMPORTANT: Get companyId from query parameter (set by frontend from company switcher)
+    // IMPORTANT: Get companyId from query parameter (sent by frontend)
     const companyId = searchParams.get('companyId')
 
     const skip = (page - 1) * limit
@@ -44,7 +43,7 @@ export async function GET(request: NextRequest) {
 
     // Handle company filtering based on role
     if (user.role === 'SUPER_ADMIN') {
-      // SUPER_ADMIN: Use companyId if provided
+      // SUPER_ADMIN: Use companyId from query if provided
       if (companyId) {
         const company = await prisma.company.findFirst({
           where: { id: companyId, archived: 0 }
@@ -60,7 +59,7 @@ export async function GET(request: NextRequest) {
       // If no companyId, SUPER_ADMIN sees all companies
     } 
     else if (user.role === 'ADMIN' || user.role === 'HR') {
-      // For ADMIN/HR, companyId is REQUIRED (from company switcher)
+      // For ADMIN/HR, companyId from query is REQUIRED
       if (!companyId) {
         return withCors(
           ApiResponse.error(
@@ -119,6 +118,25 @@ export async function GET(request: NextRequest) {
       if (managerStaff?.department) {
         where.department = managerStaff.department
       }
+    }
+    else if (user.role === 'STAFF') {
+      // STAFF: Use companyId from query or fallback to token
+      const effectiveCompanyId = companyId || user.companyId
+      
+      if (!effectiveCompanyId) {
+        return withCors(
+          ApiResponse.error(
+            'Company ID is required.',
+            400
+          ),
+          origin
+        )
+      }
+
+      where.companyId = effectiveCompanyId
+      // STAFF can only see themselves or their team (depending on permissions)
+      // For now, restrict to only themselves
+      where.id = user.userId
     }
 
     // Add active/inactive filter
@@ -202,7 +220,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Format response
+    // Format response to match frontend expectations
     const formattedStaffRecords = staffRecords.map(record => ({
       id: record.id,
       staffId: record.staffId,
@@ -243,10 +261,6 @@ export async function GET(request: NextRequest) {
           companyId: effectiveCompanyId || null,
           department: department || null,
           search: search || null
-        },
-        meta: {
-          accessLevel: user.role,
-          requiresCompanySelection: (user.role === 'ADMIN' || user.role === 'HR') && !companyId,
         }
       }),
       origin
