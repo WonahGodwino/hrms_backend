@@ -102,21 +102,24 @@ export function getPayslipDisplayFields(
   if (!customFields) return { earnings, deductions }
 
   Object.entries(customFields).forEach(([key, field]) => {
-    if (!field.showOnPayslip) return
-    
-    // Parse value to number
-    let value = 0
-    if (typeof field.value === 'number') {
-      value = field.value
-    } else if (typeof field.value === 'string') {
-      value = parseFloat(field.value) || 0
-    } else {
-      value = Number(field.value) || 0
-    }
-    
-    if (value <= 0) return
+    if (!field.showOnPayslip) return;
 
-    const normalizedSection = normalizeSection(field.section)
+    const normalizedSection = normalizeSection(field.section);
+    const isEarning = normalizedSection === 'EARNINGS' || normalizedSection === 'FIXED_EARNINGS';
+    const isDeduction = normalizedSection === 'DEDUCTIONS';
+    if (!isEarning && !isDeduction) return; // skip STAFF_DETAILS, etc.
+
+    // Parse value to number
+    let value = 0;
+    if (typeof field.value === 'number') {
+      value = field.value;
+    } else if (typeof field.value === 'string') {
+      value = parseFloat(field.value) || 0;
+    } else {
+      value = Number(field.value) || 0;
+    }
+
+    if (value <= 0) return;
 
     const item: PayslipDisplayItem = {
       label: field.displayName,
@@ -124,15 +127,15 @@ export function getPayslipDisplayFields(
       dataType: field.dataType,
       isCustom: true,
       section: normalizedSection,
-      type: normalizedSection === 'DEDUCTIONS' ? 'deduction' : 'earnings'
-    }
+      type: isDeduction ? 'deduction' : 'earnings'
+    };
 
-    if (normalizedSection === 'DEDUCTIONS') {
-      deductions.push(item)
+    if (isDeduction) {
+      deductions.push(item);
     } else {
-      earnings.push(item)
+      earnings.push(item);
     }
-  })
+  });
 
   // Sort earnings: Fixed Earnings first, then by label
   earnings.sort((a, b) => {
