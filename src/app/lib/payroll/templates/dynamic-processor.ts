@@ -626,19 +626,22 @@ export const processDynamicTemplate = {
           templateId: template.id,
         }
 
-        // Store ALL template fields in customFields JSON
+        // Store ALL template fields in customFields JSON, always include showOnPayslip fields
         const customFields: Record<string, any> = {}
-        
         template.fields.forEach(field => {
-          if (row[field.systemField] !== undefined) {
-            customFields[field.systemField] = {
-              value: row[field.systemField],
-              displayName: field.displayName,
-              dataType: field.dataType,
-              section: field.section,
-              required: field.required,
-              showOnPayslip: field.showOnPayslip || false
-            }
+          let value = row[field.systemField]
+          if (value === undefined || value === null || value === '') {
+            // Default value for missing fields
+            if (field.dataType === 'Number') value = 0;
+            else value = '';
+          }
+          customFields[field.systemField] = {
+            value,
+            displayName: field.displayName,
+            dataType: field.dataType,
+            section: field.section,
+            required: field.required,
+            showOnPayslip: field.showOnPayslip || false
           }
         })
 
@@ -672,7 +675,7 @@ export const processDynamicTemplate = {
             const fieldSection = normalizeSection(field.section)
             const payslipItem = {
               label: field.displayName,
-              value: num(field.value),
+              value: field.dataType === 'Number' ? num(field.value) : (field.value || ''),
               dataType: field.dataType,
               isCustom: true,
               section: fieldSection
