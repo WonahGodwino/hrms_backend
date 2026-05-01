@@ -4,6 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
 import { generateEnhancedPayslipPdf, type GeneratePayslipInput } from '../generateEnhancedPayslipPdf'
 import type { ParsedPayrollRow } from '@/app/lib/payroll/types'
+import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/helpers'
 import { PAYROLL_TEMPLATES } from './types'
 
 function normalizeHeader(h: string) {
@@ -638,6 +639,22 @@ export const processBlueridgeTemplate = {
             })
           }
         }
+
+        await createNotification(
+          staffRecord.id,
+          NOTIFICATION_TYPES.PAYSLIP_UPLOADED,
+          `Payslip Uploaded (${monthName} ${year})`,
+          `Your payslip for ${monthName} ${year} has been uploaded and is now available in your account.`,
+          {
+            source: 'PAYROLL_UPLOAD',
+            month: monthName,
+            year,
+            payslipId,
+            payrollId: payrollRecord.id,
+            companyName: company?.companyName || null
+          },
+          companyId
+        )
 
         results.successful++
         results.processedRecords.push({

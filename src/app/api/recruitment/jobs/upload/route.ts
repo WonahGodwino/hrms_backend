@@ -6,18 +6,26 @@ import { ApiResponse, formatError } from "@/app/lib/utils";
 import ExcelJS from "exceljs";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 
-/**
- * New model alignment:
- * - Job.status is enum JobStatus (optional in upload; defaults to ACTIVE)
- * - expirationDate is optional (open until filled)
- */
-
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
 }
 
-// ---------- Helpers ----------
 type RawRow = Record<string, unknown>;
+
+type ValidatedJobRow = {
+  title: string;
+  description: string;
+  department: string;
+  position: string;
+  employmentType?: string;
+  workplaceType?: string;
+  experienceLevel?: string;
+  salaryRange?: string;
+  benefits?: string[];
+  locations?: { state: string; lga: string }[];
+  expirationDate: Date | null;
+  status: "DRAFT" | "ACTIVE" | "CLOSED" | "EXPIRED" | null;
+};
 
 const normalizeHeader = (h: string) =>
   h
@@ -25,7 +33,6 @@ const normalizeHeader = (h: string) =>
     .replace(/\s+/g, " ")
     .toLowerCase();
 
-// Basic safe CSV row splitter supporting quotes (good enough for most templates)
 function splitCsvLine(line: string): string[] {
   const out: string[] = [];
   let cur = "";
@@ -33,9 +40,7 @@ function splitCsvLine(line: string): string[] {
 
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
-
     if (ch === '"') {
-      // handle escaped quote ""
       const next = line[i + 1];
       if (inQuotes && next === '"') {
         cur += '"';
@@ -45,28 +50,23 @@ function splitCsvLine(line: string): string[] {
       }
       continue;
     }
-
     if (ch === "," && !inQuotes) {
       out.push(cur.trim());
       cur = "";
       continue;
     }
-
     cur += ch;
   }
-
   out.push(cur.trim());
   return out;
 }
 
 function parseExpirationDate(raw: unknown): Date | null {
   if (!raw) return null;
-
   if (raw instanceof Date) {
     if (isNaN(raw.getTime())) return null;
     return raw;
   }
-
   if (typeof raw === "string") {
     const trimmed = raw.trim();
     if (!trimmed) return null;
@@ -74,16 +74,13 @@ function parseExpirationDate(raw: unknown): Date | null {
     if (isNaN(parsed.getTime())) return null;
     return parsed;
   }
-
   if (typeof raw === "number") {
-    // Excel serial date: days since 1899-12-30
     const excelBase = new Date(1899, 11, 30);
     const millis = raw * 24 * 60 * 60 * 1000;
     const parsed = new Date(excelBase.getTime() + millis);
     if (isNaN(parsed.getTime())) return null;
     return parsed;
   }
-
   return null;
 }
 
@@ -94,47 +91,69 @@ function parseJobStatus(raw: unknown): "DRAFT" | "ACTIVE" | "CLOSED" | "EXPIRED"
   return null;
 }
 
-type ValidatedJobRow = {
-  title: string;
-  description: string;
-  department: string;
-  position: string;
-  expirationDate: Date | null; // optional in new model
-  status: "DRAFT" | "ACTIVE" | "CLOSED" | "EXPIRED" | null; // optional
-};
+function parseBenefits(raw: unknown): string[] {
+  if (!raw) return [];
+  const str = String(raw).trim();
+  if (!str) return [];
+  return str.split(',').map(b => b.trim()).filter(b => b);
+}
+
+function parseLocations(raw: unknown): { state: string; lga: string }[] {
+  if (!raw) return [];
+  const str = String(raw).trim();
+  if (!str) return [];
+  
+  return str.split(',').map(loc => {
+    const parts = loc.split(':');
+    if (parts.length === 2) {
+      return { state: parts[0].trim(), lga: parts[1].trim() };
+    }
+    return null;
+  }).filter(loc => loc !== null) as { state: string; lga: string }[];
+}
+
+function getStringValue(row: RawRow, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = row[key];
+    if (value != null && value !== "") {
+      if (typeof value === "string") return value.trim() || null;
+      return String(value).trim() || null;
+    }
+  }
+  return null;
+}
 
 function validateRow(row: RawRow) {
   const rowErrors: string[] = [];
 
-  const getString = (key: string): string | null => {
-    const value = row[key];
-    if (value == null) return null;
-    if (typeof value === "string") return value.trim() || null;
-    return String(value).trim() || null;
-  };
-
-  // Accept flexible header names in templates
-  const title =
-    getString("title") || getString("job title") || getString("job_title");
-  const description =
-    getString("description") || getString("job description") || getString("job_description");
-  const department = getString("department") || getString("dept");
-  const position = getString("position") || getString("role");
-  const expirationRaw =
-    row["expirationdate"] ?? row["expiration date"] ?? row["expirationDate"];
-  const statusRaw = row["status"];
+  const title = getStringValue(row, ["title", "job title", "job_title"]);
+  const description = getStringValue(row, ["description", "job description", "job_description"]);
+  const department = getStringValue(row, ["department", "dept"]);
+  const position = getStringValue(row, ["position", "role"]);
 
   if (!title) rowErrors.push("Missing title");
   if (!description) rowErrors.push("Missing description");
   if (!department) rowErrors.push("Missing department");
   if (!position) rowErrors.push("Missing position");
 
+  const employmentType = getStringValue(row, ["employmentType", "employment_type", "employment type"]);
+  const workplaceType = getStringValue(row, ["workplaceType", "workplace_type", "workplace type"]);
+  const experienceLevel = getStringValue(row, ["experienceLevel", "experience_level", "experience level"]);
+  const salaryRange = getStringValue(row, ["salaryRange", "salary_range", "salary range"]);
+  
+  const benefitsRaw = row["benefits"];
+  const locationsRaw = row["locations"];
+  
+  const benefits = parseBenefits(benefitsRaw);
+  const locations = parseLocations(locationsRaw);
+
+  const expirationRaw = row["expirationDate"] ?? row["expiration date"] ?? row["expirationdate"];
   const expirationDate = parseExpirationDate(expirationRaw);
-  // expiration is optional now: only error if provided but invalid
   if (expirationRaw != null && String(expirationRaw).trim() !== "" && !expirationDate) {
-    rowErrors.push("Invalid expirationDate (expected a valid date)");
+    rowErrors.push("Invalid expirationDate (expected a valid date, YYYY-MM-DD)");
   }
 
+  const statusRaw = row["status"];
   const status = parseJobStatus(statusRaw);
   if (statusRaw != null && String(statusRaw).trim() !== "" && !status) {
     rowErrors.push("Invalid status (use DRAFT, ACTIVE, CLOSED, EXPIRED)");
@@ -144,23 +163,27 @@ function validateRow(row: RawRow) {
     return { ok: false as const, errors: rowErrors };
   }
 
-  const cleaned: ValidatedJobRow = {
-    title: title!,
-    description: description!,
-    department: department!,
-    position: position!,
-    expirationDate: expirationDate ?? null,
-    status: status ?? null,
+  return {
+    ok: true as const,
+    data: {
+      title: title!,
+      description: description!,
+      department: department!,
+      position: position!,
+      employmentType: employmentType || undefined,
+      workplaceType: workplaceType || undefined,
+      experienceLevel: experienceLevel || undefined,
+      salaryRange: salaryRange || undefined,
+      benefits: benefits.length > 0 ? benefits : undefined,
+      locations: locations.length > 0 ? locations : undefined,
+      expirationDate: expirationDate ?? null,
+      status: status ?? null,
+    }
   };
-
-  return { ok: true as const, data: cleaned };
 }
 
-// Optional duplicate guard (not DB constraint): prevents spam duplicates in uploads
 async function isLikelyDuplicate(companyId: string, item: ValidatedJobRow) {
-  // "same job posted recently" rule: last 30 days (adjust as you want)
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
   const existing = await prisma.job.findFirst({
     where: {
       companyId,
@@ -168,15 +191,12 @@ async function isLikelyDuplicate(companyId: string, item: ValidatedJobRow) {
       department: item.department,
       position: item.position,
       createdAt: { gte: since },
-      // ignore already closed/expired duplicates? You can tweak this
     },
     select: { id: true },
   });
-
   return Boolean(existing);
 }
 
-// ---------- Route ----------
 export async function POST(request: NextRequest) {
   const origin = request.headers.get("origin");
 
@@ -194,9 +214,7 @@ export async function POST(request: NextRequest) {
     
     let companyId: string | null = null;
 
-    // Determine company based on user role
     if (user.role === "HR") {
-      // HR can only upload for their own company
       if (!user.companyId) {
         return withCors(
           ApiResponse.error("Company context missing for HR user", 400),
@@ -205,7 +223,6 @@ export async function POST(request: NextRequest) {
       }
       companyId = user.companyId;
     } else if (user.role === "SUPER_ADMIN" || user.role === "ADMIN") {
-      // SUPER_ADMIN and ADMIN must select a company
       const selectedCompanyId = formData.get("companyId") as string | null;
       
       if (!selectedCompanyId) {
@@ -216,7 +233,6 @@ export async function POST(request: NextRequest) {
       }
       companyId = selectedCompanyId;
 
-      // Validate that user has access to the selected company
       if (user.role === "ADMIN") {
         const hasAccess = await prisma.userCompany.findFirst({
           where: {
@@ -233,7 +249,6 @@ export async function POST(request: NextRequest) {
           );
         }
       }
-      // SUPER_ADMIN doesn't need access validation
     }
 
     if (!companyId) {
@@ -243,7 +258,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify company exists and is not archived
     const company = await prisma.company.findFirst({
       where: {
         id: companyId,
@@ -278,7 +292,6 @@ export async function POST(request: NextRequest) {
 
     const data: RawRow[] = [];
 
-    // Parse file into data rows
     try {
       const workbook = new ExcelJS.Workbook();
 
@@ -308,18 +321,14 @@ export async function POST(request: NextRequest) {
 
         worksheet.eachRow((row, rowNumber) => {
           if (rowNumber <= 1) return;
-
           const rowData: RawRow = {};
           let hasData = false;
-
           row.eachCell((cell, colNumber) => {
             const header = headers[colNumber - 1];
             const value = cell.value;
-
             if (value !== null && value !== undefined && value !== "") hasData = true;
             rowData[header] = value;
           });
-
           if (hasData) data.push(rowData);
         });
       }
@@ -356,27 +365,36 @@ export async function POST(request: NextRequest) {
       const jobData = validated.data;
 
       try {
-        // Optional duplicate protection
-        const dup = await isLikelyDuplicate(companyId, jobData);
-        if (dup) {
+        const duplicate = await isLikelyDuplicate(companyId!, jobData);
+        if (duplicate) {
           results.skippedDuplicates++;
           continue;
         }
 
-        await prisma.job.create({
-          data: {
-            title: jobData.title,
-            description: jobData.description,
-            department: jobData.department,
-            position: jobData.position,
-            companyId: companyId!,
-            expirationDate: jobData.expirationDate,
-            status: (jobData.status ?? "ACTIVE") as any,
-            createdBy: user.userId,
-            updatedBy: user.userId,
-          },
-        });
+        const createData: any = {
+          title: jobData.title,
+          description: jobData.description,
+          department: jobData.department,
+          position: jobData.position,
+          companyId: companyId!,
+          expirationDate: jobData.expirationDate,
+          status: (jobData.status ?? "ACTIVE") as any,
+          createdBy: user.userId,
+          updatedBy: user.userId,
+        };
 
+        if (jobData.employmentType) createData.employmentType = jobData.employmentType;
+        if (jobData.workplaceType) createData.workplaceType = jobData.workplaceType;
+        if (jobData.experienceLevel) createData.experienceLevel = jobData.experienceLevel;
+        if (jobData.salaryRange) createData.salaryRange = jobData.salaryRange;
+        if (jobData.benefits && jobData.benefits.length > 0) {
+          createData.benefits = JSON.parse(JSON.stringify(jobData.benefits));
+        }
+        if (jobData.locations && jobData.locations.length > 0) {
+          createData.locations = JSON.parse(JSON.stringify(jobData.locations));
+        }
+
+        await prisma.job.create({ data: createData });
         results.successful++;
       } catch (error) {
         results.failed++;
@@ -384,7 +402,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Log the bulk upload
     console.log(`[JOB_BULK_UPLOAD] Jobs uploaded for company ${companyId} (${company.companyName}) by ${user.role}:${user.email}`);
     console.log(`[JOB_BULK_UPLOAD] Summary: ${results.successful} successful, ${results.failed} failed, ${results.skippedDuplicates} skipped duplicates`);
 

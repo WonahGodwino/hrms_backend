@@ -23,23 +23,40 @@ export async function POST(request: NextRequest) {
     const lastName = formData.get('lastName') as string;
     const email = formData.get('email') as string;
     const phone = formData.get('phone') as string || undefined;
-    const address = formData.get('address') as string || undefined;
+    const applicationStartDate = formData.get('applicationStartDate') as string || undefined;
     const linkedInUrl = formData.get('linkedInUrl') as string || undefined;
     const portfolioUrl = formData.get('portfolioUrl') as string || undefined;
+    const location = formData.get('location') as string || undefined; // JSON string: {"state": "Lagos", "lga": "Ikeja"}
     const createdBy = formData.get('createdBy') as string || 'public_application';
     
     // Get the CV file
     const cvFile = formData.get('cv') as File | null;
+    
+    // Get cover letter file (optional)
+    const coverLetterFile = formData.get('coverLetter') as File | null;
 
     // Validate required fields
     if (!jobId || !firstName || !lastName || !email) {
       return withCors(ApiResponse.error('Job ID, first name, last name, and email are required', 400), origin);
     }
 
+    // Parse location if provided
+    let parsedLocation: { state: string; lga: string } | null = null;
+    if (location) {
+      try {
+        parsedLocation = JSON.parse(location);
+        if (!parsedLocation || !parsedLocation.state || !parsedLocation.lga) {
+          return withCors(ApiResponse.error('Invalid location format. Expected {"state": "State Name", "lga": "LGA Name"}', 400), origin);
+        }
+      } catch (error) {
+        return withCors(ApiResponse.error('Invalid location JSON format', 400), origin);
+      }
+    }
+
     // Check if the job exists
     const job = await prisma.job.findUnique({
       where: { id: jobId },
-      select: { id: true, expirationDate: true, status: true, companyId: true },
+      select: { id: true, expirationDate: true, status: true, companyId: true, title: true },
     });
 
     if (!job) {
@@ -61,14 +78,14 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('CV file is required', 400), origin);
     }
 
-    // Validate file size
-    if (cvFile.size > 5 * 1024 * 1024) { // 5MB size limit
+    // Validate file size (5MB limit)
+    if (cvFile.size > 5 * 1024 * 1024) {
       return withCors(ApiResponse.error('CV file size exceeds the 5MB limit', 400), origin);
     }
 
-    // Check file type
-    const fileBuffer = Buffer.from(await cvFile.arrayBuffer());
-    const fileType = await fileTypeFromBuffer(fileBuffer);
+    // Check CV file type
+    const cvFileBuffer = Buffer.from(await cvFile.arrayBuffer());
+    const cvFileType = await fileTypeFromBuffer(cvFileBuffer);
 
     const allowedMimeTypes = [
       'application/pdf',
@@ -76,15 +93,36 @@ export async function POST(request: NextRequest) {
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     ];
 
-    // Also check by file extension as fallback
-    const fileExtension = cvFile.name.split('.').pop()?.toLowerCase();
+    const cvExtension = cvFile.name.split('.').pop()?.toLowerCase();
     const allowedExtensions = ['pdf', 'doc', 'docx'];
 
-    const isValidMimeType = fileType && allowedMimeTypes.includes(fileType.mime);
-    const isValidExtension = fileExtension && allowedExtensions.includes(fileExtension);
+    const isValidCvMimeType = cvFileType && allowedMimeTypes.includes(cvFileType.mime);
+    const isValidCvExtension = cvExtension && allowedExtensions.includes(cvExtension);
 
-    if (!isValidMimeType && !isValidExtension) {
-      return withCors(ApiResponse.error('Invalid file type. Allowed formats are .pdf, .doc, .docx', 400), origin);
+    if (!isValidCvMimeType && !isValidCvExtension) {
+      return withCors(ApiResponse.error('Invalid CV file type. Allowed formats are .pdf, .doc, .docx', 400), origin);
+    }
+
+    // Validate cover letter file if provided (optional)
+    let coverLetterFileBuffer: Buffer | null = null;
+    let coverLetterFileType: any = null;
+    let coverLetterFileData: any = null;
+
+    if (coverLetterFile) {
+      if (coverLetterFile.size > 5 * 1024 * 1024) {
+        return withCors(ApiResponse.error('Cover letter file size exceeds the 5MB limit', 400), origin);
+      }
+
+      coverLetterFileBuffer = Buffer.from(await coverLetterFile.arrayBuffer());
+      coverLetterFileType = await fileTypeFromBuffer(coverLetterFileBuffer);
+
+      const coverLetterExtension = coverLetterFile.name.split('.').pop()?.toLowerCase();
+      const isValidCoverLetterMimeType = coverLetterFileType && allowedMimeTypes.includes(coverLetterFileType.mime);
+      const isValidCoverLetterExtension = coverLetterExtension && allowedExtensions.includes(coverLetterExtension);
+
+      if (!isValidCoverLetterMimeType && !isValidCoverLetterExtension) {
+        return withCors(ApiResponse.error('Invalid cover letter file type. Allowed formats are .pdf, .doc, .docx', 400), origin);
+      }
     }
 
     // Check if candidate already exists for this company (same email)
@@ -95,20 +133,25 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // Prepare candidate data
+    const candidateData: any = {
+      companyId: job.companyId,
+      firstName,
+      lastName,
+      email,
+      phone: phone || null,
+      applicationStartDate: applicationStartDate ? new Date(applicationStartDate) : null,
+      linkedInUrl: linkedInUrl || null,
+      portfolioUrl: portfolioUrl || null,
+      locationState: parsedLocation?.state || null,
+      locationLga: parsedLocation?.lga || null,
+      createdBy: createdBy,
+    };
+
     // If candidate doesn't exist, create a new one
     if (!candidate) {
       candidate = await prisma.candidate.create({
-        data: {
-          companyId: job.companyId,
-          firstName,
-          lastName,
-          email,
-          phone: phone || null,
-          address: address || null,
-          linkedInUrl: linkedInUrl || null,
-          portfolioUrl: portfolioUrl || null,
-          createdBy: createdBy,
-        },
+        data: candidateData,
       });
     } else {
       // Update candidate information if they exist
@@ -118,9 +161,11 @@ export async function POST(request: NextRequest) {
           firstName,
           lastName,
           phone: phone || candidate.phone,
-          address: address || candidate.address,
+          applicationStartDate: applicationStartDate ? new Date(applicationStartDate) : candidate.applicationStartDate,
           linkedInUrl: linkedInUrl || candidate.linkedInUrl,
           portfolioUrl: portfolioUrl || candidate.portfolioUrl,
+          locationState: parsedLocation?.state || candidate.locationState,
+          locationLga: parsedLocation?.lga || candidate.locationLga,
           updatedAt: new Date(),
         },
       });
@@ -141,22 +186,42 @@ export async function POST(request: NextRequest) {
     }
 
     // Convert file buffer to Uint8Array for Prisma
-    const uint8ArrayData = new Uint8Array(fileBuffer);
+    const cvUint8Array = new Uint8Array(cvFileBuffer);
 
-    // Save the file into CandidateFile
-    const fileData = await prisma.candidateFile.create({
+    // Save the CV file into CandidateFile
+    const cvFileData = await prisma.candidateFile.create({
       data: {
         companyId: job.companyId,
         candidateId: candidate.id,
         applicationId: null, // Will be linked after application creation
         fileName: cvFile.name,
-        mimeType: fileType?.mime || 'application/octet-stream',
+        mimeType: cvFileType?.mime || 'application/octet-stream',
         sizeBytes: cvFile.size,
-        data: uint8ArrayData,
+        data: cvUint8Array,
         type: 'CV',
         createdBy: createdBy,
       }
     });
+
+    // Save cover letter file if provided
+    let coverLetterFileDataId: string | null = null;
+    if (coverLetterFileBuffer && coverLetterFile) {
+      const coverLetterUint8Array = new Uint8Array(coverLetterFileBuffer);
+      coverLetterFileData = await prisma.candidateFile.create({
+        data: {
+          companyId: job.companyId,
+          candidateId: candidate.id,
+          applicationId: null,
+          fileName: coverLetterFile.name,
+          mimeType: coverLetterFileType?.mime || 'application/octet-stream',
+          sizeBytes: coverLetterFile.size,
+          data: coverLetterUint8Array,
+          type: 'COVER_LETTER',
+          createdBy: createdBy,
+        }
+      });
+      coverLetterFileDataId = coverLetterFileData.id;
+    }
 
     // Create the job application in the database
     const application = await prisma.jobApplication.create({
@@ -164,21 +229,40 @@ export async function POST(request: NextRequest) {
         companyId: job.companyId,
         jobId: job.id,
         candidateId: candidate.id,
-        cvFilePath: fileData.fileName,
-        cvFileName: fileData.fileName,
-        cvFileId: fileData.id, // Link to the CV file
+        cvFilePath: cvFileData.fileName,
+        cvFileName: cvFileData.fileName,
+        cvFileId: cvFileData.id, // Link to the CV file
         status: 'SUBMITTED',
         createdBy: createdBy,
+        // Store additional metadata
+        metadata: {
+          applicationStartDate: applicationStartDate || null,
+          location: parsedLocation,
+          phone: phone || null,
+          linkedInUrl: linkedInUrl || null,
+          portfolioUrl: portfolioUrl || null,
+          coverLetterFileId: coverLetterFileDataId,
+        },
       },
     });
 
     // Update the CandidateFile to link it to this application
     await prisma.candidateFile.update({
-      where: { id: fileData.id },
+      where: { id: cvFileData.id },
       data: {
         applicationId: application.id,
       },
     });
+
+    // Update cover letter file if it exists
+    if (coverLetterFileDataId) {
+      await prisma.candidateFile.update({
+        where: { id: coverLetterFileDataId },
+        data: {
+          applicationId: application.id,
+        },
+      });
+    }
 
     // Create initial stage history
     await prisma.applicationStageHistory.create({
@@ -192,9 +276,11 @@ export async function POST(request: NextRequest) {
     return withCors(ApiResponse.success({ 
       applicationId: application.id,
       candidateId: candidate.id,
+      jobTitle: job.title,
       message: 'Application submitted successfully',
       note: 'You can apply to other jobs at this company, but cannot apply again to this same job.'
     }, 'Job application submitted successfully'), origin);
+    
   } catch (error) {
     const message = formatError(error);
     console.error('Error in public job application:', error);

@@ -1,4 +1,4 @@
-// src/app/api/admin/staff/route.ts
+// src/app/api/admin/dashboard/staffsearch/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN'])
+    const user = requireRole(token, ['HR', 'ADMIN','SUPER_ADMIN'])
 
     // Parse query parameters
     const { searchParams } = new URL(request.url)

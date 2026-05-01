@@ -9,14 +9,25 @@ export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
 }
 
+type Location = {
+  state: string;
+  lga: string;
+};
+
 type CreateJobBody = {
   title?: string;
   description?: string;
   department?: string;
   position?: string;
+  employmentType?: string;
+  workplaceType?: string;
+  experienceLevel?: string;
+  salaryRange?: string;
+  benefits?: string[];
+  locations?: Location[];
   expirationDate?: string | null;
   status?: "DRAFT" | "ACTIVE" | "CLOSED" | "EXPIRED";
-  companyId?: string; // This comes from the dropdown selection
+  companyId?: string;
 };
 
 function parseDate(value?: string | null): Date | null {
@@ -38,7 +49,6 @@ export async function POST(request: NextRequest) {
   const origin = request.headers.get("origin");
 
   try {
-    // Authorization check
     const authHeader = request.headers.get("authorization");
     if (!authHeader) {
       return withCors(ApiResponse.error("Authorization header missing", 401), origin);
@@ -47,7 +57,6 @@ export async function POST(request: NextRequest) {
     const token = authHeader.replace("Bearer ", "");
     const user = requireRole(token, ["HR", "SUPER_ADMIN", "ADMIN"]);
 
-    // First, parse the request body to get all data
     let body: CreateJobBody;
     try {
       body = (await request.json()) as CreateJobBody;
@@ -59,7 +68,6 @@ export async function POST(request: NextRequest) {
 
     // Determine company based on user role
     if (user.role === "HR") {
-      // HR can only create jobs for their own company
       if (!user.companyId) {
         return withCors(
           ApiResponse.error("Company context missing for HR user", 400),
@@ -67,13 +75,7 @@ export async function POST(request: NextRequest) {
         );
       }
       companyId = user.companyId;
-      
-      // HR should NOT send companyId in request
-      if (body.companyId && body.companyId !== user.companyId) {
-        console.warn(`HR ${user.email} attempted to specify companyId ${body.companyId}, using their own ${user.companyId} instead`);
-      }
     } else if (user.role === "SUPER_ADMIN" || user.role === "ADMIN") {
-      // ADMIN and SUPER_ADMIN must provide companyId from dropdown
       if (!body.companyId) {
         return withCors(
           ApiResponse.error("Company selection is required. Please select a company from the dropdown.", 400),
@@ -82,7 +84,6 @@ export async function POST(request: NextRequest) {
       }
       companyId = body.companyId;
 
-      // Validate that ADMIN has access to the selected company
       if (user.role === "ADMIN") {
         const hasAccess = await prisma.userCompany.findFirst({
           where: {
@@ -99,7 +100,6 @@ export async function POST(request: NextRequest) {
           );
         }
       }
-      // SUPER_ADMIN doesn't need access validation
     }
 
     if (!companyId) {
@@ -109,7 +109,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify company exists and is not archived
     const company = await prisma.company.findFirst({
       where: {
         id: companyId,
@@ -124,32 +123,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Extract and trim the fields
+    // Extract and validate required fields
     const title = body.title?.trim();
     const description = body.description?.trim();
     const department = body.department?.trim();
     const position = body.position?.trim();
 
-    // Validation: Ensure required fields are provided
     if (!title) return withCors(ApiResponse.error("Title is required", 400), origin);
     if (!description) return withCors(ApiResponse.error("Description is required", 400), origin);
     if (!department) return withCors(ApiResponse.error("Department is required", 400), origin);
     if (!position) return withCors(ApiResponse.error("Position is required", 400), origin);
 
-    // Validate expirationDate if provided
+    // Parse optional fields
     const expirationDate = parseDate(body.expirationDate ?? null);
     if (body.expirationDate && !expirationDate) {
       return withCors(
-        ApiResponse.error("Invalid expirationDate. Use a valid date (ISO preferred).", 400),
+        ApiResponse.error("Invalid expirationDate. Use a valid date (YYYY-MM-DD).", 400),
         origin
       );
     }
 
-    // Normalize and validate status
     const status = normalizeStatus(body.status) ?? "ACTIVE";
 
-    // Optional: prevent duplicate job spam (same role posted recently)
-    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Check last 30 days
+    // Prepare benefits and locations as JSON
+    const benefits = body.benefits && body.benefits.length > 0 ? body.benefits : undefined;
+    const locations = body.locations && body.locations.length > 0 ? body.locations : undefined;
+
+    // Optional: Prevent duplicate job spam
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const duplicate = await prisma.job.findFirst({
       where: {
         companyId: companyId!,
@@ -171,7 +172,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create the job entry in the database
+    // Create the job with all fields
     const job = await prisma.job.create({
       data: {
         title,
@@ -179,6 +180,12 @@ export async function POST(request: NextRequest) {
         department,
         position,
         companyId: companyId!,
+        employmentType: body.employmentType,
+        workplaceType: body.workplaceType,
+        experienceLevel: body.experienceLevel,
+        salaryRange: body.salaryRange,
+        benefits: benefits ? JSON.parse(JSON.stringify(benefits)) : undefined,
+        locations: locations ? JSON.parse(JSON.stringify(locations)) : undefined,
         expirationDate,
         status: status as any,
         createdBy: user.userId,
@@ -186,10 +193,8 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Log the job creation
     console.log(`[JOB_CREATE] Job created: ${job.id} for company ${companyId} (${company.companyName}) by ${user.role}:${user.email}`);
 
-    // Return a successful response with the created job data
     return withCors(
       ApiResponse.success({ 
         job,
@@ -201,8 +206,8 @@ export async function POST(request: NextRequest) {
       }, "Job created successfully"),
       origin
     );
+
   } catch (error) {
-    // Catch any other errors and return them
     console.error("[JOB_CREATE] Error:", error);
     return withCors(ApiResponse.error(formatError(error), 500), origin);
   }

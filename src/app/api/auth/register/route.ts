@@ -5,6 +5,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRole, signToken } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/helpers'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -182,6 +183,22 @@ export async function POST(request: NextRequest) {
           createdBy: admin.userId,
         },
       })
+    }
+
+    // Welcome notification for newly onboarded STAFF users.
+    if (staffRecord.role === 'STAFF') {
+      await createNotification(
+        staffRecord.id,
+        NOTIFICATION_TYPES.WELCOME_STAFF,
+        `Welcome to ${targetCompany.companyName}`,
+        `Hi ${staffRecord.firstName} ${staffRecord.lastName}, welcome to ${targetCompany.companyName}. We are glad to have you with us.`,
+        {
+          source: existing ? 'STAFF_ACTIVATED' : 'STAFF_CREATED',
+          companyName: targetCompany.companyName,
+          staffId: staffRecord.staffId
+        },
+        targetCompanyId
+      )
     }
 
     const jwtToken = signToken({

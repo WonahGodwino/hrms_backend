@@ -290,9 +290,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     // Clean filename for download
-    const cleanFileName = payslip.fileName
-      .replace(/[^\w\s.-]/g, '_')
-      .replace(/\s+/g, '_')
+    // Remove invisible Unicode characters (e.g., Word Joiner, Zero Width Space, etc.)
+    const removeInvisible = (str: string) => str.replace(/[\u200B-\u200D\uFEFF\u2060\u00A0\u202F\u205F\u3000]/g, '');
+    const cleanFileName = removeInvisible(payslip.fileName)
+      .replace(/[^\u0000-\u007F\w\s.-]/g, '_') // Remove non-ASCII and special chars
+      .replace(/\s+/g, '_');
+    // Also sanitize the original filename for Content-Disposition header
+    const encodedFileName = encodeURIComponent(removeInvisible(payslip.fileName));
 
     // Create enhanced payslip info header
     const payslipInfoString = JSON.stringify({
@@ -310,7 +314,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       status: 200,
       headers: {
         'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename="${cleanFileName}"; filename*=UTF-8''${encodeURIComponent(payslip.fileName)}`,
+        'Content-Disposition': `attachment; filename="${cleanFileName}"; filename*=UTF-8''${encodedFileName}`,
         'Content-Length': payslip.fileSize?.toString() || uint8Array.length.toString(),
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache',
@@ -325,7 +329,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           deductionsCount: payslipInfo.deductionsCount || 0
         })).toString('base64')
       },
-    })
+    });
 
     return withCors(response, origin)
   } catch (error) {

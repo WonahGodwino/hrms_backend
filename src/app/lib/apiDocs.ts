@@ -717,6 +717,27 @@ export const apiDocs: ApiDoc[] = [
   },
 
   {
+    id: 'admin-announcements',
+    group: 'Admin',
+    method: 'POST',
+    path: '/api/admin/notifications/announcements',
+    title: 'Send announcement notifications',
+    description:
+      'Creates in-app announcement notifications. HR/ADMIN send to active STAFF in one accessible company. SUPER_ADMIN can send company-level announcements to STAFF or global announcements to ADMIN/HR/SUPER_ADMIN across all active companies.',
+    auth: 'Authorization: Bearer <HR | ADMIN | SUPER_ADMIN token>',
+    input:
+      'JSON body: { title, message, companyId?, sendToAllCompanies? }. For SUPER_ADMIN global broadcast set sendToAllCompanies=true.',
+    output:
+      'JSON: { success, message, data: { scope, companyId?, recipients, audience } }',
+    sample: {
+      title: 'Important Update',
+      message: 'Please review the updated payroll processing timeline.',
+      companyId: 'company_123',
+      sendToAllCompanies: false
+    }
+  },
+
+  {
     id: 'admin-currency-catalog',
     group: 'Admin',
     method: 'GET',

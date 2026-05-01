@@ -51,6 +51,7 @@ model Company {
   annualReturns          AnnualReturn[]
   taxProfileUploads      TaxProfileUpload[]
   exchangeRates          CompanyExchangeRate[]
+  companyPayDates        CompanyPayDate[]         // This matches the relation in CompanyPayDate
 
   // Payroll Engine relations
   payPeriods             PayPeriod[]
@@ -358,14 +359,26 @@ model Job {
   companyId      String
   status         JobStatus        @default(ACTIVE)
   expirationDate DateTime?
+  
+  // NEW FIELDS 
+  employmentType  String?          // Full-time, Part-time, Contract, Intern, Temporary
+  workplaceType   String?          // Remote, Hybrid, On-site
+  experienceLevel String?          // Entry, Mid, Senior, Lead, Executive
+  salaryRange     String?          // e.g., "N500,000 - N800,000"
+  benefits        Json?            // Array of strings: ["health", "equity", "pto", "gym"]
+  locations       Json?            // Array of objects: [{"state": "Lagos", "lga": "Ikeja"}, ...]
+  
   createdBy      String
   createdAt      DateTime         @default(now())
   updatedBy      String?
   updatedAt      DateTime         @updatedAt
   archived       Int?             @default(0)
+  
+  // Relations
   applications   JobApplication[]
   company        Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   keywords       Keyword[]
+  //savedBy        SavedJob[]       // this for saved jobs feature
 
   @@index([companyId, status])
   @@index([companyId, archived])
@@ -373,24 +386,29 @@ model Job {
 }
 
 model Candidate {
-  id           String              @id @default(cuid())
-  companyId    String
-  firstName    String
-  lastName     String
-  email        String
-  phone        String?
-  address      String?
-  linkedInUrl  String?
-  portfolioUrl String?
-  createdBy    String?
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
-  archived     Int?                @default(0)
-  documents    CandidateDocument[]
-  files        CandidateFile[]
-  company      Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  applications JobApplication[]
-  offers       Offer[]
+  id              String    @id @default(cuid())
+  companyId       String
+  firstName       String
+  lastName        String
+  email           String
+  phone           String?
+  address         String?
+  applicationStartDate DateTime?
+  linkedInUrl     String?
+  portfolioUrl    String?
+  locationState   String?   // New field for state
+  locationLga     String?   // New field for LGA
+  createdBy       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  archived        Int?      @default(0)
+  
+  // Relations
+  documents       CandidateDocument[]
+  files           CandidateFile[]
+  company         Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  applications    JobApplication[]
+  offers          Offer[]
 
   @@unique([email, companyId])
   @@index([companyId, archived])
@@ -1400,4 +1418,32 @@ model ComputedPayslip {
   @@index([staffId])
   @@index([companyId])
   @@map("computed_payslips")
+}
+
+// payment date
+
+model CompanyPayDate {
+  id              String   @id @default(cuid())
+  companyId       String
+  paymentDate     DateTime // Actual date (e.g., 2026-04-28)
+  paymentCycle    PaymentCycle // WEEKLY, BI_WEEKLY, MONTHLY
+  description     String?  // Optional custom description
+  isActive        Boolean  @default(true)
+  createdBy       String
+  updatedBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, paymentDate])
+  @@index([companyId, isActive])
+  @@index([paymentDate])
+  @@map("company_pay_dates")
+}
+
+enum PaymentCycle {
+  WEEKLY
+  BI_WEEKLY
+  MONTHLY
 }
