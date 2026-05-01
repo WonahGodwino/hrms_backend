@@ -105,10 +105,10 @@ export function getPayslipDisplayFields(
     if (!field.showOnPayslip) return;
 
     const normalizedSection = normalizeSection(field.section);
-    const isEarning = normalizedSection === 'EARNINGS';
+    const isEarning = normalizedSection === 'EARNINGS' || normalizedSection === 'FIXED_EARNINGS';
     const isDeduction = normalizedSection === 'DEDUCTIONS';
-    // Only EARNINGS are summed for earnings, DEDUCTIONS for deductions. FIXED_EARNINGS is display only.
-    if (!isEarning && !isDeduction) return; // skip STAFF_DETAILS, FIXED_EARNINGS, etc.
+    // Now both EARNINGS and FIXED_EARNINGS are included in earnings
+    if (!isEarning && !isDeduction) return; // skip STAFF_DETAILS, etc.
 
     // Parse value to number
     let value = 0;
