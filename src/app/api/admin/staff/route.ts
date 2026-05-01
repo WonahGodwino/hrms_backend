@@ -65,101 +65,52 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const includeAll = searchParams.get('includeAll') === 'true'
 
-    let companies: CompanyInfo[] = []
+    // --- New logic: Return staff list filtered by current companyId for HR/ADMIN ---
+    // Query params
+    const search = searchParams.get('search') || ''
+    const page = parseInt(searchParams.get('page') || '1', 10)
+    const limit = parseInt(searchParams.get('limit') || '20', 10)
+    const skip = (page - 1) * limit
 
-    switch (user.role) {
-      case 'SUPER_ADMIN': {
-        if (includeAll) {
-          const allCompanies = await prisma.company.findMany({
-            where: { archived: 0 },
-            select: { id: true, companyName: true, email: true },
-            orderBy: { companyName: 'asc' }
-          })
-          companies = allCompanies
-        } else {
-          const userAssignments = await prisma.userCompany.findMany({
-            where: { userId: user.userId },
-            select: { companyId: true }
-          })
-          
-          const companyIds = userAssignments.map(a => a.companyId)
-          
-          if (companyIds.length > 0) {
-            const assignedCompanies = await prisma.company.findMany({
-              where: { id: { in: companyIds }, archived: 0 },
-              select: { id: true, companyName: true, email: true },
-              orderBy: { companyName: 'asc' }
-            })
-            companies = assignedCompanies
-          } else {
-            const allCompanies = await prisma.company.findMany({
-              where: { archived: 0 },
-              select: { id: true, companyName: true, email: true },
-              orderBy: { companyName: 'asc' }
-            })
-            companies = allCompanies
-          }
+    // Only SUPER_ADMIN can access this endpoint
+    if (user.role !== 'SUPER_ADMIN') {
+      return withCors(
+        ApiResponse.error('Forbidden: You do not have the right to access this resource', 403),
+        origin
+      )
+    }
+    const allowedRoles = ['HR', 'ADMIN', 'SUPER_ADMIN']
+    const where: any = { role: { in: allowedRoles } }
+    if (search) {
+      where.OR = [
+        { firstName: { contains: search, mode: 'insensitive' } },
+        { lastName: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+        { staffId: { contains: search, mode: 'insensitive' } },
+        { department: { contains: search, mode: 'insensitive' } },
+        { position: { contains: search, mode: 'insensitive' } }
+      ]
+    }
+    const [staff, totalCount] = await Promise.all([
+      prisma.staffRecord.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { firstName: 'asc' },
+        select: {
+          id: true, staffId: true, firstName: true, lastName: true, email: true, department: true, position: true, role: true, isActive: true, companyId: true,
+          company: { select: { id: true, companyName: true, email: true } }
         }
-        break
-      }
-
-      case 'ADMIN':
-      case 'HR': {
-        const userAssignments = await prisma.userCompany.findMany({
-          where: { 
-            userId: user.userId,
-            role: user.role === 'HR' ? 'HR' : { in: ['ADMIN', 'HR'] }
-          },
-          include: {
-            company: {
-              select: { id: true, companyName: true, email: true }
-            }
-          }
-        })
-        
-        companies = userAssignments.map(a => a.company)
-        break
-      }
-
-      case 'STAFF': {
-        const staffRecord = await prisma.staffRecord.findUnique({
-          where: { id: user.userId },
-          include: {
-            company: { select: { id: true, companyName: true, email: true } }
-          }
-        })
-        
-        if (staffRecord?.company) {
-          companies = [staffRecord.company]
-        }
-        break
-      }
-    }
-
-    // Mark current company
-    if (user.companyId) {
-      companies = companies.map(company => ({
-        ...company,
-        isCurrent: company.id === user.companyId
-      }))
-    }
-
-    let currentCompany: CompanyInfo | null = null
-    if (user.companyId) {
-      const current = await prisma.company.findUnique({
-        where: { id: user.companyId, archived: 0 },
-        select: { id: true, companyName: true, email: true }
-      })
-      if (current) currentCompany = current
-    }
+      }),
+      prisma.staffRecord.count({ where })
+    ])
 
     return withCors(
       ApiResponse.success({
-        companies,
-        currentCompany,
-        userRole: user.role,
-        totalCompanies: companies.length,
-        requiresCompanySelection: (user.role === 'ADMIN' || user.role === 'HR') && companies.length > 0 && !user.companyId
+        staff,
+        totalCount,
+        page,
+        limit
       }),
       origin
     )
