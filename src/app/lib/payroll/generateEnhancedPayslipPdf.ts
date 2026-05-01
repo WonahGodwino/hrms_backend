@@ -372,36 +372,55 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 
 			y += 20;
 
-			// ALL EARNINGS FIELDS - SHOW ALL EVEN IF ZERO
-			const earningsFields = earnings && earnings.length > 0
-				? earnings.map((item) => ({
+			// Group earnings by section
+			let earningsFields: { displayName: string, value: number, section?: string }[] = [];
+			if (earnings && earnings.length > 0) {
+				earningsFields = earnings.map((item) => ({
 					displayName: item.label,
 					value: item.value,
-				}))
-				: [
-					{ displayName: 'Prorated Gross Pay', value: payroll.proratedGrossPay ?? payroll.basicSalary ?? 0 },
-					{ displayName: 'Overtime Income (OI)', value: payroll.overtimeIncome ?? 0 },
-					{ displayName: 'Communication Allowance (CA)', value: payroll.communicationAllowance ?? 0 },
-					{ displayName: 'Transportation Allowance (TA)', value: payroll.transportationAllowance ?? payroll.transportAllowance ?? 0 },
-					{ displayName: 'Outstanding Income (OI)', value: payroll.outstandingIncome ?? 0 },
-					{ displayName: 'Performance Bonus (PB)', value: payroll.bonusKPI ?? 0 },
-					{ displayName: 'Other Allowances', value: payroll.otherAllowances ?? 0 },
+					section: item.section || 'EARNINGS',
+				}));
+			} else {
+				earningsFields = [
+					{ displayName: 'Prorated Gross Pay', value: payroll.proratedGrossPay ?? payroll.basicSalary ?? 0, section: 'EARNINGS' },
+					{ displayName: 'Overtime Income (OI)', value: payroll.overtimeIncome ?? 0, section: 'EARNINGS' },
+					{ displayName: 'Communication Allowance (CA)', value: payroll.communicationAllowance ?? 0, section: 'EARNINGS' },
+					{ displayName: 'Transportation Allowance (TA)', value: payroll.transportationAllowance ?? payroll.transportAllowance ?? 0, section: 'EARNINGS' },
+					{ displayName: 'Outstanding Income (OI)', value: payroll.outstandingIncome ?? 0, section: 'EARNINGS' },
+					{ displayName: 'Performance Bonus (PB)', value: payroll.bonusKPI ?? 0, section: 'EARNINGS' },
+					{ displayName: 'Other Allowances', value: payroll.otherAllowances ?? 0, section: 'EARNINGS' },
 				];
+			}
 
-			// Display ALL earnings fields (even zero values)
+			// Group by section
+			const earningsBySection: { [section: string]: { displayName: string, value: number }[] } = {};
 			earningsFields.forEach((field) => {
-				ensureSpace(18);
-				doc.fontSize(10).font(regularFont).fillColor('#000000').text(field.displayName, 50, y);
-				drawCurrency(doc, field.value, doc.page.width - 180, y, {
-					width: 130,
-					align: 'right',
-					font: regularFont,
-					fontSize: 10,
-					color: '#000000',
-					currencyCode,
-				});
-				y += 18;
+				const section = field.section || 'EARNINGS';
+				if (!earningsBySection[section]) earningsBySection[section] = [];
+				earningsBySection[section].push({ displayName: field.displayName, value: field.value });
 			});
+
+			// Show each section
+			for (const [section, fields] of Object.entries(earningsBySection)) {
+				if (Object.keys(earningsBySection).length > 1) {
+					ensureSpace(18);
+					doc.fontSize(11).font(boldFont).fillColor('#1e3a5f').text(section.replace(/_/g, ' '), 50, y);
+					y += 16;
+				}
+				fields.forEach((field) => {
+					ensureSpace(18);
+					doc.fontSize(10).font(regularFont).fillColor('#000000').text(field.displayName, 50, y);
+					drawCurrency(doc, field.value, doc.page.width - 180, y, {
+						width: 130,
+						align: 'right',
+						font: regularFont,
+						fontSize: 10,
+						color: '#000000',
+						currencyCode,
+					});
+					y += 18;
+				});
+			}
 
 			// Gross Salary
 			ensureSpace(22);
@@ -441,35 +460,51 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 
 			y += 20;
 
-			// ALL DEDUCTION FIELDS - SHOW ALL EVEN IF ZERO
-			const deductionFields = deductions && deductions.length > 0
-				? deductions.map((item) => ({
+			// Group deductions by section
+			let deductionFields: { displayName: string, value: number, section?: string }[] = [];
+			if (deductions && deductions.length > 0) {
+				deductionFields = deductions.map((item) => ({
 					displayName: item.label,
 					value: item.value,
-				}))
-				: [
-					{ displayName: 'Employee Pension Deduction', value: payroll.pension ?? 0 },
-					{ displayName: 'Payee', value: payroll.payee ?? 0 },
-					{ displayName: 'Other Deductions', value: payroll.deductions ?? 0 },
+					section: item.section || 'DEDUCTIONS',
+				}));
+			} else {
+				deductionFields = [
+					{ displayName: 'Employee Pension Deduction', value: payroll.pension ?? 0, section: 'DEDUCTIONS' },
+					{ displayName: 'Payee', value: payroll.payee ?? 0, section: 'DEDUCTIONS' },
+					{ displayName: 'Other Deductions', value: payroll.deductions ?? 0, section: 'DEDUCTIONS' },
 				];
+			}
+
+			const deductionsBySection: { [section: string]: { displayName: string, value: number }[] } = {};
+			deductionFields.forEach((field) => {
+				const section = field.section || 'DEDUCTIONS';
+				if (!deductionsBySection[section]) deductionsBySection[section] = [];
+				deductionsBySection[section].push({ displayName: field.displayName, value: field.value });
+			});
 
 			let totalDeductions = 0;
-
-			// Display ALL deduction fields
-			deductionFields.forEach((field) => {
-				ensureSpace(18);
-				totalDeductions += field.value;
-				doc.fontSize(10).font(regularFont).fillColor('#000000').text(field.displayName, 50, y);
-				drawCurrency(doc, field.value, doc.page.width - 180, y, {
-					width: 130,
-					align: 'right',
-					font: regularFont,
-					fontSize: 10,
-					color: '#000000',
-					currencyCode,
+			for (const [section, fields] of Object.entries(deductionsBySection)) {
+				if (Object.keys(deductionsBySection).length > 1) {
+					ensureSpace(18);
+					doc.fontSize(11).font(boldFont).fillColor('#8b0000').text(section.replace(/_/g, ' '), 50, y);
+					y += 16;
+				}
+				fields.forEach((field) => {
+					ensureSpace(18);
+					totalDeductions += field.value;
+					doc.fontSize(10).font(regularFont).fillColor('#000000').text(field.displayName, 50, y);
+					drawCurrency(doc, field.value, doc.page.width - 180, y, {
+						width: 130,
+						align: 'right',
+						font: regularFont,
+						fontSize: 10,
+						color: '#000000',
+						currencyCode,
+					});
+					y += 18;
 				});
-				y += 18;
-			});
+			}
 
 			// Total Deductions
 			ensureSpace(22);

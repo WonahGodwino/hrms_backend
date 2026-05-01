@@ -668,13 +668,14 @@ export const processDynamicTemplate = {
 
         // Group fields by section for payslip
         Object.values(customFields).forEach((field: any) => {
-          if (field.showOnPayslip && field.value && num(field.value) > 0) {
+          if (field.showOnPayslip) {
             const fieldSection = normalizeSection(field.section)
             const payslipItem = {
               label: field.displayName,
               value: num(field.value),
               dataType: field.dataType,
-              isCustom: true
+              isCustom: true,
+              section: fieldSection
             }
 
             if (fieldSection === 'FIXED_EARNINGS' || fieldSection === 'EARNINGS') {
