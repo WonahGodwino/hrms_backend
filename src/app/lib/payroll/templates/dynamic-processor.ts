@@ -57,107 +57,6 @@ function valueToString(v: any): string {
   return String(v).trim()
 }
 
-function normalizeStaffIdentifier(value: string): string {
-  if (!value) return ''
-
-  let normalized = value
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .replace(/\u00A0/g, ' ')
-    .trim()
-
-  // Excel often stores text IDs with a leading apostrophe to preserve formatting.
-  normalized = normalized.replace(/^'+/, '').trim()
-
-  // Remove a trailing .0 when IDs were exported/formatted as decimal text.
-  if (/^\d+\.0+$/.test(normalized)) {
-    normalized = normalized.replace(/\.0+$/, '')
-  }
-
-  return normalized
-}
-
-function normalizeEmail(value: string): string {
-  return valueToString(value).toLowerCase()
-}
-
-function stripLeadingZeros(value: string): string {
-  const trimmed = value.replace(/^0+/, '')
-  return trimmed || '0'
-}
-
-async function findStaffRecordForRow(params: {
-  companyId: string
-  staffId: string
-  rawEmail: string
-}) {
-  const normalizedStaffId = normalizeStaffIdentifier(params.staffId)
-  const normalizedEmail = normalizeEmail(params.rawEmail)
-
-  let staffRecord: any = null
-
-  if (normalizedStaffId) {
-    staffRecord = await prisma.staffRecord.findFirst({
-      where: {
-        companyId: params.companyId,
-        isActive: true,
-        staffId: normalizedStaffId,
-      },
-    })
-
-    if (!staffRecord) {
-      staffRecord = await prisma.staffRecord.findFirst({
-        where: {
-          companyId: params.companyId,
-          isActive: true,
-          staffId: {
-            equals: normalizedStaffId,
-            mode: 'insensitive',
-          },
-        },
-      })
-    }
-
-    // Fallback for zero-padded numeric IDs (e.g., DB: 000123, file: 123).
-    if (!staffRecord && /^\d+$/.test(normalizedStaffId)) {
-      const candidates = await prisma.staffRecord.findMany({
-        where: {
-          companyId: params.companyId,
-          isActive: true,
-          staffId: {
-            endsWith: normalizedStaffId,
-          },
-        },
-        take: 20,
-      })
-
-      const target = stripLeadingZeros(normalizedStaffId)
-      staffRecord = candidates.find((candidate) => {
-        const candidateStaffId = normalizeStaffIdentifier(candidate.staffId)
-        return /^\d+$/.test(candidateStaffId) && stripLeadingZeros(candidateStaffId) === target
-      }) || null
-    }
-  }
-
-  if (!staffRecord && normalizedEmail) {
-    staffRecord = await prisma.staffRecord.findFirst({
-      where: {
-        companyId: params.companyId,
-        isActive: true,
-        email: {
-          equals: normalizedEmail,
-          mode: 'insensitive',
-        },
-      },
-    })
-  }
-
-  return {
-    staffRecord,
-    normalizedStaffId,
-    normalizedEmail,
-  }
-}
-
 function normalizeWords(input: string): string[] {
   return input
     .toLowerCase()
@@ -598,8 +497,6 @@ export const processDynamicTemplate = {
       let rawName = ''
       let rawEmail = ''
       let staffId = ''
-      let normalizedStaffId = ''
-      let normalizedEmail = ''
       let monthValue = ''
       let daysInMonth = 0
       let daysWorked = 0
@@ -662,19 +559,59 @@ export const processDynamicTemplate = {
           monthName = getMonthNameFromNumber(periodMonth)
         }
 
-        // Find staff record with resilient matching for IDs/emails from spreadsheet sources.
-        const lookupResult = await findStaffRecordForRow({
-          companyId,
-          staffId,
-          rawEmail,
-        })
-        const staffRecord = lookupResult.staffRecord
-        normalizedStaffId = lookupResult.normalizedStaffId
-        normalizedEmail = lookupResult.normalizedEmail
+        // Find staff record
+        let staffRecord = null
+        
+        if (staffId) {
+          staffRecord = await prisma.staffRecord.findFirst({
+            where: {
+              companyId: companyId,
+              staffId: staffId,
+              isActive: true
+            }
+          })
+        }
+
+        if (!staffRecord && rawEmail) {
+          staffRecord = await prisma.staffRecord.findUnique({
+            where: {
+              email_companyId: {
+                email: rawEmail,
+                companyId: companyId,
+              },
+            },
+          })
+        }
+
+        if (!staffRecord && rawName) {
+          const parts = rawName.split(' ').filter(Boolean)
+          const firstName = parts[0]
+          const lastName = parts.slice(1).join(' ') || parts[0]
+
+          staffRecord = await prisma.staffRecord.findFirst({
+            where: {
+              companyId: companyId,
+              isActive: true,
+              OR: [
+                {
+                  AND: [
+                    { firstName: { contains: firstName, mode: 'insensitive' } },
+                    { lastName: { contains: lastName, mode: 'insensitive' } },
+                  ],
+                },
+                {
+                  AND: [
+                    { lastName: { contains: firstName, mode: 'insensitive' } },
+                    { firstName: { contains: lastName, mode: 'insensitive' } },
+                  ],
+                },
+              ],
+            },
+          })
+        }
 
         if (!staffRecord) {
-          const attemptedIdentity = rawName || normalizedEmail || normalizedStaffId || staffId
-          throw new Error(`Staff record not found for ${attemptedIdentity}`)
+          throw new Error(`Staff record not found for ${rawName || rawEmail || staffId}`)
         }
 
         // Prepare data for storage - ONLY template fields
@@ -991,8 +928,8 @@ export const processDynamicTemplate = {
           ROW_NUMBER: displayRowNumber,
           ERROR_MESSAGE: message,
           STAFF_NAME: rawName || 'Unknown',
-          STAFF_ID: normalizedStaffId || staffId || '',
-          STAFF_EMAIL: normalizedEmail || rawEmail || '',
+          STAFF_ID: staffId || '',
+          STAFF_EMAIL: rawEmail || '',
           MONTH_VALUE: monthValue || '',
         })
       }

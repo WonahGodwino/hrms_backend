@@ -253,8 +253,35 @@ export const processIsurfStandardTemplate = {
           })
         }
 
+        if (!staffRecord && rawName) {
+          const parts = rawName.split(' ').filter(Boolean)
+          const firstName = parts[0]
+          const lastName = parts.slice(1).join(' ') || parts[0]
+
+          staffRecord = await prisma.staffRecord.findFirst({
+            where: {
+              companyId: companyId,
+              isActive: true,
+              OR: [
+                {
+                  AND: [
+                    { firstName: { contains: firstName, mode: 'insensitive' } },
+                    { lastName: { contains: lastName, mode: 'insensitive' } },
+                  ],
+                },
+                {
+                  AND: [
+                    { lastName: { contains: firstName, mode: 'insensitive' } },
+                    { firstName: { contains: lastName, mode: 'insensitive' } },
+                  ],
+                },
+              ],
+            },
+          })
+        }
+
         if (!staffRecord) {
-          throw new Error(`Staff record not found for ${rawEmail || rawName}`)
+          throw new Error(`Staff record not found for ${rawName || rawEmail}`)
         }
 
         const monthName = getCell(row, 'Month', canonicalMap)?.toString() || 
