@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
       leaveTypeWhere.policyId = policyId
     }
 
-    // Fetch leave types with their policies - USING CORRECT FIELDS FROM YOUR SCHEMA
+    // Fetch leave types with their policies - SCHEMA
     const leaveTypes = await prisma.leaveType.findMany({
       where: leaveTypeWhere,
       include: {
@@ -112,12 +112,12 @@ export async function GET(request: NextRequest) {
             noticePeriod: true,
             minEmploymentMonths: true,
             documentationRequired: true,
-            // ✅ NEW FIELDS FROM YOUR SCHEMA
+            // ✅ NEW FIELDS FROM schema
             allowHalfDays: true,
             maxConsecutiveDays: true,
             seasonalRestrictions: true,
             requireManagerComments: true,
-            // ❌ REMOVED - These fields DON'T exist in your schema
+            // ❌ REMOVED - Non-existent fields
             companyId: true,
             company: {
               select: {

@@ -11,21 +11,21 @@ import { randomUUID } from 'crypto'
 
 // Define types for failed records
 interface FailedRecord {
-  sheetType: 'POLICIES' | 'LEAVE_TYPES' | 'HOLIDAYS' | 'BLACKOUT_PERIODS'
+  sheetType: 'LEAVE_TYPES' | 'POLICIES' | 'HOLIDAYS' | 'BLACKOUT_PERIODS'
   rowData: any
   error: string
   suggestion?: string
 }
 
 interface ProcessResults {
-  policies: {
+  leaveTypes: {
     created: number
     updated: number
     failed: number
     errors: string[]
     failedRecords: FailedRecord[]
   }
-  leaveTypes: {
+  policies: {
     created: number
     updated: number
     failed: number
@@ -60,6 +60,9 @@ function cellToString(value: any): string {
     }
     if (value?.result !== undefined) {
       return String(value.result).trim()
+    }
+    if (value instanceof Date) {
+      return value.toISOString().split('T')[0]
     }
   }
   return String(value).trim()
@@ -123,32 +126,37 @@ async function ensureUploadDirectories() {
   return { uploadsDir, leavesDir }
 }
 
-// Improved parseSheetData that intelligently finds headers
+// Improved parseSheetData that intelligently finds headers and preserves case
 function parseSheetData(sheet: ExcelJS.Worksheet, expectedHeaders: string[]): any[] {
   const data: any[] = []
   
   // Find the first row that contains expected headers
   let headerRowNumber = -1
   let foundHeaders: string[] = []
+  let foundOriginalHeaders: string[] = []
   
   // Search first 20 rows for headers
   for (let rowNum = 1; rowNum <= Math.min(20, sheet.rowCount); rowNum++) {
     const row = sheet.getRow(rowNum)
     const rowHeaders: string[] = []
+    const originalHeaders: string[] = []
     
     row.eachCell((cell, colNumber) => {
-      const value = cellToString(cell.value)
-      if (value && !value.startsWith('📋') && !value.includes('INSTRUCTIONS') && !value.startsWith('•')) {
-        const normalized = normalizeHeader(value)
+      const originalValue = cellToString(cell.value)
+      if (originalValue && !originalValue.startsWith('📋') && !originalValue.includes('INSTRUCTIONS') && !originalValue.startsWith('•') && !originalValue.startsWith('#')) {
+        const normalized = normalizeHeader(originalValue)
         rowHeaders[colNumber - 1] = normalized
+        originalHeaders[colNumber - 1] = originalValue
       }
     })
     
     // Count how many expected headers we found in this row
-    const foundCount = rowHeaders.filter(h => h && expectedHeaders.includes(h)).length
+    const expectedLower = expectedHeaders.map(h => h.toLowerCase())
+    const foundCount = rowHeaders.filter(h => h && expectedLower.includes(h)).length
     if (foundCount >= Math.min(3, expectedHeaders.length) && foundCount >= expectedHeaders.length / 2) {
       headerRowNumber = rowNum
       foundHeaders = rowHeaders
+      foundOriginalHeaders = originalHeaders
       break
     }
   }
@@ -157,11 +165,15 @@ function parseSheetData(sheet: ExcelJS.Worksheet, expectedHeaders: string[]): an
     throw new Error(`Could not find header row with required columns. Expected: ${expectedHeaders.slice(0, 3).join(', ')}...`)
   }
   
-  // Validate required headers are present
-  const missingHeaders = expectedHeaders.filter(h => !foundHeaders.includes(h.toLowerCase()))
-  if (missingHeaders.length > 0) {
-    throw new Error(`Missing required columns: ${missingHeaders.join(', ')}`)
-  }
+  // Create a mapping from normalized header to expected key
+  const columnMapping: { [key: string]: number } = {}
+  expectedHeaders.forEach(expected => {
+    const normalized = expected.toLowerCase()
+    const index = foundHeaders.findIndex(h => h === normalized)
+    if (index !== -1) {
+      columnMapping[expected] = index
+    }
+  })
   
   // Process data rows starting from the row after headers
   for (let rowNumber = headerRowNumber + 1; rowNumber <= sheet.rowCount; rowNumber++) {
@@ -170,32 +182,45 @@ function parseSheetData(sheet: ExcelJS.Worksheet, expectedHeaders: string[]): an
     let hasData = false
     let isInstructionRow = false
     
-    foundHeaders.forEach((header, colIndex) => {
-      if (header) {
-        const cell = row.getCell(colIndex + 1)
-        const value = cellToString(cell.value)
-        
-        // Skip rows that are clearly instructions or metadata
-        const lowerValue = value.toLowerCase()
-        if (value && (lowerValue.includes('instruction') || 
-            lowerValue.startsWith('📋') || 
-            lowerValue.startsWith('#') ||
-            lowerValue.startsWith('•') ||
-            lowerValue.includes('delete sample') ||
-            lowerValue.includes('required fields'))) {
-          isInstructionRow = true
-        }
-        
-        if (value && !isInstructionRow) {
-          hasData = true
-        }
-        rowData[header] = value
+    for (const [expectedKey, colIndex] of Object.entries(columnMapping)) {
+      const cell = row.getCell(colIndex + 1)
+      let value = cellToString(cell.value)
+      
+      // Skip rows that are clearly instructions or metadata
+      const lowerValue = value.toLowerCase()
+      if (value && (lowerValue.includes('instruction') || 
+          lowerValue.startsWith('📋') || 
+          lowerValue.startsWith('#') ||
+          lowerValue.startsWith('•') ||
+          lowerValue.includes('delete sample') ||
+          lowerValue.includes('required fields'))) {
+        isInstructionRow = true
+        break
       }
-    })
+      
+      // Handle Excel date numbers
+      if (typeof cell.value === 'number' && cell.value > 40000 && cell.value < 100000) {
+        const date = ExcelJS.ValueType.Date;
+        if (cell.type === ExcelJS.ValueType.Date) {
+          value = cell.value.toString()
+        }
+      }
+      
+      // Handle Date objects
+      if (cell.value instanceof Date) {
+        value = cell.value.toISOString().split('T')[0]
+      }
+      
+      if (value && !isInstructionRow) {
+        hasData = true
+      }
+      
+      rowData[expectedKey] = value
+    }
     
     // Only add rows that have actual data and aren't instruction rows
     if (hasData && !isInstructionRow) {
-      // Check if this row has any meaningful data (not all empty strings)
+      // Check if this row has any meaningful data
       const hasValue = Object.values(rowData).some(v => v && v !== '')
       if (hasValue) {
         data.push(rowData)
@@ -248,7 +273,7 @@ function getPolicyErrorSuggestion(error: string, policyData: any): string {
   return 'Check the format and required fields'
 }
 
-// Clean template download function
+// Clean template download function with LEAVE TYPES first
 async function downloadTemplate(company: any, format: string, origin: string | null) {
   const workbook = new ExcelJS.Workbook()
   
@@ -260,7 +285,68 @@ async function downloadTemplate(company: any, format: string, origin: string | n
     row.height = 25
   }
   
-  // ============ SHEET 1: Leave Policies ============
+  // ============ SHEET 1: Leave Types (FIRST - Most Important) ============
+  const typesSheet = workbook.addWorksheet('Leave Types')
+  
+  const typeHeaders = ['policyName*', 'typeName*', 'code*', 'description', 'color', 'isActive']
+  const typeHeaderRow = typesSheet.addRow(typeHeaders)
+  styleHeaderRow(typeHeaderRow)
+  
+  // Add sample data
+  const sampleType1 = typesSheet.addRow({
+    policyName: 'Annual Leave',
+    typeName: 'Vacation Leave', 
+    code: 'VL',
+    description: 'Regular vacation time off',
+    color: '#3B82F6',
+    isActive: 'YES'
+  })
+  sampleType1.alignment = { vertical: 'middle', horizontal: 'left' }
+  
+  const sampleType2 = typesSheet.addRow({
+    policyName: 'Sick Leave',
+    typeName: 'Sick Leave',
+    code: 'SL',
+    description: 'Paid sick leave',
+    color: '#EF4444',
+    isActive: 'YES'
+  })
+  sampleType2.alignment = { vertical: 'middle', horizontal: 'left' }
+  
+  const sampleType3 = typesSheet.addRow({
+    policyName: 'Unpaid Leave',
+    typeName: 'Unpaid Leave',
+    code: 'UL',
+    description: 'Unpaid time off',
+    color: '#F59E0B',
+    isActive: 'YES'
+  })
+  sampleType3.alignment = { vertical: 'middle', horizontal: 'left' }
+  
+  // Add instructions
+  typesSheet.addRow([])
+  const typeInstructionTitle = typesSheet.getCell('A6')
+  typeInstructionTitle.value = '📋 INSTRUCTIONS:'
+  typeInstructionTitle.font = { bold: true, size: 11 }
+  
+  const typeInstructions = [
+    '• policyName must match exactly with a policy from the "Leave Policies" sheet',
+    '• code: 2-4 uppercase alphanumeric characters (e.g., "VL", "SL", "ML")',
+    '• isActive: "YES" or "NO" (defaults to YES if empty)',
+    '• color: Hex color code (e.g., "#3B82F6" for blue)',
+    '• Delete the sample rows (rows 2-4) before uploading your data',
+    '• Add your data starting from row 2'
+  ]
+  
+  typeInstructions.forEach((instruction, idx) => {
+    const cell = typesSheet.getCell(`A${7 + idx}`)
+    cell.value = instruction
+    cell.font = { italic: true, color: { argb: 'FF666666' }, size: 10 }
+  })
+  
+  typesSheet.columns = [{ width: 20 }, { width: 20 }, { width: 10 }, { width: 30 }, { width: 15 }, { width: 10 }]
+  
+  // ============ SHEET 2: Leave Policies ============
   const policiesSheet = workbook.addWorksheet('Leave Policies')
   
   const policyHeaders = [
@@ -274,7 +360,7 @@ async function downloadTemplate(company: any, format: string, origin: string | n
   styleHeaderRow(policyHeaderRow)
   
   // Add sample data
-  const samplePolicy = policiesSheet.addRow({
+  const samplePolicy1 = policiesSheet.addRow({
     policyName: 'Annual Leave',
     description: 'Paid time off for vacation',
     maxDays: '20',
@@ -291,12 +377,11 @@ async function downloadTemplate(company: any, format: string, origin: string | n
     seasonalRestrictions: '12,1',
     requireManagerComments: 'YES'
   })
-  samplePolicy.alignment = { vertical: 'middle', horizontal: 'left' }
+  samplePolicy1.alignment = { vertical: 'middle', horizontal: 'left' }
   
-  // Add another sample
   const samplePolicy2 = policiesSheet.addRow({
     policyName: 'Sick Leave',
-    description: 'Paid sick leave',
+    description: 'Paid sick leave with doctor note',
     maxDays: '12',
     carryOver: '0',
     isPaid: 'YES',
@@ -313,23 +398,42 @@ async function downloadTemplate(company: any, format: string, origin: string | n
   })
   samplePolicy2.alignment = { vertical: 'middle', horizontal: 'left' }
   
-  // Add instructions section
-  policiesSheet.addRow([])
-  const instructionTitle = policiesSheet.getCell('A5')
-  instructionTitle.value = '📋 INSTRUCTIONS:'
-  instructionTitle.font = { bold: true, size: 11 }
+  const samplePolicy3 = policiesSheet.addRow({
+    policyName: 'Unpaid Leave',
+    description: 'Unpaid time off',
+    maxDays: '30',
+    carryOver: '0',
+    isPaid: 'NO',
+    accrualRate: '0',
+    minEmploymentMonths: '6',
+    requiresApproval: 'YES',
+    approvalWorkflow: 'MANAGER_THEN_HR',
+    noticePeriod: '30',
+    documentationRequired: 'YES',
+    allowHalfDays: 'NO',
+    maxConsecutiveDays: '30',
+    seasonalRestrictions: '',
+    requireManagerComments: 'YES'
+  })
+  samplePolicy3.alignment = { vertical: 'middle', horizontal: 'left' }
   
-  const instructions = [
+  // Add instructions
+  policiesSheet.addRow([])
+  const policyInstructionTitle = policiesSheet.getCell('A6')
+  policyInstructionTitle.value = '📋 INSTRUCTIONS:'
+  policyInstructionTitle.font = { bold: true, size: 11 }
+  
+  const policyInstructions = [
     '• Required fields are marked with *',
     '• approvalWorkflow options: MANAGER_THEN_HR, MANAGER_ONLY, HR_ONLY, NONE',
     '• Boolean fields (isPaid, requiresApproval, etc.): Use "YES" or "NO"',
     '• seasonalRestrictions: Comma-separated months (1-12) e.g., "1,2,12" for Jan, Feb, Dec',
-    '• Delete the sample rows (rows 2-3) before uploading your data',
+    '• Delete the sample rows (rows 2-4) before uploading your data',
     '• Add your data starting from row 2'
   ]
   
-  instructions.forEach((instruction, idx) => {
-    const cell = policiesSheet.getCell(`A${6 + idx}`)
+  policyInstructions.forEach((instruction, idx) => {
+    const cell = policiesSheet.getCell(`A${7 + idx}`)
     cell.value = instruction
     cell.font = { italic: true, color: { argb: 'FF666666' }, size: 10 }
   })
@@ -341,56 +445,6 @@ async function downloadTemplate(company: any, format: string, origin: string | n
     { width: 25 }, { width: 15 }, { width: 20 }, { width: 20 }, { width: 25 }
   ]
   
-  // ============ SHEET 2: Leave Types ============
-  const typesSheet = workbook.addWorksheet('Leave Types')
-  
-  const typeHeaders = ['policyName*', 'typeName*', 'code*', 'description', 'color', 'isActive']
-  const typeHeaderRow = typesSheet.addRow(typeHeaders)
-  styleHeaderRow(typeHeaderRow)
-  
-  // Add sample data
-  const sampleType = typesSheet.addRow({
-    policyName: 'Annual Leave',
-    typeName: 'Vacation Leave', 
-    code: 'VL',
-    description: 'Regular vacation time off',
-    color: '#3B82F6',
-    isActive: 'YES'
-  })
-  sampleType.alignment = { vertical: 'middle', horizontal: 'left' }
-  
-  const sampleType2 = typesSheet.addRow({
-    policyName: 'Sick Leave',
-    typeName: 'Sick Leave',
-    code: 'SL',
-    description: 'Paid sick leave',
-    color: '#EF4444',
-    isActive: 'YES'
-  })
-  sampleType2.alignment = { vertical: 'middle', horizontal: 'left' }
-  
-  // Instructions
-  typesSheet.addRow([])
-  const typeInstructionTitle = typesSheet.getCell('A5')
-  typeInstructionTitle.value = '📋 INSTRUCTIONS:'
-  typeInstructionTitle.font = { bold: true, size: 11 }
-  
-  const typeInstructions = [
-    '• policyName must match exactly with a policy from the "Leave Policies" sheet',
-    '• code: 2-4 uppercase alphanumeric characters (e.g., "AL", "SL", "ML")',
-    '• isActive: "YES" or "NO" (defaults to YES if empty)',
-    '• color: Hex color code (e.g., "#3B82F6")',
-    '• Delete sample rows before uploading your data'
-  ]
-  
-  typeInstructions.forEach((instruction, idx) => {
-    const cell = typesSheet.getCell(`A${6 + idx}`)
-    cell.value = instruction
-    cell.font = { italic: true, color: { argb: 'FF666666' }, size: 10 }
-  })
-  
-  typesSheet.columns = [{ width: 20 }, { width: 20 }, { width: 10 }, { width: 30 }, { width: 15 }, { width: 10 }]
-  
   // ============ SHEET 3: Public Holidays ============
   const holidaysSheet = workbook.addWorksheet('Public Holidays')
   
@@ -399,7 +453,7 @@ async function downloadTemplate(company: any, format: string, origin: string | n
   styleHeaderRow(holidayHeaderRow)
   
   // Add sample data
-  const sampleHoliday = holidaysSheet.addRow({
+  const sampleHoliday1 = holidaysSheet.addRow({
     holidayName: "New Year's Day",
     dateOrPattern: '01-01',
     description: 'Celebration of new year',
@@ -407,7 +461,7 @@ async function downloadTemplate(company: any, format: string, origin: string | n
     country: 'NG',
     state: 'All'
   })
-  sampleHoliday.alignment = { vertical: 'middle', horizontal: 'left' }
+  sampleHoliday1.alignment = { vertical: 'middle', horizontal: 'left' }
   
   const sampleHoliday2 = holidaysSheet.addRow({
     holidayName: "Independence Day",
@@ -419,22 +473,32 @@ async function downloadTemplate(company: any, format: string, origin: string | n
   })
   sampleHoliday2.alignment = { vertical: 'middle', horizontal: 'left' }
   
-  // Instructions
+  const sampleHoliday3 = holidaysSheet.addRow({
+    holidayName: "Christmas Day",
+    dateOrPattern: '12-25',
+    description: 'Christmas celebration',
+    isRecurring: 'YES',
+    country: 'NG',
+    state: 'All'
+  })
+  sampleHoliday3.alignment = { vertical: 'middle', horizontal: 'left' }
+  
+  // Add instructions
   holidaysSheet.addRow([])
-  const holidayInstructionTitle = holidaysSheet.getCell('A5')
+  const holidayInstructionTitle = holidaysSheet.getCell('A6')
   holidayInstructionTitle.value = '📋 INSTRUCTIONS:'
   holidayInstructionTitle.font = { bold: true, size: 11 }
   
   const holidayInstructions = [
     '• For recurring holidays: Use MM-DD format (e.g., "01-01" for January 1st)',
-    '• For specific dates: Use YYYY-MM-DD format (e.g., "2025-12-25")',
-    '• isRecurring: "YES" or "NO"',
-    '• country and state are optional but recommended',
+    '• For specific one-time dates: Use YYYY-MM-DD format (e.g., "2025-12-25")',
+    '• isRecurring: "YES" for yearly holidays, "NO" for one-time events',
+    '• country and state are optional but recommended for reporting',
     '• Delete sample rows before uploading your data'
   ]
   
   holidayInstructions.forEach((instruction, idx) => {
-    const cell = holidaysSheet.getCell(`A${6 + idx}`)
+    const cell = holidaysSheet.getCell(`A${7 + idx}`)
     cell.value = instruction
     cell.font = { italic: true, color: { argb: 'FF666666' }, size: 10 }
   })
@@ -450,7 +514,7 @@ async function downloadTemplate(company: any, format: string, origin: string | n
   
   // Add sample data
   const currentYear = new Date().getFullYear()
-  const sampleBlackout = blackoutSheet.addRow({
+  const sampleBlackout1 = blackoutSheet.addRow({
     periodName: 'Year-End Shutdown',
     startDate: `${currentYear}-12-20`,
     endDate: `${currentYear}-12-31`,
@@ -458,17 +522,27 @@ async function downloadTemplate(company: any, format: string, origin: string | n
     appliesToAllLeaveTypes: 'YES',
     policyName: ''
   })
-  sampleBlackout.alignment = { vertical: 'middle', horizontal: 'left' }
+  sampleBlackout1.alignment = { vertical: 'middle', horizontal: 'left' }
   
-  // Instructions
+  const sampleBlackout2 = blackoutSheet.addRow({
+    periodName: 'Peak Season Blackout',
+    startDate: `${currentYear}-11-15`,
+    endDate: `${currentYear}-12-15`,
+    reason: 'Year-end peak season - no leave allowed',
+    appliesToAllLeaveTypes: 'YES',
+    policyName: ''
+  })
+  sampleBlackout2.alignment = { vertical: 'middle', horizontal: 'left' }
+  
+  // Add instructions
   blackoutSheet.addRow([])
-  const blackoutInstructionTitle = blackoutSheet.getCell('A5')
+  const blackoutInstructionTitle = blackoutSheet.getCell('A6')
   blackoutInstructionTitle.value = '📋 INSTRUCTIONS:'
   blackoutInstructionTitle.font = { bold: true, size: 11 }
   
   const blackoutInstructions = [
-    '• Use YYYY-MM-DD format for all dates',
-    '• appliesToAllLeaveTypes: "YES" or "NO" (defaults to YES if empty)',
+    '• Use YYYY-MM-DD format for all dates (e.g., "2026-12-20")',
+    '• appliesToAllLeaveTypes: "YES" for company-wide, "NO" for specific policy only',
     '• If appliesToAllLeaveTypes is "NO", specify the exact policyName to restrict',
     '• policyName must match a policy from the "Leave Policies" sheet',
     '• Blackout periods are optional - leave this sheet blank if not needed',
@@ -476,7 +550,7 @@ async function downloadTemplate(company: any, format: string, origin: string | n
   ]
   
   blackoutInstructions.forEach((instruction, idx) => {
-    const cell = blackoutSheet.getCell(`A${6 + idx}`)
+    const cell = blackoutSheet.getCell(`A${7 + idx}`)
     cell.value = instruction
     cell.font = { italic: true, color: { argb: 'FF666666' }, size: 10 }
   })
@@ -486,9 +560,9 @@ async function downloadTemplate(company: any, format: string, origin: string | n
   // Style alternating rows for data rows across all sheets
   workbook.eachSheet((worksheet: ExcelJS.Worksheet) => {
     worksheet.eachRow((row: ExcelJS.Row, rowNumber: number) => {
-      if (rowNumber === 2 || rowNumber === 3) {
+      if (rowNumber >= 2 && rowNumber <= 4) {
         // Style data rows with light background
-        if (rowNumber === 3) {
+        if (rowNumber === 3 || rowNumber === 4) {
           row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } }
         }
         row.border = {
@@ -502,35 +576,39 @@ async function downloadTemplate(company: any, format: string, origin: string | n
   })
 
   if (format === 'csv') {
-    // Build CSV content
+    // Build CSV content with LEAVE TYPES first
     let csvContent = '# LEAVE MANAGEMENT TEMPLATE\n'
     csvContent += `# Company: ${company.companyName}\n`
     csvContent += `# Generated: ${new Date().toISOString()}\n`
     csvContent += '# Instructions: Lines starting with # are comments\n'
     csvContent += '# Delete the sample rows and add your data below\n\n'
     
+    // Leave Types sheet (FIRST)
+    csvContent += '## LEAVE TYPES ##\n'
+    csvContent += '"policyName*","typeName*","code*","description","color","isActive"\n'
+    csvContent += '"Annual Leave","Vacation Leave","VL","Regular vacation time off","#3B82F6","YES"\n'
+    csvContent += '"Sick Leave","Sick Leave","SL","Paid sick leave","#EF4444","YES"\n'
+    csvContent += '"Unpaid Leave","Unpaid Leave","UL","Unpaid time off","#F59E0B","YES"\n\n'
+    
     // Leave Policies sheet
     csvContent += '## LEAVE POLICIES ##\n'
     csvContent += '"policyName*","description","maxDays*","carryOver","isPaid","accrualRate","minEmploymentMonths","requiresApproval","approvalWorkflow*","noticePeriod","documentationRequired","allowHalfDays","maxConsecutiveDays","seasonalRestrictions","requireManagerComments"\n'
     csvContent += '"Annual Leave","Paid time off for vacation","20","5","YES","1.67","3","YES","MANAGER_THEN_HR","14","NO","YES","15","12,1","YES"\n'
-    csvContent += '"Sick Leave","Paid sick leave","12","0","YES","1.0","0","YES","MANAGER_ONLY","0","YES","YES","5","","NO"\n\n'
-    
-    // Leave Types sheet
-    csvContent += '## LEAVE TYPES ##\n'
-    csvContent += '"policyName*","typeName*","code*","description","color","isActive"\n'
-    csvContent += '"Annual Leave","Vacation Leave","VL","Regular vacation time off","#3B82F6","YES"\n'
-    csvContent += '"Sick Leave","Sick Leave","SL","Paid sick leave","#EF4444","YES"\n\n'
+    csvContent += '"Sick Leave","Paid sick leave with doctor note","12","0","YES","1.0","0","YES","MANAGER_ONLY","0","YES","YES","5","","NO"\n'
+    csvContent += '"Unpaid Leave","Unpaid time off","30","0","NO","0","6","YES","MANAGER_THEN_HR","30","YES","NO","30","","YES"\n\n'
     
     // Public Holidays sheet
     csvContent += '## PUBLIC HOLIDAYS ##\n'
     csvContent += '"holidayName*","dateOrPattern*","description","isRecurring","country","state"\n'
     csvContent += '"New Year\'s Day","01-01","Celebration of new year","YES","NG","All"\n'
-    csvContent += '"Independence Day","10-01","National Independence Day","YES","NG","All"\n\n'
+    csvContent += '"Independence Day","10-01","National Independence Day","YES","NG","All"\n'
+    csvContent += '"Christmas Day","12-25","Christmas celebration","YES","NG","All"\n\n'
     
     // Blackout Periods sheet
     csvContent += '## BLACKOUT PERIODS ##\n'
     csvContent += '"periodName*","startDate*","endDate*","reason","appliesToAllLeaveTypes","policyName"\n'
     csvContent += `"Year-End Shutdown","${currentYear}-12-20","${currentYear}-12-31","Company-wide holiday shutdown","YES",""\n`
+    csvContent += `"Peak Season Blackout","${currentYear}-11-15","${currentYear}-12-15","Year-end peak season - no leave allowed","YES",""\n`
     
     const response = new NextResponse(csvContent, {
       headers: {
@@ -589,8 +667,8 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
   })
 
   const results: ProcessResults = {
-    policies: { created: 0, updated: 0, failed: 0, errors: [], failedRecords: [] },
     leaveTypes: { created: 0, updated: 0, failed: 0, errors: [], failedRecords: [] },
+    policies: { created: 0, updated: 0, failed: 0, errors: [], failedRecords: [] },
     holidays: { created: 0, updated: 0, failed: 0, errors: [], failedRecords: [] },
     blackoutPeriods: { created: 0, updated: 0, failed: 0, errors: [], failedRecords: [] }
   }
@@ -614,6 +692,95 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
       throw new Error('Failed to parse file')
     }
 
+    // ============ PROCESS LEAVE TYPES (FIRST) ============
+    try {
+      const typesSheet = workbook.getWorksheet('Leave Types')
+      if (!typesSheet) {
+        results.leaveTypes.errors.push('Missing "Leave Types" worksheet')
+      } else {
+        const typesData = parseSheetData(typesSheet, ['policyName', 'typeName', 'code', 'description', 'color', 'isActive'])
+        
+        // Get all existing policies first for mapping
+        const policies = await prisma.leavePolicy.findMany({ where: { companyId: companyId } })
+        const policyMap = new Map(policies.map((p: any) => [p.name, p.id]))
+
+        for (let i = 0; i < typesData.length; i++) {
+          const rowNumber = i + 2
+          const typeData = typesData[i]
+          
+          try {
+            // Handle both camelCase and any case variations
+            const policyName = typeData.policyName || typeData.policyname
+            const typeName = typeData.typeName || typeData.typename
+            const code = typeData.code
+            const description = typeData.description || ''
+            const color = typeData.color || '#3B82F6'
+            const isActiveValue = typeData.isActive || typeData.isactive
+            
+            if (!policyName || !typeName || !code) {
+              throw new Error(`Missing required fields. Policy: "${policyName}", Type: "${typeName}", Code: "${code}"`)
+            }
+
+            const policyId = policyMap.get(policyName)
+            if (!policyId) {
+              const availablePolicies = Array.from(policyMap.keys()).join(', ')
+              throw new Error(`Policy "${policyName}" not found. Available policies: ${availablePolicies || 'None. Please create policies first.'}`)
+            }
+
+            // Validate code format (2-4 alphanumeric characters)
+            const codeRegex = /^[A-Z0-9]{2,4}$/i
+            if (!codeRegex.test(code)) {
+              throw new Error(`Code "${code}" must be 2-4 alphanumeric characters (e.g., "VL", "SL")`)
+            }
+
+            const isActive = isActiveValue?.toUpperCase() !== 'NO'
+            
+            // Check if leave type exists
+            const existingType = await prisma.leaveType.findFirst({
+              where: {
+                policyId: policyId,
+                OR: [
+                  { name: typeName },
+                  { code: code.toUpperCase() }
+                ]
+              }
+            })
+
+            const typeDataToSave = {
+              policyId: policyId,
+              name: typeName,
+              code: code.toUpperCase(),
+              description: description,
+              color: color,
+              isActive: isActive
+            }
+
+            if (existingType) {
+              await prisma.leaveType.update({
+                where: { id: existingType.id },
+                data: typeDataToSave
+              })
+              results.leaveTypes.updated++
+            } else {
+              await prisma.leaveType.create({ data: typeDataToSave })
+              results.leaveTypes.created++
+            }
+
+          } catch (error: any) {
+            results.leaveTypes.failed++
+            results.leaveTypes.errors.push(`Row ${rowNumber}: ${error.message}`)
+            results.leaveTypes.failedRecords.push({
+              sheetType: 'LEAVE_TYPES',
+              rowData: typeData,
+              error: error.message
+            })
+          }
+        }
+      }
+    } catch (error: any) {
+      results.leaveTypes.errors.push(`Error processing leave types sheet: ${error.message}`)
+    }
+
     // ============ PROCESS LEAVE POLICIES ============
     try {
       const policiesSheet = workbook.getWorksheet('Leave Policies')
@@ -632,35 +799,41 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
           const policyData = policiesData[i]
           
           try {
-            if (!policyData.policyName || !policyData.maxDays || !policyData.approvalWorkflow) {
+            // Handle case variations
+            const policyName = policyData.policyName || policyData.policyname
+            const maxDaysValue = policyData.maxDays || policyData.maxdays
+            const approvalWorkflow = policyData.approvalWorkflow || policyData.approvalworkflow
+            
+            if (!policyName || !maxDaysValue || !approvalWorkflow) {
               throw new Error('Missing required fields (policyName, maxDays, approvalWorkflow)')
             }
 
             const validWorkflows = ['MANAGER_THEN_HR', 'MANAGER_ONLY', 'HR_ONLY', 'NONE']
-            if (!validWorkflows.includes(policyData.approvalWorkflow)) {
-              throw new Error(`Invalid approvalWorkflow. Must be one of: ${validWorkflows.join(', ')}`)
+            if (!validWorkflows.includes(approvalWorkflow)) {
+              throw new Error(`Invalid approvalWorkflow "${approvalWorkflow}". Must be one of: ${validWorkflows.join(', ')}`)
             }
 
-            const isPaid = policyData.isPaid?.toUpperCase() === 'YES'
-            const requiresApproval = policyData.requiresApproval?.toUpperCase() === 'YES'
-            const documentationRequired = policyData.documentationRequired?.toUpperCase() === 'YES'
-            const allowHalfDays = policyData.allowHalfDays?.toUpperCase() !== 'NO'
-            const requireManagerComments = policyData.requireManagerComments?.toUpperCase() === 'YES'
+            const isPaid = (policyData.isPaid || policyData.ispaid)?.toUpperCase() === 'YES'
+            const requiresApproval = (policyData.requiresApproval || policyData.requiresapproval)?.toUpperCase() === 'YES'
+            const documentationRequired = (policyData.documentationRequired || policyData.documentationrequired)?.toUpperCase() === 'YES'
+            const allowHalfDays = (policyData.allowHalfDays || policyData.allowhalfdays)?.toUpperCase() !== 'NO'
+            const requireManagerComments = (policyData.requireManagerComments || policyData.requiremanagercomments)?.toUpperCase() === 'YES'
 
-            const maxDays = parseInt(policyData.maxDays)
+            const maxDays = parseInt(maxDaysValue)
             if (isNaN(maxDays) || maxDays <= 0) {
               throw new Error('maxDays must be a positive number')
             }
 
-            const carryOver = policyData.carryOver ? parseInt(policyData.carryOver) : 0
-            const minEmploymentMonths = policyData.minEmploymentMonths ? parseInt(policyData.minEmploymentMonths) : 0
-            const noticePeriod = policyData.noticePeriod ? parseInt(policyData.noticePeriod) : 0
-            const accrualRate = policyData.accrualRate ? parseFloat(policyData.accrualRate) : null
-            const maxConsecutiveDays = policyData.maxConsecutiveDays ? parseInt(policyData.maxConsecutiveDays) : null
+            const carryOver = policyData.carryOver || policyData.carryover ? parseInt(policyData.carryOver || policyData.carryover) : 0
+            const minEmploymentMonths = policyData.minEmploymentMonths || policyData.minemploymentmonths ? parseInt(policyData.minEmploymentMonths || policyData.minemploymentmonths) : 0
+            const noticePeriod = policyData.noticePeriod || policyData.noticeperiod ? parseInt(policyData.noticePeriod || policyData.noticeperiod) : 0
+            const accrualRate = policyData.accrualRate || policyData.accrualrate ? parseFloat(policyData.accrualRate || policyData.accrualrate) : null
+            const maxConsecutiveDays = policyData.maxConsecutiveDays || policyData.maxconsecutivedays ? parseInt(policyData.maxConsecutiveDays || policyData.maxconsecutivedays) : null
 
             let seasonalRestrictions: string | null = null
-            if (policyData.seasonalRestrictions) {
-              const months = policyData.seasonalRestrictions.split(',').map((m: string) => parseInt(m.trim()))
+            const seasonalValue = policyData.seasonalRestrictions || policyData.seasonalrestrictions
+            if (seasonalValue) {
+              const months = seasonalValue.toString().split(',').map((m: string) => parseInt(m.trim()))
               if (months.some((m: number) => isNaN(m) || m < 1 || m > 12)) {
                 throw new Error('seasonalRestrictions must be comma-separated months (1-12)')
               }
@@ -668,12 +841,12 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
             }
 
             const existingPolicy = await prisma.leavePolicy.findFirst({
-              where: { companyId: companyId, name: policyData.policyName }
+              where: { companyId: companyId, name: policyName }
             })
 
             const policyDataToSave = {
               companyId: companyId,
-              name: policyData.policyName,
+              name: policyName,
               description: policyData.description || '',
               maxDays: maxDays,
               carryOver: carryOver,
@@ -681,7 +854,7 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
               accrualRate: accrualRate,
               minEmploymentMonths: minEmploymentMonths,
               requiresApproval: requiresApproval,
-              approvalWorkflow: policyData.approvalWorkflow,
+              approvalWorkflow: approvalWorkflow,
               noticePeriod: noticePeriod,
               documentationRequired: documentationRequired,
               allowHalfDays: allowHalfDays,
@@ -717,72 +890,6 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
       results.policies.errors.push(`Error processing policies sheet: ${error.message}`)
     }
 
-    // ============ PROCESS LEAVE TYPES ============
-    try {
-      const typesSheet = workbook.getWorksheet('Leave Types')
-      if (!typesSheet) {
-        results.leaveTypes.errors.push('Missing "Leave Types" worksheet')
-      } else {
-        const typesData = parseSheetData(typesSheet, ['policyName', 'typeName', 'code', 'description', 'color', 'isActive'])
-        const policies = await prisma.leavePolicy.findMany({ where: { companyId: companyId } })
-        const policyMap = new Map(policies.map((p: any) => [p.name, p.id]))
-
-        for (let i = 0; i < typesData.length; i++) {
-          const rowNumber = i + 2
-          const typeData = typesData[i]
-          
-          try {
-            if (!typeData.policyName || !typeData.typeName || !typeData.code) {
-              throw new Error('Missing required fields (policyName, typeName, code)')
-            }
-
-            const policyId = policyMap.get(typeData.policyName)
-            if (!policyId) {
-              throw new Error(`Policy "${typeData.policyName}" not found. Create policy first.`)
-            }
-
-            const codeRegex = /^[A-Z0-9]{2,4}$/
-            if (!codeRegex.test(typeData.code)) {
-              throw new Error('Code must be 2-4 uppercase alphanumeric characters')
-            }
-
-            const isActive = typeData.isActive?.toUpperCase() !== 'NO'
-            const existingType = await prisma.leaveType.findFirst({
-              where: { policyId: policyId, OR: [{ name: typeData.typeName }, { code: typeData.code }] }
-            })
-
-            const typeDataToSave = {
-              policyId: policyId,
-              name: typeData.typeName,
-              code: typeData.code,
-              description: typeData.description || '',
-              color: typeData.color || '#3B82F6',
-              isActive: isActive
-            }
-
-            if (existingType) {
-              await prisma.leaveType.update({ where: { id: existingType.id }, data: typeDataToSave })
-              results.leaveTypes.updated++
-            } else {
-              await prisma.leaveType.create({ data: typeDataToSave })
-              results.leaveTypes.created++
-            }
-
-          } catch (error: any) {
-            results.leaveTypes.failed++
-            results.leaveTypes.errors.push(`Row ${rowNumber}: ${error.message}`)
-            results.leaveTypes.failedRecords.push({
-              sheetType: 'LEAVE_TYPES',
-              rowData: typeData,
-              error: error.message
-            })
-          }
-        }
-      }
-    } catch (error: any) {
-      results.leaveTypes.errors.push(`Error processing leave types sheet: ${error.message}`)
-    }
-
     // ============ PROCESS PUBLIC HOLIDAYS ============
     try {
       const holidaysSheet = workbook.getWorksheet('Public Holidays')
@@ -796,47 +903,77 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
           const holidayData = holidaysData[i]
           
           try {
-            if (!holidayData.holidayName || !holidayData.dateOrPattern) {
-              throw new Error('Missing required fields (holidayName, dateOrPattern)')
+            const holidayName = holidayData.holidayName || holidayData.holidayname
+            const dateOrPattern = holidayData.dateOrPattern || holidayData.dateorpattern
+            const description = holidayData.description || ''
+            const isRecurringValue = holidayData.isRecurring || holidayData.isrecurring
+            const country = holidayData.country
+            const state = holidayData.state
+            
+            if (!holidayName || !dateOrPattern) {
+              throw new Error(`Missing required fields. Name: "${holidayName}", Date: "${dateOrPattern}"`)
             }
 
-            const isRecurring = holidayData.isRecurring?.toUpperCase() === 'YES'
+            const isRecurring = isRecurringValue?.toUpperCase() === 'YES'
             let holidayDate: Date
 
             if (isRecurring) {
-              const patternMatch = holidayData.dateOrPattern.match(/^(\d{1,2})-(\d{1,2})$/)
+              // Handle MM-DD format
+              let patternMatch = dateOrPattern.match(/^(\d{1,2})-(\d{1,2})$/)
+              
               if (!patternMatch) {
-                throw new Error('Invalid date pattern for recurring holiday. Use MM-DD format')
+                // Try to parse as a date and extract month-day
+                const parsedDate = new Date(dateOrPattern)
+                if (!isNaN(parsedDate.getTime())) {
+                  const month = parsedDate.getMonth() + 1
+                  const day = parsedDate.getDate()
+                  patternMatch = [`${month}-${day}`, month.toString(), day.toString()]
+                }
               }
+              
+              if (!patternMatch) {
+                throw new Error('Invalid date pattern for recurring holiday. Use MM-DD format (e.g., "12-25" for Christmas)')
+              }
+              
               const month = parseInt(patternMatch[1]) - 1
               const day = parseInt(patternMatch[2])
+              
               if (month < 0 || month > 11 || day < 1 || day > 31) {
-                throw new Error('Invalid date values')
+                throw new Error('Invalid date values. Month must be 1-12, day must be 1-31')
               }
+              
               holidayDate = new Date(new Date().getFullYear(), month, day)
             } else {
-              holidayDate = new Date(holidayData.dateOrPattern)
+              holidayDate = new Date(dateOrPattern)
               if (isNaN(holidayDate.getTime())) {
-                throw new Error('Invalid date format. Use YYYY-MM-DD for specific dates')
+                throw new Error('Invalid date format. Use YYYY-MM-DD for specific dates (e.g., "2026-12-25")')
               }
             }
-
+            
+            // Check if holiday exists
             const existingHoliday = await prisma.publicHoliday.findFirst({
-              where: { companyId: companyId, date: holidayDate, name: holidayData.holidayName }
+              where: {
+                companyId: companyId,
+                date: holidayDate,
+                name: holidayName
+              }
             })
 
             const holidayDataToSave = {
               companyId: companyId,
-              name: holidayData.holidayName,
+              name: holidayName,
               date: holidayDate,
-              description: holidayData.description || '',
+              description: description,
               isRecurring: isRecurring,
-              country: holidayData.country || null,
-              state: holidayData.state || null
+              country: country || null,
+              state: state || null
             }
 
             if (existingHoliday) {
-              await prisma.publicHoliday.update({ where: { id: existingHoliday.id }, data: holidayDataToSave })
+              await prisma.publicHoliday.update({
+                where: { id: existingHoliday.id },
+                data: holidayDataToSave
+              })
               results.holidays.updated++
             } else {
               await prisma.publicHoliday.create({ data: holidayDataToSave })
@@ -871,12 +1008,16 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
           const periodData = blackoutData[i]
           
           try {
-            if (!periodData.periodName || !periodData.startDate || !periodData.endDate) {
+            const periodName = periodData.periodName || periodData.periodname
+            const startDateValue = periodData.startDate || periodData.startdate
+            const endDateValue = periodData.endDate || periodData.enddate
+            
+            if (!periodName || !startDateValue || !endDateValue) {
               throw new Error('Missing required fields (periodName, startDate, endDate)')
             }
 
-            const startDate = new Date(periodData.startDate)
-            const endDate = new Date(periodData.endDate)
+            const startDate = new Date(startDateValue)
+            const endDate = new Date(endDateValue)
             
             if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
               throw new Error('Invalid date format. Use YYYY-MM-DD')
@@ -886,7 +1027,7 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
               throw new Error('Start date must be before end date')
             }
 
-            const appliesToAllLeaveTypes = periodData.appliesToAllLeaveTypes?.toUpperCase() !== 'NO'
+            const appliesToAllLeaveTypes = (periodData.appliesToAllLeaveTypes || periodData.appliestoallleavetypes)?.toUpperCase() !== 'NO'
             let policyId: string | null = null
 
             if (!appliesToAllLeaveTypes && periodData.policyName) {
@@ -897,13 +1038,13 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
             }
 
             const existingPeriod = await prisma.leave_blackout_periods.findFirst({
-              where: { companyId: companyId, name: periodData.periodName, startDate: startDate, endDate: endDate }
+              where: { companyId: companyId, name: periodName, startDate: startDate, endDate: endDate }
             })
 
             const periodDataToSave = {
               id: randomUUID(),
               companyId: companyId,
-              name: periodData.periodName,
+              name: periodName,
               startDate: startDate,
               endDate: endDate,
               reason: periodData.reason || null,
@@ -945,8 +1086,8 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
 
   // Compile all failed records
   const allFailedRecords = [
-    ...results.policies.failedRecords,
     ...results.leaveTypes.failedRecords,
+    ...results.policies.failedRecords,
     ...results.holidays.failedRecords,
     ...results.blackoutPeriods.failedRecords
   ]
@@ -955,12 +1096,12 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
   const updatedUpload = await prisma.leave_uploads.update({
     where: { id: leaveUpload.id },
     data: {
-      policiesCreated: results.policies.created,
-      policiesUpdated: results.policies.updated,
-      policiesFailed: results.policies.failed,
       leaveTypesCreated: results.leaveTypes.created,
       leaveTypesUpdated: results.leaveTypes.updated,
       leaveTypesFailed: results.leaveTypes.failed,
+      policiesCreated: results.policies.created,
+      policiesUpdated: results.policies.updated,
+      policiesFailed: results.policies.failed,
       holidaysCreated: results.holidays.created,
       holidaysUpdated: results.holidays.updated,
       holidaysFailed: results.holidays.failed,
@@ -975,7 +1116,7 @@ async function processLeaveUpload(companyId: string, file: File, userId: string,
     upload: updatedUpload,
     results,
     hasFailedRecords: allFailedRecords.length > 0,
-    totalFailed: results.policies.failed + results.leaveTypes.failed + results.holidays.failed + results.blackoutPeriods.failed
+    totalFailed: results.leaveTypes.failed + results.policies.failed + results.holidays.failed + results.blackoutPeriods.failed
   }
 }
 
@@ -994,11 +1135,40 @@ async function downloadFailedRecords(
     row.alignment = { vertical: 'middle', horizontal: 'center' }
   }
   
-  const policiesRecords = failedRecords.filter((r: FailedRecord) => r.sheetType === 'POLICIES')
   const leaveTypesRecords = failedRecords.filter((r: FailedRecord) => r.sheetType === 'LEAVE_TYPES')
+  const policiesRecords = failedRecords.filter((r: FailedRecord) => r.sheetType === 'POLICIES')
   const holidaysRecords = failedRecords.filter((r: FailedRecord) => r.sheetType === 'HOLIDAYS')
   const blackoutRecords = failedRecords.filter((r: FailedRecord) => r.sheetType === 'BLACKOUT_PERIODS')
 
+  // Leave Types failed sheet (FIRST)
+  if (leaveTypesRecords.length > 0) {
+    const typesSheet = workbook.addWorksheet('Failed Leave Types')
+    const summaryRow = typesSheet.addRow(['❌ FAILED LEAVE TYPES - Please correct and re-upload'])
+    summaryRow.font = { bold: true, size: 14, color: { argb: 'FFDC3545' } }
+    typesSheet.addRow([`Upload ID: ${upload.id}`])
+    typesSheet.addRow([`Upload Date: ${new Date(upload.createdAt).toISOString()}`])
+    typesSheet.addRow([])
+    
+    typesSheet.columns = [
+      { header: 'policyName', key: 'policyName', width: 20 },
+      { header: 'typeName', key: 'typeName', width: 20 },
+      { header: 'code', key: 'code', width: 10 },
+      { header: 'description', key: 'description', width: 30 },
+      { header: 'color', key: 'color', width: 15 },
+      { header: 'isActive', key: 'isActive', width: 10 },
+      { header: '❌ ERROR', key: 'error', width: 50 }
+    ]
+    
+    const headerRow = typesSheet.getRow(5)
+    styleHeaderRow(headerRow)
+    
+    leaveTypesRecords.forEach((record: FailedRecord) => {
+      const row = typesSheet.addRow({ ...record.rowData, error: record.error })
+      row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3F3' } }
+    })
+  }
+
+  // Policies failed sheet
   if (policiesRecords.length > 0) {
     const policiesSheet = workbook.addWorksheet('Failed Policies')
     const summaryRow = policiesSheet.addRow(['❌ FAILED POLICIES - Please correct and re-upload'])
@@ -1036,33 +1206,6 @@ async function downloadFailedRecords(
         error: record.error,
         suggestion: record.suggestion || ''
       })
-      row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3F3' } }
-    })
-  }
-
-  if (leaveTypesRecords.length > 0) {
-    const typesSheet = workbook.addWorksheet('Failed Leave Types')
-    const summaryRow = typesSheet.addRow(['❌ FAILED LEAVE TYPES - Please correct and re-upload'])
-    summaryRow.font = { bold: true, size: 14, color: { argb: 'FFDC3545' } }
-    typesSheet.addRow([`Upload ID: ${upload.id}`])
-    typesSheet.addRow([`Upload Date: ${new Date(upload.createdAt).toISOString()}`])
-    typesSheet.addRow([])
-    
-    typesSheet.columns = [
-      { header: 'policyName', key: 'policyName', width: 20 },
-      { header: 'typeName', key: 'typeName', width: 20 },
-      { header: 'code', key: 'code', width: 10 },
-      { header: 'description', key: 'description', width: 30 },
-      { header: 'color', key: 'color', width: 15 },
-      { header: 'isActive', key: 'isActive', width: 10 },
-      { header: '❌ ERROR', key: 'error', width: 50 }
-    ]
-    
-    const headerRow = typesSheet.getRow(5)
-    styleHeaderRow(headerRow)
-    
-    leaveTypesRecords.forEach((record: FailedRecord) => {
-      const row = typesSheet.addRow({ ...record.rowData, error: record.error })
       row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3F3' } }
     })
   }
@@ -1127,6 +1270,19 @@ async function downloadFailedRecords(
     csvContent += `# Upload Date: ${new Date(upload.createdAt).toISOString()}\n`
     csvContent += '# Please correct the errors and re-upload\n\n'
     
+    if (leaveTypesRecords.length > 0) {
+      csvContent += '## FAILED LEAVE TYPES ##\n'
+      csvContent += '"policyName","typeName","code","description","color","isActive","ERROR"\n'
+      leaveTypesRecords.forEach((record: FailedRecord) => {
+        const row = [
+          record.rowData.policyName || '', record.rowData.typeName || '', record.rowData.code || '',
+          record.rowData.description || '', record.rowData.color || '', record.rowData.isActive || '', record.error
+        ].map((field: any) => `"${String(field).replace(/"/g, '""')}"`).join(',')
+        csvContent += row + '\n'
+      })
+      csvContent += '\n'
+    }
+    
     if (policiesRecords.length > 0) {
       csvContent += '## FAILED POLICIES ##\n'
       csvContent += '"policyName","description","maxDays","carryOver","isPaid","accrualRate","minEmploymentMonths","requiresApproval","approvalWorkflow","noticePeriod","documentationRequired","allowHalfDays","maxConsecutiveDays","seasonalRestrictions","requireManagerComments","ERROR","SUGGESTION"\n'
@@ -1139,19 +1295,6 @@ async function downloadFailedRecords(
           record.rowData.documentationRequired || '', record.rowData.allowHalfDays || '',
           record.rowData.maxConsecutiveDays || '', record.rowData.seasonalRestrictions || '',
           record.rowData.requireManagerComments || '', record.error, record.suggestion || ''
-        ].map((field: any) => `"${String(field).replace(/"/g, '""')}"`).join(',')
-        csvContent += row + '\n'
-      })
-      csvContent += '\n'
-    }
-    
-    if (leaveTypesRecords.length > 0) {
-      csvContent += '## FAILED LEAVE TYPES ##\n'
-      csvContent += '"policyName","typeName","code","description","color","isActive","ERROR"\n'
-      leaveTypesRecords.forEach((record: FailedRecord) => {
-        const row = [
-          record.rowData.policyName || '', record.rowData.typeName || '', record.rowData.code || '',
-          record.rowData.description || '', record.rowData.color || '', record.rowData.isActive || '', record.error
         ].map((field: any) => `"${String(field).replace(/"/g, '""')}"`).join(',')
         csvContent += row + '\n'
       })
@@ -1468,20 +1611,20 @@ export async function POST(request: NextRequest) {
           companyId: companyId,
           companyName: company.companyName,
           totalProcessed: {
-            policies: processResult.results.policies.created + processResult.results.policies.updated + processResult.results.policies.failed,
             leaveTypes: processResult.results.leaveTypes.created + processResult.results.leaveTypes.updated + processResult.results.leaveTypes.failed,
+            policies: processResult.results.policies.created + processResult.results.policies.updated + processResult.results.policies.failed,
             holidays: processResult.results.holidays.created + processResult.results.holidays.updated + processResult.results.holidays.failed,
             blackoutPeriods: processResult.results.blackoutPeriods.created + processResult.results.blackoutPeriods.updated + processResult.results.blackoutPeriods.failed
           },
           successful: {
-            policies: processResult.results.policies.created + processResult.results.policies.updated,
             leaveTypes: processResult.results.leaveTypes.created + processResult.results.leaveTypes.updated,
+            policies: processResult.results.policies.created + processResult.results.policies.updated,
             holidays: processResult.results.holidays.created + processResult.results.holidays.updated,
             blackoutPeriods: processResult.results.blackoutPeriods.created + processResult.results.blackoutPeriods.updated
           },
           failed: {
-            policies: processResult.results.policies.failed,
             leaveTypes: processResult.results.leaveTypes.failed,
+            policies: processResult.results.policies.failed,
             holidays: processResult.results.holidays.failed,
             blackoutPeriods: processResult.results.blackoutPeriods.failed
           },
