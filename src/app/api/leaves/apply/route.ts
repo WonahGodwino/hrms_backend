@@ -17,6 +17,10 @@ const optionalIdSchema = z.preprocess(
   (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
   cuidOrUuidSchema.optional()
 )
+const optionalNonEmptyStringSchema = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().optional()
+)
 
 // Validation schema for leave application
 const leaveApplicationSchema = z.object({
@@ -30,7 +34,7 @@ const leaveApplicationSchema = z.object({
   reason: z.string().min(5).max(500),
   emergencyContact: z.string().optional(),
   contactPhone: z.string().optional(),
-  handoverTo: optionalIdSchema,
+  handoverTo: optionalNonEmptyStringSchema,
   handoverNotes: z.string().optional(),
   attachmentUrl: z.string().url().optional(),
   fileName: z.string().optional(),
@@ -563,23 +567,82 @@ export async function POST(request: NextRequest) {
       return withCors(response, origin)
     }
 
-    // Check handover staff
+    // Resolve handover staff from id, staffId, email, or name
+    let resolvedHandoverToId: string | undefined
     if (data.handoverTo) {
-      const handoverStaff = await prisma.staffRecord.findFirst({
+      const handoverInput = data.handoverTo.trim()
+      const nameParts = handoverInput.split(/\s+/).filter(Boolean)
+      const firstName = nameParts[0]
+      const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : null
+
+      const handoverFilters: any[] = [
+        { id: handoverInput },
+        { staffId: { equals: handoverInput, mode: 'insensitive' } },
+        { email: { equals: handoverInput, mode: 'insensitive' } },
+        { firstName: { equals: handoverInput, mode: 'insensitive' } },
+        { lastName: { equals: handoverInput, mode: 'insensitive' } }
+      ]
+
+      if (firstName && lastName) {
+        handoverFilters.push({
+          AND: [
+            { firstName: { equals: firstName, mode: 'insensitive' } },
+            { lastName: { equals: lastName, mode: 'insensitive' } }
+          ]
+        })
+      }
+
+      const handoverCandidates = await prisma.staffRecord.findMany({
         where: {
-          id: data.handoverTo,
           companyId: staff.companyId,
-          isActive: true
-        }
+          isActive: true,
+          OR: handoverFilters
+        },
+        select: {
+          id: true,
+          staffId: true,
+          firstName: true,
+          lastName: true,
+          email: true
+        },
+        take: 10
       })
-      
-      if (!handoverStaff) {
+
+      const normalizedInput = handoverInput.toLowerCase()
+      const exactIdMatch = handoverCandidates.find(candidate => candidate.id.toLowerCase() === normalizedInput)
+      const exactStaffIdMatch = handoverCandidates.find(candidate => candidate.staffId.toLowerCase() === normalizedInput)
+      const exactEmailMatch = handoverCandidates.find(candidate => candidate.email.toLowerCase() === normalizedInput)
+      const exactFullNameMatch = handoverCandidates.find(candidate =>
+        `${candidate.firstName} ${candidate.lastName}`.trim().toLowerCase() === normalizedInput
+      )
+
+      const selectedHandover =
+        exactIdMatch ||
+        exactStaffIdMatch ||
+        exactEmailMatch ||
+        exactFullNameMatch ||
+        (handoverCandidates.length === 1 ? handoverCandidates[0] : undefined)
+
+      if (!selectedHandover) {
         const response = NextResponse.json(
-          { success: false, message: 'Handover staff not found or inactive' },
+          {
+            success: false,
+            message: handoverCandidates.length > 1
+              ? 'Multiple staff matched handoverTo. Please provide exact staff ID or email.'
+              : 'Handover staff not found. Provide a valid staff ID, email, or full name.',
+            matches: handoverCandidates.slice(0, 5).map(candidate => ({
+              id: candidate.id,
+              staffId: candidate.staffId,
+              name: `${candidate.firstName} ${candidate.lastName}`,
+              email: candidate.email
+            }))
+          },
           { status: 400 }
         )
         return withCors(response, origin)
       }
+
+      resolvedHandoverToId = selectedHandover.id
     }
 
     // Create leave request in transaction
@@ -618,7 +681,7 @@ export async function POST(request: NextRequest) {
         reason: data.reason,
         emergencyContact: data.emergencyContact,
         contactPhone: data.contactPhone,
-        handoverTo: data.handoverTo,
+        handoverTo: resolvedHandoverToId,
         handoverNotes: data.handoverNotes,
         attachmentUrl: data.attachmentUrl,
         fileName: data.fileName,
