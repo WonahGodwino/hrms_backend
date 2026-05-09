@@ -12,9 +12,15 @@ import {
   getNotificationsForLeaveRequest 
 } from '@/app/lib/notifications/helpers'
 
+const cuidOrUuidSchema = z.union([z.string().cuid(), z.string().uuid()])
+const optionalIdSchema = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  cuidOrUuidSchema.optional()
+)
+
 // Validation schema for leave application
 const leaveApplicationSchema = z.object({
-  leaveTypeId: z.string().cuid(),
+  leaveTypeId: cuidOrUuidSchema,
   startDate: z.string().refine((val) => !isNaN(Date.parse(val)), {
     message: 'Invalid start date format. Use YYYY-MM-DD',
   }),
@@ -24,7 +30,7 @@ const leaveApplicationSchema = z.object({
   reason: z.string().min(5).max(500),
   emergencyContact: z.string().optional(),
   contactPhone: z.string().optional(),
-  handoverTo: z.string().cuid().optional(),
+  handoverTo: optionalIdSchema,
   handoverNotes: z.string().optional(),
   attachmentUrl: z.string().url().optional(),
   fileName: z.string().optional(),
@@ -34,7 +40,7 @@ const leaveApplicationSchema = z.object({
   medicalCertificateDate: z.string().optional(),
   medicalCertificateIssuer: z.string().optional(),
   // Optional: for HR/Admin to apply on behalf of others
-  staffRecordId: z.string().cuid().optional()
+  staffRecordId: optionalIdSchema
 })
 
 // Helper function to parse work week pattern
@@ -929,6 +935,18 @@ export async function POST(request: NextRequest) {
       const response = NextResponse.json(
         { success: false, message: 'Record not found. Please refresh and try again.' },
         { status: 404 }
+      )
+      return withCors(response, origin)
+    }
+
+    if (error.code === 'P2023') {
+      const response = NextResponse.json(
+        {
+          success: false,
+          message: 'Invalid identifier format in request',
+          details: 'Please provide valid IDs for leave type, handover staff, and staff record.'
+        },
+        { status: 400 }
       )
       return withCors(response, origin)
     }
