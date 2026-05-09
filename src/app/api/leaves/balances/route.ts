@@ -24,8 +24,7 @@ async function getPrismaClient() {
   }
 
   try {
-    // DIRECT IMPORT - This is your actual file location
-    // This is the most reliable path and will work at runtime
+    // DIRECT IMPORT - 
     const { prisma } = await import('@/app/lib/prisma')
     prismaInstance = prisma
     return prisma
@@ -42,6 +41,13 @@ interface PrismaLeaveType {
   name: string;
   code: string;
   color: string | null;
+  policy: {
+    id: string;
+    name: string;
+    maxDays: number;
+    carryOver: number;
+    isPaid: boolean;
+  } | null;
 }
 
 interface PrismaLeaveBalance {
@@ -69,18 +75,20 @@ interface PrismaPreviousYearBalance {
   };
 }
 
-interface PrismaLeaveTypeWithPolicy {
-  id: string;
-  policy: {
-    name: string;
-    maxDays: number;
-    carryOver: number;
-    isPaid: boolean;
-  } | null;
-}
-
 interface FormattedLeaveBalance {
   id: string;
+  leaveId: string;
+  leaveName: string;
+  leavePolicy: {
+    id: string;
+    name: string;
+    maxDays: number;
+    carryOverLimit: number;
+    isPaid: boolean;
+  } | null;
+  daysTaken: number;
+  balance: number;
+  previousYearCarryOver: number;
   leaveTypeId: string;
   leaveType: {
     id: string;
@@ -100,14 +108,7 @@ interface FormattedLeaveBalance {
   daysUntilExpiry: number | null;
 }
 
-interface EnhancedLeaveBalance extends FormattedLeaveBalance {
-  policy?: {
-    name: string;
-    maxDays: number;
-    carryOverLimit: number;
-    isPaid: boolean;
-  };
-}
+type EnhancedLeaveBalance = FormattedLeaveBalance
 
 interface LeaveBalanceSummary {
   totalEntitled: number;
@@ -251,7 +252,16 @@ export async function GET(request: NextRequest) {
             id: true,
             name: true,
             code: true,
-            color: true
+            color: true,
+            policy: {
+              select: {
+                id: true,
+                name: true,
+                maxDays: true,
+                carryOver: true,
+                isPaid: true
+              }
+            }
           }
         }
       },
@@ -273,6 +283,18 @@ export async function GET(request: NextRequest) {
 
       return {
         id: balance.id,
+        leaveId: balance.leaveType.id,
+        leaveName: balance.leaveType.name,
+        leavePolicy: balance.leaveType.policy ? {
+          id: balance.leaveType.policy.id,
+          name: balance.leaveType.policy.name,
+          maxDays: balance.leaveType.policy.maxDays,
+          carryOverLimit: balance.leaveType.policy.carryOver,
+          isPaid: balance.leaveType.policy.isPaid
+        } : null,
+        daysTaken: Number(balance.usedDays),
+        balance: availableDays,
+        previousYearCarryOver: Number(balance.carriedOver),
         leaveTypeId: balance.leaveTypeId,
         leaveType: {
           id: balance.leaveType.id,
@@ -340,46 +362,8 @@ export async function GET(request: NextRequest) {
       year: balance.year
     }))
 
-    // 6. Get leave type policies for additional context
-    const leaveTypesWithPolicy: PrismaLeaveTypeWithPolicy[] = await prisma.leaveType.findMany({
-      where: {
-        id: {
-          in: formattedBalances.map((balance: FormattedLeaveBalance) => balance.leaveTypeId)
-        },
-        isActive: true
-      },
-      include: {
-        policy: {
-          select: {
-            name: true,
-            maxDays: true,
-            carryOver: true,
-            isPaid: true
-          }
-        }
-      }
-    })
-
-    // 7. Enhance balances with policy information
-    const enhancedBalances: EnhancedLeaveBalance[] = formattedBalances.map((balance: FormattedLeaveBalance) => {
-      const leaveTypePolicy = leaveTypesWithPolicy.find((lt: PrismaLeaveTypeWithPolicy) => lt.id === balance.leaveTypeId)
-      
-      const enhancedBalance: EnhancedLeaveBalance = {
-        ...balance,
-        daysUntilExpiry: balance.daysUntilExpiry
-      }
-      
-      if (leaveTypePolicy?.policy) {
-        enhancedBalance.policy = {
-          name: leaveTypePolicy.policy.name,
-          maxDays: leaveTypePolicy.policy.maxDays,
-          carryOverLimit: leaveTypePolicy.policy.carryOver,
-          isPaid: leaveTypePolicy.policy.isPaid
-        }
-      }
-      
-      return enhancedBalance
-    })
+    // 6. Balances already include policy information from the main query
+    const enhancedBalances: EnhancedLeaveBalance[] = formattedBalances
 
     // 8. Prepare fiscal year dates
     const fiscalYearStart = new Date(currentYear, 0, 1)
@@ -542,7 +526,16 @@ export async function POST(request: NextRequest) {
             id: true,
             name: true,
             code: true,
-            color: true
+            color: true,
+            policy: {
+              select: {
+                id: true,
+                name: true,
+                maxDays: true,
+                carryOver: true,
+                isPaid: true
+              }
+            }
           }
         }
       },
@@ -562,6 +555,18 @@ export async function POST(request: NextRequest) {
 
       return {
         id: balance.id,
+        leaveId: balance.leaveType.id,
+        leaveName: balance.leaveType.name,
+        leavePolicy: balance.leaveType.policy ? {
+          id: balance.leaveType.policy.id,
+          name: balance.leaveType.policy.name,
+          maxDays: balance.leaveType.policy.maxDays,
+          carryOverLimit: balance.leaveType.policy.carryOver,
+          isPaid: balance.leaveType.policy.isPaid
+        } : null,
+        daysTaken: Number(balance.usedDays),
+        balance: availableDays,
+        previousYearCarryOver: Number(balance.carriedOver),
         leaveTypeId: balance.leaveTypeId,
         leaveType: {
           id: balance.leaveType.id,
