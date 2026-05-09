@@ -6,6 +6,7 @@ import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { z } from 'zod'
 import { prisma } from '@/app/lib/db'
 import { sendLeaveNotificationEmail } from '@/app/lib/email'
+import { ensureStaffLeaveBalances } from '@/app/lib/leaves/balance-engine'
 import { 
   createLeaveNotification, 
   NOTIFICATION_TYPES,
@@ -491,6 +492,13 @@ export async function POST(request: NextRequest) {
 
     // Check leave balance
     const currentYear = new Date().getFullYear()
+
+    await ensureStaffLeaveBalances({
+      prisma,
+      staffRecordId: staff.id,
+      year: currentYear,
+    })
+
     const leaveBalance = await prisma.staffLeaveBalance.findFirst({
       where: {
         staffRecordId: staff.id,

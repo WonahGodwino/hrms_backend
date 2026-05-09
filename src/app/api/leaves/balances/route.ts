@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
+import { ensureStaffLeaveBalances } from '@/app/lib/leaves/balance-engine'
 
 // ================ SIMPLIFIED, ROBUST PRISMA IMPORT ================
 // This is the most reliable approach - direct import with build-time safety
@@ -236,6 +237,13 @@ export async function GET(request: NextRequest) {
     const currentYear = new Date().getFullYear()
     const today = new Date()
     today.setHours(0, 0, 0, 0)
+
+    // Auto-create/sync yearly balances from leave policies for staff with no prior applications.
+    await ensureStaffLeaveBalances({
+      prisma,
+      staffRecordId: user.userId,
+      year: currentYear,
+    })
     
     // 1. Get current year leave balances
     const balances: PrismaLeaveBalance[] = await prisma.staffLeaveBalance.findMany({
@@ -510,6 +518,12 @@ export async function POST(request: NextRequest) {
     if (isNaN(targetYear) || targetYear < 2000 || targetYear > 2100) {
       throw new Error('Invalid year specified. Must be between 2000 and 2100')
     }
+
+    await ensureStaffLeaveBalances({
+      prisma,
+      staffRecordId: user.userId,
+      year: targetYear,
+    })
 
     // Get balances for the specified year
     const balances: PrismaLeaveBalance[] = await prisma.staffLeaveBalance.findMany({
