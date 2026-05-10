@@ -689,7 +689,7 @@ export async function POST(request: NextRequest) {
         reason: data.reason,
         emergencyContact: data.emergencyContact,
         contactPhone: data.contactPhone,
-        handoverTo: resolvedHandoverToId,
+        handoverStaffId: resolvedHandoverToId,
         handoverNotes: data.handoverNotes,
         attachmentUrl: data.attachmentUrl,
         fileName: data.fileName,
