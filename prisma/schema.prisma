@@ -50,6 +50,7 @@ model Company {
   taxFilingSchedules     TaxFilingSchedule[]
   annualReturns          AnnualReturn[]
   taxProfileUploads      TaxProfileUpload[]
+  leaveRequests          LeaveRequest[]
   exchangeRates          CompanyExchangeRate[]
   companyPayDates        CompanyPayDate[]         // This matches the relation in CompanyPayDate
 
@@ -728,6 +729,7 @@ model LeaveRequest {
   id                String       @id @default(cuid())
   referenceNumber   String?      @unique
   staffRecordId     String
+  companyId         String
   leaveTypeId       String
   startDate         DateTime
   endDate           DateTime
@@ -761,12 +763,14 @@ model LeaveRequest {
   
   // Relations - ALL must have unique relation names
   leaveType         LeaveType    @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  company           Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
   
   // Each relation to StaffRecord needs a unique name
   managerApprover   StaffRecord? @relation("LeaveRequestManagerApprover", fields: [managerApproverId], references: [id])
   staffRecord       StaffRecord  @relation("LeaveRequestStaff", fields: [staffRecordId], references: [id], onDelete: Cascade)
   handoverStaff     StaffRecord? @relation("LeaveRequestHandover", fields: [handoverStaffId], references: [id])
 
+  @@index([companyId])
   @@index([staffRecordId, startDate])
   @@index([status, startDate])
   @@index([managerApproverId, status])
