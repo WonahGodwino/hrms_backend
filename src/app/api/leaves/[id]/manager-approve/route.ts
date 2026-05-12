@@ -214,8 +214,36 @@ export async function PATCH(
     // - If approved (manager-only): notify staff
     // - If rejected: notify staff
 
+    // Count supervisees by hierarchy (staff_records.managerId), not by role.
+    const [superviseesCount, pendingSuperviseeApprovalsCount] = await Promise.all([
+      prisma.staffRecord.count({
+        where: {
+          managerId: staffRecord.id,
+          isActive: true
+        }
+      }),
+      prisma.leaveRequest.count({
+        where: {
+          status: 'PENDING',
+          currentStep: 'MANAGER',
+          managerApproverId: staffRecord.id,
+          staffRecord: {
+            managerId: staffRecord.id,
+            isActive: true
+          }
+        }
+      })
+    ])
+
     return withCors(
-      ApiResponse.success(updatedLeave, 
+      ApiResponse.success({
+        leave: updatedLeave,
+        supervision: {
+          superviseesCount,
+          pendingSuperviseeApprovalsCount,
+          isManagerByHierarchy: superviseesCount > 0
+        }
+      }, 
         body.action === 'APPROVE' 
           ? (updatedLeave.currentStep === 'HR' 
               ? 'Leave request approved by manager. Awaiting HR/Admin approval.' 
