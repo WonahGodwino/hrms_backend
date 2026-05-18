@@ -561,15 +561,23 @@ export const processDynamicTemplate = {
 
         // Find staff record
         let staffRecord = null
+        let staffIdMatchedOtherCompany = false
         
         if (staffId) {
-          staffRecord = await prisma.staffRecord.findFirst({
+          const staffIdMatches = await prisma.staffRecord.findMany({
             where: {
-              companyId: companyId,
               staffId: staffId,
-              isActive: true
-            }
+              isActive: true,
+            },
           })
+
+          const inCompanyMatch = staffIdMatches.find((match) => match.companyId === companyId)
+
+          if (inCompanyMatch) {
+            staffRecord = inCompanyMatch
+          } else if (staffIdMatches.length > 0) {
+            staffIdMatchedOtherCompany = true
+          }
         }
 
         if (!staffRecord && rawEmail) {
@@ -583,7 +591,11 @@ export const processDynamicTemplate = {
           })
         }
 
-        if (!staffRecord && rawName) {
+        if (!staffRecord && staffIdMatchedOtherCompany) {
+          throw new Error(`Staff record not found for ${rawName || rawEmail || staffId}`)
+        }
+
+        if (!staffRecord && rawName && !staffIdMatchedOtherCompany) {
           const parts = rawName.split(' ').filter(Boolean)
           const firstName = parts[0]
           const lastName = parts.slice(1).join(' ') || parts[0]

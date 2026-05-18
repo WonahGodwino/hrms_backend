@@ -73,6 +73,7 @@ export async function GET(request: NextRequest) {
       ]
     }
 
+    // Fetch staff records and total count as before
     const [staffRecords, totalCount] = await Promise.all([
       prisma.staffRecord.findMany({
         where,
@@ -103,6 +104,21 @@ export async function GET(request: NextRequest) {
       prisma.staffRecord.count({ where }),
     ])
 
+    // Get all staffIds in the current result set
+    const staffIds = staffRecords.map(r => r.staffId)
+    // Get all staffIds that are referenced as managerId in the same company
+    let managerStaffIds: string[] = []
+    if (staffIds.length > 0 && companyId) {
+      const managers = await prisma.staffRecord.findMany({
+        where: {
+          companyId,
+          managerId: { in: staffIds }
+        },
+        select: { managerId: true }
+      })
+      managerStaffIds = Array.from(new Set(managers.map(m => m.managerId!).filter(Boolean)))
+    }
+
     // Get active and inactive counts
     let activeCount = 0;
     let inactiveCount = 0;
@@ -118,23 +134,29 @@ export async function GET(request: NextRequest) {
       inactiveCount = 0;
     }
 
-    // Format the response (no changes needed - frontend expects this structure)
-    const formattedStaffRecords = staffRecords.map(record => ({
-      id: record.id,
-      staffId: record.staffId,
-      email: record.email,
-      firstName: record.firstName,
-      lastName: record.lastName,
-      fullName: `${record.firstName} ${record.lastName}`,
-      department: record.department,
-      position: record.position,
-      phone: record.phone,
-      isActive: record.isActive,
-      createdAt: record.createdAt,
-      companyId: record.companyId,
-      companyName: record.company?.companyName || 'Unknown',
-      status: record.isActive ? 'Active' : 'Inactive'
-    }))
+    // Format the response and add isManager field
+    const formattedStaffRecords = staffRecords.map(record => {
+      // A staff is a manager if their staffId is referenced as a managerId in the same company
+      // Or if their role is HR, ADMIN, or MANAGER and their staffId is found in managerId
+      const isManager = managerStaffIds.includes(record.staffId)
+      return {
+        id: record.id,
+        staffId: record.staffId,
+        email: record.email,
+        firstName: record.firstName,
+        lastName: record.lastName,
+        fullName: `${record.firstName} ${record.lastName}`,
+        department: record.department,
+        position: record.position,
+        phone: record.phone,
+        isActive: record.isActive,
+        createdAt: record.createdAt,
+        companyId: record.companyId,
+        companyName: record.company?.companyName || 'Unknown',
+        status: record.isActive ? 'Active' : 'Inactive',
+        isManager
+      }
+    })
 
     return withCors(
       ApiResponse.success({

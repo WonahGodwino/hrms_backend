@@ -96,7 +96,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Determine if user is a manager (has people reporting to them)
-    const isManager = currentStaff.directReports.length > 0
+    const directReportsCount = currentStaff.directReports.length
+    const isManager = directReportsCount > 0
 
     // ============ BUILD WHERE CLAUSE BASED ON ACCESS LEVEL ============
     let where: any = {}
@@ -313,13 +314,14 @@ export async function GET(request: NextRequest) {
           position: currentStaff.position,
           company: currentStaff.company,
           isManager,
-          directReportsCount: currentStaff.directReports.length
+          directReportsCount,
         },
         managerInfo: isManager ? {
           pendingApprovalsCount,
           teamMembers,
           viewMode: viewTeamApprovals ? 'team' : 'own'
         } : null,
+        managerDirectReportsCount: directReportsCount,
         pagination: {
           page,
           limit,
