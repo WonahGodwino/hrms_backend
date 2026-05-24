@@ -83,10 +83,15 @@ model Company {
   notifications          Notification[]
   emailLogs              EmailLog[]
   
-  // Department Relations 
+  // Department Relations (NEW)
   departments            Department[]
   departmentAuditLogs    DepartmentAuditLog[]
   departmentStaffHistories DepartmentStaffHistory[]
+
+  // Staff Loans & Benefits (NEW)
+  loanRequests           LoanRequest[]       @relation("CompanyLoanRequests")
+  benefitRequests        BenefitRequest[]    @relation("CompanyBenefitRequests")
+  benefitAllocations     BenefitAllocation[] @relation("CompanyBenefitAllocations")
 
   @@map("companies")
 }
@@ -117,8 +122,8 @@ model StaffRecord {
   email                           String
   firstName                       String
   lastName                        String
-  department                      String?             // Legacy string column (keep for data)
-  departmentId                    String?             // New foreign key relation            // ← Keep existing
+  department                      String?             // ← KEEP nullable (from branch 2)
+  departmentId                    String?             // ← NEW from branch 2
   position                        String
   phone                           String?
   bankName                        String?
@@ -156,10 +161,11 @@ model StaffRecord {
   payrollData                     PayrollData[]
   taxProfile                      EmployeeTaxProfile?
 
-  departments                      Department?         @relation(fields: [departmentId], references: [id])
+  // Department relations (NEW from branch 2)
+  departments                     Department?         @relation(fields: [departmentId], references: [id])
   headOfDepartment                Department[]        @relation("DepartmentHead")
   assistantHeadOfDepartment       Department[]        @relation("DepartmentAssistantHead")
-  departmentStaffHistories DepartmentStaffHistory[]
+  departmentStaffHistories        DepartmentStaffHistory[]
 
   // Payroll Engine relations
   employeeSalaries                EmployeeSalary[]
@@ -168,6 +174,14 @@ model StaffRecord {
   overtimeEntries                 OvertimeEntry[]
   deductionEntries                DeductionEntry[]
   computedPayslips                ComputedPayslip[]
+
+  // Staff Loans & Benefits (NEW)
+  loanRequests                    LoanRequest[]       @relation("StaffLoanRequests")
+  loanRequestsAsApprover          LoanRequest[]       @relation("LoanApprover")
+  benefitRequests                 BenefitRequest[]    @relation("StaffBenefitRequests")
+  benefitRequestsAsApprover       BenefitRequest[]    @relation("BenefitRequestApprover")
+  benefitAllocations              BenefitAllocation[] @relation("StaffBenefitAllocations")
+  benefitAllocationsAsAllocator   BenefitAllocation[] @relation("BenefitAllocator")
 
   @@unique([staffId, companyId])
   @@unique([email, companyId])
@@ -1497,22 +1511,16 @@ model Department {
   activeHeadcount Int?      @default(0)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
-  
-  // NEW FIELDS
   maxHeadcount  Int?
   costCenter    String?
   budgetCode    String?
   positionCapacity Json?
-  
-  // Relations
   company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   staff         StaffRecord[]
   head          StaffRecord? @relation("DepartmentHead", fields: [headId], references: [id])
   assistantHead StaffRecord? @relation("DepartmentAssistantHead", fields: [assistantHeadId], references: [id])
   auditLogs     DepartmentAuditLog[]
   staffHistory  DepartmentStaffHistory[]
-  
-  // Transfer relations
   transferredFrom DepartmentStaffHistory[] @relation("FromDepartmentTransfer")
   transferredTo   DepartmentStaffHistory[] @relation("ToDepartmentTransfer")
 
@@ -1522,14 +1530,13 @@ model Department {
   @@map("departments")
 }
 
-
 // Add DepartmentStaffHistory model for tracking staff movements
 model DepartmentStaffHistory {
   id            String    @id @default(cuid())
   staffId       String
   departmentId  String
   companyId     String
-  action        String    // JOINED, TRANSFERRED, REMOVED
+  action        String
   fromDepartmentId String?
   toDepartmentId   String?
   oldPosition   String?
@@ -1539,7 +1546,6 @@ model DepartmentStaffHistory {
   performedBy   String
   createdAt     DateTime  @default(now())
   
-  // Relations with proper opposite links
   staff         StaffRecord   @relation(fields: [staffId], references: [id], onDelete: Cascade)
   department    Department    @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -1559,11 +1565,10 @@ model DepartmentAuditLog {
   action       String
   userId       String?
   userName     String?
-  type         String?   // create, edit, deactivate, reactivate, staff_change
+  type         String?
   details      Json?
   timestamp    DateTime @default(now())
 
-  // Relations with proper opposite links
   department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   company      Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
@@ -1571,4 +1576,114 @@ model DepartmentAuditLog {
   @@index([companyId, timestamp])
   @@index([type])
   @@map("department_audit_logs")
+}
+
+// ==================== LOANS & BENEFITS MODELS (NEW) ====================
+enum LoanType {
+  PERSONAL_LOAN
+  EMERGENCY_LOAN
+  SALARY_ADVANCE
+  OTHER
+}
+
+enum LoanRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  DISBURSED
+  REPAID
+  DEFAULTED
+}
+
+enum BenefitRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  ALLOCATED
+  COMPLETED
+  CANCELLED
+}
+
+model LoanRequest {
+  id                     String              @id @default(cuid())
+  companyId              String
+  staffId                String
+  loanType               LoanType            @default(PERSONAL_LOAN)
+  requestedAmount        Decimal             @db.Decimal(18, 2)
+  approvedAmount         Decimal?            @db.Decimal(18, 2)
+  tenureMonths           Int
+  purpose                String?
+  status                 LoanRequestStatus   @default(PENDING)
+  rejectionReason        String?
+  approvalComment        String?
+  approvedBy             String?
+  approvedAt             DateTime?
+  disbursedAt            DateTime?
+  expectedRepaymentDate  DateTime?
+  interestRate           Decimal             @default(0) @db.Decimal(5, 2)
+  monthlyRepayment       Decimal?            @db.Decimal(18, 2)
+  remainingBalance       Decimal?            @db.Decimal(18, 2)
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  createdBy              String
+
+  company                Company             @relation("CompanyLoanRequests", fields: [companyId], references: [id], onDelete: Cascade)
+  staff                  StaffRecord         @relation("StaffLoanRequests", fields: [staffId], references: [id], onDelete: Cascade)
+  approver               StaffRecord?        @relation("LoanApprover", fields: [approvedBy], references: [id])
+
+  @@index([staffId, companyId])
+  @@index([companyId, status])
+  @@index([status, createdAt])
+  @@index([staffId, status])
+  @@map("loan_requests")
+}
+
+model BenefitRequest {
+  id                     String              @id @default(cuid())
+  companyId              String
+  staffId                String
+  benefitId              String
+  benefitName            String
+  reason                 String?
+  status                 BenefitRequestStatus @default(PENDING)
+  rejectionReason        String?
+  approvalComment        String?
+  approvedBy             String?
+  approvedAt             DateTime?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  createdBy              String
+
+  company                Company             @relation("CompanyBenefitRequests", fields: [companyId], references: [id], onDelete: Cascade)
+  staff                  StaffRecord         @relation("StaffBenefitRequests", fields: [staffId], references: [id], onDelete: Cascade)
+  approver               StaffRecord?        @relation("BenefitRequestApprover", fields: [approvedBy], references: [id])
+
+  @@index([staffId, companyId])
+  @@index([companyId, status])
+  @@index([status, createdAt])
+  @@index([staffId, status])
+  @@map("benefit_requests")
+}
+
+model BenefitAllocation {
+  id                     String              @id @default(cuid())
+  companyId              String
+  staffId                String
+  benefitId              String
+  benefitName            String
+  allocationAmount       Decimal             @db.Decimal(18, 2)
+  allocatedBy            String
+  note                   String?
+  status                 BenefitRequestStatus @default(ALLOCATED)
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+
+  company                Company             @relation("CompanyBenefitAllocations", fields: [companyId], references: [id], onDelete: Cascade)
+  staff                  StaffRecord         @relation("StaffBenefitAllocations", fields: [staffId], references: [id], onDelete: Cascade)
+  allocator              StaffRecord         @relation("BenefitAllocator", fields: [allocatedBy], references: [id])
+
+  @@index([staffId, companyId])
+  @@index([companyId, createdAt])
+  @@index([staffId, createdAt])
+  @@map("benefit_allocations")
 }

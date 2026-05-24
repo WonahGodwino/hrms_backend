@@ -1,0 +1,1 @@
+This is a placeholder to extract and analyze the leave-template-correct.xlsx file for leave approval workflow and policy. The file will be processed to check for any status or workflow requirements for HR approval.

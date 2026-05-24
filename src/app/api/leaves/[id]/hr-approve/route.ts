@@ -83,7 +83,15 @@ export async function PATCH(
     }
 
     // Check if at correct step for HR approval
-    if (leaveRequest.status !== 'MANAGER_APPROVED' || leaveRequest.currentStep !== 'HR') {
+    const approvalWorkflow = leaveRequest.leaveType.policy?.approvalWorkflow;
+    const isHROnly = approvalWorkflow === 'HR_ONLY';
+    const isManagerThenHR = approvalWorkflow === 'MANAGER_THEN_HR';
+
+    const canHRApprove =
+      (isHROnly && leaveRequest.status === 'PENDING' && leaveRequest.currentStep === 'HR') ||
+      (isManagerThenHR && leaveRequest.status === 'MANAGER_APPROVED' && leaveRequest.currentStep === 'HR');
+
+    if (!canHRApprove) {
       return withCors(
         ApiResponse.error(`Leave request is not ready for HR approval. Current status: ${leaveRequest.status}`, 400),
         origin
