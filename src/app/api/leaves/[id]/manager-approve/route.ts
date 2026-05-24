@@ -1,7 +1,8 @@
 // src/app/api/leaves/[id]/manager-approve/route.ts
 import { NextRequest, NextResponse } from 'next/server'
+import { sendLeaveNotificationEmail } from '@/app/lib/email'
 import { prisma } from '@/app/lib/db'
-import { requireRole } from '@/app/lib/auth'
+import { requireAuth } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -25,7 +26,8 @@ export async function PATCH(
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['MANAGER', 'HR', 'ADMIN', 'SUPER_ADMIN'])
+    // Authenticate the user (any authenticated user can attempt, we'll check permissions below)
+    const user = requireAuth(token)
 
     const { id } = await params
     const body = await request.json()
@@ -74,24 +76,27 @@ export async function PATCH(
       )
     }
 
-    // Check if user is the manager approver
-    const staffRecord = await prisma.staffRecord.findFirst({
+    // Get the current user's staff record
+    const currentStaff = await prisma.staffRecord.findFirst({
       where: { email: user.email, isActive: true }
     })
     
-    if (!staffRecord) {
+    if (!currentStaff) {
       return withCors(
         ApiResponse.error('Staff record not found', 404),
         origin
       )
     }
 
-    // Allow HR/ADMIN/SUPER_ADMIN to override manager approval in special cases
-    const isHRAdmin = ['HR', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)
+    // Check permissions:
+    // 1. Is the current user the manager of the staff member? (managerId matches)
+    // 2. OR is the current user HR/Admin/Super Admin (can override)
+    const isManager = leaveRequest.staffRecord.managerId === currentStaff.id
+    const isHRAdmin = ['HR', 'ADMIN', 'SUPER_ADMIN'].includes(currentStaff.role)
     
-    if (!isHRAdmin && leaveRequest.managerApproverId !== staffRecord.id) {
+    if (!isManager && !isHRAdmin) {
       return withCors(
-        ApiResponse.error('You are not authorized to approve this leave request', 403),
+        ApiResponse.error('Only the staff manager or HR/Admin can approve this leave request', 403),
         origin
       )
     }
@@ -121,6 +126,7 @@ export async function PATCH(
             ...updateData,
             status: newStatus,
             currentStep: nextStep,
+            managerApproverId: currentStaff.id,
             managerApprovedAt: new Date(),
             managerApprovedBy: user.email || user.userId,
             managerComments: body.comments || null
@@ -132,13 +138,14 @@ export async function PATCH(
             ...updateData,
             status: newStatus,
             currentStep: nextStep,
+            managerApproverId: currentStaff.id,
             managerApprovedAt: new Date(),
             managerApprovedBy: user.email || user.userId,
             managerComments: body.comments || null,
-            hrApprovedAt: new Date(), // Auto HR approval for manager-only workflow
+            hrApprovedAt: new Date(),
             hrApprovedBy: user.email || user.userId,
             hrApproverUserId: user.userId,
-            hrApproverRole: user.role
+            hrApproverRole: currentStaff.role
           }
         }
       } else if (body.action === 'REJECT') {
@@ -148,6 +155,7 @@ export async function PATCH(
           ...updateData,
           status: newStatus,
           currentStep: nextStep,
+          managerApproverId: currentStaff.id,
           rejectionReason: body.comments,
           rejectedByStep: 'MANAGER',
           rejectedById: user.userId
@@ -161,9 +169,11 @@ export async function PATCH(
         include: {
           staffRecord: {
             select: {
+              id: true,
               firstName: true,
               lastName: true,
-              email: true
+              email: true,
+              companyId: true
             }
           },
           leaveType: {
@@ -209,31 +219,121 @@ export async function PATCH(
       return updated
     })
 
-    // TODO: Send notification based on action
-    // - If approved and going to HR: notify HR
-    // - If approved (manager-only): notify staff
-    // - If rejected: notify staff
+    // Send notification based on action
+    try {
+      if (body.action === 'APPROVE') {
+        if (updatedLeave.currentStep === 'HR') {
+          // Notify HR
+          const hrUsers = await prisma.staffRecord.findMany({
+            where: {
+              companyId: updatedLeave.staffRecord.companyId,
+              role: { in: ['HR', 'ADMIN', 'SUPER_ADMIN'] },
+              isActive: true
+            },
+            select: { email: true, firstName: true, lastName: true, id: true }
+          })
+          for (const hr of hrUsers) {
+            await sendLeaveNotificationEmail(
+              {
+                id: hr.id,
+                companyId: updatedLeave.staffRecord.companyId,
+                firstName: hr.firstName,
+                lastName: hr.lastName,
+                email: hr.email,
+                staffId: '',
+                department: null,
+                position: null,
+                isRegistered: true
+              },
+              {
+                id: updatedLeave.id,
+                referenceNumber: updatedLeave.referenceNumber ?? undefined,
+                leaveType: updatedLeave.leaveType.name,
+                startDate: updatedLeave.startDate,
+                endDate: updatedLeave.endDate,
+                totalDays: Number(updatedLeave.totalDays),
+                status: updatedLeave.status,
+                currentStep: updatedLeave.currentStep
+              },
+              'HR_APPROVAL'
+            )
+          }
+        } else if (updatedLeave.status === 'APPROVED') {
+          // Notify staff
+          await sendLeaveNotificationEmail(
+            {
+              id: updatedLeave.staffRecord.id,
+              companyId: updatedLeave.staffRecord.companyId,
+              firstName: updatedLeave.staffRecord.firstName,
+              lastName: updatedLeave.staffRecord.lastName,
+              email: updatedLeave.staffRecord.email,
+              staffId: '',
+              department: null,
+              position: null,
+              isRegistered: true
+            },
+            {
+              id: updatedLeave.id,
+              referenceNumber: updatedLeave.referenceNumber ?? undefined,
+              leaveType: updatedLeave.leaveType.name,
+              startDate: updatedLeave.startDate,
+              endDate: updatedLeave.endDate,
+              totalDays: Number(updatedLeave.totalDays),
+              status: updatedLeave.status,
+              currentStep: updatedLeave.currentStep
+            },
+            'APPROVED'
+          )
+        }
+      } else if (body.action === 'REJECT') {
+        // Notify staff
+        await sendLeaveNotificationEmail(
+          {
+            id: updatedLeave.staffRecord.id,
+            companyId: updatedLeave.staffRecord.companyId,
+            firstName: updatedLeave.staffRecord.firstName,
+            lastName: updatedLeave.staffRecord.lastName,
+            email: updatedLeave.staffRecord.email,
+            staffId: '',
+            department: null,
+            position: null,
+            isRegistered: true
+          },
+          {
+            id: updatedLeave.id,
+            referenceNumber: updatedLeave.referenceNumber ?? undefined,
+            leaveType: updatedLeave.leaveType.name,
+            startDate: updatedLeave.startDate,
+            endDate: updatedLeave.endDate,
+            totalDays: Number(updatedLeave.totalDays),
+            status: updatedLeave.status,
+            currentStep: updatedLeave.currentStep
+          },
+          'REJECTED'
+        )
+      }
+    } catch (e) {
+      console.error('Failed to send leave approval email:', e)
+    }
 
-    // Count supervisees by hierarchy (staff_records.managerId), not by role.
-    const [superviseesCount, pendingSuperviseeApprovalsCount] = await Promise.all([
-      prisma.staffRecord.count({
-        where: {
-          managerId: staffRecord.id,
+    // Count supervisees (staff who have this user as managerId)
+    const superviseesCount = await prisma.staffRecord.count({
+      where: {
+        managerId: currentStaff.id,
+        isActive: true
+      }
+    })
+
+    const pendingSuperviseeApprovalsCount = await prisma.leaveRequest.count({
+      where: {
+        status: 'PENDING',
+        currentStep: 'MANAGER',
+        staffRecord: {
+          managerId: currentStaff.id,
           isActive: true
         }
-      }),
-      prisma.leaveRequest.count({
-        where: {
-          status: 'PENDING',
-          currentStep: 'MANAGER',
-          managerApproverId: staffRecord.id,
-          staffRecord: {
-            managerId: staffRecord.id,
-            isActive: true
-          }
-        }
-      })
-    ])
+      }
+    })
 
     return withCors(
       ApiResponse.success({
@@ -241,7 +341,7 @@ export async function PATCH(
         supervision: {
           superviseesCount,
           pendingSuperviseeApprovalsCount,
-          isManagerByHierarchy: superviseesCount > 0
+          isManager: superviseesCount > 0
         }
       }, 
         body.action === 'APPROVE' 

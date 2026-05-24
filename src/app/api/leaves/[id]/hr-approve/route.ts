@@ -1,5 +1,6 @@
 // src/app/api/leaves/[id]/hr-approve/route.ts
 import { NextRequest, NextResponse } from 'next/server'
+import { sendLeaveNotificationEmail } from '@/app/lib/email'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
@@ -181,7 +182,35 @@ export async function PATCH(
       return updated
     })
 
-    // TODO: Send notification to staff member about approval/rejection
+    // Send notification to staff member about approval/rejection
+    try {
+      await sendLeaveNotificationEmail(
+        {
+          id: leaveRequest.staffRecord.id,
+          companyId: leaveRequest.staffRecord.companyId,
+          firstName: updatedLeave.staffRecord.firstName,
+          lastName: updatedLeave.staffRecord.lastName,
+          email: updatedLeave.staffRecord.email,
+          staffId: '', // If available, add staffId
+          department: null,
+          position: null,
+          isRegistered: true // If available, set actual value
+        },
+        {
+          id: updatedLeave.id,
+          referenceNumber: updatedLeave.referenceNumber ?? undefined,
+          leaveType: updatedLeave.leaveType.name,
+          startDate: updatedLeave.startDate,
+          endDate: updatedLeave.endDate,
+          totalDays: updatedLeave.totalDays.toNumber(),
+          status: updatedLeave.status,
+          currentStep: updatedLeave.currentStep
+        },
+        body.action === 'APPROVE' ? 'APPROVED' : 'REJECTED'
+      )
+    } catch (e) {
+      console.error('Failed to send leave approval email:', e)
+    }
 
     return withCors(
       ApiResponse.success(updatedLeave, 
