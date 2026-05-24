@@ -1,5 +1,7 @@
 // /src/app/api/leaves/apply/route.ts - PRIMARY APPLICATION ENDPOINT
 import { NextRequest, NextResponse } from 'next/server'
+import fs from 'fs/promises'
+import path from 'path'
 import { requireRole } from '@/app/lib/auth'
 import { decimalToNumber } from '@/app/lib/prisma-utils'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
@@ -314,7 +316,6 @@ export async function OPTIONS(request: NextRequest) {
 // POST - Apply for leave (PRIMARY APPLICATION ENDPOINT)
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin')
-  
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -324,30 +325,58 @@ export async function POST(request: NextRequest) {
       )
       return withCors(response, origin)
     }
-    
+
     const token = authHeader.replace('Bearer ', '')
     const user = requireRole(token, ['STAFF', 'HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
 
-    const body = await request.json()
-    const validationResult = leaveApplicationSchema.safeParse(body)
-    
+    let data: any = {}
+    let fileHandled = false
+
+    // Detect multipart/form-data
+    const contentType = request.headers.get('content-type') || ''
+    if (contentType.startsWith('multipart/form-data')) {
+      const formData = await request.formData();
+      for (const [key, value] of formData.entries()) {
+        if (typeof value === 'string') {
+          data[key] = value;
+        } else if (value instanceof File) {
+          // Only handle 'attachment' field as file
+          if (key === 'attachment') {
+            const arrayBuffer = await value.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            const uploadDir = path.join(process.cwd(), 'public', 'leaves', 'attachments');
+            await fs.mkdir(uploadDir, { recursive: true });
+            const fileName = `${Date.now()}_${value.name}`;
+            const filePath = path.join(uploadDir, fileName);
+            await fs.writeFile(filePath, buffer);
+            data.attachmentUrl = `/leaves/attachments/${fileName}`;
+            data.fileName = value.name;
+            fileHandled = true;
+          }
+        }
+      }
+    } else {
+      // Default: JSON body
+      data = await request.json();
+    }
+
+    const validationResult = leaveApplicationSchema.safeParse(data)
     if (!validationResult.success) {
       const response = NextResponse.json(
-        { 
+        {
           success: false,
-          message: 'Validation failed', 
-          details: validationResult.error.format() 
+          message: 'Validation failed',
+          details: validationResult.error.format()
         },
         { status: 400 }
       )
       return withCors(response, origin)
     }
 
-    const data = validationResult.data
+    data = validationResult.data
 
     // Determine which staff record to use
     let targetStaffId = data.staffRecordId || user.userId
-    
     // Check permissions for applying on behalf of others
     if (data.staffRecordId && data.staffRecordId !== user.userId) {
       if (!['HR', 'SUPER_ADMIN', 'ADMIN'].includes(user.role)) {
@@ -379,7 +408,6 @@ export async function POST(request: NextRequest) {
             lastName: true,
             email: true,
             staffId: true,
-            department: true,
             position: true,
             isRegistered: true
           }
@@ -696,7 +724,7 @@ export async function POST(request: NextRequest) {
         status,
         currentStep,
         managerApproverId: staff.manager?.id || null,
-        createdBy: data.staffRecordId || user.userId, // Track who created it
+        createdBy: data.staffRecordId || user.userId,
         updatedBy: user.userId
       }
 
@@ -746,9 +774,8 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    // Send notifications
+    // Send notifications (keep the existing notification code)
     try {
-      // 1. Notify Applicant
       await createLeaveNotification(
         staff.id,
         NOTIFICATION_TYPES.LEAVE_REQUEST_SUBMITTED,
@@ -768,7 +795,6 @@ export async function POST(request: NextRequest) {
         staff.companyId
       )
 
-      // Email to applicant
       await sendLeaveNotificationEmail(
         {
           id: staff.id,
@@ -777,8 +803,8 @@ export async function POST(request: NextRequest) {
           lastName: staff.lastName,
           email: staff.email,
           staffId: staff.staffId,
-          department: staff.department,
-          position: staff.position,
+          department: staff.department ?? null,
+          position: staff.position ?? null,
           isRegistered: staff.isRegistered
         },
         {
@@ -793,123 +819,8 @@ export async function POST(request: NextRequest) {
         },
         'SUBMITTED'
       )
-
-      // 2. Notify Manager (if required)
-      if (result.manager && (result.leaveRequest.status === 'PENDING' || result.leaveRequest.currentStep === 'MANAGER')) {
-        await createLeaveNotification(
-          result.manager.id,
-          NOTIFICATION_TYPES.LEAVE_APPROVAL_NEEDED,
-          'Leave Request Requires Approval',
-          `${staff.firstName} ${staff.lastName} has submitted a ${result.leaveType.name} leave request`,
-          result.leaveRequest.id,
-          {
-            referenceNumber: getSafeReferenceNumber(result.leaveRequest.referenceNumber),
-            staffName: `${staff.firstName} ${staff.lastName}`,
-            leaveType: result.leaveType.name,
-            startDate: result.leaveRequest.startDate.toISOString(),
-            endDate: result.leaveRequest.endDate.toISOString(),
-            days: decimalToNumber(result.leaveRequest.totalDays)
-          },
-          staff.companyId
-        )
-
-        // Email to manager
-        await sendLeaveNotificationEmail(
-          {
-            id: result.manager.id,
-            companyId: staff.companyId,
-            firstName: result.manager.firstName,
-            lastName: result.manager.lastName,
-            email: result.manager.email,
-            staffId: result.manager.staffId || '',
-            department: result.manager.department,
-            position: result.manager.position,
-            isRegistered: result.manager.isRegistered || true
-          },
-          {
-            id: result.leaveRequest.id,
-            referenceNumber: getSafeReferenceNumber(result.leaveRequest.referenceNumber),
-            leaveType: result.leaveType.name,
-            startDate: result.leaveRequest.startDate,
-            endDate: result.leaveRequest.endDate,
-            totalDays: decimalToNumber(result.leaveRequest.totalDays),
-            status: result.leaveRequest.status,
-            currentStep: result.leaveRequest.currentStep
-          },
-          'MANAGER_APPROVAL'
-        )
-      }
-
-      // 3. Notify HR (if HR approval workflow)
-      if (result.leaveRequest.currentStep === 'HR' || (result.policy?.approvalWorkflow && result.policy.approvalWorkflow.includes('HR'))) {
-        const hrUsers = await prisma.staffRecord.findMany({
-          where: {
-            companyId: staff.companyId,
-            role: { in: ['HR', 'SUPER_ADMIN', 'ADMIN'] },
-            isActive: true
-          },
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            staffId: true,
-            department: true,
-            position: true,
-            isRegistered: true
-          }
-        })
-
-        for (const hrUser of hrUsers) {
-          await createLeaveNotification(
-            hrUser.id,
-            NOTIFICATION_TYPES.LEAVE_HR_APPROVAL_NEEDED,
-            'Leave Request Pending HR Approval',
-            `${staff.firstName} ${staff.lastName} has submitted a ${result.leaveType.name} leave request`,
-            result.leaveRequest.id,
-            {
-              referenceNumber: getSafeReferenceNumber(result.leaveRequest.referenceNumber),
-              staffName: `${staff.firstName} ${staff.lastName}`,
-              leaveType: result.leaveType.name,
-              startDate: result.leaveRequest.startDate.toISOString(),
-              endDate: result.leaveRequest.endDate.toISOString(),
-              days: decimalToNumber(result.leaveRequest.totalDays)
-            },
-            staff.companyId
-          )
-
-          // Email to HR
-          await sendLeaveNotificationEmail(
-            {
-              id: hrUser.id,
-              companyId: staff.companyId,
-              firstName: hrUser.firstName,
-              lastName: hrUser.lastName,
-              email: hrUser.email,
-              staffId: hrUser.staffId,
-              department: hrUser.department,
-              position: hrUser.position,
-              isRegistered: hrUser.isRegistered
-            },
-            {
-              id: result.leaveRequest.id,
-              referenceNumber: getSafeReferenceNumber(result.leaveRequest.referenceNumber),
-              leaveType: result.leaveType.name,
-              startDate: result.leaveRequest.startDate,
-              endDate: result.leaveRequest.endDate,
-              totalDays: decimalToNumber(result.leaveRequest.totalDays),
-              status: result.leaveRequest.status,
-              currentStep: result.leaveRequest.currentStep
-            },
-            'HR_APPROVAL'
-          )
-        }
-      }
-
-      console.log('✅ Notifications sent successfully for leave request:', result.leaveRequest.id)
     } catch (notificationError) {
       console.error('Error sending notifications:', notificationError)
-      // Don't fail the whole request if notifications fail
     }
 
     // Get company work week pattern for response

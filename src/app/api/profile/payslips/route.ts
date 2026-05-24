@@ -269,8 +269,8 @@ export async function GET(request: NextRequest) {
 			staffId: staffRecord.staffId,
 			name: `${staffRecord.firstName} ${staffRecord.lastName}`,
 			email: staffRecord.email,
-			department: staffRecord.department,
-			position: staffRecord.position,
+			department: staffRecord.department ?? '',
+			position: staffRecord.position ?? '',
 		};
 
 		// Get available years for filtering

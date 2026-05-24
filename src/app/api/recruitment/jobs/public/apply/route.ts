@@ -165,7 +165,6 @@ export async function POST(request: NextRequest) {
           linkedInUrl: linkedInUrl || candidate.linkedInUrl,
           portfolioUrl: portfolioUrl || candidate.portfolioUrl,
           locationState: parsedLocation?.state || candidate.locationState,
-          locationLga: parsedLocation?.lga || candidate.locationLga,
           updatedAt: new Date(),
         },
       });

@@ -410,7 +410,10 @@ export async function GET(request: NextRequest) {
     const formattedLeaves: LeaveRequestAdminResponse[] = leaves.map(leave => ({
       ...leave,
       totalDays: decimalToNumber(leave.totalDays),
-      staffRecord: leave.staffRecord,
+      staffRecord: {
+        ...leave.staffRecord,
+        department: leave.staffRecord?.department ?? '',
+      },
       leaveType: leave.leaveType,
       managerApprover: leave.managerApprover,
       handoverStaff: leave.handoverStaff

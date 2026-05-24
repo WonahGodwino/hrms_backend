@@ -1,3 +1,4 @@
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -20,47 +21,72 @@ model Company {
   createdAt              DateTime                 @default(now())
   updatedAt              DateTime?                @updatedAt
   workWeekPattern        String?                  @db.VarChar(20)
+  
+  // AI & Settings
   aiSettings             AISettings?
   aiUsageLogs            AIUsageLog[]
+  
+  // Attendance
   attendances            Attendance[]
+  
+  // Recruitment
   candidateDocuments     CandidateDocument[]
   candidateFiles         CandidateFile[]
   candidates             Candidate[]
   interviews             Interview[]
   applications           JobApplication[]
   jobs                   Job[]
-  notifications          Notification[]
+  offers                 Offer[]
+  onboardings            Onboarding[]
+  
+  // Leave Management
   leave_blackout_periods leave_blackout_periods[]
   leavePolicies          LeavePolicy[]
   leave_uploads          leave_uploads[]
-  offers                 Offer[]
-  onboardings            Onboarding[]
+  leaveRequests          LeaveRequest[]
+  publicHolidays         PublicHoliday[]
+  
+  // Payroll
   payrollUploads         PayrollUpload[]
   payrolls               Payroll[]
   payslips               Payslip[]
-  publicHolidays         PublicHoliday[]
-  staff                  StaffRecord[]
-  staffUploads           StaffUpload[]
-  userCompanies          UserCompany[]
-  emailLogs              EmailLog[]
   payrollTemplates       PayrollTemplate[]
   payrollData            PayrollData[]
   payrollTemplateUploads PayrollTemplateUpload[]
+  
+  // Tax
   employeeTaxProfiles    EmployeeTaxProfile[]
   taxFilingSchedules     TaxFilingSchedule[]
   annualReturns          AnnualReturn[]
   taxProfileUploads      TaxProfileUpload[]
-  leaveRequests          LeaveRequest[]
+  
+  // Exchange Rates
   exchangeRates          CompanyExchangeRate[]
-  companyPayDates        CompanyPayDate[]         // This matches the relation in CompanyPayDate
-
-  // Payroll Engine relations
+  
+  // Pay Dates
+  companyPayDates        CompanyPayDate[]
+  
+  // Payroll Engine
   payPeriods             PayPeriod[]
   employeeSalaries       EmployeeSalary[]
   payValidations         PayValidation[]
   overtimeEntries        OvertimeEntry[]
   deductionEntries       DeductionEntry[]
   computedPayslips       ComputedPayslip[]
+  
+  // Staff & Users
+  staff                  StaffRecord[]
+  staffUploads           StaffUpload[]
+  userCompanies          UserCompany[]
+  
+  // Notifications & Logs
+  notifications          Notification[]
+  emailLogs              EmailLog[]
+  
+  // Department Relations 
+  departments            Department[]
+  departmentAuditLogs    DepartmentAuditLog[]
+  departmentStaffHistories DepartmentStaffHistory[]
 
   @@map("companies")
 }
@@ -91,7 +117,8 @@ model StaffRecord {
   email                           String
   firstName                       String
   lastName                        String
-  department                      String
+  department                      String?             // Legacy string column (keep for data)
+  departmentId                    String?             // New foreign key relation            // ← Keep existing
   position                        String
   phone                           String?
   bankName                        String?
@@ -108,7 +135,9 @@ model StaffRecord {
   encodedId                       String?
   updatedBy                       String?
   managerId                       String?
-  
+  avatarUrl                       String?
+  location                        String?
+
   // Relations with matching relation names
   attendances                     Attendance[]
   leaveRequestsToApproveAsManager LeaveRequest[]      @relation("LeaveRequestManagerApprover")
@@ -122,10 +151,15 @@ model StaffRecord {
   manager                         StaffRecord?        @relation("StaffManagers", fields: [managerId], references: [id])
   directReports                   StaffRecord[]       @relation("StaffManagers")
   userCompanies                   UserCompany[]
-  notifications                    Notification[]
+  notifications                   Notification[]
   emailLogs                       EmailLog[]
   payrollData                     PayrollData[]
   taxProfile                      EmployeeTaxProfile?
+
+  departments                      Department?         @relation(fields: [departmentId], references: [id])
+  headOfDepartment                Department[]        @relation("DepartmentHead")
+  assistantHeadOfDepartment       Department[]        @relation("DepartmentAssistantHead")
+  departmentStaffHistories DepartmentStaffHistory[]
 
   // Payroll Engine relations
   employeeSalaries                EmployeeSalary[]
@@ -250,26 +284,26 @@ model StaffUpload {
 }
 
 model PayrollUpload {
-  id                String   @id @default(cuid())
+  id                String           @id @default(cuid())
   companyId         String
   fileName          String
   filePath          String
   processedFilePath String?
   processedFileName String?
-  templateType      String   @default("ISURF_STANDARD")
+  templateType      String           @default("ISURF_STANDARD")
   templateId        String?
-  sendEmails        Boolean  @default(true)
-  overwriteExisting Boolean  @default(false)
-  totalRecords      Int
-  successful        Int
-  failed            Int
-  payslipsGenerated Int?
+  sendEmails        Boolean          @default(true)
+  totalRecords      Int              @default(0)      // ← ADD THIS
+  successful        Int              @default(0)      // ← ADD THIS
+  failed            Int              @default(0)      // ← ADD THIS
+  payslipsGenerated Int?                              // ← ADD THIS
   payslipsUpdated   Int?
   emailsSent        Int?
   emailAttempts     Int?
+  overwriteExisting Boolean          @default(false) // ← ADD THIS
   errors            String[]
   uploadedBy        String
-  createdAt         DateTime @default(now())
+  createdAt         DateTime         @default(now())
   company           Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   template          PayrollTemplate? @relation(fields: [templateId], references: [id])
 
@@ -324,7 +358,7 @@ model CandidateFile {
   data             Bytes
   createdBy        String?
   createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @default(now()) @updatedAt
+  updatedAt        DateTime          @updatedAt
   archived         Int?              @default(0)
   application      JobApplication?   @relation("ApplicationFiles", fields: [applicationId], references: [id])
   candidate        Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
@@ -398,7 +432,6 @@ model Candidate {
   linkedInUrl     String?
   portfolioUrl    String?
   locationState   String?   // New field for state
-  locationLga     String?   // New field for LGA
   createdBy       String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -445,9 +478,8 @@ model Interview {
   notes         String?
   outcome       InterviewOutcome @default(PENDING)
   createdBy     String?
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
   archived      Int?             @default(0)
+  updatedAt     DateTime         @updatedAt
   application   JobApplication   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
@@ -1450,4 +1482,93 @@ enum PaymentCycle {
   WEEKLY
   BI_WEEKLY
   MONTHLY
+}
+
+// Update Department model 
+model Department {
+  id            String      @id @default(cuid())
+  name          String
+  code          String
+  businessUnit  String?
+  companyId     String
+  headId        String?
+  assistantHeadId String?
+  status        String      @default("Active")
+  activeHeadcount Int?      @default(0)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  
+  // NEW FIELDS
+  maxHeadcount  Int?
+  costCenter    String?
+  budgetCode    String?
+  positionCapacity Json?
+  
+  // Relations
+  company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staff         StaffRecord[]
+  head          StaffRecord? @relation("DepartmentHead", fields: [headId], references: [id])
+  assistantHead StaffRecord? @relation("DepartmentAssistantHead", fields: [assistantHeadId], references: [id])
+  auditLogs     DepartmentAuditLog[]
+  staffHistory  DepartmentStaffHistory[]
+  
+  // Transfer relations
+  transferredFrom DepartmentStaffHistory[] @relation("FromDepartmentTransfer")
+  transferredTo   DepartmentStaffHistory[] @relation("ToDepartmentTransfer")
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([status])
+  @@map("departments")
+}
+
+
+// Add DepartmentStaffHistory model for tracking staff movements
+model DepartmentStaffHistory {
+  id            String    @id @default(cuid())
+  staffId       String
+  departmentId  String
+  companyId     String
+  action        String    // JOINED, TRANSFERRED, REMOVED
+  fromDepartmentId String?
+  toDepartmentId   String?
+  oldPosition   String?
+  newPosition   String?
+  reason        String?
+  effectiveDate DateTime  @default(now())
+  performedBy   String
+  createdAt     DateTime  @default(now())
+  
+  // Relations with proper opposite links
+  staff         StaffRecord   @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  department    Department    @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  fromDepartment Department?  @relation("FromDepartmentTransfer", fields: [fromDepartmentId], references: [id])
+  toDepartment   Department?  @relation("ToDepartmentTransfer", fields: [toDepartmentId], references: [id])
+
+  @@index([staffId, effectiveDate])
+  @@index([departmentId, effectiveDate])
+  @@index([companyId])
+  @@map("department_staff_history")
+}
+
+model DepartmentAuditLog {
+  id           String   @id @default(cuid())
+  departmentId String
+  companyId    String
+  action       String
+  userId       String?
+  userName     String?
+  type         String?   // create, edit, deactivate, reactivate, staff_change
+  details      Json?
+  timestamp    DateTime @default(now())
+
+  // Relations with proper opposite links
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  company      Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([departmentId, timestamp])
+  @@index([companyId, timestamp])
+  @@index([type])
+  @@map("department_audit_logs")
 }
