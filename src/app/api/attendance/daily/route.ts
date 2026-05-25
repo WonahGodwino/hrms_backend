@@ -1,6 +1,7 @@
 // src/app/api/attendance/daily/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/app/lib/auth";
+import { requireModuleAccess } from "@/app/lib/module-access";
 import { withCors, handleCorsOptions } from "@/app/lib/cors";
 
 // Utility function to get the start of the day
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest) {
     }
     
     const token = authHeader.replace("Bearer ", "");
-    const adminUser = requireRole(token, ["HR", "SUPER_ADMIN", "ADMIN"]);
+    const adminUser = await requireModuleAccess(token, 'ATTENDANCE', ["HR", "SUPER_ADMIN", "ADMIN"]);
     
     // 2. Parse request body
     const body = await req.json();
@@ -280,7 +281,7 @@ export async function GET(req: NextRequest) {
     }
     
     const token = authHeader.replace("Bearer ", "");
-    const user = requireRole(token, ["HR", "SUPER_ADMIN", "ADMIN"]);
+    const user = await requireModuleAccess(token, 'ATTENDANCE', ["HR", "SUPER_ADMIN", "ADMIN"]);
     
     const { searchParams } = new URL(req.url);
     const companyId = searchParams.get("companyId");

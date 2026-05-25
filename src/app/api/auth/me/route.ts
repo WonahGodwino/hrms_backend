@@ -4,6 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { requireAuth } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { getEnabledModules } from '@/app/lib/module-access'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -29,20 +30,18 @@ export async function GET(request: NextRequest) {
     const staff = await prisma.staffRecord.findFirst({
       where: {
         id: decoded.userId,
-        // if companyId is in the token, enforce it for multi-company safety
         ...(decoded.companyId ? { companyId: decoded.companyId } : {}),
       },
-      include: {
-        company: true,
-      },
+      include: { company: true },
     })
 
     if (!staff) {
-      return withCors(
-        ApiResponse.error('User not found', 404),
-        origin
-      )
+      return withCors(ApiResponse.error('User not found', 404), origin)
     }
+
+    const enabledModules = decoded.role === 'SUPER_ADMIN'
+      ? await getEnabledModules(undefined)
+      : await getEnabledModules(staff.companyId)
 
     return withCors(
       ApiResponse.success({
@@ -67,6 +66,7 @@ export async function GET(request: NextRequest) {
               address: staff.company.address,
             }
           : null,
+        enabledModules,
       }),
       origin
     )

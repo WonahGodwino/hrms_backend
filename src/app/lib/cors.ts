@@ -11,19 +11,10 @@ const allowedOrigins = [
 
 function isOriginAllowed(origin: string | null): boolean {
   if (!origin) return false
-  
-  // Debug logging
-  console.log('[CORS] Checking origin:', origin)
-  
-  if (allowedOrigins.includes(origin)) {
-    console.log('[CORS] ✅ Origin allowed (exact match):', origin)
-    return true
-  }
 
-  if (origin.endsWith('.247hr.co.uk')) {
-    console.log('[CORS] ✅ Origin allowed (subdomain):', origin)
-    return true
-  }
+  if (allowedOrigins.includes(origin)) return true
+
+  if (origin.endsWith('.247hr.co.uk')) return true
 
   if (origin.includes('localhost:')) {
     return /^http:\/\/localhost:\d+$/.test(origin)

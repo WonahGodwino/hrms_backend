@@ -1,6 +1,8 @@
 // /src/app/api/leaves/summary/route.ts
 import { NextRequest, NextResponse } from 'next/server'
+
 import { requireRole } from '@/app/lib/auth'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 
 // OPTIONS - CORS preflight
@@ -23,7 +25,7 @@ export async function GET(request: NextRequest) {
     }
     
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['STAFF', 'HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
+    const user = await requireModuleAccess(token, 'LEAVE', ['STAFF', 'HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
 
     // Lazy load Prisma inside the function
     const { prisma } = await import('@/app/lib/db')
@@ -210,7 +212,7 @@ export async function POST(request: NextRequest) {
     }
     
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['STAFF', 'HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
+    const user = await requireModuleAccess(token, 'LEAVE', ['STAFF', 'HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
 
     // Lazy load Prisma inside the function
     const { prisma } = await import('@/app/lib/db')

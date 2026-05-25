@@ -1,6 +1,8 @@
 // src/app/api/leaves/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server'
+
 import { requireRole } from '@/app/lib/auth'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
 import { writeFile, mkdir } from 'fs/promises'
@@ -1374,7 +1376,7 @@ export async function GET(request: NextRequest) {
     }
     
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
+    const user = await requireModuleAccess(token, 'LEAVE', ['HR', 'SUPER_ADMIN', 'ADMIN'])
     
     const { searchParams } = new URL(request.url)
     const companyId = searchParams.get('companyId')
@@ -1525,7 +1527,7 @@ export async function POST(request: NextRequest) {
     }
     
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
+    const user = await requireModuleAccess(token, 'LEAVE', ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
     const formData = await request.formData()
     const file = formData.get('file') as File

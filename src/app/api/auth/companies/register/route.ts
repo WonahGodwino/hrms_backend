@@ -5,6 +5,7 @@ import { isValidCurrencyCode, normalizeCurrencyCode } from '@/app/lib/currency'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { verifyToken } from '@/app/lib/auth'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { seedModuleAccessForCompany } from '@/app/lib/module-access'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -135,6 +136,14 @@ export async function POST(request: NextRequest) {
     } catch (aiError) {
       console.warn('⚠️ Could not create AI settings:', aiError)
       // Continue even if AI settings creation fails
+    }
+
+    // 8. Seed module access rows (all disabled by default)
+    try {
+      await seedModuleAccessForCompany(company.id)
+    } catch (moduleError) {
+      console.warn('⚠️ Could not seed module access:', moduleError)
+      // Non-fatal — super admin can run sync manually
     }
 
     // 8. Return success response

@@ -2,7 +2,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sendLeaveNotificationEmail } from '@/app/lib/email'
 import { prisma } from '@/app/lib/db'
+
 import { requireRole } from '@/app/lib/auth'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -27,7 +29,7 @@ export async function PATCH(
 
     const token = authHeader.replace('Bearer ', '')
     // Only HR, ADMIN, SUPER_ADMIN can approve at HR level
-    const user = requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'LEAVE', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const { id } = await params
     const body = await request.json()

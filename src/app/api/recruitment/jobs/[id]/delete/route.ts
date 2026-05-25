@@ -2,7 +2,9 @@
 import { NextRequest } from 'next/server'
 import { archiveJobs } from '@/app/lib/jobs'
 import type { UserContext } from '@/app/lib/jobs/types'
+
 import { requireRole } from '@/app/lib/auth'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -71,7 +73,7 @@ export async function DELETE(
     // Get user from token
     let user: UserContext
     try {
-      const authUser = requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+      const authUser = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'ADMIN', 'SUPER_ADMIN'])
       const role = authUser.role
       if (role !== 'HR' && role !== 'ADMIN' && role !== 'SUPER_ADMIN') {
         throw new Error('Insufficient permissions')

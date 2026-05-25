@@ -1,7 +1,9 @@
 // /src/app/api/leaves/types/[id]/route.ts - FIXED
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
+
 import { requireRole } from '@/app/lib/auth'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { decimalToNumber } from '@/app/lib/prisma-utils'
@@ -31,7 +33,7 @@ export async function GET(
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['STAFF', 'MANAGER', 'HR', 'ADMIN', 'SUPER_ADMIN']) as UserContext
+    const user = await requireModuleAccess(token, 'LEAVE', ['STAFF', 'MANAGER', 'HR', 'ADMIN', 'SUPER_ADMIN']) as UserContext
 
     const { id } = params
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/app/lib/auth";
+import { requireModuleAccess } from "@/app/lib/module-access";
 import { withCors, handleCorsOptions } from "@/app/lib/cors";
 
 // Helper functions to get start and end of month
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest) {
     }
 
     const token = authHeader.replace("Bearer ", "");
-    const user = requireRole(token, ["HR", "ADMIN", "SUPER_ADMIN"]);
+    const user = await requireModuleAccess(token, 'ATTENDANCE', ["HR", "ADMIN", "SUPER_ADMIN"]);
 
     // Get query parameters from URL
     const url = new URL(req.url);

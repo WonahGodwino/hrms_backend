@@ -59,13 +59,13 @@ model Company {
   taxFilingSchedules     TaxFilingSchedule[]
   annualReturns          AnnualReturn[]
   taxProfileUploads      TaxProfileUpload[]
-  
+
   // Exchange Rates
   exchangeRates          CompanyExchangeRate[]
-  
+
   // Pay Dates
   companyPayDates        CompanyPayDate[]
-  
+
   // Payroll Engine
   payPeriods             PayPeriod[]
   employeeSalaries       EmployeeSalary[]
@@ -73,27 +73,83 @@ model Company {
   overtimeEntries        OvertimeEntry[]
   deductionEntries       DeductionEntry[]
   computedPayslips       ComputedPayslip[]
-  
+
   // Staff & Users
   staff                  StaffRecord[]
   staffUploads           StaffUpload[]
   userCompanies          UserCompany[]
-  
+
   // Notifications & Logs
   notifications          Notification[]
   emailLogs              EmailLog[]
-  
-  // Department Relations (NEW)
+
+  // Department Relations
   departments            Department[]
   departmentAuditLogs    DepartmentAuditLog[]
   departmentStaffHistories DepartmentStaffHistory[]
 
-  // Staff Loans & Benefits (NEW)
+  // Staff Loans & Benefits
   loanRequests           LoanRequest[]       @relation("CompanyLoanRequests")
   benefitRequests        BenefitRequest[]    @relation("CompanyBenefitRequests")
   benefitAllocations     BenefitAllocation[] @relation("CompanyBenefitAllocations")
 
+  // PHED Module relations
+  phedGrades             PhedGrade[]
+  phedRegions            PhedRegion[]
+  phedFeeders            PhedFeeder[]
+  phedPayPoints          PhedPayPoint[]
+  phedUnions             PhedUnion[]
+  phedCooperatives       PhedCooperative[]
+  phedDeductionLiabilities PhedDeductionLiability[]
+  phedStaff              PhedStaff[]
+  phedPayPeriods         PhedPayPeriod[]
+  phedValidations        PhedValidation[]
+  phedOvertimeEntries    PhedOvertimeEntry[]
+  phedComputedPayrolls   PhedComputedPayroll[]
+  phedBulkUploads        PhedBulkUpload[]
+
+  // Training & Certification Module relations
+  trainingPrograms       TrainingProgram[]
+  trainingSessions       TrainingSession[]
+  trainingMaterials      TrainingMaterial[]
+  assessments            Assessment[]
+  assessmentAttempts     AssessmentAttempt[]
+  participantProgress    ParticipantProgress[]
+  certificationTypes     CertificationType[]
+  certificationTemplates CertificationTemplate[]
+  certificationRecords   CertificationRecord[]
+  assignmentRules        AssignmentRule[]
+  riskItems              RiskItem[]
+  trainingAuditLogs      TrainingAuditLog[]
+  moduleAccess           CompanyModuleAccess[]
+
   @@map("companies")
+}
+
+model PlatformModule {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  companyAccess CompanyModuleAccess[]
+
+  @@map("platform_modules")
+}
+
+model CompanyModuleAccess {
+  id        String   @id @default(cuid())
+  companyId String
+  moduleId  String
+  enabled   Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  module  PlatformModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, moduleId])
+  @@map("company_module_access")
 }
 
 model CompanyExchangeRate {
@@ -122,8 +178,8 @@ model StaffRecord {
   email                           String
   firstName                       String
   lastName                        String
-  department                      String?             // ← KEEP nullable (from branch 2)
-  departmentId                    String?             // ← NEW from branch 2
+  department                      String?
+  departmentId                    String?
   position                        String
   phone                           String?
   bankName                        String?
@@ -131,6 +187,7 @@ model StaffRecord {
   bvn                             String?
   password                        String?
   isRegistered                    Boolean             @default(false)
+  requirePasswordChange           Boolean             @default(false)
   role                            String              @default("STAFF")
   isActive                        Boolean             @default(true)
   companyId                       String
@@ -161,7 +218,7 @@ model StaffRecord {
   payrollData                     PayrollData[]
   taxProfile                      EmployeeTaxProfile?
 
-  // Department relations (NEW from branch 2)
+  // Department relations
   departments                     Department?         @relation(fields: [departmentId], references: [id])
   headOfDepartment                Department[]        @relation("DepartmentHead")
   assistantHeadOfDepartment       Department[]        @relation("DepartmentAssistantHead")
@@ -175,7 +232,13 @@ model StaffRecord {
   deductionEntries                DeductionEntry[]
   computedPayslips                ComputedPayslip[]
 
-  // Staff Loans & Benefits (NEW)
+  // Training & Certification Module relations
+  assessmentAttempts              AssessmentAttempt[]
+  participantProgress             ParticipantProgress[]
+  certificationRecords            CertificationRecord[]
+  trainingAuditLogs               TrainingAuditLog[]
+
+  // Staff Loans & Benefits
   loanRequests                    LoanRequest[]       @relation("StaffLoanRequests")
   loanRequestsAsApprover          LoanRequest[]       @relation("LoanApprover")
   benefitRequests                 BenefitRequest[]    @relation("StaffBenefitRequests")
@@ -883,108 +946,11 @@ model leave_uploads {
   companies              Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 }
 
-model EmployeeTaxProfile {
-  id               String      @id @default(cuid())
-  staffId          String      @unique
-  companyId        String
-  stateOfResidence String
-  jtbTin           String?
-  tinVerified      Boolean     @default(false)
-  lockedState      String?
-  lockedDate       DateTime?
-  pfaName          String?
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
-
-  staff            StaffRecord @relation(fields: [staffId], references: [id], onDelete: Cascade)
-  company          Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  @@index([companyId, stateOfResidence])
-  @@map("employee_tax_profiles")
-}
-
-model TaxFilingSchedule {
-  id               String       @id @default(cuid())
-  companyId        String
-  payPeriodId      String
-  stateIrs         String
-  stateCode        String
-  stateName        String
-  totalEmployees   Int
-  totalTaxAmount   Decimal      @db.Decimal(15, 2)
-  totalGrossIncome Decimal      @db.Decimal(15, 2)
-  status           FilingStatus @default(PENDING)
-  filedAt          DateTime?
-  filedBy          String?
-  paymentReference String?
-  filePath         String?
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
-
-  company          Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  payPeriod        PayPeriod    @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
-
-  @@unique([companyId, payPeriodId, stateCode])
-  @@index([companyId, status])
-  @@index([payPeriodId])
-  @@map("tax_filing_schedules")
-}
-
-model AnnualReturn {
-  id               String       @id @default(cuid())
-  companyId        String
-  year             Int
-  stateIrs         String
-  stateCode        String
-  stateName        String
-  totalEmployees   Int
-  totalGrossIncome Decimal      @db.Decimal(15, 2)
-  totalTaxPaid     Decimal      @db.Decimal(15, 2)
-  status           FilingStatus @default(PENDING)
-  filedAt          DateTime?
-  filedBy          String?
-  formH1FilePath   String?
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
-
-  company          Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  @@unique([companyId, year, stateCode])
-  @@index([companyId, year])
-  @@map("annual_returns")
-}
-
-model TaxProfileUpload {
-  id             String   @id @default(cuid())
-  companyId      String
-  fileName       String
-  filePath       String
-  totalRecords   Int
-  successful     Int
-  failed         Int
-  errors         String[]
-  failedFilePath String?
-  uploadedBy     String
-  createdAt      DateTime @default(now())
-
-  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  @@index([companyId])
-  @@map("tax_profile_uploads")
-}
-
 enum PayrollStatus {
   DRAFT
   PROCESSED
   PAID
   FAILED
-}
-
-enum FilingStatus {
-  PENDING
-  GENERATED
-  FILED
-  CONFIRMED
 }
 
 enum JobStatus {
@@ -1206,9 +1172,100 @@ model PayrollTemplateUpload {
   @@map("payroll_template_uploads")
 }
 
-// ==================== PAYROLL ENGINE MODULE ====================
+// ==================== TAX MODELS ====================
 
-// Payroll Engine Enums
+model EmployeeTaxProfile {
+  id               String      @id @default(cuid())
+  staffId          String      @unique
+  companyId        String
+  stateOfResidence String
+  jtbTin           String?
+  tinVerified      Boolean     @default(false)
+  lockedState      String?
+  lockedDate       DateTime?
+  pfaName          String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  staff            StaffRecord @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  company          Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, stateOfResidence])
+  @@map("employee_tax_profiles")
+}
+
+model TaxFilingSchedule {
+  id               String       @id @default(cuid())
+  companyId        String
+  payPeriodId      String
+  stateIrs         String
+  stateCode        String
+  stateName        String
+  totalEmployees   Int
+  totalTaxAmount   Decimal      @db.Decimal(15, 2)
+  totalGrossIncome Decimal      @db.Decimal(15, 2)
+  status           String       @default("PENDING")
+  filedAt          DateTime?
+  filedBy          String?
+  paymentReference String?
+  filePath         String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  company          Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payPeriod        PayPeriod    @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, payPeriodId, stateCode])
+  @@index([companyId, status])
+  @@index([payPeriodId])
+  @@map("tax_filing_schedules")
+}
+
+model AnnualReturn {
+  id               String       @id @default(cuid())
+  companyId        String
+  year             Int
+  stateIrs         String
+  stateCode        String
+  stateName        String
+  totalEmployees   Int
+  totalGrossIncome Decimal      @db.Decimal(15, 2)
+  totalTaxPaid     Decimal      @db.Decimal(15, 2)
+  status           String       @default("PENDING")
+  filedAt          DateTime?
+  filedBy          String?
+  formH1FilePath   String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  company          Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, year, stateCode])
+  @@index([companyId, year])
+  @@map("annual_returns")
+}
+
+model TaxProfileUpload {
+  id             String   @id @default(cuid())
+  companyId      String
+  fileName       String
+  filePath       String
+  totalRecords   Int
+  successful     Int
+  failed         Int
+  errors         String[]
+  failedFilePath String?
+  uploadedBy     String
+  createdAt      DateTime @default(now())
+
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("tax_profile_uploads")
+}
+
+// ==================== PAYROLL ENGINE MODELS ====================
+
 enum PayPeriodStatus {
   DRAFT
   VALIDATION_OPEN
@@ -1245,49 +1302,36 @@ enum DeductionType {
   OTHER
 }
 
-enum ReportType {
-  BANK_SCHEDULE
-  WITHHELD_SALARIES
-  PAYE_SCHEDULE
-  PENSION_SCHEDULE
-  NHF_SCHEDULE
-  ITF_SCHEDULE
-  NSITF_SCHEDULE
-  COST_CENTRE_SUMMARY
-}
-
-// Pay Period - Represents a payroll cycle (monthly)
 model PayPeriod {
-  id                     String          @id @default(cuid())
-  companyId              String
-  year                   Int
-  month                  Int
-  periodName             String
-  startDate              DateTime
-  endDate                DateTime
-  validationWindowStart  DateTime?
-  validationWindowEnd    DateTime?
-  status                 PayPeriodStatus @default(DRAFT)
-  standardMonthlyHours   Int             @default(176)
-  createdBy              String
-  approvedBy             String?
-  approvedAt             DateTime?
-  createdAt              DateTime        @default(now())
-  updatedAt              DateTime        @updatedAt
+  id                    String          @id @default(cuid())
+  companyId             String
+  year                  Int
+  month                 Int
+  periodName            String
+  startDate             DateTime
+  endDate               DateTime
+  validationWindowStart DateTime?
+  validationWindowEnd   DateTime?
+  status                PayPeriodStatus @default(DRAFT)
+  standardMonthlyHours  Int             @default(176)
+  createdBy             String
+  approvedBy            String?
+  approvedAt            DateTime?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
 
-  company                Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  computedPayslips       ComputedPayslip[]
-  payValidations         PayValidation[]
-  overtimeEntries        OvertimeEntry[]
-  deductionEntries       DeductionEntry[]
-  taxFilingSchedules     TaxFilingSchedule[]
+  company               Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  computedPayslips      ComputedPayslip[]
+  payValidations        PayValidation[]
+  overtimeEntries       OvertimeEntry[]
+  deductionEntries      DeductionEntry[]
+  taxFilingSchedules    TaxFilingSchedule[]
 
   @@unique([companyId, year, month])
   @@index([companyId, status])
   @@map("pay_periods")
 }
 
-// Employee Salary Structure - Defines salary components for each staff
 model EmployeeSalary {
   id                       String           @id @default(cuid())
   staffId                  String
@@ -1320,7 +1364,6 @@ model EmployeeSalary {
   @@map("employee_salaries")
 }
 
-// Pay Validation - Supervisor validation for each staff per period
 model PayValidation {
   id            String           @id @default(cuid())
   payPeriodId   String
@@ -1346,7 +1389,6 @@ model PayValidation {
   @@map("pay_validations")
 }
 
-// Overtime Entry - Tracks overtime hours for payroll computation
 model OvertimeEntry {
   id            String    @id @default(cuid())
   payPeriodId   String
@@ -1370,7 +1412,6 @@ model OvertimeEntry {
   @@map("overtime_entries")
 }
 
-// Deduction Entry - Tracks various deductions per staff per period
 model DeductionEntry {
   id            String        @id @default(cuid())
   payPeriodId   String
@@ -1394,9 +1435,8 @@ model DeductionEntry {
   @@map("deduction_entries")
 }
 
-// Computed Payslip - Final computed payslip for each staff per period
 model ComputedPayslip {
-  id                          String          @id @default(cuid())
+  id                          String            @id @default(cuid())
   payPeriodId                 String
   staffId                     String
   companyId                   String
@@ -1405,62 +1445,55 @@ model ComputedPayslip {
   departmentId                String?
   departmentName              String?
 
-  // Earnings
-  basicSalary                 Decimal         @default(0) @db.Decimal(18, 2)
-  housingAllowance            Decimal         @default(0) @db.Decimal(18, 2)
-  transportAllowance          Decimal         @default(0) @db.Decimal(18, 2)
-  dressingAllowance           Decimal         @default(0) @db.Decimal(18, 2)
-  leaveAllowance              Decimal         @default(0) @db.Decimal(18, 2)
-  entertainmentAllowance      Decimal         @default(0) @db.Decimal(18, 2)
-  utilityAllowance            Decimal         @default(0) @db.Decimal(18, 2)
-  otherAllowances             Decimal         @default(0) @db.Decimal(18, 2)
-  overtimeEarnings            Decimal         @default(0) @db.Decimal(18, 2)
-  bonusKpi                    Decimal         @default(0) @db.Decimal(18, 2)
-  grossSalary                 Decimal         @default(0) @db.Decimal(18, 2)
+  basicSalary                 Decimal           @default(0) @db.Decimal(18, 2)
+  housingAllowance            Decimal           @default(0) @db.Decimal(18, 2)
+  transportAllowance          Decimal           @default(0) @db.Decimal(18, 2)
+  dressingAllowance           Decimal           @default(0) @db.Decimal(18, 2)
+  leaveAllowance              Decimal           @default(0) @db.Decimal(18, 2)
+  entertainmentAllowance      Decimal           @default(0) @db.Decimal(18, 2)
+  utilityAllowance            Decimal           @default(0) @db.Decimal(18, 2)
+  otherAllowances             Decimal           @default(0) @db.Decimal(18, 2)
+  overtimeEarnings            Decimal           @default(0) @db.Decimal(18, 2)
+  bonusKpi                    Decimal           @default(0) @db.Decimal(18, 2)
+  grossSalary                 Decimal           @default(0) @db.Decimal(18, 2)
 
-  // Statutory Deductions
-  pensionEmployee             Decimal         @default(0) @db.Decimal(18, 2)
-  pensionEmployer             Decimal         @default(0) @db.Decimal(18, 2)
-  nhf                         Decimal         @default(0) @db.Decimal(18, 2)
-  nhis                        Decimal         @default(0) @db.Decimal(18, 2)
-  totalStatutoryDeductions    Decimal         @default(0) @db.Decimal(18, 2)
+  pensionEmployee             Decimal           @default(0) @db.Decimal(18, 2)
+  pensionEmployer             Decimal           @default(0) @db.Decimal(18, 2)
+  nhf                         Decimal           @default(0) @db.Decimal(18, 2)
+  nhis                        Decimal           @default(0) @db.Decimal(18, 2)
+  totalStatutoryDeductions    Decimal           @default(0) @db.Decimal(18, 2)
 
-  // Tax Calculation (Nigeria 2026)
-  annualGrossIncome           Decimal         @default(0) @db.Decimal(18, 2)
-  rentRelief                  Decimal         @default(0) @db.Decimal(18, 2)
-  consolidatedReliefAllowance Decimal         @default(0) @db.Decimal(18, 2)
-  annualChargeableIncome      Decimal         @default(0) @db.Decimal(18, 2)
-  annualPAYE                  Decimal         @default(0) @db.Decimal(18, 2)
-  monthlyPAYE                 Decimal         @default(0) @db.Decimal(18, 2)
+  annualGrossIncome           Decimal           @default(0) @db.Decimal(18, 2)
+  rentRelief                  Decimal           @default(0) @db.Decimal(18, 2)
+  consolidatedReliefAllowance Decimal           @default(0) @db.Decimal(18, 2)
+  annualChargeableIncome      Decimal           @default(0) @db.Decimal(18, 2)
+  annualPAYE                  Decimal           @default(0) @db.Decimal(18, 2)
+  monthlyPAYE                 Decimal           @default(0) @db.Decimal(18, 2)
 
-  // Other Deductions
-  unionDues                   Decimal         @default(0) @db.Decimal(18, 2)
-  cooperativeDeduction        Decimal         @default(0) @db.Decimal(18, 2)
-  loanRepayment               Decimal         @default(0) @db.Decimal(18, 2)
-  otherDeductions             Decimal         @default(0) @db.Decimal(18, 2)
-  totalDeductions             Decimal         @default(0) @db.Decimal(18, 2)
+  unionDues                   Decimal           @default(0) @db.Decimal(18, 2)
+  cooperativeDeduction        Decimal           @default(0) @db.Decimal(18, 2)
+  loanRepayment               Decimal           @default(0) @db.Decimal(18, 2)
+  otherDeductions             Decimal           @default(0) @db.Decimal(18, 2)
+  totalDeductions             Decimal           @default(0) @db.Decimal(18, 2)
 
-  // Net Salary
-  netSalary                   Decimal         @default(0) @db.Decimal(18, 2)
+  netSalary                   Decimal           @default(0) @db.Decimal(18, 2)
 
-  // Status
-  paymentStatus               PaymentStatus   @default(PENDING)
+  paymentStatus               PaymentStatus     @default(PENDING)
   validationStatus            ValidationStatus?
   withheldReason              String?
 
-  // Banking Details (denormalized for reports)
   bankName                    String?
   accountNumber               String?
   accountName                 String?
   pensionFundAdministrator    String?
   pensionPin                  String?
 
-  createdAt                   DateTime        @default(now())
-  updatedAt                   DateTime        @updatedAt
+  createdAt                   DateTime          @default(now())
+  updatedAt                   DateTime          @updatedAt
 
-  payPeriod                   PayPeriod       @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
-  staff                       StaffRecord     @relation(fields: [staffId], references: [id], onDelete: Cascade)
-  company                     Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payPeriod                   PayPeriod         @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+  staff                       StaffRecord       @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  company                     Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@unique([payPeriodId, staffId])
   @@index([payPeriodId, paymentStatus])
@@ -1468,6 +1501,849 @@ model ComputedPayslip {
   @@index([staffId])
   @@index([companyId])
   @@map("computed_payslips")
+}
+
+// ==================== PHED MODULE (Port Harcourt Client) ====================
+
+enum PhedStaffCategory {
+  REGULAR
+  CONTRACT
+  NYSC_IT
+}
+
+enum PhedPayPeriodStatus {
+  DRAFT
+  VALIDATION_OPEN
+  VALIDATION_CLOSED
+  PROCESSING
+  REVIEW
+  APPROVED
+  PAID
+}
+
+enum PhedValidationStatus {
+  PENDING
+  YES_FOR_PAYMENT
+  NO_FOR_PAYMENT
+}
+
+enum PhedPaymentStatus {
+  ACTIVE
+  WITHHELD
+}
+
+// Grade level definitions (Regular: Officer IV → GM | Contract: Staff 1, Staff 2)
+model PhedGrade {
+  id                 String             @id @default(cuid())
+  companyId          String
+  name               String             // e.g. "Officer IV", "General Manager"
+  code               String             // e.g. "GL06", "GM"
+  category           PhedStaffCategory
+  levelOrder         Int
+  defaultBasicSalary Decimal?           @db.Decimal(18, 2)
+  isActive           Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  company            Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  allowanceTemplates PhedAllowanceTemplate[]
+  staff              PhedStaff[]
+
+  @@unique([companyId, code])
+  @@index([companyId, category])
+  @@map("phed_grades")
+}
+
+// Default allowance templates per grade (FIXED = naira, PERCENTAGE = % of basic)
+model PhedAllowanceTemplate {
+  id            String    @id @default(cuid())
+  gradeId       String
+  allowanceType String    // HOUSING | TRANSPORT | FURNITURE | MEAL_SUBSIDY | UTILITY | LEAVE | SHIFT | DOMESTIC | HAZARD | ELECTRICITY | DISCOVERY | CAR_SUBSIDY | ENTERTAINMENT | DATA | NIGHT | ARREARS | OTHER
+  valueType     String    // FIXED | PERCENTAGE
+  value         Decimal   @db.Decimal(18, 4)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  grade         PhedGrade @relation(fields: [gradeId], references: [id], onDelete: Cascade)
+
+  @@unique([gradeId, allowanceType])
+  @@map("phed_allowance_templates")
+}
+
+// HR-managed regions
+model PhedRegion {
+  id        String       @id @default(cuid())
+  companyId String
+  name      String
+  code      String?
+  isActive  Boolean      @default(true)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  company   Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  feeders   PhedFeeder[]
+  staff     PhedStaff[]
+
+  @@unique([companyId, name])
+  @@map("phed_regions")
+}
+
+// HR-managed feeders (belong to a region)
+model PhedFeeder {
+  id        String         @id @default(cuid())
+  regionId  String
+  companyId String
+  name      String
+  code      String?
+  isActive  Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  region    PhedRegion     @relation(fields: [regionId], references: [id], onDelete: Cascade)
+  company   Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payPoints PhedPayPoint[]
+  staff     PhedStaff[]
+
+  @@unique([companyId, name])
+  @@map("phed_feeders")
+}
+
+// HR-managed pay points (optionally linked to a feeder)
+model PhedPayPoint {
+  id        String      @id @default(cuid())
+  feederId  String?
+  companyId String
+  name      String
+  code      String?
+  isActive  Boolean     @default(true)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  feeder    PhedFeeder? @relation(fields: [feederId], references: [id])
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staff     PhedStaff[]
+
+  @@unique([companyId, name])
+  @@map("phed_pay_points")
+}
+
+// Unions — percentage of gross salary deduction per month
+model PhedUnion {
+  id          String           @id @default(cuid())
+  companyId   String
+  name        String
+  percentage  Decimal          @default(0) @db.Decimal(5, 4) // e.g. 0.0250 = 2.5%
+  isActive    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  company     Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staffUnions PhedStaffUnion[]
+
+  @@unique([companyId, name])
+  @@map("phed_unions")
+}
+
+// Cooperatives — per-member fixed monthly deduction
+model PhedCooperative {
+  id                String                 @id @default(cuid())
+  companyId         String
+  name              String
+  percentage        Decimal                @default(0) @db.Decimal(5, 4) // legacy, no longer used for computation
+  isActive          Boolean                @default(true)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  company           Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staffCooperatives PhedStaffCooperative[]
+
+  @@unique([companyId, name])
+  @@map("phed_cooperatives")
+}
+
+// PHED Staff record (independent of main StaffRecord)
+model PhedStaff {
+  id                 String                 @id @default(cuid())
+  companyId          String
+  staffId            String                 // Employee ID e.g. PHED-001
+  firstName          String
+  lastName           String
+  email              String
+  phone              String?
+  category           PhedStaffCategory      @default(REGULAR)
+  gradeId            String?
+  department         String?
+  unit               String?
+  regionId           String?
+  feederId           String?
+  payPointId         String?
+
+  // Banking & statutory identifiers
+  bankName           String?
+  accountNumber      String?
+  accountName        String?
+  rsaPin             String?
+  pfaName            String?
+  pensionNumber      String?                // Pension member enrollment / PIN from PFA
+  tin                String?                // Tax Identification Number (FIRS)
+
+  // Life assurance
+  hasLifeAssurance   Boolean                @default(false)
+  lifeAssuranceAmount Decimal?              @db.Decimal(18, 2) // Annual premium — deducted from annual gross before PAYE
+
+  // For rent relief calculation
+  annualRent         Decimal?               @db.Decimal(18, 2)
+
+  // Salary (overrides grade defaults when set)
+  basicSalary        Decimal?               @db.Decimal(18, 2)
+  housingAllowance   Decimal?               @db.Decimal(18, 2)
+  transportAllowance Decimal?               @db.Decimal(18, 2)
+  furnitureAllowance Decimal?               @db.Decimal(18, 2)
+  mealSubsidy        Decimal?               @db.Decimal(18, 2)
+  utilityAllowance   Decimal?               @db.Decimal(18, 2)
+  leaveAllowance     Decimal?               @db.Decimal(18, 2)
+  shiftAllowance         Decimal?               @db.Decimal(18, 2)
+  domesticAllowance      Decimal?               @db.Decimal(18, 2)
+  hazardAllowance        Decimal?               @db.Decimal(18, 2)
+  electricityAllowance   Decimal?               @db.Decimal(18, 2)
+  discoveryAllowance     Decimal?               @db.Decimal(18, 2)
+  carSubsidy             Decimal?               @db.Decimal(18, 2)
+  entertainmentAllowance Decimal?               @db.Decimal(18, 2)
+  dataAllowance          Decimal?               @db.Decimal(18, 2)
+  nightAllowance         Decimal?               @db.Decimal(18, 2)
+  arrears                Decimal?               @db.Decimal(18, 2)
+  otherAllowances        Decimal?               @db.Decimal(18, 2)
+
+  isActive           Boolean                @default(true)
+  createdBy          String
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  company            Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  grade              PhedGrade?             @relation(fields: [gradeId], references: [id])
+  region             PhedRegion?            @relation(fields: [regionId], references: [id])
+  feeder             PhedFeeder?            @relation(fields: [feederId], references: [id])
+  payPoint           PhedPayPoint?          @relation(fields: [payPointId], references: [id])
+  unions               PhedStaffUnion[]
+  cooperatives         PhedStaffCooperative[]
+  deductionLiabilities PhedStaffDeductionLiability[]
+  validations          PhedValidation[]
+  overtimeEntries    PhedOvertimeEntry[]
+  computedPayrolls   PhedComputedPayroll[]
+
+  @@unique([companyId, staffId])
+  @@unique([companyId, email])
+  @@index([companyId, category, isActive])
+  @@map("phed_staff")
+}
+
+// Staff ↔ Union (many-to-many)
+model PhedStaffUnion {
+  id         String    @id @default(cuid())
+  staffId    String
+  unionId    String
+  assignedAt DateTime  @default(now())
+
+  staff      PhedStaff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  union      PhedUnion @relation(fields: [unionId], references: [id], onDelete: Cascade)
+
+  @@unique([staffId, unionId])
+  @@map("phed_staff_unions")
+}
+
+// Staff ↔ Cooperative (many-to-many, per-member fixed monthly deduction amounts)
+model PhedStaffCooperative {
+  id                 String          @id @default(cuid())
+  staffId            String
+  cooperativeId      String
+  contributionAmount Decimal         @default(0) @db.Decimal(18, 2)
+  loanAmount         Decimal         @default(0) @db.Decimal(18, 2)
+  totalAmount        Decimal         @default(0) @db.Decimal(18, 2) // contributionAmount + loanAmount
+  assignedAt         DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  staff         PhedStaff       @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  cooperative   PhedCooperative @relation(fields: [cooperativeId], references: [id], onDelete: Cascade)
+
+  @@unique([staffId, cooperativeId])
+  @@map("phed_staff_cooperatives")
+}
+
+// Deductions & Liabilities (per-employee fixed monthly deduction, name only to create)
+model PhedDeductionLiability {
+  id        String   @id @default(cuid())
+  companyId String
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company                       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staff   PhedStaffDeductionLiability[]
+
+  @@unique([companyId, name])
+  @@map("phed_deduction_liabilities")
+}
+
+model PhedStaffDeductionLiability {
+  id                   String   @id @default(cuid())
+  staffId              String
+  deductionLiabilityId String
+  amount               Decimal  @default(0) @db.Decimal(18, 2)
+  assignedAt           DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  staff              PhedStaff              @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  deductionLiability PhedDeductionLiability @relation(fields: [deductionLiabilityId], references: [id], onDelete: Cascade)
+
+  @@unique([staffId, deductionLiabilityId])
+  @@map("phed_staff_deduction_liabilities")
+}
+
+// Monthly pay periods
+model PhedPayPeriod {
+  id                String              @id @default(cuid())
+  companyId         String
+  year              Int
+  month             Int
+  periodName        String              // e.g. "April 2026"
+  validationOpenAt  DateTime?
+  validationCloseAt DateTime?
+  status            PhedPayPeriodStatus @default(DRAFT)
+  createdBy         String
+  approvedBy        String?
+  approvedAt        DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  company           Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  validations       PhedValidation[]
+  overtimeEntries   PhedOvertimeEntry[]
+  computedPayrolls  PhedComputedPayroll[]
+  bulkUploads       PhedBulkUpload[]
+
+  @@unique([companyId, year, month])
+  @@index([companyId, status])
+  @@map("phed_pay_periods")
+}
+
+// Monthly staff payment validation (Yes/No for payment)
+model PhedValidation {
+  id           String               @id @default(cuid())
+  payPeriodId  String
+  staffId      String
+  companyId    String
+  status       PhedValidationStatus @default(PENDING)
+  validatedBy  String?
+  validatedAt  DateTime?
+  reason       String?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  payPeriod    PhedPayPeriod        @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+  staff        PhedStaff            @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  company      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([payPeriodId, staffId])
+  @@index([payPeriodId, status])
+  @@map("phed_validations")
+}
+
+// Overtime entries per staff per period
+model PhedOvertimeEntry {
+  id             String        @id @default(cuid())
+  payPeriodId    String
+  staffId        String
+  companyId      String
+  overtimeHours  Decimal       @db.Decimal(10, 2)
+  computedAmount Decimal?      @db.Decimal(18, 2)
+  sourceFileId   String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  payPeriod      PhedPayPeriod @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+  staff          PhedStaff     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  company        Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([payPeriodId, staffId])
+  @@index([payPeriodId])
+  @@map("phed_overtime_entries")
+}
+
+// Final computed payroll per staff per period
+model PhedComputedPayroll {
+  id                          String               @id @default(cuid())
+  payPeriodId                 String
+  staffId                     String
+  companyId                   String
+
+  // Staff snapshot (denormalized for reports)
+  staffName                   String?
+  staffEmail                  String?
+  staffIdCode                 String?
+  category                    PhedStaffCategory?
+  gradeName                   String?
+  department                  String?
+  unit                        String?
+  regionName                  String?
+
+  // Earnings
+  basicSalary                 Decimal              @default(0) @db.Decimal(18, 2)
+  housingAllowance            Decimal              @default(0) @db.Decimal(18, 2)
+  transportAllowance          Decimal              @default(0) @db.Decimal(18, 2)
+  furnitureAllowance          Decimal              @default(0) @db.Decimal(18, 2)
+  mealSubsidy                 Decimal              @default(0) @db.Decimal(18, 2)
+  utilityAllowance            Decimal              @default(0) @db.Decimal(18, 2)
+  leaveAllowance              Decimal              @default(0) @db.Decimal(18, 2)
+  shiftAllowance              Decimal              @default(0) @db.Decimal(18, 2)
+  domesticAllowance           Decimal              @default(0) @db.Decimal(18, 2)
+  hazardAllowance             Decimal              @default(0) @db.Decimal(18, 2)
+  electricityAllowance        Decimal              @default(0) @db.Decimal(18, 2)
+  discoveryAllowance          Decimal              @default(0) @db.Decimal(18, 2)
+  carSubsidy                  Decimal              @default(0) @db.Decimal(18, 2)
+  entertainmentAllowance      Decimal              @default(0) @db.Decimal(18, 2)
+  dataAllowance               Decimal              @default(0) @db.Decimal(18, 2)
+  nightAllowance              Decimal              @default(0) @db.Decimal(18, 2)
+  arrears                     Decimal              @default(0) @db.Decimal(18, 2)
+  otherAllowances             Decimal              @default(0) @db.Decimal(18, 2)
+  overtimeEarnings            Decimal              @default(0) @db.Decimal(18, 2)
+  grossSalary                 Decimal              @default(0) @db.Decimal(18, 2)
+
+  // Statutory deductions
+  pensionEmployee             Decimal              @default(0) @db.Decimal(18, 2)
+  pensionEmployer             Decimal              @default(0) @db.Decimal(18, 2)
+  nhf                         Decimal              @default(0) @db.Decimal(18, 2)
+
+  // Tax calculation (NTA 2025)
+  annualRentRelief            Decimal              @default(0) @db.Decimal(18, 2)
+  lifeAssuranceAmount         Decimal              @default(0) @db.Decimal(18, 2)
+  annualGrossIncome           Decimal              @default(0) @db.Decimal(18, 2)
+  annualPensionDeduction      Decimal              @default(0) @db.Decimal(18, 2)
+  annualChargeableIncome      Decimal              @default(0) @db.Decimal(18, 2)
+  annualPAYE                  Decimal              @default(0) @db.Decimal(18, 2)
+  monthlyPAYE                 Decimal              @default(0) @db.Decimal(18, 2)
+
+  // Variable deductions
+  unionDeductions             Decimal              @default(0) @db.Decimal(18, 2)
+  cooperativeDeductions       Decimal              @default(0) @db.Decimal(18, 2)
+  deductionLiabilities        Decimal              @default(0) @db.Decimal(18, 2)
+  otherDeductions             Decimal              @default(0) @db.Decimal(18, 2)
+  totalDeductions             Decimal              @default(0) @db.Decimal(18, 2)
+
+  netSalary                   Decimal              @default(0) @db.Decimal(18, 2)
+
+  // Status
+  validationStatus            PhedValidationStatus?
+  paymentStatus               PhedPaymentStatus    @default(ACTIVE)
+  withheldReason              String?
+
+  // Banking & statutory snapshot (for reports)
+  bankName                    String?
+  accountNumber               String?
+  accountName                 String?
+  pfaName                     String?
+  rsaPin                      String?
+  pensionNumber               String?
+  tin                         String?
+
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
+
+  payPeriod                   PhedPayPeriod        @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+  staff                       PhedStaff            @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  company                     Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([payPeriodId, staffId])
+  @@index([payPeriodId, paymentStatus])
+  @@index([payPeriodId])
+  @@index([companyId])
+  @@map("phed_computed_payrolls")
+}
+
+// ============================================================
+// TRAINING & CERTIFICATION MODULE
+// ============================================================
+
+model TrainingProgram {
+  id                 String    @id @default(cuid())
+  companyId          String
+  programName        String
+  slug               String
+  category           String
+  trainingType       String    // Online | Hybrid | Instructor-Led | On-site
+  description        String
+  level              String    @default("Beginner") // Beginner | Intermediate | Advanced
+  departments        String[]
+  trainer            String
+  durationHours      Decimal?  @db.Decimal(6, 2)
+  sessionType        String    @default("Single") // Single | Multi-session
+  startDate          DateTime
+  endDate            DateTime
+  location           String?
+  maxParticipants    Int?
+  assessmentRequired Boolean   @default(true)
+  assessmentType     String?   @default("Quiz") // Quiz | Certification | Evaluation
+  passingScore       Int       @default(80)
+  maxAttempts        Int       @default(3)
+  autoCertificate    Boolean   @default(true)
+  assignmentMethod   String    @default("Automatic Enrollment")
+  dueDate            DateTime
+  notifyEmployees    Boolean   @default(true)
+  status             String    @default("DRAFT") // DRAFT | ACTIVE | ARCHIVED
+  createdBy          String
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deletedAt          DateTime?
+
+  company            Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  sessions           TrainingSession[]
+  materials          TrainingMaterial[]
+  assessment         Assessment?
+  participants       ParticipantProgress[]
+  assignmentRules    AssignmentRule[]
+
+  @@unique([companyId, slug])
+  @@index([companyId, status])
+  @@index([companyId, category])
+  @@map("training_programs")
+}
+
+model TrainingSession {
+  id                String    @id @default(cuid())
+  companyId         String
+  trainingProgramId String
+  title             String
+  date              DateTime
+  time              String?
+  type              String    // Virtual | Instructor-led | Self-paced
+  status            String    @default("Upcoming") // Upcoming | Completed | Cancelled
+  trainer           String?
+  capacity          Int?
+  participantsCount Int       @default(0)
+  location          String?
+  duration          String?
+  summary           String?
+  programLabel      String?
+  createdBy         String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  company           Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  trainingProgram   TrainingProgram @relation(fields: [trainingProgramId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, status])
+  @@index([companyId, date])
+  @@index([trainingProgramId])
+  @@map("training_sessions")
+}
+
+model TrainingMaterial {
+  id                String    @id @default(cuid())
+  companyId         String
+  trainingProgramId String
+  title             String
+  type              String    // PDF Document | Video | Presentation | Document | External Resource
+  source            String    @default("upload") // upload | external
+  fileUrl           String?
+  externalUrl       String?
+  description       String?
+  studyTimeMinutes  Int       @default(15)
+  fileSizeBytes     BigInt?
+  createdBy         String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  company           Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  trainingProgram   TrainingProgram @relation(fields: [trainingProgramId], references: [id], onDelete: Cascade)
+
+  @@index([trainingProgramId])
+  @@map("training_materials")
+}
+
+model Assessment {
+  id                String    @id @default(cuid())
+  companyId         String
+  trainingProgramId String?   @unique
+  name              String
+  type              String    // Quiz | Certification | Evaluation
+  status            String    @default("DRAFT") // DRAFT | ACTIVE | ARCHIVED
+  description       String?
+  timeLimitMinutes  Int?
+  passingScore      Int
+  maxAttempts       Int?
+  category          String?
+  difficulty        String?
+  shuffleQuestions  Boolean   @default(false)
+  createdBy         String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+
+  company           Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  trainingProgram   TrainingProgram? @relation(fields: [trainingProgramId], references: [id])
+  questions         Question[]
+  attempts          AssessmentAttempt[]
+
+  @@index([companyId, status])
+  @@index([companyId, type])
+  @@map("assessments")
+}
+
+model Question {
+  id              String    @id @default(cuid())
+  assessmentId    String
+  order           Int
+  title           String?
+  type            String    // multiple-choice | true-false
+  prompt          String
+  options         Json      // [{id, label, value}]
+  correctOptionId String?
+  correctBoolean  String?
+  explanation     String?
+  points          Int       @default(5)
+  difficulty      String    @default("medium") // easy | medium | hard
+  tags            String[]
+  required        Boolean   @default(true)
+  shuffleAnswers  Boolean   @default(false)
+  multipleSelections Boolean @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  assessment      Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([assessmentId, order])
+  @@map("questions")
+}
+
+model AssessmentAttempt {
+  id              String    @id @default(cuid())
+  assessmentId    String
+  employeeId      String
+  companyId       String
+  attemptNumber   Int
+  outcome         String?   // Passed | Failed | Pending
+  score           Int?
+  timeTakenSeconds Int?
+  responses       Json?     // [{questionId, selectedOptionId, timeSpent}]
+  retakeAllowed   Boolean   @default(false)
+  isManualReview  Boolean   @default(false)
+  startedAt       DateTime  @default(now())
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  assessment      Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  employee        StaffRecord @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company         Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([assessmentId, employeeId, attemptNumber])
+  @@index([assessmentId, employeeId])
+  @@index([companyId, outcome])
+  @@map("assessment_attempts")
+}
+
+model ParticipantProgress {
+  id                String    @id @default(cuid())
+  companyId         String
+  trainingProgramId String
+  employeeId        String
+  trainingStatus    String    @default("NOT STARTED") // IN PROGRESS | COMPLETED | NOT STARTED | PENDING
+  progressPct       Int       @default(0)
+  score             Int?
+  certStatus        String    @default("NOT CERTIFIED") // CERTIFIED | NOT CERTIFIED | EXPIRED
+  completionDate    DateTime?
+  timeSpentSeconds  Int       @default(0)
+  dueDate           DateTime?
+  timeline          Json?
+  materialsProgress Json?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  company           Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  trainingProgram   TrainingProgram @relation(fields: [trainingProgramId], references: [id], onDelete: Cascade)
+  employee          StaffRecord     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([trainingProgramId, employeeId])
+  @@index([companyId, trainingStatus])
+  @@index([companyId, certStatus])
+  @@map("participant_progress")
+}
+
+model CertificationType {
+  id          String    @id @default(cuid())
+  companyId   String
+  name        String
+  type        String    // Technical | Compliance | Sales | Design | Management
+  authority   String
+  templateId  String?
+  isActive    Boolean   @default(true)
+  createdBy   String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  company         Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  template        CertificationTemplate? @relation(fields: [templateId], references: [id])
+  records         CertificationRecord[]
+
+  @@index([companyId, type])
+  @@index([companyId, isActive])
+  @@map("certification_types")
+}
+
+model CertificationTemplate {
+  id           String    @id @default(cuid())
+  companyId    String
+  name         String
+  fieldsSchema Json
+  createdBy    String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  company      Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  types        CertificationType[]
+
+  @@index([companyId])
+  @@map("certification_templates")
+}
+
+model CertificationRecord {
+  id                  String    @id @default(cuid())
+  companyId           String
+  employeeId          String
+  certificationTypeId String
+  certIdNumber        String?
+  issueDate           DateTime
+  expiryDate          DateTime?
+  duration            String?
+  status              String    @default("Pending") // Valid | Expiring Soon | Expired | Pending
+  daysToExpiry        Int?
+  hasDocument         Boolean   @default(false)
+  issuedBy            String
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  company             Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee            StaffRecord       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  certificationType   CertificationType @relation(fields: [certificationTypeId], references: [id])
+  documents           CertificationDocument[]
+
+  @@index([companyId, status])
+  @@index([companyId, employeeId])
+  @@index([companyId, expiryDate])
+  @@map("certification_records")
+}
+
+model CertificationDocument {
+  id                    String    @id @default(cuid())
+  certificationRecordId String
+  fileUrl               String
+  fileType              String?
+  fileName              String?
+  uploadedBy            String
+  createdAt             DateTime  @default(now())
+
+  certificationRecord   CertificationRecord @relation(fields: [certificationRecordId], references: [id], onDelete: Cascade)
+
+  @@index([certificationRecordId])
+  @@map("certification_documents")
+}
+
+model AssignmentRule {
+  id                    String    @id @default(cuid())
+  companyId             String
+  name                  String
+  ruleType              String    // auto_assignment | trigger_condition | recurring | expiry_reassignment | compliance
+  trigger               String?
+  condition             Json?
+  trainingProgramId     String?
+  enabled               Boolean   @default(true)
+  recurrenceValue       Int?
+  recurrenceUnit        String?
+  startOption           String?
+  endOption             String?
+  graceDays             Int       @default(7)
+  priority              String    @default("Medium")
+  scope                 String    @default("All Employees")
+  notifyOnAssignment    Boolean   @default(true)
+  statusHandling        String[]
+  escalateManager       Boolean   @default(false)
+  preExpiryNotifications Int[]
+  createdBy             String
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  company               Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  trainingProgram       TrainingProgram? @relation(fields: [trainingProgramId], references: [id])
+
+  @@index([companyId, ruleType])
+  @@index([companyId, enabled])
+  @@map("assignment_rules")
+}
+
+model RiskItem {
+  id            String    @id @default(cuid())
+  companyId     String
+  code          String
+  type          String    // Compliance | Security | Safety | Operational
+  title         String
+  description   String?
+  severity      String    // CRITICAL | WARNING | RESOLVED
+  department    String?
+  status        String    @default("Active") // Active | Resolved
+  affectedUsers Json?
+  primaryAction String?
+  createdBy     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, code])
+  @@index([companyId, severity])
+  @@index([companyId, status])
+  @@map("risk_items")
+}
+
+model TrainingAuditLog {
+  id         String    @id @default(cuid())
+  companyId  String
+  actorId    String
+  action     String    // ISSUED | RENEWED | ARCHIVED | BULK_REMIND | CREATED | UPDATED | DELETED
+  entityType String    // certification_record | training_program | assessment | assignment_rule
+  entityId   String
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime  @default(now())
+
+  company    Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  actor      StaffRecord @relation(fields: [actorId], references: [id])
+
+  @@index([companyId, entityType, entityId])
+  @@index([companyId, actorId])
+  @@index([companyId, createdAt])
+  @@map("training_audit_logs")
+}
+
+// Bulk upload tracking (staff CSV, validation CSV, overtime CSV)
+model PhedBulkUpload {
+  id           String         @id @default(cuid())
+  companyId    String
+  payPeriodId  String?
+  type         String         // STAFF | VALIDATION | OVERTIME
+  fileName     String
+  totalRecords Int
+  successful   Int
+  failed       Int
+  errors       Json?
+  uploadedBy   String
+  createdAt    DateTime       @default(now())
+
+  company      Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payPeriod    PhedPayPeriod? @relation(fields: [payPeriodId], references: [id])
+
+  @@index([companyId, type])
+  @@map("phed_bulk_uploads")
+  //@@map("computed_payslips")
 }
 
 // payment date
@@ -1686,4 +2562,10 @@ model BenefitAllocation {
   @@index([companyId, createdAt])
   @@index([staffId, createdAt])
   @@map("benefit_allocations")
+}
+enum FilingStatus {
+  PENDING
+  GENERATED
+  FILED
+  CONFIRMED
 }

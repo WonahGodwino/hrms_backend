@@ -1,6 +1,8 @@
 // /src/app/api/leaves/upload/[id]/failed/route.ts
 import { NextRequest, NextResponse } from 'next/server'
+
 import { requireRole } from '@/app/lib/auth'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { prisma } from '@/app/lib/prisma'
 
@@ -29,7 +31,7 @@ export async function GET(
     }
     
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
+    const user = await requireModuleAccess(token, 'LEAVE', ['HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
 
     // Get upload ID from params
     const { id } = await params
@@ -490,7 +492,7 @@ export async function DELETE(
     }
     
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['SUPER_ADMIN', 'ADMIN'])
+    const user = await requireModuleAccess(token, 'LEAVE', ['SUPER_ADMIN', 'ADMIN'])
 
     // Get upload ID from params
     const { id } = await params

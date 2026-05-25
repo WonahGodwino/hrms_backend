@@ -1,7 +1,9 @@
 // src/app/api/payroll/templates/dynamic/download/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
+
 import { requireRole } from '@/app/lib/auth'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
@@ -40,7 +42,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = await requireRole(token, ['SUPER_ADMIN', 'HR', 'ADMIN'])
+    const user = await await requireModuleAccess(token, 'PAYROLL', ['SUPER_ADMIN', 'HR', 'ADMIN'])
 
     const { searchParams } = new URL(request.url)
     const templateId = searchParams.get('templateId')

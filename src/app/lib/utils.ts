@@ -59,6 +59,18 @@ export const handleApiError = (error: any) => {
   console.error('API Error:', error)
 
   const message = formatError(error)
+
+  // Auth errors thrown by requireRole / requireAuth → correct HTTP status
+  if (message === 'Authentication required' || message === 'Invalid or expired token') {
+    return ApiResponse.unauthorized(message)
+  }
+  if (message.startsWith('Insufficient permissions')) {
+    return ApiResponse.forbidden(message)
+  }
+  if (message === 'JWT_SECRET environment variable is not set') {
+    return ApiResponse.serverError('Server configuration error')
+  }
+
   return ApiResponse.error(message, 500)
 }
 

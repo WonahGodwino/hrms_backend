@@ -2,7 +2,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/app/lib/db'
+
 import { requireRole } from '@/app/lib/auth'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { getPayslipDisplayFields, calculateTotals } from '@/app/lib/payroll/templates/utils'
@@ -35,7 +37,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Authenticate user and get their role
     let user
     try {
-      user = requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN', 'STAFF'])
+      user = await requireModuleAccess(token, 'PAYROLL', ['HR', 'ADMIN', 'SUPER_ADMIN', 'STAFF'])
     } catch (authError) {
       console.error('Authentication error:', authError)
       return withCors(

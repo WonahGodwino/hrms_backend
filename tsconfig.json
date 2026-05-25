@@ -19,5 +19,12 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules", "isurfhr-backend/**", "**/* - Copy.ts", "**/* - Copy.tsx"]
+  "exclude": [
+    "node_modules",
+    "isurfhr-backend/**",
+    "**/* - Copy.ts",
+    "**/* - Copy.tsx",
+    "src/app/api/engine/**",
+    "src/app/lib/payroll-engine/**"
+  ]
 }

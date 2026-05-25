@@ -2,7 +2,9 @@
 //HR and Admin Job Management.
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
+
 import { requireRole } from '@/app/lib/auth'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -33,7 +35,7 @@ export async function PUT(request: NextRequest, context: { params: { id: string 
 
     let user
     try {
-      user = requireRole(token, ['HR', 'SUPER_ADMIN'])
+      user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'SUPER_ADMIN'])
     } catch (authError) {
       const message = formatError(authError)
       return withCors(ApiResponse.error(message, mapAuthErrorStatus(message)), origin)
@@ -91,7 +93,7 @@ export async function DELETE(request: NextRequest, context: { params: { id: stri
 
     let user
     try {
-      user = requireRole(token, ['HR', 'SUPER_ADMIN'])
+      user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'SUPER_ADMIN'])
     } catch (authError) {
       const message = formatError(authError)
       return withCors(ApiResponse.error(message, mapAuthErrorStatus(message)), origin)

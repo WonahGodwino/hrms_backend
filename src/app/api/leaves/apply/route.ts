@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import fs from 'fs/promises'
 import path from 'path'
 import { requireRole } from '@/app/lib/auth'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { decimalToNumber } from '@/app/lib/prisma-utils'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { z } from 'zod'
@@ -327,7 +328,7 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['STAFF', 'HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
+    const user = await requireModuleAccess(token, 'LEAVE', ['STAFF', 'HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
 
     let data: any = {}
     let fileHandled = false

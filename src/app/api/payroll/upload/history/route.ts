@@ -1,7 +1,9 @@
 // src/app/api/payroll/upload/history/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
+
 import { requireRole } from '@/app/lib/auth'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -50,7 +52,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = await requireRole(token, ['SUPER_ADMIN', 'HR', 'ADMIN'])
+    const user = await await requireModuleAccess(token, 'PAYROLL', ['SUPER_ADMIN', 'HR', 'ADMIN'])
 
     // 2) Parse query parameters
     const { searchParams } = new URL(request.url)

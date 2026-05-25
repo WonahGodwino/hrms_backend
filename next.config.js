@@ -9,7 +9,7 @@ const nextConfig = {
   },
 
   experimental: {
-    serverComponentsExternalPackages: ['pdfkit', '@prisma/adapter-pg', 'pg'],
+    serverComponentsExternalPackages: ['pdfkit', 'exceljs', '@prisma/adapter-pg', 'pg'],
   },
 
   // Only add security headers, NOT CORS headers

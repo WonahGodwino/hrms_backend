@@ -2,7 +2,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sendLeaveNotificationEmail } from '@/app/lib/email'
 import { prisma } from '@/app/lib/db'
-import { requireAuth } from '@/app/lib/auth'
+import { requireRole, requireAuth } from '@/app/lib/auth'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -26,8 +27,14 @@ export async function PATCH(
     }
 
     const token = authHeader.replace('Bearer ', '')
-    // Authenticate the user (any authenticated user can attempt, we'll check permissions below)
-    const user = requireAuth(token)
+    // Authenticate and check module access (combine both approaches)
+    let user = null
+    try {
+      user = await requireModuleAccess(token, 'LEAVE', ['MANAGER', 'HR', 'ADMIN', 'SUPER_ADMIN'])
+    } catch (e) {
+      // fallback to requireAuth if module access fails (for backward compatibility)
+      user = requireAuth(token)
+    }
 
     const { id } = await params
     const body = await request.json()

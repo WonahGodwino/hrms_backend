@@ -5,6 +5,8 @@ import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { signToken } from '@/app/lib/auth'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { getEnabledModules } from '@/app/lib/module-access'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -12,6 +14,8 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin')
+  const rl = phedRateLimit(request, 'auth')
+  if (rl) return withCors(rl, origin)
 
   try {
     const body = await request.json()
@@ -80,16 +84,21 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('Invalid credentials', 401), origin)
     }
 
+    // Fetch company and enabled modules before signing the token so
+    // modules are embedded in the JWT — middleware reads them without a DB call.
+    const [company, enabledModules] = await Promise.all([
+      prisma.company.findUnique({ where: { id: staff.companyId } }),
+      staff.role === 'SUPER_ADMIN'
+        ? getEnabledModules(undefined)
+        : getEnabledModules(staff.companyId),
+    ])
+
     const token = signToken({
       userId: staff.id,
       email: staff.email,
       role: staff.role,
       companyId: staff.companyId,
-    })
-
-    // Fetch company using companyId
-    const company = await prisma.company.findUnique({
-      where: { id: staff.companyId },
+      enabledModules,
     })
 
     return withCors(
@@ -106,6 +115,7 @@ export async function POST(request: NextRequest) {
             department: staff.department,
             position: staff.position,
             staffId: staff.staffId,
+            requirePasswordChange: (staff as any).requirePasswordChange ?? false,
           },
           company: company
             ? {
@@ -116,6 +126,7 @@ export async function POST(request: NextRequest) {
                 address: company.address,
               }
             : null,
+          enabledModules,
         },
         'Login successful'
       ),

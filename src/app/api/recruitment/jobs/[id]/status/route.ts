@@ -4,7 +4,9 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+
 import { requireRole } from '@/app/lib/auth'
+import { requireModuleAccess } from '@/app/lib/module-access'
 
 // Define allowed status transitions
 const ALLOWED_STATUSES = ['ACTIVE', 'CLOSED', 'DRAFT', 'EXPIRED'] as const
@@ -56,7 +58,7 @@ export async function GET(
 
     let user
     try {
-      user = requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+      user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'ADMIN', 'SUPER_ADMIN'])
     } catch (authError) {
       const message = formatError(authError)
       return withCors(ApiResponse.error(message, mapAuthErrorStatus(message)), origin)
@@ -116,7 +118,7 @@ export async function PATCH(
 
     let user
     try {
-      user = requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+      user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'ADMIN', 'SUPER_ADMIN'])
     } catch (authError) {
       const message = formatError(authError)
       return withCors(ApiResponse.error(message, mapAuthErrorStatus(message)), origin)

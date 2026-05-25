@@ -9,6 +9,7 @@ export type JwtPayload = {
   companyId?: string | null // Current selected company
   companyIds?: string[] // All accessible companies for this user
   permissions?: string[]
+  enabledModules?: string[] // Module keys enabled for this company
   sub?: string
 }
 

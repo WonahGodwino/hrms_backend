@@ -1,7 +1,9 @@
 // src/app/api/payroll/upload/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
+
 import { requireRole } from '@/app/lib/auth'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { writeFile, mkdir } from 'fs/promises'
@@ -121,7 +123,7 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = await requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
+    const user = await await requireModuleAccess(token, 'PAYROLL', ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
     // Parse request
     const url = new URL(request.url)

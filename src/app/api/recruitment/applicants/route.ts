@@ -2,7 +2,9 @@
 
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
+
 import { requireRole } from '@/app/lib/auth'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -21,7 +23,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
+    const user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
     if (!user.companyId) {
       return withCors(ApiResponse.error('Company context missing for this user', 400), origin)
