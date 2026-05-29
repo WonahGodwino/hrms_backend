@@ -1,4 +1,4 @@
-// src/app/api/admin/staff/[id]/route.ts
+// src/app/api/admin/staff/edit/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
@@ -252,9 +252,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+
     // Extract and sanitize update fields
     const {
       email,
+      staffId,
       firstName,
       lastName,
       department,
@@ -269,14 +271,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       encodedId,
       // Explicitly exclude these fields
       password,
-      staffId,
       companyId,
       ...rest
     } = body
 
     // Validate allowed fields
     const allowedFields = [
-      'email', 'firstName', 'lastName', 'department', 'position',
+      'email', 'staffId', 'firstName', 'lastName', 'department', 'position',
       'phone', 'bankName', 'accountNumber', 'bvn', 'isRegistered',
       'role', 'isActive', 'encodedId'
     ]
@@ -285,7 +286,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const invalidFields = Object.keys(rest).filter(key => !allowedFields.includes(key))
     if (invalidFields.length > 0) {
       return withCors(
-        ApiResponse.error(`Invalid fields: ${invalidFields.join(', ')}. Password, staffId, and companyId cannot be updated through this endpoint.`, 400),
+        ApiResponse.error(`Invalid fields: ${invalidFields.join(', ')}. Password and companyId cannot be updated through this endpoint.`, 400),
         origin
       )
     }
@@ -300,7 +301,6 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
           origin
         )
       }
-      
       const sanitizedEmail = sanitizeEmail(email)
       if (!validator.isEmail(sanitizedEmail)) {
         return withCors(
@@ -308,22 +308,54 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
           origin
         )
       }
-      
-      // Check if email is unique within the company
+      // Check if email is unique among active staff in the company
       const existingEmail = await prisma.staffRecord.findFirst({
         where: {
           email: sanitizedEmail,
           companyId: existingStaff.companyId,
-          id: { not: sanitizedId }
+          id: { not: sanitizedId },
+          isActive: true
         }
       })
       if (existingEmail) {
         return withCors(
-          ApiResponse.error('Email already exists in this company', 400),
+          ApiResponse.error('Email already exists in an active staff record in this company', 400),
           origin
         )
       }
       updateData.email = sanitizedEmail
+    }
+
+    if (staffId !== undefined) {
+      if (!staffId || typeof staffId !== 'string') {
+        return withCors(
+          ApiResponse.error('Staff ID must be a non-empty string', 400),
+          origin
+        )
+      }
+      const sanitizedStaffId = sanitizeString(staffId)
+      if (!sanitizedStaffId || !validator.isLength(sanitizedStaffId, { min: 1, max: 100 })) {
+        return withCors(
+          ApiResponse.error('Staff ID must be 1-100 characters', 400),
+          origin
+        )
+      }
+      // Check if staffId is unique among active staff in the company
+      const existingStaffId = await prisma.staffRecord.findFirst({
+        where: {
+          staffId: sanitizedStaffId,
+          companyId: existingStaff.companyId,
+          id: { not: sanitizedId },
+          isActive: true
+        }
+      })
+      if (existingStaffId) {
+        return withCors(
+          ApiResponse.error('Staff ID already exists in an active staff record in this company', 400),
+          origin
+        )
+      }
+      updateData.staffId = sanitizedStaffId
     }
 
     if (firstName !== undefined) {
