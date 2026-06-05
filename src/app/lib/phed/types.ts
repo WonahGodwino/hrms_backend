@@ -7,6 +7,7 @@ export type PhedPayPeriodStatus =
   | 'DRAFT'
   | 'VALIDATION_OPEN'
   | 'VALIDATION_CLOSED'
+  | 'TEMPLATE_ISSUED'
   | 'PROCESSING'
   | 'REVIEW'
   | 'APPROVED'
@@ -50,6 +51,7 @@ export interface PhedSalaryComponents {
 
 // -------------------------------------------------------
 // Input to the payroll processor for one staff member
+// (template-driven flow: salary values come from uploaded XLSX)
 // -------------------------------------------------------
 export interface PhedPayrollInput {
   staffId: string
@@ -62,16 +64,21 @@ export interface PhedPayrollInput {
   department: string
   unit: string
   regionName: string
-  salary: PhedSalaryComponents
-  annualRent: number             // Kept for reference; no longer drives rent relief calculation
+  salary: PhedSalaryComponents    // HR-entered via payroll template
   hasLifeAssurance: boolean
-  lifeAssuranceAmount: number    // Annual life assurance premium (0 if none)
-  overtimeHours: number
-  unionDeductionTotal: number        // Pre-summed union percentages (applied to gross)
-  cooperativeDeductionTotal:   number  // Pre-summed fixed cooperative totalAmount per member
-  deductionLiabilityTotal:    number  // Pre-summed fixed deduction/liability amount per member
+  lifeAssuranceAmount: number     // Annual life assurance premium (0 if none)
+  overtimeHours: number           // Used only for OT amount computation; actual OT amount comes from stored entry
+  overtimeAmount: number          // Pre-computed OT amount (stored after OT hours upload)
+  unionDeductionTotal: number     // Pre-summed union percentages (applied to gross)
+  cooperativeDeductionTotal: number // Pre-summed fixed cooperative totalAmount per member
+  deductionLiabilityTotal: number   // Pre-summed fixed deduction/liability amount per member
+  voluntaryPension: number        // Monthly voluntary pension deduction (HR-entered)
+  insurance: number               // Monthly insurance deduction (HR-entered)
+  cashAdvanced: number            // Cash advance for this period (HR-entered)
+  loan: number                    // Loan deduction for this period (HR-entered)
+  domesticLoan: number            // Domestic loan deduction for this period (HR-entered)
   validationStatus: PhedValidationStatus
-  withheldReason?: string            // Reason from validation record (if NO_FOR_PAYMENT)
+  withheldReason?: string
   bankName: string
   accountNumber: string
   accountName: string
@@ -135,6 +142,11 @@ export interface PhedPayrollResult {
   unionDeductions:        number
   cooperativeDeductions:  number
   deductionLiabilities:   number
+  voluntaryPension:       number
+  insurance:              number
+  cashAdvanced:           number
+  loan:                   number
+  domesticLoan:           number
   otherDeductions:        number
   totalDeductions:        number
 
@@ -288,5 +300,87 @@ export interface CooperativeMemberCsvRow {
 export interface DeductionMemberCsvRow {
   staffId: string
   amount:  number
+}
+
+// -------------------------------------------------------
+// Payroll template types (XLSX download / upload)
+// -------------------------------------------------------
+
+// One row in the payroll template XLSX (mirrors column layout)
+export interface PayrollTemplateRow {
+  staffId:   string   // locked / prefilled
+  staffName: string   // locked / prefilled
+
+  // Salary — HR fills these columns
+  grossPay:              number
+  basicSalary:           number
+  housingAllowance:      number
+  transportAllowance:    number
+  furnitureAllowance:    number
+  mealSubsidy:           number
+  utilityAllowance:      number
+  leaveAllowance:        number
+  shiftAllowance:        number
+  domesticAllowance:     number
+  hazardAllowance:       number
+  electricityAllowance:  number
+  discoveryAllowance:    number
+  carSubsidy:            number
+  entertainmentAllowance: number
+  dataAllowance:         number
+  nightAllowance:        number
+  arrears:               number
+  otherAllowances:       number
+
+  // Prefilled & locked
+  overtimeAmount:        number
+
+  // HR fills these
+  voluntaryPension:      number
+  insurance:             number
+  cashAdvanced:          number
+  loan:                  number
+  domesticLoan:          number
+
+  // Dynamic deduction columns (prefilled & locked per staff)
+  cooperativeAmounts:    Record<string, number>  // cooperativeName → amount
+  unionAmounts:          Record<string, number>  // unionName → amount
+  deductionAmounts:      Record<string, number>  // deductionName → amount
+}
+
+// Parsed/validated template row after upload
+export interface ParsedTemplateRow {
+  staffId:               string
+  basicSalary:           number
+  housingAllowance:      number
+  transportAllowance:    number
+  furnitureAllowance:    number
+  mealSubsidy:           number
+  utilityAllowance:      number
+  leaveAllowance:        number
+  shiftAllowance:        number
+  domesticAllowance:     number
+  hazardAllowance:       number
+  electricityAllowance:  number
+  discoveryAllowance:    number
+  carSubsidy:            number
+  entertainmentAllowance: number
+  dataAllowance:         number
+  nightAllowance:        number
+  arrears:               number
+  otherAllowances:       number
+  voluntaryPension:      number
+  insurance:             number
+  cashAdvanced:          number
+  loan:                  number
+  domesticLoan:          number
+}
+
+// Per-period union deduction snapshot (stored before template is issued)
+export interface PhedUnionSnapshot {
+  unionId:   string
+  unionName: string
+  staffId:   string
+  amount:    number
 }
 

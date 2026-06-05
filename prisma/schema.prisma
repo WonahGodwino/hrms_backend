@@ -107,6 +107,7 @@ model Company {
   phedOvertimeEntries    PhedOvertimeEntry[]
   phedComputedPayrolls   PhedComputedPayroll[]
   phedBulkUploads        PhedBulkUpload[]
+  phedPeriodAdvances     PhedStaffPeriodAdvance[]
 
   // Training & Certification Module relations
   trainingPrograms       TrainingProgram[]
@@ -122,7 +123,26 @@ model Company {
   riskItems              RiskItem[]
   trainingAuditLogs      TrainingAuditLog[]
   moduleAccess           CompanyModuleAccess[]
-
+  
+   // Grade Levels
+  gradeLevels            GradeLevel[]            //opposite of GradeLevel.company
+  
+  // Benefits
+  benefits               Benefit[]                 // opposite of Benefit.company
+  
+  // Allowance Rules
+  companyAllowanceRules  CompanyAllowanceRule[]    // CompanyAllowanceRule.company
+  
+  // Grade Step Allowances
+  gradeStepAllowances    GradeStepAllowance[]      //  GradeStepAllowance.company
+  
+  // Company Salary Formulas
+  companySalaryFormulas  CompanySalaryFormula[]    // opposite of CompanySalaryFormula.company
+  
+  // Grade Allowance Templates
+  gradeAllowanceTemplates GradeAllowanceTemplate[] //opposite of GradeAllowanceTemplate.company
+  staffSalaryHistory      StaffSalaryHistory[]
+  staffGradeHistory       StaffGradeHistory[]
   @@map("companies")
 }
 
@@ -245,6 +265,25 @@ model StaffRecord {
   benefitRequestsAsApprover       BenefitRequest[]    @relation("BenefitRequestApprover")
   benefitAllocations              BenefitAllocation[] @relation("StaffBenefitAllocations")
   benefitAllocationsAsAllocator   BenefitAllocation[] @relation("BenefitAllocator")
+  
+   // Grade Level Relations
+  currentGradeId      String?
+  currentGradeStep    Int?              @default(1)
+  gradeLevelStartDate DateTime?
+  
+  // Relations
+  currentGrade        GradeLevel?       @relation("StaffGradeLevel", fields: [currentGradeId], references: [id])
+  
+  // Salary history
+  salaryHistory       StaffSalaryHistory[]
+  gradeHistory        StaffGradeHistory[]
+  
+  // Grade-based salary calculations
+  gradeBasicSalary    Decimal?          @db.Decimal(18, 2)
+  gradeAllowances     Json?
+   // Designation relation 
+  designationId       String?
+  designation         Designation?       @relation(fields: [designationId], references: [id])
 
   @@unique([staffId, companyId])
   @@unique([email, companyId])
@@ -1515,6 +1554,7 @@ enum PhedPayPeriodStatus {
   DRAFT
   VALIDATION_OPEN
   VALIDATION_CLOSED
+  TEMPLATE_ISSUED
   PROCESSING
   REVIEW
   APPROVED
@@ -1694,6 +1734,10 @@ model PhedStaff {
   // For rent relief calculation
   annualRent         Decimal?               @db.Decimal(18, 2)
 
+  // Voluntary deductions (monthly amounts)
+  voluntaryPension   Decimal?               @db.Decimal(18, 2)
+  insurance          Decimal?               @db.Decimal(18, 2)
+
   // Salary (overrides grade defaults when set)
   basicSalary        Decimal?               @db.Decimal(18, 2)
   housingAllowance   Decimal?               @db.Decimal(18, 2)
@@ -1728,8 +1772,9 @@ model PhedStaff {
   cooperatives         PhedStaffCooperative[]
   deductionLiabilities PhedStaffDeductionLiability[]
   validations          PhedValidation[]
-  overtimeEntries    PhedOvertimeEntry[]
-  computedPayrolls   PhedComputedPayroll[]
+  overtimeEntries      PhedOvertimeEntry[]
+  computedPayrolls     PhedComputedPayroll[]
+  periodAdvances       PhedStaffPeriodAdvance[]
 
   @@unique([companyId, staffId])
   @@unique([companyId, email])
@@ -1821,6 +1866,7 @@ model PhedPayPeriod {
   overtimeEntries   PhedOvertimeEntry[]
   computedPayrolls  PhedComputedPayroll[]
   bulkUploads       PhedBulkUpload[]
+  periodAdvances    PhedStaffPeriodAdvance[]
 
   @@unique([companyId, year, month])
   @@index([companyId, status])
@@ -1868,6 +1914,27 @@ model PhedOvertimeEntry {
   @@unique([payPeriodId, staffId])
   @@index([payPeriodId])
   @@map("phed_overtime_entries")
+}
+
+// Cash advances, loans, and domestic loans per staff per period (HR-entered via payroll template)
+model PhedStaffPeriodAdvance {
+  id           String        @id @default(cuid())
+  payPeriodId  String
+  staffId      String
+  companyId    String
+  cashAdvanced Decimal       @default(0) @db.Decimal(18, 2)
+  loan         Decimal       @default(0) @db.Decimal(18, 2)
+  domesticLoan Decimal       @default(0) @db.Decimal(18, 2)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  payPeriod    PhedPayPeriod @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+  staff        PhedStaff     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([payPeriodId, staffId])
+  @@index([payPeriodId])
+  @@map("phed_staff_period_advances")
 }
 
 // Final computed payroll per staff per period
@@ -1927,6 +1994,11 @@ model PhedComputedPayroll {
   unionDeductions             Decimal              @default(0) @db.Decimal(18, 2)
   cooperativeDeductions       Decimal              @default(0) @db.Decimal(18, 2)
   deductionLiabilities        Decimal              @default(0) @db.Decimal(18, 2)
+  voluntaryPension            Decimal              @default(0) @db.Decimal(18, 2)
+  insurance                   Decimal              @default(0) @db.Decimal(18, 2)
+  cashAdvanced                Decimal              @default(0) @db.Decimal(18, 2)
+  loan                        Decimal              @default(0) @db.Decimal(18, 2)
+  domesticLoan                Decimal              @default(0) @db.Decimal(18, 2)
   otherDeductions             Decimal              @default(0) @db.Decimal(18, 2)
   totalDeductions             Decimal              @default(0) @db.Decimal(18, 2)
 
@@ -2329,7 +2401,7 @@ model PhedBulkUpload {
   id           String         @id @default(cuid())
   companyId    String
   payPeriodId  String?
-  type         String         // STAFF | VALIDATION | OVERTIME
+  type         String         // STAFF | VALIDATION | OVERTIME | PAYROLL_TEMPLATE
   fileName     String
   totalRecords Int
   successful   Int
@@ -2568,4 +2640,250 @@ enum FilingStatus {
   GENERATED
   FILED
   CONFIRMED
+}
+
+
+// Grade Level model
+
+model GradeLevel {
+  id                  String            @id @default(cuid())
+  name                String
+  rank                Int
+  summary             String?           @db.Text
+  basePay             Float?
+  basePayFrequency    BasePayFrequency? @default(Monthly)
+  totalSteps          Int               @default(1)
+  autoProgression     Boolean           @default(true)
+  progressionTimeline Int?
+  requirePerfRating   Boolean           @default(true)
+  status              GradeStatus       @default(Active)
+  companyId           String
+  createdBy           String
+  updatedBy           String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  
+  // Relations
+  steps                   GradeStep[]
+  benefits                Benefit[]              @relation("GradeBenefits")
+  designations            Designation[]
+  company                 Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staff                   StaffRecord[]          @relation("StaffGradeLevel")
+  staffSalaryHistory      StaffSalaryHistory[]
+  companyAllowanceRules   CompanyAllowanceRule[]
+  gradeStepAllowances     GradeStepAllowance[]
+  gradeAllowanceTemplates GradeAllowanceTemplate[]
+  staffGradeHistory       StaffGradeHistory[]
+  previousGradeHistory    StaffGradeHistory[]    @relation("PreviousGradeHistory")
+  
+  @@unique([companyId, rank])
+  @@unique([companyId, name])
+  @@index([companyId, status])
+}
+
+model GradeStep {
+  id               String     @id @default(cuid())
+  gradeLevelId     String
+  stepNumber       Int
+  incrementPercent Float      @default(0)
+  calculatedPay    Float?
+  gradeLevel       GradeLevel @relation(fields: [gradeLevelId], references: [id], onDelete: Cascade)
+  
+  @@unique([gradeLevelId, stepNumber])
+}
+
+model Benefit {
+  id          String        @id @default(cuid())
+  label       String        @unique
+  type        String
+  description String?
+  companyId   String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  
+  gradeLevels  GradeLevel[] @relation("GradeBenefits")
+  company      Company?     @relation(fields: [companyId], references: [id])
+}
+
+enum GradeStatus {
+  Active
+  Inactive
+}
+
+enum BasePayFrequency {
+  Yearly
+  Monthly
+  BiWeekly
+}
+
+// Designation model 
+model Designation {
+  id           String      @id @default(cuid())
+  title        String
+  code         String      @unique
+  gradeLevelId String?
+  departmentId String?
+  staffCount   Int         @default(0)
+  gradeLevel   GradeLevel? @relation(fields: [gradeLevelId], references: [id])
+  staffRecords  StaffRecord[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  
+  @@index([gradeLevelId])
+}
+
+
+
+// Company-specific allowance/benefit rules
+model CompanyAllowanceRule {
+  id              String            @id @default(cuid())
+  companyId       String
+  name            String            // e.g., "Housing Allowance", "Transport Allowance"
+  code            String            // e.g., "HOUSING", "TRANSPORT"
+  type            AllowanceType     @default(PERCENTAGE) // PERCENTAGE, FIXED
+  value           Float?            // Percentage (e.g., 20 for 20%) or fixed amount
+  appliesTo       String            // BASIC_SALARY, GROSS_SALARY, SPECIFIC_GRADE
+  gradeLevelId    String?           // Optional: specific grade level this applies to
+  minAmount       Float?            // Minimum amount if percentage calculation
+  maxAmount       Float?            // Maximum amount if percentage calculation
+  isTaxable       Boolean           @default(false)
+  isActive        Boolean           @default(true)
+  requiresApproval Boolean          @default(false)
+  priority        Int               @default(0) // Order of calculation
+  createdBy       String
+  updatedBy       String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  company         Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  gradeLevel      GradeLevel?       @relation(fields: [gradeLevelId], references: [id])
+
+  @@unique([companyId, code])
+  @@index([companyId, isActive])
+  @@index([companyId, gradeLevelId])
+  @@map("company_allowance_rules")
+}
+
+// Grade-specific step allowances
+model GradeStepAllowance {
+  id              String            @id @default(cuid())
+  companyId       String
+  gradeLevelId    String
+  stepNumber      Int
+  allowanceCode   String
+  allowanceType   AllowanceType
+  value           Float
+  isTaxable       Boolean           @default(false)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  company         Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  gradeLevel      GradeLevel        @relation(fields: [gradeLevelId], references: [id], onDelete: Cascade)
+
+  @@unique([gradeLevelId, stepNumber, allowanceCode])
+  @@index([companyId, gradeLevelId, stepNumber])
+  @@map("grade_step_allowances")
+}
+
+// Company-wide salary calculation formulas
+model CompanySalaryFormula {
+  id              String            @id @default(cuid())
+  companyId       String            @unique
+  name            String
+  description     String?
+  baseFormula     Json              // JSON formula definition
+  allowancesFormula Json            // JSON allowances calculation rules
+  deductionsFormula Json            // JSON deductions calculation rules
+  isActive        Boolean           @default(true)
+  version         Int               @default(1)
+  createdBy       String
+  updatedBy       String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  company         Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("company_salary_formulas")
+}
+
+// Grade level allowance templates (default rules per grade)
+model GradeAllowanceTemplate {
+  id              String            @id @default(cuid())
+  companyId       String
+  gradeLevelId    String
+  allowanceCode   String
+  allowanceType   AllowanceType
+  value           Float             // Percentage or fixed amount
+  appliesTo       String            // BASIC_SALARY, GROSS_SALARY
+  minAmount       Float?
+  maxAmount       Float?
+  isTaxable       Boolean           @default(false)
+  priority        Int               @default(0)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  company         Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  gradeLevel      GradeLevel        @relation(fields: [gradeLevelId], references: [id], onDelete: Cascade)
+
+  @@unique([gradeLevelId, allowanceCode])
+  @@index([companyId, gradeLevelId])
+  @@map("grade_allowance_templates")
+}
+
+
+model StaffSalaryHistory {
+  id              String      @id @default(cuid())
+  staffId         String
+  companyId       String
+  gradeLevelId    String
+  stepNumber      Int
+  basicSalary     Decimal     @db.Decimal(18, 2)
+  totalAllowances Decimal     @db.Decimal(18, 2)
+  grossSalary     Decimal     @db.Decimal(18, 2)
+  effectiveDate   DateTime
+  endDate         DateTime?
+  reason          String
+  approvedBy      String
+  notes           String?
+  createdAt       DateTime    @default(now())
+  
+  staff           StaffRecord @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  gradeLevel      GradeLevel  @relation(fields: [gradeLevelId], references: [id])
+  company         Company     @relation(fields: [companyId], references: [id])
+  
+  @@index([staffId, effectiveDate])
+  @@index([gradeLevelId, effectiveDate])
+  @@index([companyId, effectiveDate])
+}
+
+model StaffGradeHistory {
+  id              String      @id @default(cuid())
+  staffId         String
+  companyId       String
+  gradeLevelId    String
+  stepNumber      Int
+  effectiveDate   DateTime
+  endDate         DateTime?
+  reason          String
+  previousGradeId String?
+  previousStep    Int?
+  createdBy       String
+  createdAt       DateTime    @default(now())
+
+  staff           StaffRecord @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  gradeLevel      GradeLevel  @relation(fields: [gradeLevelId], references: [id])
+  previousGrade   GradeLevel? @relation("PreviousGradeHistory", fields: [previousGradeId], references: [id])
+  company         Company     @relation(fields: [companyId], references: [id])
+
+  @@index([staffId, effectiveDate])
+  @@index([gradeLevelId, effectiveDate])
+  @@index([companyId, effectiveDate])
+  @@index([previousGradeId])
+}
+
+enum AllowanceType {
+  PERCENTAGE
+  FIXED
+  TIERED
+  FORMULA
 }

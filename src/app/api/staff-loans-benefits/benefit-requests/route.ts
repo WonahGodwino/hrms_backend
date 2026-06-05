@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Authenticate user
-    const user = requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER', 'STAFF'])
+    const user = await requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER', 'STAFF'])
     
     // Parse and validate request body
     const body = await request.json()

@@ -1,6 +1,5 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
@@ -11,11 +10,15 @@ import type { PhedPayrollInput, PhedSalaryComponents } from '@/app/lib/phed/type
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // POST /api/phed/pay-periods/:id/compute
-// Runs the full payroll engine for all staff in this period.
+// Reads salary inputs already stored by upload-template, runs the full payroll
+// engine for every staff member, writes computed results back to phed_computed_payrolls,
+// and advances the period to REVIEW.
+// Allowed from PROCESSING (normal flow) or REVIEW (re-compute).
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'compute')
   if (rl) return withCors(rl, origin)
+
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user  = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
@@ -24,139 +27,163 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && user.companyId && period.companyId !== user.companyId)
       return withCors(ApiResponse.notFound('Pay period not found'), origin)
-    if (!['VALIDATION_CLOSED', 'REVIEW'].includes(period.status))
-      return withCors(ApiResponse.error('Period must be in VALIDATION_CLOSED or REVIEW status to compute', 400), origin)
 
-    // ── Load all data needed for computation ──────────────────
+    if (!['PROCESSING', 'REVIEW'].includes(period.status))
+      return withCors(ApiResponse.error('Period must be in PROCESSING or REVIEW status to compute', 400), origin)
 
-    const [allStaff, validations, overtimeEntries] = await Promise.all([
+    // ── Load stored salary inputs + all deduction references ──
+    const [storedPayrolls, allStaff, validations, overtimeEntries, periodAdvances] = await Promise.all([
+      // Salary inputs saved by upload-template
+      (prisma as any).phedComputedPayroll.findMany({
+        where: { payPeriodId: params.id },
+      }),
+      // Staff with union/cooperative/deduction memberships
       (prisma as any).phedStaff.findMany({
-        where: { companyId: period.companyId, isActive: true },
+        where:   { companyId: period.companyId, isActive: true },
         include: {
-          grade: { include: { allowanceTemplates: true } },
-          region: true,
+          region:               true,
+          grade:                { select: { name: true, code: true } },
           unions:               { include: { union: true } },
           cooperatives:         { include: { cooperative: true } },
           deductionLiabilities: { include: { deductionLiability: true } },
         },
       }),
-      (prisma as any).phedValidation.findMany({
-        where: { payPeriodId: params.id },
-      }),
-      (prisma as any).phedOvertimeEntry.findMany({
-        where: { payPeriodId: params.id },
-      }),
+      (prisma as any).phedValidation.findMany({ where: { payPeriodId: params.id } }),
+      (prisma as any).phedOvertimeEntry.findMany({ where: { payPeriodId: params.id } }),
+      (prisma as any).phedStaffPeriodAdvance.findMany({ where: { payPeriodId: params.id } }),
     ])
 
-    const validationMap       = new Map(validations.map((v: any) => [v.staffId, v.status]))
-    const validationReasonMap = new Map(validations.map((v: any) => [v.staffId, v.reason as string | null]))
-    const overtimeMap         = new Map(overtimeEntries.map((ot: any) => [ot.staffId, Number(ot.overtimeHours)]))
+    if (storedPayrolls.length === 0)
+      return withCors(ApiResponse.error('No salary data found. Please upload the filled template first.', 400), origin)
 
-    const results = []
+    // Build lookup maps
+    const salaryMap         = new Map<string, any>(storedPayrolls.map((p: any) => [p.staffId, p]))
+    const staffMap          = new Map<string, any>(allStaff.map((s: any) => [s.id, s]))
+    const validationMap     = new Map<string, string>(validations.map((v: any) => [v.staffId, v.status as string]))
+    const validationReasonMap = new Map<string, string | null>(validations.map((v: any) => [v.staffId, v.reason as string | null]))
+    const overtimeMap       = new Map<string, { hours: number; amount: number }>(
+      overtimeEntries.map((ot: any) => [ot.staffId, {
+        hours:  Number(ot.overtimeHours  ?? 0),
+        amount: Number(ot.computedAmount ?? 0),
+      }])
+    )
+    const advancesMap       = new Map<string, any>(periodAdvances.map((a: any) => [a.staffId, a]))
 
-    for (const staff of allStaff) {
-      // ── Resolve salary components ────────────────────────────
-      const salary = resolveSalary(staff)
+    const results: any[] = []
 
-      // ── Union deductions (sum of percentages, applied to gross in processor) ──
+    for (const stored of storedPayrolls) {
+      const staff = staffMap.get(stored.staffId)
+      if (!staff) continue
+
+      const salary: PhedSalaryComponents = {
+        basicSalary:            Number(stored.basicSalary ?? 0),
+        housingAllowance:       Number(stored.housingAllowance ?? 0),
+        transportAllowance:     Number(stored.transportAllowance ?? 0),
+        furnitureAllowance:     Number(stored.furnitureAllowance ?? 0),
+        mealSubsidy:            Number(stored.mealSubsidy ?? 0),
+        utilityAllowance:       Number(stored.utilityAllowance ?? 0),
+        leaveAllowance:         Number(stored.leaveAllowance ?? 0),
+        shiftAllowance:         Number(stored.shiftAllowance ?? 0),
+        domesticAllowance:      Number(stored.domesticAllowance ?? 0),
+        hazardAllowance:        Number(stored.hazardAllowance ?? 0),
+        electricityAllowance:   Number(stored.electricityAllowance ?? 0),
+        discoveryAllowance:     Number(stored.discoveryAllowance ?? 0),
+        carSubsidy:             Number(stored.carSubsidy ?? 0),
+        entertainmentAllowance: Number(stored.entertainmentAllowance ?? 0),
+        dataAllowance:          Number(stored.dataAllowance ?? 0),
+        nightAllowance:         Number(stored.nightAllowance ?? 0),
+        arrears:                Number(stored.arrears ?? 0),
+        otherAllowances:        Number(stored.otherAllowances ?? 0),
+      }
+
+      const adv = advancesMap.get(staff.id)
+
+      // Union deductions = sum of (gross × union%) — computed by processor from grossSalary
       const unionDeductionTotal = staff.unions.reduce(
-        (sum: number, su: any) => sum + Number(su.union.percentage),
+        (sum: number, su: any) => sum + Number(su.union.percentage ?? 0),
         0
       )
-
-      // ── Cooperative deductions (sum of per-member fixed totalAmount) ────────────
       const cooperativeDeductionTotal = staff.cooperatives.reduce(
         (sum: number, sc: any) => sum + Number(sc.totalAmount ?? 0),
         0
       )
-
-      // ── Deduction/Liability deductions (sum of per-member fixed amount) ─────────
       const deductionLiabilityTotal = staff.deductionLiabilities.reduce(
         (sum: number, sd: any) => sum + (sd.deductionLiability?.isActive ? Number(sd.amount ?? 0) : 0),
         0
       )
 
       const input: PhedPayrollInput = {
-        staffId:      staff.id,
-        staffDbId:    staff.id,
-        staffName:    `${staff.firstName} ${staff.lastName}`,
-        staffEmail:   staff.email,
-        staffIdCode:  staff.staffId,
-        category:     staff.category,
-        gradeName:    staff.grade?.name ?? '',
-        department:   staff.department  ?? '',
-        unit:         staff.unit        ?? '',
-        regionName:   staff.region?.name ?? '',
+        staffId:                  staff.id,
+        staffDbId:                staff.id,
+        staffName:                `${staff.firstName} ${staff.lastName}`,
+        staffEmail:               staff.email,
+        staffIdCode:              staff.staffId,
+        category:                 staff.category,
+        gradeName:                staff.grade?.name ?? '',
+        department:               staff.department  ?? '',
+        unit:                     staff.unit        ?? '',
+        regionName:               staff.region?.name ?? '',
         salary,
-        annualRent:           Number(staff.annualRent ?? 0),
-        hasLifeAssurance:     Boolean(staff.hasLifeAssurance),
-        lifeAssuranceAmount:  Number(staff.lifeAssuranceAmount ?? 0),
-        overtimeHours: Number(overtimeMap.get(staff.id) ?? 0),
+        hasLifeAssurance:         Boolean(staff.hasLifeAssurance),
+        lifeAssuranceAmount:      Number(staff.lifeAssuranceAmount ?? 0),
+        overtimeHours:            0,
+        overtimeAmount:           (() => {
+          const otEntry = overtimeMap.get(staff.id)
+          if (!otEntry || otEntry.hours === 0) return 0
+          if (otEntry.amount > 0) return otEntry.amount
+          // computedAmount not stored — derive from stored gross before OT
+          const grossBeforeOT = r2(
+            salary.basicSalary + salary.housingAllowance + salary.transportAllowance +
+            salary.furnitureAllowance + salary.mealSubsidy + salary.utilityAllowance +
+            salary.leaveAllowance + salary.shiftAllowance + salary.domesticAllowance +
+            salary.hazardAllowance + salary.electricityAllowance + salary.discoveryAllowance +
+            salary.carSubsidy + salary.entertainmentAllowance + salary.dataAllowance +
+            salary.nightAllowance + salary.arrears + salary.otherAllowances
+          )
+          return r2((grossBeforeOT / 160) * 1.5 * otEntry.hours)
+        })(),
         unionDeductionTotal,
         cooperativeDeductionTotal,
         deductionLiabilityTotal,
-        validationStatus: (validationMap.get(staff.id) as any) ?? 'PENDING',
-        withheldReason:   (validationReasonMap.get(staff.id) as string | undefined) ?? undefined,
-        bankName:      staff.bankName      ?? '',
-        accountNumber: staff.accountNumber ?? '',
-        accountName:   staff.accountName   ?? '',
-        pfaName:       staff.pfaName       ?? '',
-        rsaPin:        staff.rsaPin        ?? '',
-        pensionNumber: staff.pensionNumber ?? undefined,
-        tin:           staff.tin           ?? undefined,
+        voluntaryPension:         Number(stored.voluntaryPension ?? 0),
+        insurance:                Number(stored.insurance ?? 0),
+        cashAdvanced:             Number(adv?.cashAdvanced ?? stored.cashAdvanced ?? 0),
+        loan:                     Number(adv?.loan         ?? stored.loan         ?? 0),
+        domesticLoan:             Number(adv?.domesticLoan ?? stored.domesticLoan ?? 0),
+        validationStatus:         (validationMap.get(staff.id) as any) ?? 'PENDING',
+        withheldReason:           (validationReasonMap.get(staff.id) as string | undefined) ?? undefined,
+        bankName:                 staff.bankName      ?? '',
+        accountNumber:            staff.accountNumber ?? '',
+        accountName:              staff.accountName   ?? '',
+        pfaName:                  staff.pfaName       ?? '',
+        rsaPin:                   staff.rsaPin        ?? '',
+        pensionNumber:            staff.pensionNumber ?? undefined,
+        tin:                      staff.tin           ?? undefined,
       }
 
-      const result = processOneStaff(input)
-      results.push(result)
+      results.push({ result: processOneStaff(input), staff })
     }
 
-    // ── Upsert computed payrolls ──────────────────────────────
-    await Promise.all(
-      results.map(r =>
-        (prisma as any).phedComputedPayroll.upsert({
+    // ── Persist full computed results + write OT amount back ──
+    await Promise.all([
+      ...results.map(({ result: r }) =>
+        (prisma as any).phedComputedPayroll.update({
           where: { payPeriodId_staffId: { payPeriodId: params.id, staffId: r.staffId } },
-          create: {
-            payPeriodId:  params.id,
-            staffId:      r.staffId,
-            companyId:    period.companyId,
-            staffName:    r.staffName,
-            staffEmail:   r.staffEmail,
-            staffIdCode:  r.staffIdCode,
-            category:     r.category,
-            gradeName:    r.gradeName,
-            department:   r.department,
-            unit:         r.unit,
-            regionName:   r.regionName,
-            ...payrollFields(r),
-          },
-          update: {
-            staffName:    r.staffName,
-            staffEmail:   r.staffEmail,
-            staffIdCode:  r.staffIdCode,
-            category:     r.category,
-            gradeName:    r.gradeName,
-            department:   r.department,
-            unit:         r.unit,
-            regionName:   r.regionName,
-            ...payrollFields(r),
-          },
+          data:  fullPayrollFields(r),
         })
-      )
-    )
-
-    // Update overtime entries with computed amounts
-    await Promise.all(
-      results
-        .filter(r => r.overtimeEarnings > 0)
-        .map(r =>
+      ),
+      // Write computed overtime amounts back to phedOvertimeEntry so GET /overtime reflects them
+      ...results
+        .filter(({ result: r }) => r.overtimeEarnings > 0)
+        .map(({ result: r }) =>
           (prisma as any).phedOvertimeEntry.updateMany({
             where: { payPeriodId: params.id, staffId: r.staffId },
             data:  { computedAmount: r.overtimeEarnings },
           })
-        )
-    )
+        ),
+    ])
 
-    // Advance period to REVIEW
+    // ── Advance to REVIEW ──────────────────────────────────────
     const updatedPeriod = await (prisma as any).phedPayPeriod.update({
       where: { id: params.id },
       data:  { status: 'REVIEW' },
@@ -164,111 +191,28 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     const summary = {
       totalStaff:    results.length,
-      activeStaff:   results.filter(r => r.paymentStatus === 'ACTIVE').length,
-      withheldStaff: results.filter(r => r.paymentStatus === 'WITHHELD').length,
-      totalGross:    r2(results.reduce((s, r) => s + r.grossSalary, 0)),
-      totalNet:      r2(results.reduce((s, r) => s + r.netSalary, 0)),
-      totalPAYE:     r2(results.reduce((s, r) => s + r.monthlyPAYE, 0)),
-      totalPension:  r2(results.reduce((s, r) => s + r.pensionEmployee + r.pensionEmployer, 0)),
+      activeStaff:   results.filter(({ result: r }) => r.paymentStatus === 'ACTIVE').length,
+      withheldStaff: results.filter(({ result: r }) => r.paymentStatus === 'WITHHELD').length,
+      totalGross:    r2(results.reduce((s, { result: r }) => s + r.grossSalary, 0)),
+      totalNet:      r2(results.reduce((s, { result: r }) => s + r.netSalary, 0)),
+      totalPAYE:     r2(results.reduce((s, { result: r }) => s + r.monthlyPAYE, 0)),
+      totalPension:  r2(results.reduce((s, { result: r }) => s + r.pensionEmployee + r.pensionEmployer, 0)),
     }
 
-    return withCors(ApiResponse.success({ period: updatedPeriod, summary }, 'Payroll computed successfully'), origin)
+    return withCors(
+      ApiResponse.success(
+        { period: updatedPeriod, summary },
+        'Payroll computed successfully. Period is now in REVIEW — download the review template to verify.'
+      ),
+      origin
+    )
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 
-// ── Helpers ───────────────────────────────────────────────────
-
-function resolveSalary(staff: any): PhedSalaryComponents {
-  const templates: Map<string, any> = new Map(
-    (staff.grade?.allowanceTemplates ?? []).map((t: any) => [t.allowanceType, t])
-  )
-
-  // staff.basicSalary is the total monthly gross package.
-  // Allowances are slices of that gross, not additions on top of it.
-  const monthlyGross = Number(staff.basicSalary ?? staff.grade?.defaultBasicSalary ?? 0)
-
-  function resolveAllowance(field: keyof PhedSalaryComponents, allowanceType: string): number {
-    const override = staff[field]
-    if (override !== null && override !== undefined) return Number(override)
-    const template = templates.get(allowanceType)
-    if (!template) return 0
-    if (template.valueType === 'FIXED')      return Number(template.value)
-    if (template.valueType === 'PERCENTAGE') return r2(monthlyGross * Number(template.value) / 100)
-    return 0
-  }
-
-  const housingAllowance      = resolveAllowance('housingAllowance',      'HOUSING')
-  const transportAllowance    = resolveAllowance('transportAllowance',    'TRANSPORT')
-  const furnitureAllowance    = resolveAllowance('furnitureAllowance',    'FURNITURE')
-  const mealSubsidy           = resolveAllowance('mealSubsidy',           'MEAL_SUBSIDY')
-  const utilityAllowance      = resolveAllowance('utilityAllowance',      'UTILITY')
-  const leaveAllowance        = resolveAllowance('leaveAllowance',        'LEAVE')
-  const shiftAllowance        = resolveAllowance('shiftAllowance',        'SHIFT')
-  const domesticAllowance     = resolveAllowance('domesticAllowance',     'DOMESTIC')
-  const hazardAllowance       = resolveAllowance('hazardAllowance',       'HAZARD')
-  const electricityAllowance  = resolveAllowance('electricityAllowance',  'ELECTRICITY')
-  const discoveryAllowance    = resolveAllowance('discoveryAllowance',    'DISCOVERY')
-  const carSubsidy            = resolveAllowance('carSubsidy',            'CAR_SUBSIDY')
-  const entertainmentAllowance = resolveAllowance('entertainmentAllowance', 'ENTERTAINMENT')
-  const dataAllowance         = resolveAllowance('dataAllowance',         'DATA')
-  const nightAllowance        = resolveAllowance('nightAllowance',        'NIGHT')
-  const arrears               = resolveAllowance('arrears',               'ARREARS')
-  const otherAllowances       = Number(staff.otherAllowances ?? 0)
-
-  // All allowances are slices of the total package — basicSalary is what remains.
-  const totalAllowances = r2(
-    housingAllowance + transportAllowance + furnitureAllowance +
-    mealSubsidy + utilityAllowance + leaveAllowance + shiftAllowance +
-    domesticAllowance + hazardAllowance + electricityAllowance +
-    discoveryAllowance + carSubsidy + entertainmentAllowance +
-    dataAllowance + nightAllowance + arrears + otherAllowances
-  )
-  const basicSalary = r2(Math.max(0, monthlyGross - totalAllowances))
-
+function fullPayrollFields(r: any) {
   return {
-    basicSalary,
-    housingAllowance,
-    transportAllowance,
-    furnitureAllowance,
-    mealSubsidy,
-    utilityAllowance,
-    leaveAllowance,
-    shiftAllowance,
-    domesticAllowance,
-    hazardAllowance,
-    electricityAllowance,
-    discoveryAllowance,
-    carSubsidy,
-    entertainmentAllowance,
-    dataAllowance,
-    nightAllowance,
-    arrears,
-    otherAllowances,
-  }
-}
-
-function payrollFields(r: any) {
-  return {
-    basicSalary:            r.basicSalary,
-    housingAllowance:       r.housingAllowance,
-    transportAllowance:     r.transportAllowance,
-    furnitureAllowance:     r.furnitureAllowance,
-    mealSubsidy:            r.mealSubsidy,
-    utilityAllowance:       r.utilityAllowance,
-    leaveAllowance:         r.leaveAllowance,
-    shiftAllowance:         r.shiftAllowance,
-    domesticAllowance:      r.domesticAllowance,
-    hazardAllowance:        r.hazardAllowance,
-    electricityAllowance:   r.electricityAllowance,
-    discoveryAllowance:     r.discoveryAllowance,
-    carSubsidy:             r.carSubsidy,
-    entertainmentAllowance: r.entertainmentAllowance,
-    dataAllowance:          r.dataAllowance,
-    nightAllowance:         r.nightAllowance,
-    arrears:                r.arrears,
-    otherAllowances:        r.otherAllowances,
-    overtimeEarnings:       r.overtimeEarnings,
     grossSalary:            r.grossSalary,
+    overtimeEarnings:       r.overtimeEarnings,
     pensionEmployee:        r.pensionEmployee,
     pensionEmployer:        r.pensionEmployer,
     nhf:                    r.nhf,
@@ -282,6 +226,11 @@ function payrollFields(r: any) {
     unionDeductions:        r.unionDeductions,
     cooperativeDeductions:  r.cooperativeDeductions,
     deductionLiabilities:   r.deductionLiabilities,
+    voluntaryPension:       r.voluntaryPension,
+    insurance:              r.insurance,
+    cashAdvanced:           r.cashAdvanced,
+    loan:                   r.loan,
+    domesticLoan:           r.domesticLoan,
     otherDeductions:        r.otherDeductions,
     totalDeductions:        r.totalDeductions,
     netSalary:              r.netSalary,
@@ -299,4 +248,3 @@ function payrollFields(r: any) {
 }
 
 function r2(v: number): number { return Math.round(v * 100) / 100 }
-

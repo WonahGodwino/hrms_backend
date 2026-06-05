@@ -1,0 +1,1320 @@
+{
+  "info": {
+    "name": "247HR — Training & Certification Module",
+    "description": "Complete API reference for the Training & Certification module. Set the `baseUrl` and `token` environment variables before running requests.\n\n**baseUrl** — e.g. `https://api.247hr.com` (no trailing slash)\n**token** — Bearer JWT from the login endpoint\n**companyId** — UUID of the authenticated user's company",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl",   "value": "http://localhost:3000" },
+    { "key": "token",     "value": "YOUR_JWT_TOKEN" },
+    { "key": "companyId", "value": "YOUR_COMPANY_ID" },
+    { "key": "programId", "value": "" },
+    { "key": "sessionId", "value": "" },
+    { "key": "assessmentId", "value": "" },
+    { "key": "questionId",   "value": "" },
+    { "key": "attemptId",    "value": "" },
+    { "key": "certRecordId", "value": "" },
+    { "key": "certTypeId",   "value": "" },
+    { "key": "certTemplateId", "value": "" },
+    { "key": "ruleId",       "value": "" },
+    { "key": "employeeId",   "value": "" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "item": [
+
+    {
+      "name": "1. Training Programs",
+      "item": [
+        {
+          "name": "List Programs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/training-programs?companyId={{companyId}}&status=ACTIVE&category=Compliance&training_type=Online&level=Beginner&search=safety&sort=createdAt&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-programs"],
+              "query": [
+                { "key": "companyId",     "value": "{{companyId}}" },
+                { "key": "status",        "value": "ACTIVE",      "description": "DRAFT | ACTIVE | ARCHIVED" },
+                { "key": "category",      "value": "Compliance",  "description": "Any category string" },
+                { "key": "training_type", "value": "Online",      "description": "Online | In-Person | Hybrid" },
+                { "key": "level",         "value": "Beginner",    "description": "Beginner | Intermediate | Advanced" },
+                { "key": "search",        "value": "safety",      "description": "Search by program name" },
+                { "key": "sort",          "value": "createdAt",   "description": "createdAt | name" },
+                { "key": "page",          "value": "1" },
+                { "key": "limit",         "value": "20",          "description": "Max 100" }
+              ]
+            },
+            "description": "Returns paginated list of training programs. STAFF/MANAGER see all active. HR/ADMIN see all statuses."
+          }
+        },
+        {
+          "name": "Create Program",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"programName\": \"Fire Safety Training 2026\",\n  \"category\": \"Safety\",\n  \"trainingType\": \"Online\",\n  \"description\": \"Annual fire safety compliance training for all staff.\",\n  \"level\": \"Beginner\",\n  \"departments\": [\"Operations\", \"Facilities\"],\n  \"trainer\": \"John Doe\",\n  \"durationHours\": 4,\n  \"sessionType\": \"Single\",\n  \"startDate\": \"2026-05-01\",\n  \"endDate\": \"2026-05-31\",\n  \"dueDate\": \"2026-05-31\",\n  \"location\": \"Online (LMS)\",\n  \"maxParticipants\": 200,\n  \"assessmentRequired\": true,\n  \"assessmentType\": \"Quiz\",\n  \"passingScore\": 80,\n  \"maxAttempts\": 3,\n  \"autoCertificate\": true,\n  \"assignmentMethod\": \"Automatic Enrollment\",\n  \"notifyEmployees\": true,\n  \"status\": \"DRAFT\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/training-programs",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-programs"]
+            },
+            "description": "Creates a training program in DRAFT status. Required: programName, category, trainingType, description, trainer, startDate, endDate, dueDate. Validation: endDate >= startDate, dueDate <= endDate.\n\nSave the returned `id` as {{programId}}."
+          }
+        },
+        {
+          "name": "Get Program by ID or Slug",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/training-programs/{{programId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-programs", "{{programId}}"]
+            },
+            "description": "Returns full program detail including sessions, materials, linked assessment, and participant stats. Accepts both UUID and slug."
+          }
+        },
+        {
+          "name": "Update Program",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"programName\": \"Fire Safety Training 2026 (Updated)\",\n  \"trainer\": \"Jane Smith\",\n  \"maxParticipants\": 250,\n  \"durationHours\": 5\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/training-programs/{{programId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-programs", "{{programId}}"]
+            },
+            "description": "Partial update — only send fields you want to change. All fields are optional."
+          }
+        },
+        {
+          "name": "Delete Program (Soft)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/training-programs/{{programId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-programs", "{{programId}}"]
+            },
+            "description": "Soft-deletes the program (sets deletedAt). Requires ADMIN or SUPER_ADMIN."
+          }
+        },
+        {
+          "name": "Publish Program",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notify_employees\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/training-programs/{{programId}}/publish",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-programs", "{{programId}}", "publish"]
+            },
+            "description": "Transitions the program from DRAFT → ACTIVE. If notify_employees=true, sends notifications to all enrolled participants. Also supports POST for backwards compat."
+          }
+        },
+        {
+          "name": "Archive Program",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/training-programs/{{programId}}/archive",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-programs", "{{programId}}", "archive"]
+            },
+            "description": "Transitions program → ARCHIVED. Requires ADMIN or SUPER_ADMIN. Also supports POST."
+          }
+        },
+        {
+          "name": "Send Reminders",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"employee_ids\": [],\n  \"message\": \"Please complete your training before the deadline.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/training-programs/{{programId}}/reminders",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-programs", "{{programId}}", "reminders"]
+            },
+            "description": "Sends reminder notifications to participants who have NOT STARTED or are IN PROGRESS. If employee_ids is empty or omitted, sends to all eligible participants. Returns { reminded: N }."
+          }
+        },
+        {
+          "name": "Get Dashboard Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/training-programs/dashboard-stats?companyId={{companyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-programs", "dashboard-stats"],
+              "query": [{ "key": "companyId", "value": "{{companyId}}" }]
+            },
+            "description": "Returns: activeTrainings, totalPrograms, employeesEnrolled, completionRate, overdueTrainings, and 30-day trend deltas."
+          }
+        },
+        {
+          "name": "Import Programs (Bulk)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"records\": [\n    {\n      \"programName\": \"OSHA Safety 101\",\n      \"category\": \"Safety\",\n      \"trainingType\": \"Online\",\n      \"description\": \"Required OSHA safety training.\",\n      \"trainer\": \"Alice Johnson\",\n      \"startDate\": \"2026-06-01\",\n      \"endDate\": \"2026-06-30\",\n      \"dueDate\": \"2026-06-30\"\n    },\n    {\n      \"programName\": \"Data Privacy Basics\",\n      \"category\": \"Compliance\",\n      \"trainingType\": \"Online\",\n      \"description\": \"GDPR/NDPA data handling training.\",\n      \"trainer\": \"Bob Martins\",\n      \"startDate\": \"2026-06-01\",\n      \"endDate\": \"2026-07-31\",\n      \"dueDate\": \"2026-07-31\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/training-programs/import",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-programs", "import"]
+            },
+            "description": "Bulk import programs. The frontend should parse CSV client-side and send the records array as JSON. Returns { imported, skipped, errors: [{row, message}] }. Invalid rows are skipped; valid rows are committed in a transaction."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "2. Training Participants",
+      "item": [
+        {
+          "name": "List Participants",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/training-programs/{{programId}}/participants?training_status=IN+PROGRESS&cert_status=NOT+CERTIFIED&department=Engineering&search=john&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-programs", "{{programId}}", "participants"],
+              "query": [
+                { "key": "training_status", "value": "IN PROGRESS",    "description": "NOT STARTED | IN PROGRESS | COMPLETED" },
+                { "key": "cert_status",     "value": "NOT CERTIFIED",  "description": "NOT CERTIFIED | CERTIFIED | EXPIRED" },
+                { "key": "department",      "value": "Engineering" },
+                { "key": "search",          "value": "john",           "description": "Searches firstName, lastName, email, staffId" },
+                { "key": "page",            "value": "1" },
+                { "key": "limit",           "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Participant Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/training-programs/{{programId}}/participants/{{employeeId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-programs", "{{programId}}", "participants", "{{employeeId}}"]
+            },
+            "description": "Returns participant progress record including all assessment attempts for this program."
+          }
+        },
+        {
+          "name": "Participant KPIs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/training-programs/{{programId}}/participants/kpis",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-programs", "{{programId}}", "participants", "kpis"]
+            },
+            "description": "Returns { total, completed, inProgress, notStarted, certified, pending }. Use for the participant status summary bar."
+          }
+        },
+        {
+          "name": "Export Participants (CSV)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/training-programs/{{programId}}/participants/export?format=csv",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-programs", "{{programId}}", "participants", "export"],
+              "query": [
+                { "key": "format", "value": "csv", "description": "csv | xlsx (xlsx returns JSON rows for client-side rendering)" }
+              ]
+            },
+            "description": "Returns a CSV file as an attachment. Trigger with window.location.href or create a hidden anchor tag with the Authorization header set via a pre-fetch blob approach."
+          }
+        },
+        {
+          "name": "Assign Employees",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"employee_ids\": [\"emp-uuid-1\", \"emp-uuid-2\"],\n  \"due_date\": \"2026-06-30\",\n  \"completion_window_days\": null\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/training-programs/{{programId}}/assignments",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-programs", "{{programId}}", "assignments"]
+            },
+            "description": "Assigns employees to the program. Already-assigned employees are silently skipped. Max 500 per request. Returns { assigned, skipped }. due_date takes priority over completion_window_days; falls back to program dueDate."
+          }
+        },
+        {
+          "name": "Remove Assignment",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/training-programs/{{programId}}/assignments/{{employeeId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-programs", "{{programId}}", "assignments", "{{employeeId}}"]
+            },
+            "description": "Removes an employee's assignment and their progress record from the program. Writes an UNASSIGNED audit log entry."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "3. Training Sessions",
+      "item": [
+        {
+          "name": "List Sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/training-sessions?companyId={{companyId}}&program_id={{programId}}&status=Upcoming&type=Online&date_from=2026-05-01&date_to=2026-05-31&search=&page=1&limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-sessions"],
+              "query": [
+                { "key": "companyId",  "value": "{{companyId}}" },
+                { "key": "program_id", "value": "{{programId}}" },
+                { "key": "status",     "value": "Upcoming",     "description": "Upcoming | Completed | Cancelled" },
+                { "key": "type",       "value": "Online",        "description": "Online | In-Person | Hybrid" },
+                { "key": "date_from",  "value": "2026-05-01" },
+                { "key": "date_to",    "value": "2026-05-31" },
+                { "key": "search",     "value": "" },
+                { "key": "page",       "value": "1" },
+                { "key": "limit",      "value": "50",            "description": "Max 200" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Session",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"trainingProgramId\": \"{{programId}}\",\n  \"title\": \"Session 1 — Introduction\",\n  \"date\": \"2026-05-10\",\n  \"time\": \"09:00\",\n  \"type\": \"Online\",\n  \"trainer\": \"John Doe\",\n  \"capacity\": 50,\n  \"location\": \"Zoom\",\n  \"duration\": \"2 hours\",\n  \"summary\": \"Overview of fire safety fundamentals.\",\n  \"programLabel\": \"Module 1\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/training-sessions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-sessions"]
+            },
+            "description": "Required: companyId, trainingProgramId, title, date, type. The program must belong to the same company. Saves {{sessionId}} from the response."
+          }
+        },
+        {
+          "name": "Get Session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/training-sessions/{{sessionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-sessions", "{{sessionId}}"]
+            }
+          }
+        },
+        {
+          "name": "Update Session",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"trainer\": \"Jane Smith\",\n  \"capacity\": 60,\n  \"location\": \"Microsoft Teams\",\n  \"participantsCount\": 42\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/training-sessions/{{sessionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-sessions", "{{sessionId}}"]
+            }
+          }
+        },
+        {
+          "name": "Cancel Session",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/training-sessions/{{sessionId}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-sessions", "{{sessionId}}", "cancel"]
+            },
+            "description": "Sets status → Cancelled. Returns 400 if already cancelled. Also supports POST."
+          }
+        },
+        {
+          "name": "Reschedule Session",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"2026-05-20\",\n  \"time\": \"14:00\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/training-sessions/{{sessionId}}/reschedule",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-sessions", "{{sessionId}}", "reschedule"]
+            },
+            "description": "Required: date. Resets status to Upcoming. Returns 400 if session is cancelled."
+          }
+        },
+        {
+          "name": "Upcoming Sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/training-sessions/upcoming?companyId={{companyId}}&limit=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-sessions", "upcoming"],
+              "query": [
+                { "key": "companyId", "value": "{{companyId}}" },
+                { "key": "limit",     "value": "5", "description": "Max 20" }
+              ]
+            },
+            "description": "Returns the next N sessions with status=Upcoming ordered by date asc. Good for a dashboard widget."
+          }
+        },
+        {
+          "name": "Delete Session",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/training-sessions/{{sessionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "training-sessions", "{{sessionId}}"]
+            },
+            "description": "Hard delete. Requires ADMIN or SUPER_ADMIN."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "4. Assessments",
+      "item": [
+        {
+          "name": "List Assessments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments?companyId={{companyId}}&status=ACTIVE&type=Quiz&category=Safety&program_id={{programId}}&search=&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments"],
+              "query": [
+                { "key": "companyId",  "value": "{{companyId}}" },
+                { "key": "status",     "value": "ACTIVE",   "description": "DRAFT | ACTIVE | ARCHIVED" },
+                { "key": "type",       "value": "Quiz",     "description": "Quiz | Survey | Skills Assessment" },
+                { "key": "category",   "value": "Safety" },
+                { "key": "program_id", "value": "{{programId}}" },
+                { "key": "search",     "value": "" },
+                { "key": "page",       "value": "1" },
+                { "key": "limit",      "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Assessment",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"trainingProgramId\": \"{{programId}}\",\n  \"name\": \"Fire Safety Quiz\",\n  \"type\": \"Quiz\",\n  \"description\": \"End-of-training knowledge check\",\n  \"timeLimitMinutes\": 30,\n  \"passingScore\": 80,\n  \"maxAttempts\": 3,\n  \"category\": \"Safety\",\n  \"difficulty\": \"medium\",\n  \"shuffleQuestions\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments"]
+            },
+            "description": "Required: name, type, passingScore. Save the returned id as {{assessmentId}}. Assessment starts in DRAFT — add questions then publish."
+          }
+        },
+        {
+          "name": "Get Assessment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments/{{assessmentId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments", "{{assessmentId}}"]
+            },
+            "description": "STAFF receive questions without correctOptionId/correctBoolean. HR/ADMIN see full answers."
+          }
+        },
+        {
+          "name": "Update Assessment",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"timeLimitMinutes\": 45,\n  \"passingScore\": 75,\n  \"shuffleQuestions\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments/{{assessmentId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments", "{{assessmentId}}"]
+            }
+          }
+        },
+        {
+          "name": "Publish Assessment",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments/{{assessmentId}}/publish",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments", "{{assessmentId}}", "publish"]
+            },
+            "description": "DRAFT → ACTIVE. Fails if assessment has no questions. Also supports POST."
+          }
+        },
+        {
+          "name": "Archive Assessment",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments/{{assessmentId}}/archive",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments", "{{assessmentId}}", "archive"]
+            },
+            "description": "→ ARCHIVED. Requires ADMIN or SUPER_ADMIN. Also supports POST."
+          }
+        },
+        {
+          "name": "Assessment Analytics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments/{{assessmentId}}/analytics",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments", "{{assessmentId}}", "analytics"]
+            },
+            "description": "Returns: totalAssigned, passed, failed, pending, avgScore, passRate, completionRate, minScore, maxScore, questionCount."
+          }
+        },
+        {
+          "name": "Delete Assessment (Soft)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments/{{assessmentId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments", "{{assessmentId}}"]
+            },
+            "description": "Soft delete. Requires ADMIN or SUPER_ADMIN."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "5. Questions",
+      "item": [
+        {
+          "name": "List Questions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments/{{assessmentId}}/questions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments", "{{assessmentId}}", "questions"]
+            },
+            "description": "STAFF: no correct answers. HR/ADMIN: full answers included."
+          }
+        },
+        {
+          "name": "Add Question — Multiple Choice",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Fire extinguisher class\",\n  \"type\": \"multiple-choice\",\n  \"prompt\": \"Which fire extinguisher class is used for electrical fires?\",\n  \"options\": [\n    { \"id\": \"opt-a\", \"text\": \"Class A\" },\n    { \"id\": \"opt-b\", \"text\": \"Class B\" },\n    { \"id\": \"opt-c\", \"text\": \"Class C\" },\n    { \"id\": \"opt-d\", \"text\": \"Class D\" }\n  ],\n  \"correctOptionId\": \"opt-c\",\n  \"explanation\": \"Class C extinguishers are designed for electrical fires.\",\n  \"points\": 10,\n  \"difficulty\": \"medium\",\n  \"tags\": [\"safety\", \"fire\"],\n  \"required\": true,\n  \"shuffleAnswers\": true,\n  \"multipleSelections\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments/{{assessmentId}}/questions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments", "{{assessmentId}}", "questions"]
+            },
+            "description": "Required: type, prompt, options. Save returned id as {{questionId}}."
+          }
+        },
+        {
+          "name": "Add Question — True/False",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Water on electrical fires\",\n  \"type\": \"true-false\",\n  \"prompt\": \"You should use water to extinguish an electrical fire.\",\n  \"options\": [\n    { \"id\": \"opt-true\",  \"text\": \"True\" },\n    { \"id\": \"opt-false\", \"text\": \"False\" }\n  ],\n  \"correctBoolean\": \"false\",\n  \"explanation\": \"Water conducts electricity and can cause electrocution.\",\n  \"points\": 5,\n  \"difficulty\": \"easy\",\n  \"required\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments/{{assessmentId}}/questions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments", "{{assessmentId}}", "questions"]
+            },
+            "description": "correctBoolean must be the string \"true\" or \"false\" (not a boolean)."
+          }
+        },
+        {
+          "name": "Update Question",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"points\": 15,\n  \"difficulty\": \"hard\",\n  \"explanation\": \"Updated explanation.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments/{{assessmentId}}/questions/{{questionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments", "{{assessmentId}}", "questions", "{{questionId}}"]
+            }
+          }
+        },
+        {
+          "name": "Reorder Questions",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  { \"id\": \"{{questionId}}\", \"order\": 1 },\n  { \"id\": \"question-uuid-2\", \"order\": 2 },\n  { \"id\": \"question-uuid-3\", \"order\": 3 }\n]"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments/{{assessmentId}}/questions/reorder",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments", "{{assessmentId}}", "questions", "reorder"]
+            },
+            "description": "Send the full desired order as an array of {id, order} objects. Executed in a transaction."
+          }
+        },
+        {
+          "name": "Delete Question",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments/{{assessmentId}}/questions/{{questionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments", "{{assessmentId}}", "questions", "{{questionId}}"]
+            }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "6. Assessment Attempts",
+      "item": [
+        {
+          "name": "List Attempts (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments/{{assessmentId}}/attempts?employee_id={{employeeId}}&outcome=Passed&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments", "{{assessmentId}}", "attempts"],
+              "query": [
+                { "key": "employee_id", "value": "{{employeeId}}" },
+                { "key": "outcome",     "value": "Passed", "description": "Pending | Passed | Failed" },
+                { "key": "page",        "value": "1" },
+                { "key": "limit",       "value": "20" }
+              ]
+            },
+            "description": "HR/ADMIN view of all attempts for this assessment. STAFF cannot access this endpoint."
+          }
+        },
+        {
+          "name": "Start Attempt (STAFF)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments/{{assessmentId}}/attempts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments", "{{assessmentId}}", "attempts"]
+            },
+            "description": "Starts a new attempt for the authenticated employee. Returns { attemptId, attemptNumber, questions } — questions have NO correct answers. Rate limited: 10 starts/minute per user. Save attemptId as {{attemptId}}."
+          }
+        },
+        {
+          "name": "Get Attempt",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/attempts/{{attemptId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "attempts", "{{attemptId}}"]
+            },
+            "description": "STAFF can only see their own attempts. HR/ADMIN can see any."
+          }
+        },
+        {
+          "name": "Submit Attempt (STAFF)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"time_taken_seconds\": 720,\n  \"responses\": [\n    {\n      \"question_id\": \"{{questionId}}\",\n      \"selected_option_id\": \"opt-c\",\n      \"time_spent_seconds\": 45\n    },\n    {\n      \"question_id\": \"question-uuid-2\",\n      \"selected_boolean\": \"false\",\n      \"time_spent_seconds\": 20\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/attempts/{{attemptId}}/submit",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "attempts", "{{attemptId}}", "submit"]
+            },
+            "description": "Server scores the responses and returns { score, outcome, passed }. On pass, automatically updates participantProgress to COMPLETED. Also supports POST."
+          }
+        },
+        {
+          "name": "My Attempts (Self-Service)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/assessments/{{assessmentId}}/my-attempts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assessments", "{{assessmentId}}", "my-attempts"]
+            },
+            "description": "Returns the authenticated user's attempt history for this assessment including retakeAllowed flag. Use to determine if the employee can start another attempt."
+          }
+        },
+        {
+          "name": "Attempt Review (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/attempts/{{attemptId}}/review",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "attempts", "{{attemptId}}", "review"]
+            },
+            "description": "Full review mode: returns questions WITH correct answers, employee responses, and isCorrect flag per question. HR/ADMIN only. Returns 400 if attempt is not yet completed."
+          }
+        },
+        {
+          "name": "Allow Retake (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/attempts/{{attemptId}}/allow-retake",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "attempts", "{{attemptId}}", "allow-retake"]
+            },
+            "description": "Sets retakeAllowed=true on the employee's last attempt, granting one extra attempt beyond maxAttempts. HR/ADMIN only. Also supports POST."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "7. Certifications",
+      "item": [
+        {
+          "name": "List Certifications",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/certifications?companyId={{companyId}}&status=Valid&type=Professional&department=Engineering&authority=OSHA&dateFrom=2026-01-01&dateTo=2026-12-31&criticalOnly=false&search=john&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certifications"],
+              "query": [
+                { "key": "companyId",    "value": "{{companyId}}" },
+                { "key": "status",       "value": "Valid",         "description": "Valid | Expiring Soon | Expired | Pending" },
+                { "key": "type",         "value": "Professional",  "description": "Filters by certificationType.type" },
+                { "key": "department",   "value": "Engineering" },
+                { "key": "authority",    "value": "OSHA" },
+                { "key": "dateFrom",     "value": "2026-01-01",    "description": "Filters by issueDate.gte" },
+                { "key": "dateTo",       "value": "2026-12-31",    "description": "Filters by issueDate.lte" },
+                { "key": "criticalOnly", "value": "false",         "description": "true = expiring within 7 days" },
+                { "key": "search",       "value": "john",          "description": "Searches employee name/email" },
+                { "key": "page",         "value": "1" },
+                { "key": "limit",        "value": "20" }
+              ]
+            },
+            "description": "STAFF only see their own records. HR/ADMIN see all. Each record includes daysToExpiry (computed)."
+          }
+        },
+        {
+          "name": "Issue Certifications",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"records\": [\n    {\n      \"employeeId\": \"{{employeeId}}\",\n      \"certificationTypeId\": \"{{certTypeId}}\",\n      \"issueDate\": \"2026-05-01\",\n      \"expiryDate\": \"2027-05-01\",\n      \"certIdNumber\": \"CERT-2026-001\",\n      \"issuedBy\": \"{{employeeId}}\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/certifications",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certifications"]
+            },
+            "description": "Issues one or more certifications atomically. expiryDate must be after issueDate. Status defaults to Pending. Save first returned id as {{certRecordId}}."
+          }
+        },
+        {
+          "name": "Get Certification",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/certifications/{{certRecordId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certifications", "{{certRecordId}}"]
+            }
+          }
+        },
+        {
+          "name": "Update Certification",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Valid\",\n  \"certIdNumber\": \"CERT-2026-001-A\",\n  \"expiryDate\": \"2027-06-01\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/certifications/{{certRecordId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certifications", "{{certRecordId}}"]
+            },
+            "description": "Updatable fields: status, issueDate, expiryDate, duration, certIdNumber, hasDocument. daysToExpiry is computed server-side and cannot be set."
+          }
+        },
+        {
+          "name": "Renew Certification",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newExpiryDate\": \"2028-05-01\",\n  \"issueDate\": \"2026-05-01\",\n  \"certIdNumber\": \"CERT-2027-001\",\n  \"documentUrl\": \"https://storage.example.com/cert-renewal.pdf\",\n  \"documentName\": \"Fire Safety Renewal Certificate\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/certifications/{{certRecordId}}/renew",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certifications", "{{certRecordId}}", "renew"]
+            },
+            "description": "Required: newExpiryDate. Sets status → Valid and updates daysToExpiry. If documentUrl is provided, creates a CertificationDocument record."
+          }
+        },
+        {
+          "name": "Expiring Certifications",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/certifications/expiring?companyId={{companyId}}&days_threshold=30&critical_only=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certifications", "expiring"],
+              "query": [
+                { "key": "companyId",       "value": "{{companyId}}" },
+                { "key": "days_threshold",  "value": "30",   "description": "Look-ahead window in days" },
+                { "key": "critical_only",   "value": "false","description": "true = only within 7 days" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Certification KPIs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/certifications/kpis?companyId={{companyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certifications", "kpis"],
+              "query": [{ "key": "companyId", "value": "{{companyId}}" }]
+            },
+            "description": "Returns: { total, valid: {count, pct}, expiringSoon: {count, pct}, expired: {count, pct}, pending: {count, pct} }."
+          }
+        },
+        {
+          "name": "Bulk Action — Remind",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"recordIds\": [\"{{certRecordId}}\"]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/certifications/bulk/remind",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certifications", "bulk", "remind"]
+            },
+            "description": "Sends renewal reminder notifications to the employees of each listed record. Max 500 records."
+          }
+        },
+        {
+          "name": "Bulk Action — Expire Update",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"recordIds\": [\"{{certRecordId}}\"]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/certifications/bulk/expire-update",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certifications", "bulk", "expire-update"]
+            },
+            "description": "Recalculates and updates the status of each record based on its expiryDate: Expired (<0 days), Expiring Soon (<=30 days), Valid (>30 days)."
+          }
+        },
+        {
+          "name": "Bulk Action — Archive",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"recordIds\": [\"{{certRecordId}}\"]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/certifications/bulk/archive",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certifications", "bulk", "archive"]
+            },
+            "description": "Sets status → Expired for all listed records."
+          }
+        },
+        {
+          "name": "Export Certifications (CSV)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"format\": \"csv\",\n  \"scope\": \"all\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/certifications/export",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certifications", "export"]
+            },
+            "description": "format: csv (returns file) | excel | pdf (returns JSON rows for client rendering). scope: all | selected. For selected, include certification_ids: [\"id1\", \"id2\"]."
+          }
+        },
+        {
+          "name": "Certification Audit Log",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/certifications/audit?companyId={{companyId}}&entityType=certification_record&action=ISSUED&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certifications", "audit"],
+              "query": [
+                { "key": "companyId",   "value": "{{companyId}}" },
+                { "key": "entityType",  "value": "certification_record", "description": "training_program | assessment | certification_record | assignment_rule" },
+                { "key": "action",      "value": "ISSUED",               "description": "ISSUED | RENEWED | PUBLISHED | ARCHIVED | SUBMITTED | BULK_REMIND | IMPORTED | UNASSIGNED" },
+                { "key": "actorId",     "value": "" },
+                { "key": "page",        "value": "1" },
+                { "key": "limit",       "value": "20" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "8. Certification Types",
+      "item": [
+        {
+          "name": "List Certification Types",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/certification-types?companyId={{companyId}}&is_active=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certification-types"],
+              "query": [
+                { "key": "companyId", "value": "{{companyId}}" },
+                { "key": "is_active", "value": "true" }
+              ]
+            },
+            "description": "Returns all certification types for this company with linked template and record count."
+          }
+        },
+        {
+          "name": "Create Certification Type",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"name\": \"OSHA 30-Hour\",\n  \"type\": \"Safety\",\n  \"authority\": \"OSHA\",\n  \"templateId\": null\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/certification-types",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certification-types"]
+            },
+            "description": "Required: name, type, authority. Requires ADMIN or SUPER_ADMIN. Save returned id as {{certTypeId}}."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "9. Certification Templates",
+      "item": [
+        {
+          "name": "List Templates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/certification-templates?companyId={{companyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certification-templates"],
+              "query": [{ "key": "companyId", "value": "{{companyId}}" }]
+            }
+          }
+        },
+        {
+          "name": "Create Template",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"name\": \"Standard Safety Certificate\",\n  \"fieldsSchema\": {\n    \"header\": \"Certificate of Completion\",\n    \"logo\": true,\n    \"signatureLine\": true,\n    \"fields\": [\"employeeName\", \"certificationName\", \"issueDate\", \"expiryDate\", \"authority\"]\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/certification-templates",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certification-templates"]
+            },
+            "description": "fieldsSchema is a free-form JSON object defining the certificate layout. Save returned id as {{certTemplateId}}."
+          }
+        },
+        {
+          "name": "Update Template",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Standard Safety Certificate v2\",\n  \"fieldsSchema\": {\n    \"header\": \"Certificate of Completion\",\n    \"logo\": true,\n    \"signatureLine\": true,\n    \"watermark\": \"CONFIDENTIAL\",\n    \"fields\": [\"employeeName\", \"certificationName\", \"issueDate\", \"expiryDate\", \"authority\", \"certIdNumber\"]\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/certification-templates/{{certTemplateId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "certification-templates", "{{certTemplateId}}"]
+            }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "10. Assignment Rules",
+      "item": [
+        {
+          "name": "List Rules",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/assignment-rules?companyId={{companyId}}&ruleType=department&enabled=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assignment-rules"],
+              "query": [
+                { "key": "companyId", "value": "{{companyId}}" },
+                { "key": "ruleType",  "value": "department" },
+                { "key": "enabled",   "value": "true" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Rule",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"name\": \"Auto-assign Safety Training to Engineering\",\n  \"ruleType\": \"department\",\n  \"trigger\": \"OnHire\",\n  \"condition\": { \"department\": \"Engineering\" },\n  \"trainingProgramId\": \"{{programId}}\",\n  \"graceDays\": 7,\n  \"priority\": \"High\",\n  \"scope\": \"Engineering Department\",\n  \"notifyOnAssignment\": true,\n  \"escalateManager\": true,\n  \"preExpiryNotifications\": [30, 14, 7]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/assignment-rules",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assignment-rules"]
+            },
+            "description": "Required: name, ruleType. If trainingProgramId is provided it must belong to the same company. Save returned id as {{ruleId}}."
+          }
+        },
+        {
+          "name": "Update Rule",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"graceDays\": 14,\n  \"priority\": \"Medium\",\n  \"escalateManager\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/assignment-rules/{{ruleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assignment-rules", "{{ruleId}}"]
+            }
+          }
+        },
+        {
+          "name": "Toggle Rule (Enable/Disable)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/assignment-rules/{{ruleId}}/toggle",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assignment-rules", "{{ruleId}}", "toggle"]
+            },
+            "description": "Flips enabled from true → false or false → true. Returns the updated rule."
+          }
+        },
+        {
+          "name": "Rule Activity Log",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/assignment-rules/activity-log?companyId={{companyId}}&rule_id={{ruleId}}&date_from=&date_to=&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assignment-rules", "activity-log"],
+              "query": [
+                { "key": "companyId", "value": "{{companyId}}" },
+                { "key": "rule_id",   "value": "{{ruleId}}" },
+                { "key": "date_from", "value": "" },
+                { "key": "date_to",   "value": "" },
+                { "key": "page",      "value": "1" },
+                { "key": "limit",     "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Rule",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/assignment-rules/{{ruleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "assignment-rules", "{{ruleId}}"]
+            },
+            "description": "Hard delete. Requires ADMIN or SUPER_ADMIN."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "11. Analytics",
+      "item": [
+        {
+          "name": "Training Overview",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/training?companyId={{companyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "analytics", "training"],
+              "query": [{ "key": "companyId", "value": "{{companyId}}" }]
+            },
+            "description": "Comprehensive dashboard: programs, participants, certifications, assessment pass rates, recent activity, and breakdowns by category and status."
+          }
+        },
+        {
+          "name": "Training Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/training/dashboard?companyId={{companyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "analytics", "training", "dashboard"],
+              "query": [{ "key": "companyId", "value": "{{companyId}}" }]
+            },
+            "description": "Lightweight version: activeTrainings, totalPrograms, employeesEnrolled, completionRate, overdueTrainings, last 5 audit activities."
+          }
+        },
+        {
+          "name": "Training Trends",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/training/trends?companyId={{companyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "analytics", "training", "trends"],
+              "query": [{ "key": "companyId", "value": "{{companyId}}" }]
+            }
+          }
+        },
+        {
+          "name": "Training Compliance",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/training/compliance?companyId={{companyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "analytics", "training", "compliance"],
+              "query": [{ "key": "companyId", "value": "{{companyId}}" }]
+            }
+          }
+        },
+        {
+          "name": "Training Activity",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/training/activity?companyId={{companyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "analytics", "training", "activity"],
+              "query": [{ "key": "companyId", "value": "{{companyId}}" }]
+            }
+          }
+        },
+        {
+          "name": "Training Completion Rate",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/training/completion-rate?companyId={{companyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "analytics", "training", "completion-rate"],
+              "query": [{ "key": "companyId", "value": "{{companyId}}" }]
+            }
+          }
+        },
+        {
+          "name": "Training Progress",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/training/progress?companyId={{companyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "analytics", "training", "progress"],
+              "query": [{ "key": "companyId", "value": "{{companyId}}" }]
+            }
+          }
+        },
+        {
+          "name": "Certification Compliance",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/certifications/compliance?companyId={{companyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "analytics", "certifications", "compliance"],
+              "query": [{ "key": "companyId", "value": "{{companyId}}" }]
+            },
+            "description": "Returns: kpis (total/valid/expiringSoon/expired/pending), overall complianceRate, and byDepartment breakdown."
+          }
+        },
+        {
+          "name": "Certification by Department",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/certifications/departments?companyId={{companyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "analytics", "certifications", "departments"],
+              "query": [{ "key": "companyId", "value": "{{companyId}}" }]
+            }
+          }
+        },
+        {
+          "name": "Certification Risk",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/certifications/risk?companyId={{companyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "analytics", "certifications", "risk"],
+              "query": [{ "key": "companyId", "value": "{{companyId}}" }]
+            }
+          }
+        },
+        {
+          "name": "Certification Trends",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/certifications/trends?companyId={{companyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "analytics", "certifications", "trends"],
+              "query": [{ "key": "companyId", "value": "{{companyId}}" }]
+            }
+          }
+        }
+      ]
+    }
+
+  ]
+}

@@ -1,0 +1,2183 @@
+{
+  "info": {
+    "name": "24/7HR \u2013 PHED Payroll Module",
+    "description": "24/7HR \u2013 PHED Payroll Module\n\nComplete API reference for the PHED payroll module. All endpoints require a Bearer JWT token in the Authorization header except where noted.\n\n## Rate Limiting\n\nEvery endpoint is rate-limited by IP address. Exceeding the limit returns HTTP 429 with a Retry-After header (seconds to wait) and X-RateLimit-* headers.\n\n| Profile | Limit | Window | Endpoints |\n|---|---|---|---|\n| auth | 10 req | 60 s | Login, Change Password |\n| compute | 5 req | 15 min | Compute Payroll |\n| upload | 15 req | 5 min | All file uploads |\n| report | 40 req | 60 s | Reports, payslip PDFs, templates |\n| write | 60 req | 60 s | POST / PUT / DELETE mutations |\n| read | 150 req | 60 s | GET list / detail endpoints |\n\n429 response body:\n{\"success\": false, \"message\": \"Too many requests. Please slow down and try again shortly.\", \"data\": null}\n\n## Collection Variables\n\nSet these in your environment:\n- baseUrl \u2014 https://hrms.isurfglobal.com\n- token \u2014 JWT from Login\n- companyId \u2014 PHED company UUID\n- periodId \u2014 Pay period UUID\n- staffId \u2014 phed_staff UUID\n- gradeId \u2014 Grade UUID\n- unionId \u2014 Union UUID\n- coopId \u2014 Cooperative UUID",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://hrms.isurfglobal.com",
+      "description": "API base URL"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "description": "JWT token from login"
+    },
+    {
+      "key": "companyId",
+      "value": "",
+      "description": "PHED company ID"
+    },
+    {
+      "key": "periodId",
+      "value": "",
+      "description": "Pay period ID"
+    },
+    {
+      "key": "staffId",
+      "value": "",
+      "description": "phed_staff row ID (UUID)"
+    },
+    {
+      "key": "gradeId",
+      "value": "",
+      "description": "Grade ID"
+    },
+    {
+      "key": "coopId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "unionId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"hr@phed.com.ng\",\n  \"password\": \"yourpassword\"\n}"
+            },
+            "description": "Authenticate and receive a JWT token. Include the token as `Authorization: Bearer <token>` on all subsequent requests.\n\n**Rate limit:** 10 requests / 60 seconds per IP.\n\nIf `requirePasswordChange` is `true` in the response, redirect the user to change their password before allowing access to any other page.\n\nResponse includes `company` object (name, email, phone, address)."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2013 Login successful",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Login successful\",\n  \"data\": {\n    \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n    \"user\": {\n      \"id\": \"clxxx\",\n      \"email\": \"john.doe@phed.com.ng\",\n      \"firstName\": \"John\",\n      \"lastName\": \"Doe\",\n      \"role\": \"STAFF\",\n      \"companyId\": \"clyyy\",\n      \"staffId\": \"PHED-001\",\n      \"requirePasswordChange\": true\n    },\n    \"company\": {\n      \"id\": \"clyyy\",\n      \"companyName\": \"Port Harcourt Electricity Distribution Company\"\n    }\n  }\n}"
+            },
+            {
+              "name": "429 \u2013 Rate limit exceeded",
+              "status": "Too Many Requests",
+              "code": 429,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Retry-After",
+                  "value": "45"
+                },
+                {
+                  "key": "X-RateLimit-Limit",
+                  "value": "10"
+                },
+                {
+                  "key": "X-RateLimit-Remaining",
+                  "value": "0"
+                }
+              ],
+              "body": "{\n  \"success\": false,\n  \"message\": \"Too many requests. Please slow down and try again shortly.\",\n  \"data\": null\n}"
+            }
+          ]
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/change-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "change-password"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"johndoe\",\n  \"newPassword\": \"MyNewSecurePass123!\"\n}"
+            },
+            "description": "Change the authenticated user's password. Required on first login when `requirePasswordChange` is true.\n\n**Rate limit:** 10 requests / 60 seconds per IP.\n\n- `currentPassword`: the current (or temporary) password\n- `newPassword`: minimum 8 characters\n\nOn success, `requirePasswordChange` is cleared server-side."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Password changed successfully\",\n  \"data\": null\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Configuration \u2013 Grades",
+      "description": "Salary grades define the pay structure for each employee category. Each grade has a name, code, and a set of allowance templates.",
+      "item": [
+        {
+          "name": "List Grades",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/grades?companyId={{companyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "grades"
+              ],
+              "query": [
+                {
+                  "key": "companyId",
+                  "value": "{{companyId}}"
+                },
+                {
+                  "key": "category",
+                  "value": "REGULAR",
+                  "disabled": true,
+                  "description": "Filter by REGULAR or CONTRACT"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"clgrd001\",\n      \"companyId\": \"clyyy\",\n      \"name\": \"Grade Level 9\",\n      \"code\": \"GL09\",\n      \"category\": \"REGULAR\",\n      \"levelOrder\": 9,\n      \"defaultBasicSalary\": 250000,\n      \"isActive\": true,\n      \"allowanceTemplates\": [\n        { \"id\": \"clat001\", \"gradeId\": \"clgrd001\", \"allowanceType\": \"HOUSING\", \"valueType\": \"PERCENTAGE\", \"value\": 40 },\n        { \"id\": \"clat002\", \"gradeId\": \"clgrd001\", \"allowanceType\": \"TRANSPORT\", \"valueType\": \"PERCENTAGE\", \"value\": 15 }\n      ]\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create Grade",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/grades",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "grades"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"name\": \"Grade Level 9\",\n  \"code\": \"GL09\",\n  \"category\": \"REGULAR\",\n  \"levelOrder\": 9,\n  \"defaultBasicSalary\": 250000\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Grade",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/grades/{{gradeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "grades",
+                "{{gradeId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Grade Level 9 \u2013 Senior\",\n  \"defaultBasicSalary\": 280000\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Grade",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/grades/{{gradeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "grades",
+                "{{gradeId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Grade Allowance Templates",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/grades/{{gradeId}}/allowances",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "grades",
+                "{{gradeId}}",
+                "allowances"
+              ]
+            },
+            "description": "Returns the allowance breakdown for a grade. Each template specifies a component type (HOUSING, TRANSPORT, etc.), whether the value is FIXED (\u20a6) or PERCENTAGE (% of basic), and the amount."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    { \"id\": \"clat001\", \"gradeId\": \"clgrd001\", \"allowanceType\": \"HOUSING\",   \"valueType\": \"PERCENTAGE\", \"value\": 40 },\n    { \"id\": \"clat002\", \"gradeId\": \"clgrd001\", \"allowanceType\": \"TRANSPORT\", \"valueType\": \"PERCENTAGE\", \"value\": 15 },\n    { \"id\": \"clat003\", \"gradeId\": \"clgrd001\", \"allowanceType\": \"MEAL_SUBSIDY\", \"valueType\": \"FIXED\", \"value\": 15000 }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Save Grade Allowance Templates",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/grades/{{gradeId}}/allowances",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "grades",
+                "{{gradeId}}",
+                "allowances"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"templates\": [\n    { \"allowanceType\": \"HOUSING\",      \"valueType\": \"PERCENTAGE\", \"value\": 40 },\n    { \"allowanceType\": \"TRANSPORT\",    \"valueType\": \"PERCENTAGE\", \"value\": 15 },\n    { \"allowanceType\": \"FURNITURE\",    \"valueType\": \"PERCENTAGE\", \"value\": 10 },\n    { \"allowanceType\": \"MEAL_SUBSIDY\", \"valueType\": \"FIXED\",      \"value\": 15000 },\n    { \"allowanceType\": \"UTILITY\",      \"valueType\": \"FIXED\",      \"value\": 10000 },\n    { \"allowanceType\": \"LEAVE\",        \"valueType\": \"PERCENTAGE\", \"value\": 10 },\n    { \"allowanceType\": \"SHIFT\",        \"valueType\": \"FIXED\",      \"value\": 5000 }\n  ]\n}",
+              "description": "Upserts all templates at once. allowanceType values: HOUSING | TRANSPORT | FURNITURE | MEAL_SUBSIDY | UTILITY | LEAVE | SHIFT | OTHER. valueType: FIXED | PERCENTAGE."
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Configuration \u2013 Regions, Feeders, Pay Points",
+      "item": [
+        {
+          "name": "List Regions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/regions?companyId={{companyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "regions"
+              ],
+              "query": [
+                {
+                  "key": "companyId",
+                  "value": "{{companyId}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Region",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/regions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "regions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"name\": \"Port Harcourt Zone\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Region",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/regions/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "regions",
+                ":id"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Port Harcourt North Zone\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Region",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/regions/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "regions",
+                ":id"
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Feeders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/feeders?companyId={{companyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "feeders"
+              ],
+              "query": [
+                {
+                  "key": "companyId",
+                  "value": "{{companyId}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Feeder",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/feeders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "feeders"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"name\": \"Rumuola Feeder\",\n  \"regionId\": \"<regionId>\"\n}"
+            }
+          }
+        },
+        {
+          "name": "List Pay Points",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-points?companyId={{companyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-points"
+              ],
+              "query": [
+                {
+                  "key": "companyId",
+                  "value": "{{companyId}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Pay Point",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-points",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-points"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"name\": \"Head Office\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Configuration \u2013 Unions & Cooperatives",
+      "item": [
+        {
+          "name": "List Unions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/unions?companyId={{companyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "unions"
+              ],
+              "query": [
+                {
+                  "key": "companyId",
+                  "value": "{{companyId}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Union",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/unions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "unions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"name\": \"NUEE\",\n  \"monthlyAmount\": 2000\n}"
+            },
+            "description": "monthlyAmount is a fixed naira deduction per month per member."
+          }
+        },
+        {
+          "name": "Update Union",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/unions/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "unions",
+                ":id"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"monthlyAmount\": 2500\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Union",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/unions/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "unions",
+                ":id"
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Cooperatives",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/cooperatives?companyId={{companyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "cooperatives"
+              ],
+              "query": [
+                {
+                  "key": "companyId",
+                  "value": "{{companyId}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Cooperative",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/cooperatives",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "cooperatives"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"name\": \"PHED Staff Cooperative Society\",\n  \"deductionPercentage\": 5\n}"
+            },
+            "description": "deductionPercentage is applied to gross salary. e.g. 5 = 5% of gross."
+          }
+        },
+        {
+          "name": "Update Cooperative",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/cooperatives/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "cooperatives",
+                ":id"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deductionPercentage\": 6\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Cooperative",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/cooperatives/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "cooperatives",
+                ":id"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Download Union Member Template",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/unions/{{unionId}}/template",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "unions",
+                "{{unionId}}",
+                "template"
+              ]
+            },
+            "description": "**Rate limit:** 40 requests / 60 seconds per IP.\n\nDownloads a two-sheet Excel template. Sheet 1 (New Members) has blank rows for the chairman to fill in Staff IDs. Sheet 2 (Staff Directory) is a read-only reference list of all active staff. HR sends this to the union chairman who fills in their member list and returns it."
+          },
+          "response": [
+            {
+              "name": "200 \u2013 xlsx file download",
+              "status": "OK",
+              "code": 200,
+              "body": "<binary .xlsx file \u2014 handle as blob download>"
+            }
+          ]
+        },
+        {
+          "name": "Upload Union Members (Bulk)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "description": "CSV or Excel file with a Staff ID column. Other columns are ignored."
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/unions/{{unionId}}/upload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "unions",
+                "{{unionId}}",
+                "upload"
+              ]
+            },
+            "description": "**Rate limit:** 15 requests / 5 minutes per IP.\n\nBulk-assigns staff to a union. Additive \u2014 staff already in the union are skipped. Staff IDs not found are reported as errors. An audit record is written."
+          },
+          "response": [
+            {
+              "name": "200 \u2013 Upload complete",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"12 member(s) added to NUEE, 3 already member(s) skipped\",\n  \"data\": {\n    \"added\": 12,\n    \"skipped\": 3,\n    \"failed\": 0,\n    \"errors\": []\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Download Cooperative Member Template",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/cooperatives/{{coopId}}/template",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "cooperatives",
+                "{{coopId}}",
+                "template"
+              ]
+            },
+            "description": "**Rate limit:** 40 requests / 60 seconds per IP.\n\nSame structure as the union template, branded for the cooperative. Sheet 1 for new members, Sheet 2 staff directory reference."
+          },
+          "response": [
+            {
+              "name": "200 \u2013 xlsx file download",
+              "status": "OK",
+              "code": 200,
+              "body": "<binary .xlsx file \u2014 handle as blob download>"
+            }
+          ]
+        },
+        {
+          "name": "Upload Cooperative Members (Bulk)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "description": "CSV or Excel file with a Staff ID column."
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/cooperatives/{{coopId}}/upload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "cooperatives",
+                "{{coopId}}",
+                "upload"
+              ]
+            },
+            "description": "**Rate limit:** 15 requests / 5 minutes per IP.\n\nBulk-assigns staff to a cooperative. Additive \u2014 duplicates silently skipped, invalid IDs reported in errors array."
+          },
+          "response": [
+            {
+              "name": "200 \u2013 Upload complete",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"12 member(s) added to NUEE, 3 already member(s) skipped\",\n  \"data\": {\n    \"added\": 12,\n    \"skipped\": 3,\n    \"failed\": 0,\n    \"errors\": []\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Staff Management",
+      "item": [
+        {
+          "name": "List Staff",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/staff?companyId={{companyId}}&page=1&limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "staff"
+              ],
+              "query": [
+                {
+                  "key": "companyId",
+                  "value": "{{companyId}}"
+                },
+                {
+                  "key": "category",
+                  "value": "REGULAR",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"staff\": [\n      {\n        \"id\": \"clstf001\",\n        \"companyId\": \"clyyy\",\n        \"staffId\": \"PHED-001\",\n        \"firstName\": \"John\",\n        \"lastName\": \"Doe\",\n        \"email\": \"john.doe@phed.com.ng\",\n        \"phone\": \"08012345678\",\n        \"category\": \"REGULAR\",\n        \"department\": \"Operations\",\n        \"unit\": \"Field Services\",\n        \"isActive\": true,\n        \"grade\": { \"id\": \"clgrd001\", \"name\": \"Grade Level 9\", \"code\": \"GL09\" },\n        \"region\": { \"id\": \"clreg001\", \"name\": \"Port Harcourt Zone\" },\n        \"unions\": [],\n        \"cooperatives\": []\n      }\n    ],\n    \"total\": 1,\n    \"page\": 1,\n    \"limit\": 50,\n    \"pages\": 1\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create Single Staff",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/staff",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "staff"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\":   \"{{companyId}}\",\n  \"staffId\":     \"PHED-001\",\n  \"firstName\":   \"John\",\n  \"lastName\":    \"Doe\",\n  \"email\":       \"john.doe@phed.com.ng\",\n  \"phone\":       \"08012345678\",\n  \"category\":    \"REGULAR\",\n  \"gradeId\":     \"{{gradeId}}\",\n  \"department\":  \"Operations\",\n  \"unit\":        \"Field Services\",\n  \"regionId\":    \"<regionId>\",\n  \"feederId\":    \"<feederId>\",\n  \"payPointId\":  \"<payPointId>\",\n  \"bankName\":    \"First Bank of Nigeria\",\n  \"accountNumber\": \"3012345678\",\n  \"accountName\": \"John Doe\",\n  \"rsaPin\":      \"PEN123456789012\",\n  \"pfaName\":     \"Stanbic IBTC Pension\",\n  \"basicSalary\": 250000,\n  \"annualRent\":  600000\n}",
+              "description": "Creates the PHED staff record AND automatically provisions a 24/7HR login account. A welcome email with temporary credentials (firstname+lastname lowercase) is sent to the staff member."
+            }
+          }
+        },
+        {
+          "name": "Get Staff by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/staff/{{staffId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "staff",
+                "{{staffId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Staff",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/staff/{{staffId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "staff",
+                "{{staffId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"department\": \"Engineering\",\n  \"gradeId\":    \"<newGradeId>\",\n  \"bankName\":   \"GTBank\",\n  \"accountNumber\": \"0123456789\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Deactivate Staff",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/staff/{{staffId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "staff",
+                "{{staffId}}"
+              ]
+            },
+            "description": "Soft-deletes the staff member (sets isActive: false). Does not delete the database row."
+          }
+        },
+        {
+          "name": "Assign Unions to Staff",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/staff/{{staffId}}/unions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "staff",
+                "{{staffId}}",
+                "unions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"unionId\": \"{{unionId}}\"\n}",
+              "description": "Replaces the staff member's union memberships entirely. Pass an empty array to remove all unions."
+            },
+            "description": "Assign a single union to a staff member. Call once per union.\n\nThis is an **incremental** operation \u2014 it adds the union without removing any existing ones.\n\nTo remove a union, send DELETE to the same URL with `{ \"unionId\": \"uuid\" }`."
+          }
+        },
+        {
+          "name": "Assign Cooperatives to Staff",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/staff/{{staffId}}/cooperatives",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "staff",
+                "{{staffId}}",
+                "cooperatives"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cooperativeId\": \"{{coopId}}\"\n}"
+            },
+            "description": "Assign a single cooperative to a staff member. Call once per cooperative.\n\nThis is an **incremental** operation \u2014 adds the cooperative without removing existing ones.\n\nTo remove, send DELETE to the same URL with `{ \"cooperativeId\": \"uuid\" }`."
+          }
+        },
+        {
+          "name": "Bulk Upload Staff (CSV/Excel)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/staff/upload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "staff",
+                "upload"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "description": "CSV or Excel (.xlsx/.xls) file"
+                },
+                {
+                  "key": "companyId",
+                  "type": "text",
+                  "value": "{{companyId}}"
+                }
+              ]
+            },
+            "description": "**Rate limit:** 15 requests / 5 minutes per IP.\n\nUpserts staff records from file. Rows with matching staffId+companyId are updated; new rows are created. Login accounts are provisioned and welcome emails sent for newly created staff only."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Staff upload complete\",\n  \"data\": {\n    \"successful\": 48,\n    \"failed\": 2,\n    \"errors\": [\n      \"Row 12: Staff ID PHED-012 not found in grade map\",\n      \"Row 29: email already exists in company\"\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Download Staff Upload Template",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/staff/template",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "staff",
+                "template"
+              ]
+            },
+            "description": "**Rate limit:** 40 requests / 60 seconds per IP.\n\nDownloads a pre-formatted .xlsx template with all 19 columns, a sample row, data-validation dropdown for Category, and an Instructions sheet."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Pay Periods",
+      "item": [
+        {
+          "name": "List Pay Periods",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods?companyId={{companyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods"
+              ],
+              "query": [
+                {
+                  "key": "companyId",
+                  "value": "{{companyId}}"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"clper001\",\n      \"companyId\": \"clyyy\",\n      \"year\": 2026,\n      \"month\": 4,\n      \"periodName\": \"April 2026\",\n      \"status\": \"DRAFT\",\n      \"createdAt\": \"2026-04-01T00:00:00.000Z\",\n      \"_count\": { \"validations\": 0, \"overtimeEntries\": 0, \"computedPayrolls\": 0 }\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create Pay Period",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyId\": \"{{companyId}}\",\n  \"year\": 2026,\n  \"month\": 4\n}",
+              "description": "month is 1\u201312. The periodName (e.g. 'April 2026') is auto-generated."
+            }
+          }
+        },
+        {
+          "name": "Get Pay Period by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Open Validation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/open-validation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "open-validation"
+              ]
+            },
+            "description": "Seeds one validation record per active staff member and transitions the period to VALIDATION_OPEN. Period must be in DRAFT status."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Validation portal opened\",\n  \"data\": {\n    \"period\": { \"id\": \"clper001\", \"status\": \"VALIDATION_OPEN\", \"validationOpenAt\": \"2026-04-02T10:00:00.000Z\" },\n    \"staffSeeded\": 312\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Validations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/validations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "validations"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"clval001\",\n      \"payPeriodId\": \"clper001\",\n      \"staffId\": \"clstf001\",\n      \"status\": \"PENDING\",\n      \"reason\": null,\n      \"staff\": { \"staffId\": \"PHED-001\", \"firstName\": \"John\", \"lastName\": \"Doe\", \"department\": \"Operations\" }\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Upload Validations (CSV/Excel)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/validations/upload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "validations",
+                "upload"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "description": "CSV or Excel with columns: Staff ID, Status (YES/NO), Reason"
+                }
+              ]
+            },
+            "description": "**Rate limit:** 15 requests / 5 minutes per IP.\n\nBulk-update validation statuses. YES maps to YES_FOR_PAYMENT, NO maps to NO_FOR_PAYMENT. Staff with NO must have a Reason."
+          }
+        },
+        {
+          "name": "Download Validation Template",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/validations/template",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "validations",
+                "template"
+              ]
+            },
+            "description": "**Rate limit:** 40 requests / 60 seconds per IP.\n\nDownloads .xlsx pre-populated with all staff and their current validation status. Status column has YES/NO dropdown."
+          }
+        },
+        {
+          "name": "Close Validation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/close-validation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "close-validation"
+              ]
+            },
+            "description": "Closes the validation window. Period transitions to VALIDATION_CLOSED. Must be in VALIDATION_OPEN status."
+          }
+        },
+        {
+          "name": "Get Overtime Entries",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/overtime",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "overtime"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Upload Overtime (CSV/Excel)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/overtime/upload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "overtime",
+                "upload"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "description": "CSV or Excel with columns: Staff ID, Overtime Hours (decimals allowed e.g. 8.5)"
+                }
+              ]
+            },
+            "description": "**Rate limit:** 15 requests / 5 minutes per IP.\n\n"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Overtime upload complete\",\n  \"data\": { \"successful\": 45, \"failed\": 0, \"errors\": [] }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Download Overtime Template",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/overtime/template",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "overtime",
+                "template"
+              ]
+            },
+            "description": "**Rate limit:** 40 requests / 60 seconds per IP.\n\nDownloads .xlsx pre-populated with all active staff. Only the Overtime Hours column needs to be filled."
+          }
+        },
+        {
+          "name": "Compute Payroll",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/compute",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "compute"
+              ]
+            },
+            "description": "Runs the full payroll engine for all active staff in the period. Period must be in VALIDATION_CLOSED or REVIEW status. Can be re-run to correct errors.\n\n**Rate limit:** 5 requests / 15 minutes per IP (expensive operation).\n\nWhat is computed:\n- Salary components (basic + allowances from grade template or staff overrides)\n- Overtime: (Monthly Gross / 160) \u00d7 1.5 \u00d7 OT hours\n- Gross salary\n- Pension: 8% EE / 10% ER on (basic + housing + transport)\n- NHF: 2.5% of basic\n- PAYE: NTA 2025 progressive bands after pension and rent relief\n- Union deductions (fixed naira amounts)\n- Cooperative deductions (% of gross)\n- Net salary = Gross - Total Deductions\n- Withheld reason is captured for staff marked NO_FOR_PAYMENT\n\nStatus advances to REVIEW."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Payroll computed successfully\",\n  \"data\": {\n    \"computed\": 312,\n    \"withheld\": 4,\n    \"errors\": []\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Pay Period Summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "summary"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"period\": { \"id\": \"clper001\", \"periodName\": \"April 2026\", \"status\": \"REVIEW\" },\n    \"headCount\": 312,\n    \"activeCount\": 308,\n    \"withheldCount\": 4,\n    \"earnings\": {\n      \"totalBasic\": 52400000,\n      \"totalGross\": 78600000,\n      \"totalOvertime\": 1240000,\n      \"activeGross\": 77400000\n    },\n    \"deductions\": {\n      \"totalPAYE\": 9820000,\n      \"totalPensionEE\": 5020800,\n      \"totalPensionER\": 6276000,\n      \"totalNHF\": 1310000,\n      \"totalUnion\": 624000,\n      \"totalCooperative\": 3930000,\n      \"totalDeductions\": 20704800\n    },\n    \"net\": {\n      \"totalNet\": 57895200,\n      \"activeNet\": 57234000,\n      \"withheldGross\": 661200\n    },\n    \"statutory\": { \"itf\": 774000, \"nsitf\": 774000 },\n    \"validationSummary\": { \"YES_FOR_PAYMENT\": 308, \"NO_FOR_PAYMENT\": 4, \"PENDING\": 0 }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Approve Payroll",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "approve"
+              ]
+            },
+            "description": "Approves the payroll. Period must be in REVIEW status. Restricted to ADMIN and SUPER_ADMIN roles."
+          }
+        },
+        {
+          "name": "Send Payslip Emails",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/payslips",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "payslips"
+              ]
+            },
+            "description": "Sends HTML payslip emails to all ACTIVE staff. Period transitions to PAID. Can be called again on PAID periods to resend."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"308 payslips sent\",\n  \"data\": { \"sent\": 308, \"failed\": 0, \"errors\": [] }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Download Individual Payslip PDF (HR)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/payslips/{{staffId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "payslips",
+                "{{staffId}}"
+              ]
+            },
+            "description": "**Rate limit:** 40 requests / 60 seconds per IP.\n\nDownloads a PDF payslip for a specific staff member. staffId here is the phed_staff.id UUID. Period must be APPROVED or PAID."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reports",
+      "description": "All reports support ?format=json (default) | xlsx | pdf. xlsx and pdf trigger a file download.",
+      "item": [
+        {
+          "name": "Bank Payment Schedule",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/bank-schedule?format=json",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "bank-schedule"
+              ],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "json",
+                  "description": "json | xlsx | pdf"
+                }
+              ]
+            },
+            "description": "**Rate limit:** 40 requests / 60 seconds per IP.\n\n"
+          },
+          "response": [
+            {
+              "name": "200 OK (JSON)",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"sn\": 1,\n      \"staffId\": \"PHED-001\",\n      \"staffName\": \"John Doe\",\n      \"bankName\": \"First Bank of Nigeria\",\n      \"accountNumber\": \"3012345678\",\n      \"accountName\": \"John Doe\",\n      \"netSalary\": 183500.00,\n      \"department\": \"Operations\",\n      \"region\": \"Port Harcourt Zone\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Withheld Salaries",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/withheld?format=json",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "withheld"
+              ],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "json"
+                }
+              ]
+            },
+            "description": "**Rate limit:** 40 requests / 60 seconds per IP.\n\n"
+          },
+          "response": [
+            {
+              "name": "200 OK (JSON)",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"sn\": 1,\n      \"staffId\": \"PHED-045\",\n      \"staffName\": \"Jane Smith\",\n      \"grossSalary\": 185000.00,\n      \"netSalary\": 142300.00,\n      \"reason\": \"Absent without leave for full month\",\n      \"department\": \"Customer Service\",\n      \"region\": \"Rumuola Zone\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Pension Remittance Schedule",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/pension?format=json",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "pension"
+              ],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "json"
+                }
+              ]
+            },
+            "description": "**Rate limit:** 40 requests / 60 seconds per IP.\n\n"
+          }
+        },
+        {
+          "name": "PAYE Tax Schedule",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/paye?format=json",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "paye"
+              ],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "json"
+                }
+              ]
+            },
+            "description": "**Rate limit:** 40 requests / 60 seconds per IP.\n\n"
+          }
+        },
+        {
+          "name": "ITF Schedule",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/itf?format=xlsx",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "itf"
+              ],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "xlsx"
+                }
+              ]
+            },
+            "description": "**Rate limit:** 40 requests / 60 seconds per IP.\n\n"
+          }
+        },
+        {
+          "name": "NSITF Schedule",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/nsitf?format=xlsx",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "nsitf"
+              ],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "xlsx"
+                }
+              ]
+            },
+            "description": "**Rate limit:** 40 requests / 60 seconds per IP.\n\n"
+          }
+        },
+        {
+          "name": "NHF Schedule",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/nhf?format=xlsx",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "nhf"
+              ],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "xlsx"
+                }
+              ]
+            },
+            "description": "**Rate limit:** 40 requests / 60 seconds per IP.\n\n"
+          }
+        },
+        {
+          "name": "Cost Centre Summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/cost-centre?format=json",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "cost-centre"
+              ],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "json"
+                }
+              ]
+            },
+            "description": "**Rate limit:** 40 requests / 60 seconds per IP.\n\n"
+          },
+          "response": [
+            {
+              "name": "200 OK (JSON)",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"region\": \"Port Harcourt Zone\",\n      \"department\": \"Operations\",\n      \"unit\": \"Field Services\",\n      \"headCount\": 45,\n      \"totalGross\": 11250000.00,\n      \"totalNet\": 8637500.00,\n      \"totalPAYE\": 1406250.00,\n      \"totalPension\": 1012500.00\n    }\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Employee Self-Service",
+      "description": "Accessed by staff with role STAFF. The JWT must belong to an employee whose email matches a phed_staff record.",
+      "item": [
+        {
+          "name": "List My Payslips",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/my-payslips?companyId={{companyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "my-payslips"
+              ],
+              "query": [
+                {
+                  "key": "companyId",
+                  "value": "{{companyId}}"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"staffId\": \"PHED-001\",\n    \"payslips\": [\n      {\n        \"payPeriodId\": \"clper001\",\n        \"periodName\": \"April 2026\",\n        \"year\": 2026,\n        \"month\": 4,\n        \"periodStatus\": \"PAID\",\n        \"approvedAt\": \"2026-04-28T14:00:00.000Z\",\n        \"grossSalary\": 350000.00,\n        \"netSalary\": 268500.00,\n        \"paymentStatus\": \"ACTIVE\"\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Download My Payslip PDF",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/my-payslips/{{periodId}}?companyId={{companyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "my-payslips",
+                "{{periodId}}"
+              ],
+              "query": [
+                {
+                  "key": "companyId",
+                  "value": "{{companyId}}"
+                }
+              ]
+            },
+            "description": "**Rate limit:** 40 requests / 60 seconds per IP.\n\nDownloads the authenticated employee's payslip as a branded PDF. Period must be APPROVED or PAID."
+          }
+        }
+      ]
+    }
+  ]
+}

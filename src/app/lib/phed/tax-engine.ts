@@ -105,6 +105,30 @@ export function getNhfMonthly(basicSalary: number): number {
   return round2(basicSalary * NHF_RATE)
 }
 
+// Returns the tax amount applied within each of the six NTA 2025 bands.
+// Used to populate the band-breakdown columns in the review template.
+export function computeTaxBandBreakdown(annualChargeableIncome: number): {
+  band1: number  // ₦800k @ 0%
+  band2: number  // next ₦2.2M @ 15%
+  band3: number  // next ₦9M @ 18%
+  band4: number  // next ₦13M @ 21%
+  band5: number  // next ₦25M @ 23%
+  band6: number  // above ₦50M @ 25%
+} {
+  const aci = Math.max(0, annualChargeableIncome)
+  const band = (from: number, to: number, rate: number) =>
+    round2(Math.min(Math.max(aci - from, 0), to - from) * rate)
+
+  return {
+    band1: band(0,          800_000,    0.00),
+    band2: band(800_000,    3_000_000,  0.15),
+    band3: band(3_000_000,  12_000_000, 0.18),
+    band4: band(12_000_000, 25_000_000, 0.21),
+    band5: band(25_000_000, 50_000_000, 0.23),
+    band6: band(50_000_000, Infinity,   0.25),
+  }
+}
+
 function round2(value: number): number {
   return Math.round(value * 100) / 100
 }

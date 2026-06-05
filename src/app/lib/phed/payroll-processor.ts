@@ -5,27 +5,28 @@
 import { deriveTaxData, getNhfMonthly } from './tax-engine'
 import type { PhedPayrollInput, PhedPayrollResult } from './types'
 
-const OVERTIME_MONTHLY_HOURS = 160
-const OVERTIME_MULTIPLIER    = 1.5
-
 /**
  * Compute payroll for a single staff member.
- * Called once per staff per pay period during the compute step.
+ * In the template-driven flow, salary values come from the uploaded XLSX.
+ * Overtime amount is pre-computed and stored before the template is issued.
  */
 export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
   const {
     salary,
-    annualRent,
     hasLifeAssurance,
     lifeAssuranceAmount,
-    overtimeHours,
+    overtimeAmount,
     unionDeductionTotal,
     cooperativeDeductionTotal,
     deductionLiabilityTotal,
+    voluntaryPension,
+    insurance,
+    cashAdvanced,
+    loan,
+    domesticLoan,
     validationStatus,
   } = input
 
-  // ── Earnings ──────────────────────────────────────────────
   const {
     basicSalary,
     housingAllowance,
@@ -47,7 +48,7 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
     otherAllowances,
   } = salary
 
-  // Monthly gross BEFORE overtime (used for overtime rate calculation)
+  // ── Earnings ──────────────────────────────────────────────
   const grossBeforeOT = r2(
     basicSalary +
     housingAllowance +
@@ -69,18 +70,13 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
     otherAllowances
   )
 
-  // Overtime: (Monthly Gross / 160) × 1.5 × OT Hours
-  const overtimeEarnings = r2(
-    (grossBeforeOT / OVERTIME_MONTHLY_HOURS) * OVERTIME_MULTIPLIER * overtimeHours
-  )
-
-  const grossSalary = r2(grossBeforeOT + overtimeEarnings)
+  // Overtime amount was pre-computed at hours-upload time and stored; use it directly.
+  const overtimeEarnings = r2(overtimeAmount)
+  const grossSalary      = r2(grossBeforeOT + overtimeEarnings)
 
   // ── Statutory Deductions ──────────────────────────────────
-  // Pensionable emoluments = Basic + Housing + Transport
   const pensionable = r2(basicSalary + housingAllowance + transportAllowance)
 
-  // Apply life assurance whenever a positive annual premium exists, regardless of the flag
   const annualLifeAssurance = lifeAssuranceAmount > 0 ? lifeAssuranceAmount : 0
   const taxData = deriveTaxData(grossSalary, pensionable, annualLifeAssurance)
   const nhf     = getNhfMonthly(basicSalary)
@@ -96,14 +92,16 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
     taxData.monthlyPAYE +
     unionDeductions +
     cooperativeDeductions +
-    deductionLiabilities
+    deductionLiabilities +
+    voluntaryPension +
+    insurance +
+    cashAdvanced +
+    loan +
+    domesticLoan
   )
 
-  const netSalary = r2(grossSalary - totalDeductions)
-
-  // ── Payment status from validation ────────────────────────
-  const paymentStatus =
-    validationStatus === 'NO_FOR_PAYMENT' ? 'WITHHELD' : 'ACTIVE'
+  const netSalary    = r2(grossSalary - totalDeductions)
+  const paymentStatus = validationStatus === 'NO_FOR_PAYMENT' ? 'WITHHELD' : 'ACTIVE'
 
   return {
     staffId:      input.staffId,
@@ -152,6 +150,11 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
     unionDeductions,
     cooperativeDeductions,
     deductionLiabilities,
+    voluntaryPension,
+    insurance,
+    cashAdvanced,
+    loan,
+    domesticLoan,
     otherDeductions:  0,
     totalDeductions,
 
@@ -173,4 +176,3 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
 function r2(v: number): number {
   return Math.round(v * 100) / 100
 }
-
