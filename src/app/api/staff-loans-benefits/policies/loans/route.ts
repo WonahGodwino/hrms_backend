@@ -53,9 +53,27 @@ export async function GET(request: NextRequest) {
       if (staffRecord) {
         const salary = await prisma.employeeSalary.findFirst({
           where: { staffId: staffRecord.id, isActive: true },
-          select: { basicSalary: true, grossSalary: true },
+          select: {
+            basicSalary: true,
+            housingAllowance: true,
+            transportAllowance: true,
+            dressingAllowance: true,
+            leaveAllowance: true,
+            entertainmentAllowance: true,
+            utilityAllowance: true,
+            otherAllowances: true,
+          },
         })
-        const employeeSalary = salary ? Number(salary.grossSalary || salary.basicSalary || 0) : 0
+        const employeeSalary = salary
+          ? Number(salary.basicSalary || 0)
+            + Number(salary.housingAllowance || 0)
+            + Number(salary.transportAllowance || 0)
+            + Number(salary.dressingAllowance || 0)
+            + Number(salary.leaveAllowance || 0)
+            + Number(salary.entertainmentAllowance || 0)
+            + Number(salary.utilityAllowance || 0)
+            + Number(salary.otherAllowances || 0)
+          : 0
         const monthsEmployed = Math.floor((Date.now() - new Date(staffRecord.createdAt).getTime()) / (1000 * 60 * 60 * 24 * 30.44))
 
         // Check active loan repayment obligations

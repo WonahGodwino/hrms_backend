@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
     const headerStyle = {
       font: { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 },
       fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E40AF' } } as ExcelJS.Fill,
-      alignment: { vertical: 'middle', horizontal: 'center' as const, wrapText: true },
+      alignment: { vertical: 'middle' as const, horizontal: 'center' as const, wrapText: true } as any,
       border: {
         top: { style: 'thin' as const },
         left: { style: 'thin' as const },

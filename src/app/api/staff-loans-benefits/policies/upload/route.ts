@@ -33,12 +33,10 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
     }
 
-    // Read the file buffer
+    // Read the file buffer and pass directly to ExcelJS
     const arrayBuffer = await file.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
-
     const workbook = new ExcelJS.Workbook()
-    await workbook.xlsx.load(buffer)
+    await workbook.xlsx.load(arrayBuffer as any)
 
     const results = {
       loansCreated: 0,
