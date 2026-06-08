@@ -40,7 +40,7 @@ type ModuleRequestRecord = {
   reviewerComment?: string | null
 }
 
-const BENEFITS_CATALOG = [
+const DEFAULT_BENEFITS_CATALOG = [
   {
     id: 'ben-health-001',
     name: 'Comprehensive Health Coverage',
@@ -79,7 +79,7 @@ const BENEFITS_CATALOG = [
   },
 ]
 
-const LOAN_TERMS = [
+const DEFAULT_LOAN_TERMS = [
   {
     id: 'loan-term-001',
     name: 'Personal Loan',
@@ -201,6 +201,13 @@ export async function GET(request: NextRequest) {
       scopedCompanyIds = [staffRecord.companyId]
     }
 
+    // Fetch company currency
+    const companyCurrencies = await prisma.company.findMany({
+      where: { id: { in: scopedCompanyIds } },
+      select: { id: true, baseCurrency: true },
+    })
+    const defaultCurrency = companyCurrencies[0]?.baseCurrency || 'NGN'
+
     if (scopedCompanyIds.length === 0) {
       return withCors(
         ApiResponse.success(
@@ -208,6 +215,7 @@ export async function GET(request: NextRequest) {
             companyContext: {
               role: user.role,
               scopedCompanyIds: [],
+              baseCurrency: 'NGN',
             },
             kpis: {
               totalLoansIssued: 0,
@@ -220,8 +228,8 @@ export async function GET(request: NextRequest) {
             },
             loans: [],
             myLoans: [],
-            loanTerms: LOAN_TERMS,
-            benefitsCatalog: BENEFITS_CATALOG,
+            loanTerms: DEFAULT_LOAN_TERMS,
+            benefitsCatalog: DEFAULT_BENEFITS_CATALOG,
             loanRequests: [],
             benefitRequests: [],
             benefitAllocations: [],
@@ -235,7 +243,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch data in parallel
-    const [loanEntries, activeStaffCount, loanRequestsData, benefitRequestsData, benefitAllocationsData] = await Promise.all([
+    const [loanEntries, activeStaffCount, loanRequestsData, benefitRequestsData, benefitAllocationsData, loanPolicies, benefitPolicies] = await Promise.all([
       prisma.deductionEntry.findMany({
         where: {
           companyId: { in: scopedCompanyIds },
@@ -306,6 +314,14 @@ export async function GET(request: NextRequest) {
         },
         orderBy: { createdAt: 'desc' },
         take: 50,
+      }),
+      prisma.loanPolicy.findMany({
+        where: { companyId: { in: scopedCompanyIds }, isActive: true },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.benefitPolicy.findMany({
+        where: { companyId: { in: scopedCompanyIds }, isActive: true },
+        orderBy: { category: 'asc' },
       }),
     ])
 
@@ -496,6 +512,7 @@ export async function GET(request: NextRequest) {
           companyContext: {
             role: user.role,
             scopedCompanyIds,
+            baseCurrency: defaultCurrency,
           },
           kpis: {
             totalLoansIssued: totalIssued,
@@ -508,8 +525,8 @@ export async function GET(request: NextRequest) {
           },
           loans,
           myLoans,
-          loanTerms: LOAN_TERMS,
-          benefitsCatalog: BENEFITS_CATALOG,
+          loanTerms: loanPolicies.length > 0 ? loanPolicies : DEFAULT_LOAN_TERMS,
+          benefitsCatalog: benefitPolicies.length > 0 ? benefitPolicies : DEFAULT_BENEFITS_CATALOG,
           loanRequests,
           benefitRequests,
           benefitAllocations,

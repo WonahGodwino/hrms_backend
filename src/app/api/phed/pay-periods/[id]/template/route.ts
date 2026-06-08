@@ -66,57 +66,57 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const centerMid: Partial<ExcelJS.Alignment> = { horizontal: 'center', vertical: 'middle', wrapText: true }
     const rightMid:  Partial<ExcelJS.Alignment> = { horizontal: 'right',  vertical: 'middle' }
 
-    type Col = { header: string; key: string; width: number; locked: boolean }
+    type Col = { header: string; key: string; width: number; locked: boolean; numeric?: boolean }
 
     const identityCols: Col[] = [
-      { header: 'S/N',           key: 'sn',       width: 6,  locked: true },
-      { header: 'EMPLOYEE ID',   key: 'staffId',  width: 14, locked: true },
-      { header: 'NAME',          key: 'fullName', width: 28, locked: true },
-      { header: 'APPROVED ROLE', key: 'role',     width: 16, locked: true },
-      { header: 'GRADE',         key: 'grade',    width: 18, locked: true },
-      { header: 'LEVEL',         key: 'level',    width: 10, locked: true },
+      { header: 'S/N',           key: 'sn',       width: 6,  locked: true  },
+      { header: 'EMPLOYEE ID',   key: 'staffId',  width: 14, locked: true  },
+      { header: 'NAME',          key: 'fullName', width: 28, locked: true  },
+      { header: 'APPROVED ROLE', key: 'role',     width: 16, locked: true  },
+      { header: 'GRADE',         key: 'grade',    width: 18, locked: false },
+      { header: 'LEVEL',         key: 'level',    width: 10, locked: false },
     ]
 
     const cooperativeCols: Col[] = cooperatives.map((c: any) => ({
-      header: c.name, key: `coop_${c.id}`, width: 18, locked: true,
+      header: c.name, key: `coop_${c.id}`, width: 18, locked: true, numeric: true,
     }))
 
     const deductionCols: Col[] = deductionLiabilities.map((d: any) => ({
-      header: d.name, key: `ded_${d.id}`, width: 18, locked: true,
+      header: d.name, key: `ded_${d.id}`, width: 18, locked: true, numeric: true,
     }))
 
     const editableCols: Col[] = [
-      { header: 'INITIAL GROSS PAY',       key: 'grossPay',              width: 18, locked: false },
-      { header: 'BASIC SALARY',            key: 'basicSalary',           width: 16, locked: false },
-      { header: 'HOUSING ALLOWANCE',       key: 'housingAllowance',      width: 18, locked: false },
-      { header: 'TRANSPORT ALLOWANCE',     key: 'transportAllowance',    width: 20, locked: false },
-      { header: 'FURNITURE',               key: 'furnitureAllowance',    width: 14, locked: false },
-      { header: 'DOMESTIC',                key: 'domesticAllowance',     width: 14, locked: false },
-      { header: 'MEAL',                    key: 'mealSubsidy',           width: 12, locked: false },
-      { header: 'HAZARD',                  key: 'hazardAllowance',       width: 12, locked: false },
-      { header: 'LEAVE GRANT',             key: 'leaveAllowance',        width: 14, locked: false },
-      { header: 'ELECTRICITY',             key: 'electricityAllowance',  width: 14, locked: false },
-      { header: 'UTILITY',                 key: 'utilityAllowance',      width: 14, locked: false },
-      { header: 'SHIFT ALLOWANCE',         key: 'shiftAllowance',        width: 16, locked: false },
-      { header: 'DISCRETIONARY',           key: 'discoveryAllowance',    width: 16, locked: false },
-      { header: 'CAR SUBSIDY',             key: 'carSubsidy',            width: 14, locked: false },
-      { header: 'ENTERTAINMENT',           key: 'entertainmentAllowance',width: 16, locked: false },
-      { header: 'DATA ALLOWANCE',          key: 'dataAllowance',         width: 14, locked: false },
-      { header: 'NIGHT ALLOWANCE',         key: 'nightAllowance',        width: 14, locked: false },
-      { header: 'OTHER ALLOWANCES',        key: 'otherAllowances',       width: 16, locked: false },
-      { header: 'ARREARS',                 key: 'arrears',               width: 12, locked: false },
-      { header: 'VOLUNTARY PENSION',       key: 'voluntaryPension',      width: 18, locked: false },
-      { header: 'INSURANCE',               key: 'insurance',             width: 14, locked: false },
-      { header: 'CASH ADVANCED',           key: 'cashAdvanced',          width: 16, locked: false },
-      { header: 'LOAN',                    key: 'loan',                  width: 12, locked: false },
-      { header: 'DOMESTIC LOAN',           key: 'domesticLoan',          width: 14, locked: false },
+      { header: 'INITIAL GROSS PAY',       key: 'grossPay',              width: 18, locked: false, numeric: true },
+      { header: 'BASIC SALARY',            key: 'basicSalary',           width: 16, locked: false, numeric: true },
+      { header: 'HOUSING ALLOWANCE',       key: 'housingAllowance',      width: 18, locked: false, numeric: true },
+      { header: 'TRANSPORT ALLOWANCE',     key: 'transportAllowance',    width: 20, locked: false, numeric: true },
+      { header: 'FURNITURE',               key: 'furnitureAllowance',    width: 14, locked: false, numeric: true },
+      { header: 'DOMESTIC',                key: 'domesticAllowance',     width: 14, locked: false, numeric: true },
+      { header: 'MEAL',                    key: 'mealSubsidy',           width: 12, locked: false, numeric: true },
+      { header: 'HAZARD',                  key: 'hazardAllowance',       width: 12, locked: false, numeric: true },
+      { header: 'LEAVE GRANT',             key: 'leaveAllowance',        width: 14, locked: false, numeric: true },
+      { header: 'ELECTRICITY',             key: 'electricityAllowance',  width: 14, locked: false, numeric: true },
+      { header: 'UTILITY',                 key: 'utilityAllowance',      width: 14, locked: false, numeric: true },
+      { header: 'SHIFT ALLOWANCE',         key: 'shiftAllowance',        width: 16, locked: false, numeric: true },
+      { header: 'DISCRETIONARY',           key: 'discoveryAllowance',    width: 16, locked: false, numeric: true },
+      { header: 'CAR SUBSIDY',             key: 'carSubsidy',            width: 14, locked: false, numeric: true },
+      { header: 'ENTERTAINMENT',           key: 'entertainmentAllowance',width: 16, locked: false, numeric: true },
+      { header: 'DATA ALLOWANCE',          key: 'dataAllowance',         width: 14, locked: false, numeric: true },
+      { header: 'NIGHT ALLOWANCE',         key: 'nightAllowance',        width: 14, locked: false, numeric: true },
+      { header: 'OTHER ALLOWANCES',        key: 'otherAllowances',       width: 16, locked: false, numeric: true },
+      { header: 'ARREARS',                 key: 'arrears',               width: 12, locked: false, numeric: true },
+      { header: 'VOLUNTARY PENSION',       key: 'voluntaryPension',      width: 18, locked: false, numeric: true },
+      { header: 'INSURANCE',               key: 'insurance',             width: 14, locked: false, numeric: true },
+      { header: 'CASH ADVANCED',           key: 'cashAdvanced',          width: 16, locked: false, numeric: true },
+      { header: 'LOAN',                    key: 'loan',                  width: 12, locked: false, numeric: true },
+      { header: 'DOMESTIC LOAN',           key: 'domesticLoan',          width: 14, locked: false, numeric: true },
     ]
 
     const allCols = [...identityCols, ...cooperativeCols, ...deductionCols, ...editableCols]
     sheet.columns = allCols.map(c => ({ key: c.key, width: c.width }))
 
     // Title row
-    const titleRow = sheet.addRow([`PHED PAYROLL TEMPLATE — ${period.periodName}  |  Fill yellow cells only`])
+    const titleRow = sheet.addRow([`PHED PAYROLL TEMPLATE — ${period.periodName}  |  Yellow cells are editable`])
     sheet.mergeCells(1, 1, 1, allCols.length)
     sheet.getCell(1, 1).fill      = headerFill
     sheet.getCell(1, 1).font      = { ...boldWhite, size: 12 }
@@ -163,19 +163,33 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
       allCols.forEach((c, i) => {
         const cell = dataRow.getCell(i + 1)
-        cell.border = border
         if (c.locked) {
-          cell.fill       = lockedFill
-          cell.font       = boldDark
-          cell.alignment  = centerMid
-          cell.protection = { locked: true }
-          if (i >= identityCols.length) cell.numFmt = '#,##0.00'
+          cell.style = {
+            fill:       lockedFill,
+            font:       boldDark,
+            alignment:  centerMid,
+            border,
+            numFmt:     c.numeric ? '#,##0.00' : 'General',
+            protection: { locked: true, hidden: false },
+          }
+        } else if (c.numeric) {
+          cell.style = {
+            fill:       editorFill,
+            font:       normal,
+            alignment:  rightMid,
+            border,
+            numFmt:     '#,##0.00',
+            protection: { locked: false, hidden: false },
+          }
         } else {
-          cell.fill       = editorFill
-          cell.font       = normal
-          cell.alignment  = rightMid
-          cell.numFmt     = '#,##0.00'
-          cell.protection = { locked: false }
+          cell.style = {
+            fill:       editorFill,
+            font:       normal,
+            alignment:  centerMid,
+            border,
+            numFmt:     'General',
+            protection: { locked: false, hidden: false },
+          }
         }
       })
     })
@@ -201,7 +215,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     sheet.protect('phed-tmpl', {
       selectLockedCells: true, selectUnlockedCells: true,
-      formatCells: false, insertRows: false, deleteRows: false,
+      formatCells: true, insertRows: false, deleteRows: false,
     })
     sheet.views = [{ state: 'frozen', xSplit: identityCols.length, ySplit: 2, activeCell: `G3` }]
 

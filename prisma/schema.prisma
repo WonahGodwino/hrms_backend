@@ -92,6 +92,8 @@ model Company {
   loanRequests           LoanRequest[]       @relation("CompanyLoanRequests")
   benefitRequests        BenefitRequest[]    @relation("CompanyBenefitRequests")
   benefitAllocations     BenefitAllocation[] @relation("CompanyBenefitAllocations")
+  loanPolicies           LoanPolicy[]
+  benefitPolicies        BenefitPolicy[]
 
   // PHED Module relations
   phedGrades             PhedGrade[]
@@ -2886,4 +2888,50 @@ enum AllowanceType {
   FIXED
   TIERED
   FORMULA
+}
+
+// ─── Staff Loans & Benefits ───
+
+model LoanPolicy {
+  id                        String    @id @default(cuid())
+  companyId                 String
+  name                      String
+  interestRatePercent       Float     @default(5)
+  maxDurationMonths         Int       @default(12)
+  maxAmount                 Float     @default(500000)
+  minServiceMonths          Int       @default(3)
+  maxDebtRatioPercent       Float     @default(40)
+  requiresGuarantor                  Boolean   @default(false)
+  guarantorThresholdAmount           Float?
+  guarantorMustBeActiveInCompany     Boolean   @default(true)
+  guarantorMustNotHaveActiveLoan     Boolean   @default(false)
+  salaryMultiplier                   Float     @default(1.0)
+  isActive                  Boolean   @default(true)
+  rules                     String?   @db.Text
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  company                   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, name])
+  @@index([companyId, isActive])
+}
+
+model BenefitPolicy {
+  id              String    @id @default(cuid())
+  companyId       String
+  name            String
+  category        String
+  description     String?   @db.Text
+  monetaryValue   Float?
+  keyValue        String?
+  eligibilityRule String?   @db.Text
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  company         Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, name])
+  @@index([companyId, isActive])
 }
