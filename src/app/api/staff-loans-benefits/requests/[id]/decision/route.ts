@@ -4,6 +4,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { extractBearerToken, resolveScopedCompanyIds } from '@/app/api/staff-loans-benefits/_helpers'
 import { prisma } from '@/app/lib/db'
+import Decimal from 'decimal.js'
 
 const VALID_ACTIONS = ['APPROVE', 'REJECT'] as const
 
@@ -32,6 +33,7 @@ export async function PATCH(
     const body = await request.json()
     const action = String(body.action || '').toUpperCase().trim()
     const comment = String(body.comment || '').trim()
+    const approvedAmount = body.approvedAmount != null ? Number(body.approvedAmount) : null
 
     // Validate action
     if (!VALID_ACTIONS.includes(action as any)) {
@@ -134,18 +136,22 @@ export async function PATCH(
     if (loanRequest) {
       updated = await prisma.loanRequest.update({
         where: { id: record.id },
-        data: {
+          data: {
           status: nextStatus as any,
           approvedBy: action === 'APPROVE' ? user.userId : null,
           approvedAt: action === 'APPROVE' ? new Date() : null,
           rejectionReason: action === 'REJECT' ? comment : null,
           approvalComment: action === 'APPROVE' ? comment || null : null,
+          ...(action === 'APPROVE' && approvedAmount != null && !isNaN(approvedAmount) && approvedAmount > 0
+            ? { approvedAmount: new Decimal(approvedAmount) }
+            : {}),
         },
         select: {
           id: true,
           staffId: true,
           loanType: true,
           requestedAmount: true,
+          approvedAmount: true,
           tenureMonths: true,
           monthlyRepayment: true,
           purpose: true,

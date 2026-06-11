@@ -2573,6 +2573,9 @@ model LoanRequest {
   interestRate           Decimal             @default(0) @db.Decimal(5, 2)
   monthlyRepayment       Decimal?            @db.Decimal(18, 2)
   remainingBalance       Decimal?            @db.Decimal(18, 2)
+  signature              String?             @db.Text
+  signatureType          String?             @db.VarChar(20)
+  signedAt               DateTime?
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
   createdBy              String

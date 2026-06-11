@@ -63,9 +63,11 @@ export async function POST(request: NextRequest) {
           const maxDebtRatioPercent = parseFloat(String(row.getCell(6).value || 40)) || 40
           const requiresGuarantor = String(row.getCell(7).value || '').toLowerCase() === 'true'
           const guarantorThresholdAmount = parseFloat(String(row.getCell(8).value || 0)) || null
-          const salaryMultiplier = parseFloat(String(row.getCell(9).value || 1)) || 1
-          const isActive = String(row.getCell(10).value || 'true').toLowerCase() !== 'false'
-          const rules = String(row.getCell(11).value || '').trim() || null
+          const guarantorMustBeActiveInCompany = String(row.getCell(9).value || 'true').toLowerCase() !== 'false'
+          const guarantorMustNotHaveActiveLoan = String(row.getCell(10).value || 'false').toLowerCase() === 'true'
+          const salaryMultiplier = parseFloat(String(row.getCell(11).value || 1)) || 1
+          const isActive = String(row.getCell(12).value || 'true').toLowerCase() !== 'false'
+          const rules = String(row.getCell(13).value || '').trim() || null
 
           // Upsert: update if exists by companyId+name, otherwise create
           await prisma.loanPolicy.upsert({
@@ -78,6 +80,8 @@ export async function POST(request: NextRequest) {
               maxDebtRatioPercent,
               requiresGuarantor,
               guarantorThresholdAmount: guarantorThresholdAmount || null,
+              guarantorMustBeActiveInCompany,
+              guarantorMustNotHaveActiveLoan,
               salaryMultiplier,
               isActive,
               rules,
@@ -92,6 +96,8 @@ export async function POST(request: NextRequest) {
               maxDebtRatioPercent,
               requiresGuarantor,
               guarantorThresholdAmount: guarantorThresholdAmount || null,
+              guarantorMustBeActiveInCompany,
+              guarantorMustNotHaveActiveLoan,
               salaryMultiplier,
               isActive,
               rules,

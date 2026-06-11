@@ -37,6 +37,9 @@ export async function POST(request: NextRequest) {
     const tenureMonths = Number(body.tenureMonths || 0)
     const purpose = String(body.purpose || '').trim()
     const targetStaffId = body.targetStaffId ? String(body.targetStaffId).trim() : null
+    const guarantorStaffId = body.guarantorStaffId ? String(body.guarantorStaffId).trim() : null
+    const signature = body.signature ? String(body.signature).trim() : null
+    const signatureType = body.signatureType ? String(body.signatureType).trim() : null
 
     // Validate loan type
     if (!allowedLoanTypes.includes(loanType as any)) {
@@ -119,6 +122,63 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // If a guarantor was specified, validate them against the loan policy
+    if (guarantorStaffId) {
+      // Find the corresponding loan policy by loan type name
+      const policyName = loanType
+        .replace(/_/g, ' ')
+        .split(' ')
+        .map((w: string) => w.charAt(0) + w.slice(1).toLowerCase())
+        .join(' ')
+
+      const policy = await prisma.loanPolicy.findFirst({
+        where: {
+          companyId: requesterStaff.companyId,
+          name: { equals: policyName, mode: 'insensitive' },
+        },
+        select: {
+          requiresGuarantor: true,
+          guarantorMustBeActiveInCompany: true,
+          guarantorMustNotHaveActiveLoan: true,
+        },
+      })
+
+      if (policy && policy.requiresGuarantor) {
+        const guarantor = await prisma.staffRecord.findFirst({
+          where: {
+            id: guarantorStaffId,
+            companyId: requesterStaff.companyId,
+          },
+          select: { id: true, isActive: true },
+        })
+
+        if (!guarantor) {
+          return withCors(ApiResponse.error('Guarantor not found in this company', 400), origin)
+        }
+
+        if (!guarantor.isActive) {
+          return withCors(ApiResponse.error('Guarantor is not an active staff member', 400), origin)
+        }
+
+        if (policy.guarantorMustNotHaveActiveLoan) {
+          const activeLoans = await prisma.deductionEntry.count({
+            where: {
+              staffId: guarantor.id,
+              deductionType: { in: ['LOAN', 'SALARY_ADVANCE'] },
+              companyId: requesterStaff.companyId,
+            },
+          })
+
+          if (activeLoans > 0) {
+            return withCors(
+              ApiResponse.error('Guarantor has active loan(s) and the policy does not allow this', 400),
+              origin
+            )
+          }
+        }
+      }
+    }
+
     // Calculate loan details
     const monthlyRepayment = Number((requestedAmount / tenureMonths).toFixed(2))
     const expectedRepaymentDate = new Date()
@@ -137,6 +197,7 @@ export async function POST(request: NextRequest) {
         monthlyRepayment: new Decimal(monthlyRepayment),
         expectedRepaymentDate,
         interestRate: new Decimal(0),
+        ...(signature ? { signature, signatureType: signatureType || 'drawn', signedAt: new Date() } : {}),
         createdBy: user.userId,
       },
       select: {

@@ -40,83 +40,6 @@ type ModuleRequestRecord = {
   reviewerComment?: string | null
 }
 
-const DEFAULT_BENEFITS_CATALOG = [
-  {
-    id: 'ben-health-001',
-    name: 'Comprehensive Health Coverage',
-    category: 'Health',
-    description: 'Primary staff and spouse cover with preventive care package.',
-    keyValue: 'Up to N500,000 annual cover',
-    eligibilityRule: 'Available after 3 months of employment',
-    status: 'ELIGIBLE',
-  },
-  {
-    id: 'ben-transport-001',
-    name: 'Transportation Support',
-    category: 'Financial',
-    description: 'Monthly transportation support for approved staff levels.',
-    keyValue: 'N35,000 monthly support',
-    eligibilityRule: 'Available to field and shift teams',
-    status: 'ELIGIBLE',
-  },
-  {
-    id: 'ben-edu-001',
-    name: 'Professional Certification Reimbursement',
-    category: 'Learning',
-    description: 'Reimbursement for approved certifications aligned to role growth.',
-    keyValue: 'Up to N200,000 per year',
-    eligibilityRule: 'Available after 6 months of employment',
-    status: 'REQUIRES_TENURE',
-  },
-  {
-    id: 'ben-wellness-001',
-    name: 'Wellness and Fitness Allowance',
-    category: 'Wellness',
-    description: 'Quarterly wellness stipend for gym or fitness activities.',
-    keyValue: 'N25,000 quarterly',
-    eligibilityRule: 'Available to all confirmed staff',
-    status: 'ELIGIBLE',
-  },
-]
-
-const DEFAULT_LOAN_TERMS = [
-  {
-    id: 'loan-term-001',
-    name: 'Personal Loan',
-    interestRatePercent: 5,
-    maxDurationMonths: 18,
-    maxAmount: 2500000,
-    rules: [
-      'Applicant must be a confirmed staff member',
-      'Maximum debt service ratio is 40% of net salary',
-      'Guarantor is mandatory above N1,000,000',
-    ],
-  },
-  {
-    id: 'loan-term-002',
-    name: 'Emergency Loan',
-    interestRatePercent: 2,
-    maxDurationMonths: 6,
-    maxAmount: 750000,
-    rules: [
-      'Fast-track approval for urgent needs',
-      'Single outstanding emergency loan allowed',
-      'Full disclosure note required on application',
-    ],
-  },
-  {
-    id: 'loan-term-003',
-    name: 'Asset Loan',
-    interestRatePercent: 8,
-    maxDurationMonths: 24,
-    maxAmount: 5000000,
-    rules: [
-      'Asset invoice or quote is mandatory',
-      'Extended tenor requires dual guarantors',
-      'Early repayment has no penalty',
-    ],
-  },
-]
 
 function toNaira(amount: number): string {
   return `N${amount.toLocaleString('en-NG')}`
@@ -153,10 +76,30 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
     const requestedCompanyId = searchParams.get('companyId')
+    const personalScope = searchParams.get('personalScope') === 'true'
 
     let scopedCompanyIds: string[] = []
 
-    if (user.role === 'SUPER_ADMIN') {
+    // Personal scope: ADMIN/HR view their own staff_record company loans, not the operational company
+    if (personalScope && (user.role === 'ADMIN' || user.role === 'HR')) {
+      const ownStaffRecord = await prisma.staffRecord.findFirst({
+        where: { email: user.email, isActive: true },
+        select: { companyId: true },
+      })
+      if (ownStaffRecord) {
+        scopedCompanyIds = [ownStaffRecord.companyId]
+      } else {
+        // HR/ADMIN may not have a staff record — fall back to assigned companies
+        const assignments = await prisma.userCompany.findMany({
+          where: {
+            userId: user.userId,
+            company: { archived: 0 },
+          },
+          select: { companyId: true },
+        })
+        scopedCompanyIds = assignments.map((a) => a.companyId)
+      }
+    } else if (user.role === 'SUPER_ADMIN') {
       if (requestedCompanyId) {
         scopedCompanyIds = [requestedCompanyId]
       } else {
@@ -228,13 +171,14 @@ export async function GET(request: NextRequest) {
             },
             loans: [],
             myLoans: [],
-            loanTerms: DEFAULT_LOAN_TERMS,
-            benefitsCatalog: DEFAULT_BENEFITS_CATALOG,
+            loanTerms: [],
+            benefitsCatalog: [],
             loanRequests: [],
             benefitRequests: [],
             benefitAllocations: [],
             alerts: [],
             insights: [],
+            departmentDistribution: [],
           },
           'Staff loans and benefits dashboard data fetched successfully'
         ),
@@ -256,6 +200,7 @@ export async function GET(request: NextRequest) {
               firstName: true,
               lastName: true,
               email: true,
+              department: true,
             },
           },
         },
@@ -277,11 +222,19 @@ export async function GET(request: NextRequest) {
               firstName: true,
               lastName: true,
               email: true,
+              department: true,
+            },
+          },
+          approver: {
+            select: {
+              firstName: true,
+              lastName: true,
+              email: true,
             },
           },
         },
         orderBy: { createdAt: 'desc' },
-        take: 50,
+        take: 100,
       }),
       prisma.benefitRequest.findMany({
         where: {
@@ -293,11 +246,19 @@ export async function GET(request: NextRequest) {
               firstName: true,
               lastName: true,
               email: true,
+              department: true,
+            },
+          },
+          approver: {
+            select: {
+              firstName: true,
+              lastName: true,
+              email: true,
             },
           },
         },
         orderBy: { createdAt: 'desc' },
-        take: 50,
+        take: 100,
       }),
       prisma.benefitAllocation.findMany({
         where: {
@@ -384,12 +345,114 @@ export async function GET(request: NextRequest) {
     const defaultedLoans = loans.filter((loan) => loan.status === 'DEFAULTED').length
     const recoveryRatePercent = totalIssued > 0 ? Number(((totalRepaid / totalIssued) * 100).toFixed(1)) : 0
 
-    const myLoans = user.role === 'STAFF'
+    const myLoans = (user.role === 'STAFF' || personalScope)
       ? loans.filter((loan) => loan.employeeEmail === user.email)
       : []
 
+    // Fetch employee salary for STAFF users — sum of latest month's payrolls
+    // (Some companies split payments e.g. salary + bonus as separate payroll entries)
+    let employeeSalary = 0
+    let employeeNetSalary = 0
+    if (user.role === 'STAFF') {
+      const staffRecord = await prisma.staffRecord.findFirst({
+        where: { email: user.email, isActive: true },
+        select: { id: true },
+      })
+      if (staffRecord) {
+        // Find the latest month/year that has payroll records for this staff
+        const latestPayPeriod = await prisma.payroll.findFirst({
+          where: {
+            staffRecordId: staffRecord.id,
+            status: 'PROCESSED',
+          },
+          orderBy: [{ year: 'desc' }, { month: 'desc' }],
+          select: { year: true, month: true },
+        })
+
+        if (latestPayPeriod) {
+          // Get ALL payroll records from that same month (some companies split payments)
+          const monthPayrolls = await prisma.payroll.findMany({
+            where: {
+              staffRecordId: staffRecord.id,
+              status: 'PROCESSED',
+              year: latestPayPeriod.year,
+              month: latestPayPeriod.month,
+            },
+            select: {
+              grossPay: true,
+              basicSalary: true,
+              housing: true,
+              transport: true,
+              dressing: true,
+              leaveAllowance: true,
+              entertainment: true,
+              utility: true,
+              otherAllowance: true,
+              communicationAllowance: true,
+              transportationAllowance: true,
+              overtimeIncome: true,
+              customFields: true,
+              templateType: true,
+            },
+          })
+
+          if (monthPayrolls.length > 0) {
+            let totalGross = 0
+            let totalBasePay = 0
+
+            for (const p of monthPayrolls) {
+              if (p.templateType && p.templateType !== 'ISURF_STANDARD' && p.customFields) {
+                // Dynamic template — extract from customFields JSON
+                const cf = p.customFields as Record<string, any>
+                let earnings = 0
+                let basePay = 0
+                for (const key of Object.keys(cf)) {
+                  const field = cf[key]
+                  if (field && typeof field === 'object' && 'value' in field) {
+                    const val = Number(field.value)
+                    if (!isNaN(val)) {
+                      if (field.section === 'EARNINGS' || key === 'base_pay' || key.includes('salary') || key.includes('bonus')) {
+                        earnings += val
+                      }
+                      if (key === 'base_pay' || key.includes('basic_salary')) {
+                        basePay = val
+                      }
+                    }
+                  }
+                }
+                totalGross += (earnings || Number(p.grossPay || 0))
+                totalBasePay += (basePay || Number(p.basicSalary || 0))
+              } else {
+                // System template — use named columns
+                const gross =
+                  Number(p.grossPay || 0) ||
+                  Number(p.basicSalary || 0) +
+                  Number(p.housing || 0) +
+                  Number(p.transport || 0) +
+                  Number(p.dressing || 0) +
+                  Number(p.leaveAllowance || 0) +
+                  Number(p.entertainment || 0) +
+                  Number(p.utility || 0) +
+                  Number(p.otherAllowance || 0) +
+                  Number(p.communicationAllowance || 0) +
+                  Number(p.transportationAllowance || 0) +
+                  Number(p.overtimeIncome || 0)
+                totalGross += gross
+                totalBasePay += Number(p.basicSalary || 0)
+              }
+            }
+
+            employeeSalary = totalGross
+            employeeNetSalary = totalBasePay
+          }
+        }
+      }
+    }
+
+    const isPersonalScope = personalScope || user.role === 'STAFF'
+
     // Process loan requests from new LoanRequest model
-    const loanRequests = user.role === 'STAFF'
+    const loanRequests = isPersonalScope
       ? loanRequestsData
           .filter((lr) => lr.staff.email === user.email)
           .map((lr) => ({
@@ -401,9 +464,11 @@ export async function GET(request: NextRequest) {
             title: `${lr.loanType} request`,
             amount: Number(lr.requestedAmount),
             tenureMonths: lr.tenureMonths,
+            interestRate: Number(lr.interestRate || 0),
             createdAt: lr.createdAt.toISOString(),
             reviewedAt: lr.approvedAt?.toISOString() || null,
             reviewerComment: lr.approvalComment || lr.rejectionReason || null,
+            approverName: lr.approver ? `${lr.approver.firstName} ${lr.approver.lastName}`.trim() : null,
           }))
       : loanRequestsData.map((lr) => ({
         id: lr.id,
@@ -414,13 +479,15 @@ export async function GET(request: NextRequest) {
         title: `${lr.loanType} request`,
         amount: Number(lr.requestedAmount),
         tenureMonths: lr.tenureMonths,
+        interestRate: Number(lr.interestRate || 0),
         createdAt: lr.createdAt.toISOString(),
         reviewedAt: lr.approvedAt?.toISOString() || null,
         reviewerComment: lr.approvalComment || lr.rejectionReason || null,
+        approverName: lr.approver ? `${lr.approver.firstName} ${lr.approver.lastName}`.trim() : null,
       }))
 
     // Process benefit requests from new BenefitRequest model
-    const benefitRequests = user.role === 'STAFF'
+    const benefitRequests = isPersonalScope
       ? benefitRequestsData
           .filter((br) => br.staff.email === user.email)
           .map((br) => ({
@@ -434,6 +501,7 @@ export async function GET(request: NextRequest) {
             createdAt: br.createdAt.toISOString(),
             reviewedAt: br.approvedAt?.toISOString() || null,
             reviewerComment: br.approvalComment || br.rejectionReason || null,
+            approverName: br.approver ? `${br.approver.firstName} ${br.approver.lastName}`.trim() : null,
           }))
       : benefitRequestsData.map((br) => ({
         id: br.id,
@@ -446,10 +514,11 @@ export async function GET(request: NextRequest) {
         createdAt: br.createdAt.toISOString(),
         reviewedAt: br.approvedAt?.toISOString() || null,
         reviewerComment: br.approvalComment || br.rejectionReason || null,
+        approverName: br.approver ? `${br.approver.firstName} ${br.approver.lastName}`.trim() : null,
       }))
 
     // Process benefit allocations from new BenefitAllocation model
-    const benefitAllocations = user.role === 'STAFF'
+    const benefitAllocations = isPersonalScope
       ? benefitAllocationsData
           .filter((ba) => ba.staff.email === user.email)
           .map((ba) => ({
@@ -479,6 +548,46 @@ export async function GET(request: NextRequest) {
       ...loanRequestsData.filter((lr) => lr.status === 'PENDING'),
       ...benefitRequestsData.filter((br) => br.status === 'PENDING'),
     ].length
+
+    // ── Department-wise distribution (from staff_records, company-scoped) ──
+    // Get all active staff grouped by department for the scoped companies
+    const staffByDept = await prisma.staffRecord.groupBy({
+      by: ['department'],
+      where: {
+        companyId: { in: scopedCompanyIds },
+        isActive: true,
+        department: { not: null },
+      },
+      _count: { id: true },
+      orderBy: { _count: { id: 'desc' } },
+      take: 10,
+    })
+
+    // Build a map of department → total deduction amount (from loanEntries, already fetched)
+    const deptAmountMap = new Map<string, number>()
+    for (const entry of loanEntries) {
+      const dept = entry.staff.department?.trim()
+      if (dept) {
+        deptAmountMap.set(dept, (deptAmountMap.get(dept) || 0) + Number(entry.amount || 0))
+      }
+    }
+
+    const departmentDistribution = staffByDept
+      .filter((d) => d.department) // safety: exclude null (already filtered above, but TS guard)
+      .map((d) => ({
+        name: d.department!,
+        value: d._count.id,
+        totalAmount: deptAmountMap.get(d.department!) || 0,
+      }))
+
+    // Also include departments with deductions but no active staff (edge case)
+    for (const [dept, amount] of deptAmountMap) {
+      if (!departmentDistribution.find((d) => d.name === dept)) {
+        departmentDistribution.push({ name: dept, value: 0, totalAmount: amount })
+      }
+    }
+    // Re-sort by staff count descending
+    departmentDistribution.sort((a, b) => b.value - a.value)
 
     const alerts = [
       {
@@ -525,13 +634,16 @@ export async function GET(request: NextRequest) {
           },
           loans,
           myLoans,
-          loanTerms: loanPolicies.length > 0 ? loanPolicies : DEFAULT_LOAN_TERMS,
-          benefitsCatalog: benefitPolicies.length > 0 ? benefitPolicies : DEFAULT_BENEFITS_CATALOG,
+          employeeSalary,
+          employeeNetSalary,
+          loanTerms: loanPolicies,
+          benefitsCatalog: benefitPolicies,
           loanRequests,
           benefitRequests,
           benefitAllocations,
           alerts,
           insights,
+          departmentDistribution,
           labels: {
             totalLoansIssued: toNaira(totalIssued),
             totalOutstanding: toNaira(totalOutstanding),

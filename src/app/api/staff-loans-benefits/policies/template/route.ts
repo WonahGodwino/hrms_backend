@@ -35,6 +35,8 @@ export async function GET(request: NextRequest) {
       { header: 'Max Debt Ratio (%)', key: 'maxDebtRatioPercent', width: 20 },
       { header: 'Requires Guarantor (true/false)', key: 'requiresGuarantor', width: 28 },
       { header: 'Guarantor Threshold (₦)', key: 'guarantorThresholdAmount', width: 24 },
+      { header: 'Guarantor - Must Be Active In Company (true/false)', key: 'guarantorMustBeActiveInCompany', width: 36 },
+      { header: 'Guarantor - Must Not Have Active Loan (true/false)', key: 'guarantorMustNotHaveActiveLoan', width: 38 },
       { header: 'Salary Multiplier', key: 'salaryMultiplier', width: 18 },
       { header: 'Active (true/false)', key: 'isActive', width: 18 },
       { header: 'Rules / Notes', key: 'rules', width: 35 },
@@ -62,9 +64,9 @@ export async function GET(request: NextRequest) {
 
     // Sample data rows
     const sampleLoans = [
-      ['Personal Loan', 5, 18, 2500000, 3, 40, 'false', '', 1.0, 'true', 'Standard personal loan for confirmed staff'],
-      ['Emergency Loan', 2, 6, 750000, 1, 35, 'false', '', 0.5, 'true', 'Fast-track approval for urgent needs'],
-      ['Asset Loan', 8, 24, 5000000, 6, 40, 'true', '1000000', 1.5, 'true', 'Asset-backed loan with guarantor requirement'],
+      ['Personal Loan', 5, 18, 2500000, 3, 40, 'false', '', 'true', 'false', 1.0, 'true', 'Standard personal loan for confirmed staff'],
+      ['Emergency Loan', 2, 6, 750000, 1, 35, 'false', '', 'true', 'false', 0.5, 'true', 'Fast-track approval for urgent needs'],
+      ['Asset Loan', 8, 24, 5000000, 6, 40, 'true', '1000000', 'true', 'true', 1.5, 'true', 'Asset-backed loan with guarantor requirement'],
     ]
     sampleLoans.forEach((row) => {
       loanSheet.addRow(row)
@@ -119,6 +121,8 @@ export async function GET(request: NextRequest) {
       ['Loan Types - Min Service (Months)', 'Minimum months of employment required. Default: 3'],
       ['Loan Types - Max Debt Ratio (%)', 'Maximum percentage of salary that can go to debt. Default: 40'],
       ['Loan Types - Requires Guarantor', '"true" or "false". Default: false'],
+      ['Loan Types - Guarantor Must Be Active In Company', '"true" or "false". Whether guarantor must be an active employee in the same company. Default: true'],
+      ['Loan Types - Guarantor Must Not Have Active Loan', '"true" or "false". If true, guarantor must not have any active loan. Default: false'],
       ['Loan Types - Salary Multiplier', 'Multiplier on gross salary for max borrowable. Default: 1.0'],
       ['Benefit Types - Category', 'Must be one of: Health, Financial, Learning, Wellness'],
       ['Benefit Types - Eligibility Rule', 'JSON object e.g. {"minServiceMonths":3}. Leave blank for open eligibility.'],

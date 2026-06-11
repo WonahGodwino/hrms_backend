@@ -210,9 +210,21 @@ export async function PUT(request: NextRequest) {
       return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
     }
 
+    // Sanitize empty strings → null for nullable numeric fields
+    const cleanUpdates: any = { ...updates }
+    const nullableNumericFields = ['guarantorThresholdAmount', 'maxAmount', 'minServiceMonths']
+    for (const field of nullableNumericFields) {
+      if (cleanUpdates[field] === '' || cleanUpdates[field] === undefined) {
+        cleanUpdates[field] = null
+      } else if (typeof cleanUpdates[field] === 'string') {
+        const num = parseFloat(cleanUpdates[field])
+        cleanUpdates[field] = isNaN(num) ? null : num
+      }
+    }
+
     const policy = await prisma.loanPolicy.update({
       where: { id },
-      data: updates,
+      data: cleanUpdates,
     })
 
     return withCors(ApiResponse.success(policy, 'Loan policy updated successfully'), origin)

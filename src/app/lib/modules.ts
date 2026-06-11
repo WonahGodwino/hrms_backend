@@ -53,6 +53,11 @@ export const PLATFORM_MODULES = [
     name:        'PHED Payroll',
     description: 'Port Harcourt Electricity Distribution payroll engine — staff management, pay periods, computation, and reports',
   },
+  {
+    key:         'STAFF_LOANS_BENEFITS',
+    name:        'Staff Loans & Benefits',
+    description: 'Loan applications, benefit requests, policy configuration, eligibility validation and staff financial dashboards',
+  },
 ] as const
 
 export type ModuleKey = typeof PLATFORM_MODULES[number]['key']
