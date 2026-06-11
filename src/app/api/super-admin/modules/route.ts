@@ -4,21 +4,14 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { syncModuleAccess } from '@/app/lib/module-access'
+import { PLATFORM_MODULES } from '@/app/lib/modules'
 
-// Pre-approved module options that can be created by SUPER_ADMIN
-const AVAILABLE_MODULE_OPTIONS = [
-  { key: 'CORE_SETUP', name: 'Core Setup', description: 'Company structure — departments, business units, designations, grade levels and staff records' },
-  { key: 'RECRUITMENT', name: 'Recruitment', description: 'Job postings, applicant tracking, interviews and selection' },
-  { key: 'ONBOARDING', name: 'Onboarding', description: 'New hire onboarding workflows, checklists and command centre' },
-  { key: 'TASK_MANAGEMENT', name: 'Task Management', description: 'Task dashboard, assignment and tracking for HR and staff' },
-  { key: 'ATTENDANCE', name: 'Attendance', description: 'Attendance tracking, daily, weekly and monthly reports' },
-  { key: 'LEAVE', name: 'Leave Management', description: 'Leave applications, approvals, balances and policy management' },
-  { key: 'PAYROLL', name: 'General Payroll', description: 'Standard payroll processing, payslips and salary schedules' },
-  { key: 'TRAINING', name: 'Training & Certifications', description: 'Training programs, sessions, assessments and certification tracking' },
-  { key: 'OFFBOARDING', name: 'Offboarding', description: 'Employee exit workflows, task management and offboarding records' },
-  { key: 'PHED', name: 'PHED Payroll', description: 'Port Harcourt Electricity Distribution payroll engine' },
-  { key: 'STAFF_LOANS_BENEFITS', name: 'Staff Loans & Benefits', description: 'Loan applications, benefit requests, policy configuration' },
-]
+// Available modules come from the platform module registry — single source of truth
+const AVAILABLE_MODULE_OPTIONS = PLATFORM_MODULES.map(m => ({
+  key: m.key,
+  name: m.name,
+  description: m.description,
+}))
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
