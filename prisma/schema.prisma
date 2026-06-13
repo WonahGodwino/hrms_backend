@@ -128,6 +128,7 @@ model Company {
   
    // Grade Levels
   gradeLevels            GradeLevel[]            //opposite of GradeLevel.company
+  designations           Designation[]           //opposite of Designation.company
   
   // Benefits
   benefits               Benefit[]                 // opposite of Benefit.company
@@ -2724,16 +2725,24 @@ enum BasePayFrequency {
 // Designation model 
 model Designation {
   id           String      @id @default(cuid())
+  companyId    String?
   title        String
-  code         String      @unique
+  code         String
   gradeLevelId String?
   departmentId String?
+  description  String?     @db.Text
+  status       String      @default("Active")
   staffCount   Int         @default(0)
   gradeLevel   GradeLevel? @relation(fields: [gradeLevelId], references: [id])
   staffRecords  StaffRecord[]
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
+
+  company      Company?    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([companyId, status])
   @@index([gradeLevelId])
 }
 
