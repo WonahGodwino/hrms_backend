@@ -2,7 +2,7 @@
 import formData from 'form-data'
 import Mailgun from 'mailgun.js'
 import { prisma } from '@/app/lib/db'
-import { sign } from 'jsonwebtoken'
+import { sign, verify } from 'jsonwebtoken'
 import { normalizeCurrencyCode } from '@/app/lib/currency'
 
 // Initialize Mailgun
@@ -947,5 +947,210 @@ export async function sendSimpleNotificationEmail(
     html: htmlContent,
     text: textContent,
     from: companyName ? `${companyName} <${FROM_EMAIL}>` : FROM_EMAIL
+  })
+}
+
+// ========== GUARANTOR WORKFLOW ==========
+
+export function generateGuarantorToken(
+  loanRequestId: string,
+  guarantorStaffId: string
+): { token: string; expiry: Date } {
+  const expiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+  const token = sign(
+    { purpose: 'guarantor_response', loanRequestId, guarantorStaffId },
+    process.env.JWT_SECRET || 'secret',
+    { expiresIn: '7d' }
+  )
+  return { token, expiry }
+}
+
+export function verifyGuarantorToken(token: string): {
+  loanRequestId: string
+  guarantorStaffId: string
+} | null {
+  try {
+    const decoded = verify(token, process.env.JWT_SECRET || 'secret') as any
+    if (decoded?.purpose !== 'guarantor_response') return null
+    return { loanRequestId: decoded.loanRequestId, guarantorStaffId: decoded.guarantorStaffId }
+  } catch {
+    return null
+  }
+}
+
+export async function sendGuarantorRequestEmail(params: {
+  guarantorEmail: string
+  guarantorName: string
+  applicantName: string
+  loanType: string
+  amount: number
+  tenureMonths: number
+  monthlyRepayment: number
+  purpose: string
+  token: string
+  currency?: string
+}): Promise<{ success: boolean; error?: string }> {
+  const {
+    guarantorEmail, guarantorName, applicantName, loanType,
+    amount, tenureMonths, monthlyRepayment, purpose, token, currency = 'NGN',
+  } = params
+  const responseLink = `${FRONTEND_URL}/guarantor-response?token=${token}`
+  const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Guarantor Request</title>
+  <style>
+    body{margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif;background:#0f172a;color:#e2e8f0}
+    .wrapper{max-width:600px;margin:0 auto;padding:24px 16px}
+    .card{background:#1e293b;border:1px solid #334155;border-radius:16px;overflow:hidden}
+    .header{background:linear-gradient(135deg,#f59e0b,#d97706);padding:32px;text-align:center}
+    .header h1{margin:0;font-size:22px;font-weight:700;color:#fff}
+    .header p{margin:8px 0 0;font-size:14px;color:rgba(255,255,255,.85)}
+    .body{padding:32px}
+    .greeting{font-size:16px;color:#cbd5e1;margin-bottom:16px}
+    .intro{font-size:15px;color:#94a3b8;line-height:1.6;margin-bottom:24px}
+    .loan-box{background:#0f172a;border:1px solid #334155;border-radius:12px;padding:20px;margin-bottom:24px}
+    .loan-box h3{margin:0 0 16px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#64748b}
+    .row{display:flex;justify-content:space-between;margin-bottom:12px}
+    .row:last-child{margin-bottom:0}
+    .lbl{font-size:13px;color:#64748b}
+    .val{font-size:13px;color:#e2e8f0;font-weight:600;text-align:right;max-width:60%}
+    .amt{font-size:20px;font-weight:700;color:#f59e0b}
+    .info{background:#172033;border:1px solid #1e3a5f;border-radius:10px;padding:16px 20px;margin-bottom:24px}
+    .info p{margin:0;font-size:13px;color:#7dd3fc;line-height:1.6}
+    .btns{display:flex;gap:12px;margin-bottom:20px}
+    .btn{display:inline-block;padding:14px 20px;border-radius:10px;font-size:14px;font-weight:700;text-decoration:none;text-align:center;flex:1}
+    .btn-accept{background:linear-gradient(135deg,#10b981,#059669);color:#fff}
+    .btn-decline{background:#1e293b;border:2px solid #ef4444;color:#ef4444}
+    .link-note{font-size:12px;color:#475569;line-height:1.6;word-break:break-all;margin-bottom:8px}
+    .expiry{font-size:12px;color:#64748b}
+    .footer{padding:20px 32px;border-top:1px solid #334155;text-align:center}
+    .footer p{margin:0;font-size:12px;color:#475569}
+  </style>
+</head>
+<body>
+  <div class="wrapper"><div class="card">
+    <div class="header">
+      <h1>247HR — Guarantor Request</h1>
+      <p>You have been requested to guarantee a loan application</p>
+    </div>
+    <div class="body">
+      <p class="greeting">Dear <strong>${guarantorName}</strong>,</p>
+      <p class="intro">
+        <strong style="color:#e2e8f0">${applicantName}</strong> has submitted a loan application and selected
+        you as their guarantor. As a guarantor, you are consenting to support this application.
+        Please review the details below and respond before the loan can be processed for approval.
+      </p>
+      <div class="loan-box">
+        <h3>Loan Details</h3>
+        <div class="row"><span class="lbl">Applicant</span><span class="val">${applicantName}</span></div>
+        <div class="row"><span class="lbl">Loan Type</span><span class="val">${loanType}</span></div>
+        <div class="row"><span class="lbl">Amount Requested</span><span class="val amt">${currency} ${fmt(amount)}</span></div>
+        <div class="row"><span class="lbl">Repayment Period</span><span class="val">${tenureMonths} Month${tenureMonths !== 1 ? 's' : ''}</span></div>
+        <div class="row"><span class="lbl">Monthly Deduction</span><span class="val">${currency} ${fmt(monthlyRepayment)}</span></div>
+        ${purpose ? `<div class="row"><span class="lbl">Purpose</span><span class="val" style="color:#94a3b8">${purpose}</span></div>` : ''}
+      </div>
+      <div class="info">
+        <p>ℹ️ By accepting, you confirm willingness to act as guarantor. This loan will not be processed until you respond. If you decline, the applicant will be notified to update their application.</p>
+      </div>
+      <div class="btns">
+        <a href="${responseLink}&decision=ACCEPT" class="btn btn-accept">✓ Accept as Guarantor</a>
+        <a href="${responseLink}&decision=DECLINE" class="btn btn-decline">✗ Decline</a>
+      </div>
+      <p class="link-note">Or open the response page directly:<br>${responseLink}</p>
+      <p class="expiry">⏱ This link expires in 7 days.</p>
+    </div>
+    <div class="footer"><p>Automated message from 247HR. Do not reply to this email.</p></div>
+  </div></div>
+</body>
+</html>`
+
+  const text = `Guarantor Request\n\nDear ${guarantorName},\n\n${applicantName} has requested you as guarantor for a ${loanType} of ${currency} ${fmt(amount)} over ${tenureMonths} months (${currency} ${fmt(monthlyRepayment)}/month).\n\nRespond here: ${responseLink}\n\nThis link expires in 7 days.\n\n247HR`
+
+  return sendEmail({
+    to: guarantorEmail,
+    subject: `Guarantor Request: ${applicantName} — ${loanType} (${currency} ${fmt(amount)})`,
+    html,
+    text,
+  })
+}
+
+export async function sendGuarantorResponseEmail(params: {
+  applicantEmail: string
+  applicantName: string
+  guarantorName: string
+  loanType: string
+  amount: number
+  decision: 'ACCEPTED' | 'DECLINED'
+  declineReason?: string
+  currency?: string
+}): Promise<{ success: boolean; error?: string }> {
+  const { applicantEmail, applicantName, guarantorName, loanType, amount, decision, declineReason, currency = 'NGN' } = params
+  const isAccepted = decision === 'ACCEPTED'
+  const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const accent = isAccepted ? '#10b981' : '#ef4444'
+  const loginLink = `${FRONTEND_URL}/login`
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Guarantor ${isAccepted ? 'Accepted' : 'Declined'}</title>
+  <style>
+    body{margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif;background:#0f172a;color:#e2e8f0}
+    .wrapper{max-width:600px;margin:0 auto;padding:24px 16px}
+    .card{background:#1e293b;border:1px solid #334155;border-radius:16px;overflow:hidden}
+    .header{background:linear-gradient(135deg,${accent},${isAccepted ? '#059669' : '#dc2626'});padding:32px;text-align:center}
+    .header h1{margin:0;font-size:22px;font-weight:700;color:#fff}
+    .header p{margin:8px 0 0;font-size:14px;color:rgba(255,255,255,.85)}
+    .body{padding:32px}
+    .badge{display:inline-block;padding:8px 20px;border-radius:50px;font-size:14px;font-weight:700;color:${accent};background:${accent}20;border:1px solid ${accent}50;margin-bottom:20px}
+    .info{background:${isAccepted ? '#0d2d1f' : '#2d0d0d'};border:1px solid ${accent}40;border-radius:10px;padding:16px 20px;margin-bottom:20px}
+    .info p{margin:0;font-size:14px;color:${isAccepted ? '#6ee7b7' : '#fca5a5'};line-height:1.6}
+    .reason{background:#0f172a;border:1px solid #475569;border-radius:10px;padding:14px 18px;margin-top:12px}
+    .reason .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;margin-bottom:6px}
+    .reason p{margin:0;font-size:13px;color:#94a3b8}
+    .btn{display:inline-block;padding:12px 28px;background:#f59e0b;color:#0f172a;border-radius:8px;font-size:14px;font-weight:700;text-decoration:none;margin-top:16px}
+    .footer{padding:20px 32px;border-top:1px solid #334155;text-align:center}
+    .footer p{margin:0;font-size:12px;color:#475569}
+  </style>
+</head>
+<body>
+  <div class="wrapper"><div class="card">
+    <div class="header">
+      <h1>${isAccepted ? '✅' : '❌'} Guarantor ${isAccepted ? 'Accepted' : 'Declined'}</h1>
+      <p>Update on your ${loanType} application</p>
+    </div>
+    <div class="body">
+      <p style="font-size:16px;color:#cbd5e1;margin-bottom:16px">Dear <strong>${applicantName}</strong>,</p>
+      <span class="badge">${isAccepted ? '✅' : '❌'} ${guarantorName} has ${isAccepted ? 'accepted' : 'declined'} your guarantor request</span>
+      <div class="info">
+        ${isAccepted
+          ? `<p><strong>${guarantorName}</strong> has accepted to guarantee your <strong>${loanType}</strong> of <strong>${currency} ${fmt(amount)}</strong>. Your application will now be reviewed by HR/Admin for approval. You will be notified once a decision is made.</p>`
+          : `<p><strong>${guarantorName}</strong> has declined to guarantee your <strong>${loanType}</strong> of <strong>${currency} ${fmt(amount)}</strong>. Please log in to update your guarantor and resubmit your application, or contact HR for assistance.</p>`
+        }
+      </div>
+      ${!isAccepted && declineReason ? `<div class="reason"><div class="lbl">Reason Provided</div><p>${declineReason}</p></div>` : ''}
+      <a href="${loginLink}" class="btn">${isAccepted ? 'View My Applications →' : 'Update & Resubmit →'}</a>
+    </div>
+    <div class="footer"><p>Automated message from 247HR. Do not reply to this email.</p></div>
+  </div></div>
+</body>
+</html>`
+
+  const text = isAccepted
+    ? `Guarantor Accepted\n\nDear ${applicantName},\n\n${guarantorName} has accepted your guarantor request for a ${loanType} of ${currency} ${fmt(amount)}.\n\nYour application will now proceed to HR/Admin for review.\n\nLog in: ${loginLink}\n\n247HR`
+    : `Guarantor Declined\n\nDear ${applicantName},\n\n${guarantorName} has declined your guarantor request for a ${loanType} of ${currency} ${fmt(amount)}.\n\n${declineReason ? `Reason: ${declineReason}\n\n` : ''}Please log in to update your guarantor and resubmit.\n\nLog in: ${loginLink}\n\n247HR`
+
+  return sendEmail({
+    to: applicantEmail,
+    subject: `Guarantor ${isAccepted ? 'Accepted' : 'Declined'}: ${guarantorName} — ${loanType} Application`,
+    html,
+    text,
   })
 }

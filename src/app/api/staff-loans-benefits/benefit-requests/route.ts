@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { extractBearerToken, findStaffByEmail, findStaffById, resolveScopedCompanyIds } from '@/app/api/staff-loans-benefits/_helpers'
+import { extractBearerToken, findStaffByEmail, findStaffByEmailAndCompany, findStaffById, resolveScopedCompanyIds } from '@/app/api/staff-loans-benefits/_helpers'
 import { prisma } from '@/app/lib/db'
 
 const MIN_REASON_LENGTH = 8
@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
     const benefitId = String(body.benefitId || '').trim()
     const benefitName = String(body.benefitName || '').trim()
     const reason = String(body.reason || '').trim()
+    const requestedCompanyId = body.companyId ? String(body.companyId).trim() : null
     const targetStaffId = body.targetStaffId ? String(body.targetStaffId).trim() : null
 
     // Validate required fields
@@ -51,10 +52,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get actor staff record
-    const actorStaff = await findStaffByEmail(user.email)
+    // Resolve actor staff — scoped to the selected company when provided so that
+    // ADMIN/SUPER_ADMIN requests are attributed to the company they are operating in.
+    const actorStaff = requestedCompanyId
+      ? await findStaffByEmailAndCompany(user.email, requestedCompanyId)
+      : await findStaffByEmail(user.email)
+
     if (!actorStaff) {
-      return withCors(ApiResponse.error('Staff record not found', 404), origin)
+      const msg = requestedCompanyId
+        ? `You don't have a staff record in the selected company. Ask HR to create one, or use the on-behalf-of flow to submit for another staff member.`
+        : 'Staff record not found'
+      return withCors(ApiResponse.error(msg, 404), origin)
     }
 
     let requesterStaff = actorStaff

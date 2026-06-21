@@ -52,153 +52,112 @@ export async function GET(request: NextRequest) {
           month: latestPayPeriod.month,
         },
         select: {
+          netSalary: true,
           grossPay: true,
-          basicSalary: true,
-          housing: true,
-          transport: true,
-          dressing: true,
-          leaveAllowance: true,
-          entertainment: true,
-          utility: true,
-          otherAllowance: true,
-          communicationAllowance: true,
-          transportationAllowance: true,
-          overtimeIncome: true,
           customFields: true,
           templateType: true,
         },
       })
 
-      let totalGross = 0
-      let totalBasePay = 0
+      let totalNet = 0
 
       for (const p of monthPayrolls) {
         if (p.templateType && p.templateType !== 'ISURF_STANDARD' && p.customFields) {
           const cf = p.customFields as Record<string, any>
-          let earnings = 0
-          let basePay = 0
+          let customNet = 0
           for (const key of Object.keys(cf)) {
             const field = cf[key]
             if (field && typeof field === 'object' && 'value' in field) {
               const val = Number(field.value)
-              if (!isNaN(val)) {
-                if (field.section === 'EARNINGS' || key === 'base_pay' || key.includes('salary') || key.includes('bonus')) {
-                  earnings += val
-                }
-                if (key === 'base_pay' || key.includes('basic_salary')) {
-                  basePay = val
-                }
+              if (!isNaN(val) && val > 0 &&
+                (field.section === 'NET' || key === 'net_salary' || key === 'take_home' ||
+                  key === 'net_pay' || key.includes('net_salary') || key.includes('take_home'))) {
+                customNet = val
+                break
               }
             }
           }
-          totalGross += (earnings || Number(p.grossPay || 0))
-          totalBasePay += (basePay || Number(p.basicSalary || 0))
+          totalNet += customNet || Number(p.netSalary || p.grossPay || 0)
         } else {
-          const gross =
-            Number(p.grossPay || 0) ||
-            Number(p.basicSalary || 0) +
-            Number(p.housing || 0) +
-            Number(p.transport || 0) +
-            Number(p.dressing || 0) +
-            Number(p.leaveAllowance || 0) +
-            Number(p.entertainment || 0) +
-            Number(p.utility || 0) +
-            Number(p.otherAllowance || 0) +
-            Number(p.communicationAllowance || 0) +
-            Number(p.transportationAllowance || 0) +
-            Number(p.overtimeIncome || 0)
-          totalGross += gross
-          totalBasePay += Number(p.basicSalary || 0)
+          totalNet += Number(p.netSalary || 0)
         }
       }
 
-      employeeSalary = totalGross
-      employeeNetSalary = totalBasePay
+      employeeSalary = totalNet
+      employeeNetSalary = totalNet
     }
 
-    // Fetch loan deduction entries — only for THIS staff
-    const deductionEntries = await prisma.deductionEntry.findMany({
-      where: {
-        companyId,
-        staffId,
-        deductionType: { in: ['LOAN', 'SALARY_ADVANCE'] },
-      },
-      include: {
-        staff: {
-          select: { id: true, firstName: true, lastName: true, email: true, department: true },
+    // Fetch all records in parallel before computing derived data
+    const [myLoanRequests, myBenefitRequests, myBenefitAllocations, company] = await Promise.all([
+      prisma.loanRequest.findMany({
+        where: { companyId, staffId },
+        include: {
+          staff: { select: { firstName: true, lastName: true, email: true, department: true } },
+          approver: { select: { firstName: true, lastName: true, email: true } },
         },
-      },
-      orderBy: { createdAt: 'desc' },
-    })
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.benefitRequest.findMany({
+        where: { companyId, staffId },
+        include: {
+          staff: { select: { firstName: true, lastName: true, email: true, department: true } },
+          approver: { select: { firstName: true, lastName: true, email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.benefitAllocation.findMany({
+        where: { companyId, staffId },
+        include: {
+          staff: { select: { firstName: true, lastName: true, email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.company.findUnique({
+        where: { id: companyId },
+        select: { baseCurrency: true },
+      }),
+    ])
 
-    // Aggregate loans from deductions
-    const aggregatedByLoan = new Map()
-    deductionEntries.forEach((entry) => {
-      const deductionAmount = Number(entry.amount || 0)
-      const loanKey = `${entry.staffId}:${entry.deductionType}`
-      const existing = aggregatedByLoan.get(loanKey)
-      if (!existing) {
-        const impliedAmountIssued = deductionAmount * 12
-        const progressPercent = Math.min(100, Math.round((deductionAmount / Math.max(impliedAmountIssued, 1)) * 100))
-        aggregatedByLoan.set(loanKey, {
-          id: `LN-${entry.staffId.slice(-4)}-${entry.id.slice(-4)}`,
-          staffId: entry.staffId,
-          employeeName: `${entry.staff.firstName} ${entry.staff.lastName}`.trim(),
-          employeeEmail: entry.staff.email,
-          loanType: entry.deductionType === 'LOAN' ? 'Loan Repayment' : 'Salary Advance',
-          amountIssued: impliedAmountIssued,
-          amountRepaid: deductionAmount,
-          outstandingBalance: Math.max(0, impliedAmountIssued - deductionAmount),
-          monthlyDeduction: deductionAmount,
-          progressPercent,
-          status: progressPercent >= 100 ? 'COMPLETED' : 'ACTIVE',
-        })
-        return
-      }
-      existing.amountRepaid += deductionAmount
-      existing.monthlyDeduction = Math.max(existing.monthlyDeduction, deductionAmount)
-      existing.outstandingBalance = Math.max(0, existing.amountIssued - existing.amountRepaid)
-      existing.progressPercent = Math.min(100, Math.round((existing.amountRepaid / Math.max(existing.amountIssued, 1)) * 100))
-      existing.status = existing.progressPercent >= 100 ? 'COMPLETED' : 'ACTIVE'
-    })
-
-    const myLoans = Array.from(aggregatedByLoan.values())
-
-    // Fetch my loan requests
-    const myLoanRequests = await prisma.loanRequest.findMany({
-      where: { companyId, staffId },
-      include: {
-        staff: { select: { firstName: true, lastName: true, email: true, department: true } },
-        approver: { select: { firstName: true, lastName: true, email: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    })
-
-    // Fetch my benefit requests
-    const myBenefitRequests = await prisma.benefitRequest.findMany({
-      where: { companyId, staffId },
-      include: {
-        staff: { select: { firstName: true, lastName: true, email: true, department: true } },
-        approver: { select: { firstName: true, lastName: true, email: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    })
-
-    // Fetch my benefit allocations
-    const myBenefitAllocations = await prisma.benefitAllocation.findMany({
-      where: { companyId, staffId },
-      include: {
-        staff: { select: { firstName: true, lastName: true, email: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    })
-
-    // Fetch company currency
-    const company = await prisma.company.findUnique({
-      where: { id: companyId },
-      select: { baseCurrency: true },
-    })
     const baseCurrency = company?.baseCurrency || 'NGN'
+
+    // Build myLoans from LoanRequest records (accurate principal, rate, tenure, monthly payment)
+    const myLoans = myLoanRequests.map((lr) => {
+      const P = Number(lr.requestedAmount)
+      const rate = Number(lr.interestRate ?? 0) / 100 / 12
+      const n = lr.tenureMonths ?? 12
+      const monthlyPayment =
+        Number(lr.monthlyRepayment ?? 0) ||
+        (rate > 0 ? (P * rate * Math.pow(1 + rate, n)) / (Math.pow(1 + rate, n) - 1) : P / n)
+      const startDate = lr.approvedAt ?? lr.createdAt
+      const monthsElapsed = Math.min(
+        n,
+        Math.max(0, Math.floor((Date.now() - new Date(startDate).getTime()) / (30.44 * 86400000)))
+      )
+      let balance = P
+      for (let i = 0; i < monthsElapsed; i++) {
+        const interest = balance * rate
+        balance = Math.max(0, balance - (monthlyPayment - interest))
+      }
+      const pctPaid = P > 0 ? Math.min(100, Math.round(((P - balance) / P) * 100)) : 0
+      const displayStatus =
+        lr.status === 'APPROVED' || lr.status === 'DISBURSED' ? 'ACTIVE'
+        : lr.status === 'REPAID' ? 'COMPLETED'
+        : lr.status === 'DEFAULTED' ? 'DEFAULTED'
+        : (lr.status as string)
+      return {
+        id: lr.id,
+        staffId: lr.staffId,
+        employeeName: `${lr.staff.firstName} ${lr.staff.lastName}`.trim(),
+        employeeEmail: lr.staff.email,
+        loanType: lr.loanType,
+        amountIssued: P,
+        amountRepaid: P - balance,
+        outstandingBalance: balance,
+        monthlyDeduction: monthlyPayment,
+        progressPercent: pctPaid,
+        status: displayStatus,
+      }
+    })
 
     // Map loan requests
     const loanRequests = myLoanRequests.map((lr) => ({
@@ -217,6 +176,8 @@ export async function GET(request: NextRequest) {
       reviewedAt: lr.approvedAt?.toISOString() || null,
       reviewerComment: lr.approvalComment || lr.rejectionReason || null,
       approverName: lr.approver ? `${lr.approver.firstName} ${lr.approver.lastName}`.trim() : null,
+      guarantorStatus: (lr as any).guarantorStatus || 'NOT_REQUIRED',
+      disbursedAt: (lr as any).disbursedAt?.toISOString() || null,
     }))
 
     // Map benefit requests

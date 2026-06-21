@@ -56,6 +56,34 @@ export async function resolveScopedCompanyIds(user: AuthUser): Promise<string[]>
 }
 
 /**
+ * Finds a staff member by email address scoped to a specific company.
+ * Used when an ADMIN/SUPER_ADMIN is operating in a selected company that
+ * differs from their home company.
+ */
+export async function findStaffByEmailAndCompany(email: string, companyId: string) {
+  try {
+    return await prisma.staffRecord.findFirst({
+      where: {
+        email: email.toLowerCase().trim(),
+        companyId,
+        isActive: true,
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        companyId: true,
+        role: true,
+      },
+    })
+  } catch (error) {
+    console.error('[findStaffByEmailAndCompany] Error finding staff:', error)
+    throw new Error('Failed to find staff record')
+  }
+}
+
+/**
  * Finds a staff member by email address
  * @param email - The staff email
  * @returns Staff record or null if not found

@@ -2530,12 +2530,9 @@ model DepartmentAuditLog {
 }
 
 // ==================== LOANS & BENEFITS MODELS (NEW) ====================
-enum LoanType {
-  PERSONAL_LOAN
-  EMERGENCY_LOAN
-  SALARY_ADVANCE
-  OTHER
-}
+// LoanType enum removed — loanType is now a free-form TEXT field so each
+// company can store their own loan product names (e.g. "Car Loan", "Staff Welfare")
+// without being constrained to a fixed enum list.
 
 enum LoanRequestStatus {
   PENDING
@@ -2559,7 +2556,7 @@ model LoanRequest {
   id                     String              @id @default(cuid())
   companyId              String
   staffId                String
-  loanType               LoanType            @default(PERSONAL_LOAN)
+  loanType               String              @default("OTHER")
   requestedAmount        Decimal             @db.Decimal(18, 2)
   approvedAmount         Decimal?            @db.Decimal(18, 2)
   tenureMonths           Int
@@ -2570,6 +2567,7 @@ model LoanRequest {
   approvedBy             String?
   approvedAt             DateTime?
   disbursedAt            DateTime?
+  disbursedBy            String?
   expectedRepaymentDate  DateTime?
   interestRate           Decimal             @default(0) @db.Decimal(5, 2)
   monthlyRepayment       Decimal?            @db.Decimal(18, 2)
@@ -2577,6 +2575,12 @@ model LoanRequest {
   signature              String?             @db.Text
   signatureType          String?             @db.VarChar(20)
   signedAt               DateTime?
+  guarantorStaffId       String?
+  guarantorStatus        String              @default("NOT_REQUIRED")
+  guarantorToken         String?             @unique
+  guarantorTokenExpiry   DateTime?
+  guarantorRespondedAt   DateTime?
+  guarantorDeclineReason String?
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
   createdBy              String

@@ -336,17 +336,80 @@ export async function GET(request: NextRequest) {
 
     const loans = Array.from(aggregatedByLoan.values())
 
-    const totalIssued = loans.reduce((sum, loan) => sum + loan.amountIssued, 0)
-    const totalOutstanding = loans.reduce((sum, loan) => sum + loan.outstandingBalance, 0)
-    const totalRepaid = loans.reduce((sum, loan) => sum + loan.amountRepaid, 0)
+    // KPIs computed from LoanRequest table (accurate principal, rate, tenure, status)
+    const approvedLoanRequests = loanRequestsData.filter((lr) =>
+      ['APPROVED', 'DISBURSED'].includes(lr.status as string)
+    )
 
-    const activeLoans = loans.filter((loan) => loan.status === 'ACTIVE').length
-    const overdueLoans = loans.filter((loan) => loan.status === 'OVERDUE').length
-    const defaultedLoans = loans.filter((loan) => loan.status === 'DEFAULTED').length
+    const activeLoans = approvedLoanRequests.length
+    const defaultedLoans = loanRequestsData.filter((lr) => lr.status === 'DEFAULTED').length
+    const overdueLoans = defaultedLoans // LoanRequest has no OVERDUE status yet; use DEFAULTED
+
+    const totalIssued = approvedLoanRequests.reduce((s, lr) => s + Number(lr.requestedAmount), 0)
+
+    // Outstanding balance: amortize each loan from its approval date
+    const totalOutstanding = approvedLoanRequests.reduce((s, lr) => {
+      const P = Number(lr.requestedAmount)
+      const rate = Number(lr.interestRate ?? 0) / 100 / 12
+      const n = lr.tenureMonths ?? 12
+      const monthly =
+        Number(lr.monthlyRepayment ?? 0) ||
+        (rate > 0 ? (P * rate * Math.pow(1 + rate, n)) / (Math.pow(1 + rate, n) - 1) : P / n)
+      const startDate = lr.approvedAt ?? lr.createdAt
+      const monthsElapsed = Math.min(n, Math.max(0, Math.floor((Date.now() - new Date(startDate).getTime()) / (30.44 * 86400000))))
+      let balance = P
+      for (let i = 0; i < monthsElapsed; i++) {
+        const interest = balance * rate
+        balance = Math.max(0, balance - (monthly - interest))
+      }
+      return s + balance
+    }, 0)
+
+    const totalMonthlyRepayment = approvedLoanRequests.reduce(
+      (s, lr) => s + Number(lr.monthlyRepayment ?? 0), 0
+    )
+
+    const totalRepaid = totalIssued - totalOutstanding
     const recoveryRatePercent = totalIssued > 0 ? Number(((totalRepaid / totalIssued) * 100).toFixed(1)) : 0
 
+    // myLoans for STAFF personal scope: derive from LoanRequest (accurate, same as my-loans endpoint)
     const myLoans = (user.role === 'STAFF' || personalScope)
-      ? loans.filter((loan) => loan.employeeEmail === user.email)
+      ? loanRequestsData
+          .filter((lr) => lr.staff.email === user.email)
+          .map((lr) => {
+            const P = Number(lr.requestedAmount)
+            const rate = Number(lr.interestRate ?? 0) / 100 / 12
+            const n = lr.tenureMonths ?? 12
+            const monthly =
+              Number(lr.monthlyRepayment ?? 0) ||
+              (rate > 0 ? (P * rate * Math.pow(1 + rate, n)) / (Math.pow(1 + rate, n) - 1) : P / n)
+            const startDate = lr.approvedAt ?? lr.createdAt
+            const monthsElapsed = Math.min(n, Math.max(0, Math.floor((Date.now() - new Date(startDate).getTime()) / (30.44 * 86400000))))
+            let balance = P
+            for (let i = 0; i < monthsElapsed; i++) {
+              const interest = balance * rate
+              balance = Math.max(0, balance - (monthly - interest))
+            }
+            const pctPaid = P > 0 ? Math.min(100, Math.round(((P - balance) / P) * 100)) : 0
+            const displayStatus =
+              lr.status === 'APPROVED' || lr.status === 'DISBURSED' ? 'ACTIVE'
+              : lr.status === 'REPAID' ? 'COMPLETED'
+              : lr.status === 'DEFAULTED' ? 'DEFAULTED'
+              : (lr.status as string)
+            return {
+              id: lr.id,
+              staffId: lr.staffId,
+              employeeName: `${lr.staff.firstName} ${lr.staff.lastName}`.trim(),
+              employeeEmail: lr.staff.email,
+              loanType: lr.loanType,
+              amountIssued: P,
+              amountRepaid: P - balance,
+              outstandingBalance: balance,
+              monthlyDeduction: monthly,
+              progressPercent: pctPaid,
+              status: displayStatus,
+            }
+          })
       : []
 
     // Fetch employee salary for STAFF users — sum of latest month's payrolls
@@ -379,71 +442,40 @@ export async function GET(request: NextRequest) {
               month: latestPayPeriod.month,
             },
             select: {
+              netSalary: true,
               grossPay: true,
-              basicSalary: true,
-              housing: true,
-              transport: true,
-              dressing: true,
-              leaveAllowance: true,
-              entertainment: true,
-              utility: true,
-              otherAllowance: true,
-              communicationAllowance: true,
-              transportationAllowance: true,
-              overtimeIncome: true,
               customFields: true,
               templateType: true,
             },
           })
 
           if (monthPayrolls.length > 0) {
-            let totalGross = 0
-            let totalBasePay = 0
+            let totalNet = 0
 
             for (const p of monthPayrolls) {
               if (p.templateType && p.templateType !== 'ISURF_STANDARD' && p.customFields) {
-                // Dynamic template — extract from customFields JSON
                 const cf = p.customFields as Record<string, any>
-                let earnings = 0
-                let basePay = 0
+                let customNet = 0
                 for (const key of Object.keys(cf)) {
                   const field = cf[key]
                   if (field && typeof field === 'object' && 'value' in field) {
                     const val = Number(field.value)
-                    if (!isNaN(val)) {
-                      if (field.section === 'EARNINGS' || key === 'base_pay' || key.includes('salary') || key.includes('bonus')) {
-                        earnings += val
-                      }
-                      if (key === 'base_pay' || key.includes('basic_salary')) {
-                        basePay = val
-                      }
+                    if (!isNaN(val) && val > 0 &&
+                      (field.section === 'NET' || key === 'net_salary' || key === 'take_home' ||
+                        key === 'net_pay' || key.includes('net_salary') || key.includes('take_home'))) {
+                      customNet = val
+                      break
                     }
                   }
                 }
-                totalGross += (earnings || Number(p.grossPay || 0))
-                totalBasePay += (basePay || Number(p.basicSalary || 0))
+                totalNet += customNet || Number(p.netSalary || p.grossPay || 0)
               } else {
-                // System template — use named columns
-                const gross =
-                  Number(p.grossPay || 0) ||
-                  Number(p.basicSalary || 0) +
-                  Number(p.housing || 0) +
-                  Number(p.transport || 0) +
-                  Number(p.dressing || 0) +
-                  Number(p.leaveAllowance || 0) +
-                  Number(p.entertainment || 0) +
-                  Number(p.utility || 0) +
-                  Number(p.otherAllowance || 0) +
-                  Number(p.communicationAllowance || 0) +
-                  Number(p.transportationAllowance || 0) +
-                  Number(p.overtimeIncome || 0)
-                totalGross += gross
-                totalBasePay += Number(p.basicSalary || 0)
+                totalNet += Number(p.netSalary || 0)
               }
             }
 
-            employeeSalary = totalGross
-            employeeNetSalary = totalBasePay
+            employeeSalary = totalNet
+            employeeNetSalary = totalNet
           }
         }
       }
@@ -451,40 +483,32 @@ export async function GET(request: NextRequest) {
 
     const isPersonalScope = personalScope || user.role === 'STAFF'
 
+    // Helper — map a LoanRequest DB record to the API shape
+    const mapLoanRequest = (lr: (typeof loanRequestsData)[number]) => ({
+      id: lr.id,
+      requestType: 'LOAN' as const,
+      status: lr.status as any,
+      employeeName: `${lr.staff.firstName} ${lr.staff.lastName}`.trim(),
+      employeeEmail: lr.staff.email,
+      title: `${lr.loanType} request`,
+      amount: Number(lr.requestedAmount),
+      tenureMonths: lr.tenureMonths,
+      interestRate: Number(lr.interestRate ?? 0),
+      monthlyRepayment: Number(lr.monthlyRepayment ?? 0),
+      createdAt: lr.createdAt.toISOString(),
+      reviewedAt: lr.approvedAt?.toISOString() || null,
+      reviewerComment: lr.approvalComment || lr.rejectionReason || null,
+      approverName: lr.approver ? `${lr.approver.firstName} ${lr.approver.lastName}`.trim() : null,
+      guarantorStatus: (lr as any).guarantorStatus || 'NOT_REQUIRED',
+      guarantorStaffId: (lr as any).guarantorStaffId || null,
+      disbursedAt: (lr as any).disbursedAt?.toISOString() || null,
+      disbursedBy: (lr as any).disbursedBy || null,
+    })
+
     // Process loan requests from new LoanRequest model
     const loanRequests = isPersonalScope
-      ? loanRequestsData
-          .filter((lr) => lr.staff.email === user.email)
-          .map((lr) => ({
-            id: lr.id,
-            requestType: 'LOAN' as const,
-            status: lr.status as any,
-            employeeName: `${lr.staff.firstName} ${lr.staff.lastName}`.trim(),
-            employeeEmail: lr.staff.email,
-            title: `${lr.loanType} request`,
-            amount: Number(lr.requestedAmount),
-            tenureMonths: lr.tenureMonths,
-            interestRate: Number(lr.interestRate || 0),
-            createdAt: lr.createdAt.toISOString(),
-            reviewedAt: lr.approvedAt?.toISOString() || null,
-            reviewerComment: lr.approvalComment || lr.rejectionReason || null,
-            approverName: lr.approver ? `${lr.approver.firstName} ${lr.approver.lastName}`.trim() : null,
-          }))
-      : loanRequestsData.map((lr) => ({
-        id: lr.id,
-        requestType: 'LOAN' as const,
-        status: lr.status as any,
-        employeeName: `${lr.staff.firstName} ${lr.staff.lastName}`.trim(),
-        employeeEmail: lr.staff.email,
-        title: `${lr.loanType} request`,
-        amount: Number(lr.requestedAmount),
-        tenureMonths: lr.tenureMonths,
-        interestRate: Number(lr.interestRate || 0),
-        createdAt: lr.createdAt.toISOString(),
-        reviewedAt: lr.approvedAt?.toISOString() || null,
-        reviewerComment: lr.approvalComment || lr.rejectionReason || null,
-        approverName: lr.approver ? `${lr.approver.firstName} ${lr.approver.lastName}`.trim() : null,
-      }))
+      ? loanRequestsData.filter((lr) => lr.staff.email === user.email).map(mapLoanRequest)
+      : loanRequestsData.map(mapLoanRequest)
 
     // Process benefit requests from new BenefitRequest model
     const benefitRequests = isPersonalScope
@@ -626,6 +650,7 @@ export async function GET(request: NextRequest) {
           kpis: {
             totalLoansIssued: totalIssued,
             totalOutstanding,
+            totalMonthlyRepayment,
             activeLoans,
             overdueLoans,
             defaultedLoans,

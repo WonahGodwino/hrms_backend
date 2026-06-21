@@ -9,6 +9,70 @@ export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
+// Returns the sum of take-home (net) salary from the most recent processed payroll month.
+// If the staff member has multiple payroll rows in the same month, they are summed.
+async function getStaffNetSalary(staffId: string): Promise<number> {
+  const latestPeriod = await prisma.payroll.findFirst({
+    where: { staffRecordId: staffId, status: 'PROCESSED' },
+    orderBy: [{ year: 'desc' }, { month: 'desc' }],
+    select: { year: true, month: true },
+  })
+
+  if (!latestPeriod) return 0
+
+  const records = await prisma.payroll.findMany({
+    where: {
+      staffRecordId: staffId,
+      status: 'PROCESSED',
+      year: latestPeriod.year,
+      month: latestPeriod.month,
+    },
+    select: {
+      netSalary: true,
+      grossPay: true,
+      deductions: true,
+      payee: true,
+      pensionDeduction: true,
+      customFields: true,
+      templateType: true,
+    },
+  })
+
+  let totalNet = 0
+  for (const p of records) {
+    if (p.templateType && p.templateType !== 'ISURF_STANDARD' && p.customFields) {
+      // Custom template — look for net/take-home in customFields first
+      const cf = p.customFields as Record<string, any>
+      let customNet = 0
+      for (const key of Object.keys(cf)) {
+        const field = cf[key]
+        if (field && typeof field === 'object' && 'value' in field) {
+          const val = Number(field.value)
+          if (
+            !isNaN(val) &&
+            val > 0 &&
+            (field.section === 'NET' ||
+              key === 'net_salary' ||
+              key === 'take_home' ||
+              key === 'net_pay' ||
+              key.includes('net_salary') ||
+              key.includes('take_home'))
+          ) {
+            customNet = val
+            break
+          }
+        }
+      }
+      // Fall back to the standard netSalary column if the custom field wasn't found
+      totalNet += customNet || Number(p.netSalary || 0)
+    } else {
+      totalNet += Number(p.netSalary || 0)
+    }
+  }
+
+  return totalNet
+}
+
 export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
   try {
@@ -16,7 +80,7 @@ export async function GET(request: NextRequest) {
     if (!authHeader) return withCors(ApiResponse.error('Authorization header missing', 401), origin)
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR', 'STAFF'])
+    const user = requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER', 'STAFF'])
 
     const { searchParams } = new URL(request.url)
     const requestedCompanyId = searchParams.get('companyId')
@@ -25,98 +89,94 @@ export async function GET(request: NextRequest) {
     const scopedCompanyIds = await resolveScopedCompanyIds(user)
     if (scopedCompanyIds.length === 0) return withCors(ApiResponse.success([], 'No company access'), origin)
 
-    // Filter to specific company if requested (for SUPER_ADMIN)
     let companyFilter = scopedCompanyIds
     if (requestedCompanyId && scopedCompanyIds.includes(requestedCompanyId)) {
       companyFilter = [requestedCompanyId]
     }
 
-    const where: any = {
-      companyId: { in: companyFilter },
-    }
-    if (!showInactive && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN' && user.role !== 'HR') {
+    const where: any = { companyId: { in: companyFilter } }
+    // Non-admin roles only see active policies unless showInactive is explicitly requested
+    if (!showInactive && !['ADMIN', 'SUPER_ADMIN', 'HR'].includes(user.role)) {
       where.isActive = true
     }
 
-    const policies = await prisma.loanPolicy.findMany({
-      where,
-      orderBy: { name: 'asc' },
+    const policies = await prisma.loanPolicy.findMany({ where, orderBy: { name: 'asc' } })
+
+    // ── Eligibility computation for the requesting user ──
+    // Applies to ALL roles. Each user sees their own eligibility against the
+    // company policies returned.  SUPER_ADMINs without a staff record get no
+    // eligibility data (admin-only scenario).
+    let eligibilityData: {
+      netSalary: number
+      monthsEmployed: number
+      monthlyDebtPayment: number
+    } | null = null
+
+    const staffRecord = await prisma.staffRecord.findFirst({
+      where: { email: user.email, isActive: true },
+      select: { id: true, companyId: true, createdAt: true },
     })
 
-    // For STAFF — compute eligibility against their salary
-    let eligibilityData: any = {}
-    if (user.role === 'STAFF') {
-      const staffRecord = await prisma.staffRecord.findFirst({
-        where: { email: user.email, isActive: true },
-        select: { id: true, companyId: true, createdAt: true },
+    if (staffRecord) {
+      const netSalary = await getStaffNetSalary(staffRecord.id)
+
+      const monthsEmployed = Math.floor(
+        (Date.now() - new Date(staffRecord.createdAt).getTime()) / (1000 * 60 * 60 * 24 * 30.44)
+      )
+
+      // Sum all active loan/advance deduction entries for this staff member
+      const activeDeductions = await prisma.deductionEntry.aggregate({
+        where: {
+          staffId: staffRecord.id,
+          deductionType: { in: ['LOAN', 'SALARY_ADVANCE'] },
+        },
+        _sum: { amount: true },
       })
-      if (staffRecord) {
-        const salary = await prisma.employeeSalary.findFirst({
-          where: { staffId: staffRecord.id, isActive: true },
-          select: {
-            basicSalary: true,
-            housingAllowance: true,
-            transportAllowance: true,
-            dressingAllowance: true,
-            leaveAllowance: true,
-            entertainmentAllowance: true,
-            utilityAllowance: true,
-            otherAllowances: true,
-          },
-        })
-        const employeeSalary = salary
-          ? Number(salary.basicSalary || 0)
-            + Number(salary.housingAllowance || 0)
-            + Number(salary.transportAllowance || 0)
-            + Number(salary.dressingAllowance || 0)
-            + Number(salary.leaveAllowance || 0)
-            + Number(salary.entertainmentAllowance || 0)
-            + Number(salary.utilityAllowance || 0)
-            + Number(salary.otherAllowances || 0)
-          : 0
-        const monthsEmployed = Math.floor((Date.now() - new Date(staffRecord.createdAt).getTime()) / (1000 * 60 * 60 * 24 * 30.44))
+      const monthlyDebtPayment = Number(activeDeductions._sum.amount || 0)
 
-        // Check active loan repayment obligations
-        const activeDeductions = await prisma.deductionEntry.aggregate({
-          where: {
-            staffId: staffRecord.id,
-            deductionType: { in: ['LOAN', 'SALARY_ADVANCE'] },
-          },
-          _sum: { amount: true },
-        })
-        const monthlyDebtPayment = Number(activeDeductions._sum.amount || 0)
-
-        eligibilityData = {
-          employeeSalary,
-          monthsEmployed,
-          monthlyDebtPayment,
-        }
-      }
+      eligibilityData = { netSalary, monthsEmployed, monthlyDebtPayment }
     }
 
-    const result = policies.map(policy => {
+    const result = policies.map((policy) => {
       const item: any = { ...policy }
-      if (user.role === 'STAFF' && eligibilityData.employeeSalary) {
-        const ed = eligibilityData
-        // Check minimum service months
-        item.isEligible = ed.monthsEmployed >= policy.minServiceMonths
 
-        // Calculate max borrowing based on salary * multiplier
-        const maxBySalary = Math.round(ed.employeeSalary * policy.salaryMultiplier)
-        item.maxBorrowable = Math.min(maxBySalary, policy.maxAmount)
+      if (!eligibilityData) return item // no staff record — return policy as-is
 
-        // Check debt ratio
-        const newMonthlyPayment = item.maxBorrowable * (policy.interestRatePercent / 100) / 12 + item.maxBorrowable / policy.maxDurationMonths
-        const totalDebtRatio = ((ed.monthlyDebtPayment + newMonthlyPayment) / ed.employeeSalary) * 100
-        if (totalDebtRatio > policy.maxDebtRatioPercent) {
-          item.isEligible = false
-          item.eligibilityReason = `Your current debt-to-income ratio (${totalDebtRatio.toFixed(0)}%) exceeds the maximum allowed (${policy.maxDebtRatioPercent}%)`
-        }
+      const { netSalary, monthsEmployed, monthlyDebtPayment } = eligibilityData
 
-        if (!item.isEligible && !item.eligibilityReason) {
-          item.eligibilityReason = `Requires ${policy.minServiceMonths} months of service (you have ${ed.monthsEmployed})`
-        }
+      if (netSalary <= 0) {
+        // Staff record exists but no processed payroll found
+        item.isEligible = false
+        item.eligibilityReason = 'No salary data found. Please contact HR.'
+        item.maxBorrowable = 0
+        return item
       }
+
+      // Tenure gate
+      item.isEligible = monthsEmployed >= (policy.minServiceMonths ?? 0)
+
+      // Max borrowable = min(netSalary × multiplier, policy hard cap)
+      const maxBySalary = Math.round(netSalary * (policy.salaryMultiplier ?? 1))
+      item.maxBorrowable = Math.min(maxBySalary, policy.maxAmount ?? maxBySalary)
+
+      // Debt-to-income ratio check using the max borrowable as the projected amount
+      const monthlyRate = (policy.interestRatePercent ?? 0) / 100 / 12
+      const n = policy.maxDurationMonths ?? 12
+      const newMonthlyPayment =
+        monthlyRate > 0
+          ? (item.maxBorrowable * monthlyRate * Math.pow(1 + monthlyRate, n)) /
+            (Math.pow(1 + monthlyRate, n) - 1)
+          : item.maxBorrowable / n
+
+      const totalDebtRatio = ((monthlyDebtPayment + newMonthlyPayment) / netSalary) * 100
+
+      if (totalDebtRatio > (policy.maxDebtRatioPercent ?? 100)) {
+        item.isEligible = false
+        item.eligibilityReason = `Debt-to-income ratio (${totalDebtRatio.toFixed(0)}%) exceeds the maximum allowed (${policy.maxDebtRatioPercent}%)`
+      } else if (!item.isEligible) {
+        item.eligibilityReason = `Requires ${policy.minServiceMonths} months of service (you have ${monthsEmployed})`
+      }
+
       return item
     })
 
@@ -157,7 +217,6 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('companyId and name are required', 400), origin)
     }
 
-    // Verify company access
     const scopedCompanyIds = await resolveScopedCompanyIds(user)
     if (!scopedCompanyIds.includes(companyId)) {
       return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
@@ -210,7 +269,6 @@ export async function PUT(request: NextRequest) {
       return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
     }
 
-    // Sanitize empty strings → null for nullable numeric fields
     const cleanUpdates: any = { ...updates }
     const nullableNumericFields = ['guarantorThresholdAmount', 'maxAmount', 'minServiceMonths']
     for (const field of nullableNumericFields) {
@@ -222,10 +280,7 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    const policy = await prisma.loanPolicy.update({
-      where: { id },
-      data: cleanUpdates,
-    })
+    const policy = await prisma.loanPolicy.update({ where: { id }, data: cleanUpdates })
 
     return withCors(ApiResponse.success(policy, 'Loan policy updated successfully'), origin)
   } catch (err) {

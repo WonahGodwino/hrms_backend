@@ -62,6 +62,7 @@ export async function PATCH(
         companyId: true,
         staffId: true,
         status: true,
+        guarantorStatus: true,
         staff: {
           select: {
             firstName: true,
@@ -125,6 +126,23 @@ export async function PATCH(
         ApiResponse.error(`${recordType} request has already been reviewed (status: ${record.status})`, 400),
         origin
       )
+    }
+
+    // Block approval of loans that are awaiting guarantor acceptance
+    if (action === 'APPROVE' && loanRequest) {
+      const gs = (loanRequest as any).guarantorStatus as string | undefined
+      if (gs === 'PENDING') {
+        return withCors(
+          ApiResponse.error('This loan requires guarantor acceptance before it can be approved. The guarantor has been notified via email.', 400),
+          origin
+        )
+      }
+      if (gs === 'DECLINED') {
+        return withCors(
+          ApiResponse.error('The guarantor has declined this loan request. The applicant must update their guarantor before approval can proceed.', 400),
+          origin
+        )
+      }
     }
 
     // Determine next status based on action

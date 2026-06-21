@@ -65,3 +65,5 @@ src/**/*.zip
 # Test and sample files that shouldn't be tracked
 *.tmp
 *.temp
+
+ISURFHR_Project_Summary
