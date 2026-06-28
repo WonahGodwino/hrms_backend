@@ -60,11 +60,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return String(row.getCell(c).value ?? '').trim()
     }
 
-    // Load active staff
-    const allStaff = await (prisma as any).phedStaff.findMany({
-      where:   { companyId: period.companyId, isActive: true },
-      include: { region: true, grade: { select: { name: true, code: true } } },
-    })
+    // Load active staff + cooperative/deduction-liability reference lists (to match column headers)
+    const [allStaff, cooperatives, deductionLiabilities] = await Promise.all([
+      (prisma as any).phedStaff.findMany({
+        where:   { companyId: period.companyId, isActive: true },
+        include: { region: true, grade: { select: { name: true, code: true } } },
+      }),
+      (prisma as any).phedCooperative.findMany({
+        where: { companyId: period.companyId, isActive: true }, orderBy: { name: 'asc' },
+      }),
+      (prisma as any).phedDeductionLiability.findMany({
+        where: { companyId: period.companyId, isActive: true }, orderBy: { name: 'asc' },
+      }),
+    ])
     const staffByCode = new Map<string, any>(allStaff.map((s: any) => [s.staffId.toLowerCase(), s]))
 
     const saved:  any[]    = []
@@ -107,16 +115,26 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         domesticLoan:     num(row, 'DOMESTIC LOAN'),
       }
 
-      saved.push({ staff, salary, advances })
+      // Read per-cooperative and per-deduction-liability amounts from their named columns.
+      // Union deductions are NOT in the template — they are computed by the payroll engine
+      // as gross × union percentage and do not come from HR input.
+      const cooperativeDeductions = cooperatives.reduce(
+        (sum: number, c: any) => sum + num(row, c.name), 0
+      )
+      const deductionLiabilityTotal = deductionLiabilities.reduce(
+        (sum: number, d: any) => sum + num(row, d.name), 0
+      )
+
+      saved.push({ staff, salary, advances, cooperativeDeductions, deductionLiabilityTotal })
     })
 
     if (saved.length === 0)
       return withCors(ApiResponse.error('No valid staff rows found in the uploaded template', 400), origin)
 
-    // Persist salary inputs to PhedComputedPayroll (computed fields = 0 until /compute is run)
-    // and advances to PhedStaffPeriodAdvance
+    // Persist salary inputs + cooperative/union/deduction amounts to PhedComputedPayroll.
+    // Other computed fields (PAYE, pension, net, etc.) are set to 0 and recalculated by /compute.
     await Promise.all([
-      ...saved.map(({ staff, salary, advances }) =>
+      ...saved.map(({ staff, salary, advances, cooperativeDeductions, deductionLiabilityTotal }) =>
         (prisma as any).phedComputedPayroll.upsert({
           where:  { payPeriodId_staffId: { payPeriodId: params.id, staffId: staff.id } },
           create: {
@@ -132,20 +150,24 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
             unit:          staff.unit        ?? '',
             regionName:    staff.region?.name ?? '',
             ...salary,
-            voluntaryPension: advances.voluntaryPension,
-            insurance:        advances.insurance,
-            cashAdvanced:     advances.cashAdvanced,
-            loan:             advances.loan,
-            domesticLoan:     advances.domesticLoan,
+            voluntaryPension:      advances.voluntaryPension,
+            insurance:             advances.insurance,
+            cashAdvanced:          advances.cashAdvanced,
+            loan:                  advances.loan,
+            domesticLoan:          advances.domesticLoan,
+            cooperativeDeductions,
+            deductionLiabilities:  deductionLiabilityTotal,
           },
           update: {
             ...salary,
-            voluntaryPension: advances.voluntaryPension,
-            insurance:        advances.insurance,
-            cashAdvanced:     advances.cashAdvanced,
-            loan:             advances.loan,
-            domesticLoan:     advances.domesticLoan,
-            // Reset computed fields — they'll be recalculated when /compute is called
+            voluntaryPension:      advances.voluntaryPension,
+            insurance:             advances.insurance,
+            cashAdvanced:          advances.cashAdvanced,
+            loan:                  advances.loan,
+            domesticLoan:          advances.domesticLoan,
+            cooperativeDeductions,
+            deductionLiabilities:  deductionLiabilityTotal,
+            // Reset engine-computed fields — recalculated by /compute
             grossSalary:            0,
             overtimeEarnings:       0,
             pensionEmployee:        0,
@@ -159,8 +181,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
             annualPAYE:             0,
             monthlyPAYE:            0,
             unionDeductions:        0,
-            cooperativeDeductions:  0,
-            deductionLiabilities:   0,
             otherDeductions:        0,
             totalDeductions:        0,
             netSalary:              0,

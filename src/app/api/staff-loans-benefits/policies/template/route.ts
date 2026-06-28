@@ -62,15 +62,32 @@ export async function GET(request: NextRequest) {
     })
     loanSheet.getRow(1).height = 36
 
-    // Sample data rows
+    // Sample data rows — booleans written as actual Excel booleans so
+    // Excel displays TRUE/FALSE natively and the parser receives JS booleans.
     const sampleLoans = [
-      ['Personal Loan', 5, 18, 2500000, 3, 40, 'false', '', 'true', 'false', 1.0, 'true', 'Standard personal loan for confirmed staff'],
-      ['Emergency Loan', 2, 6, 750000, 1, 35, 'false', '', 'true', 'false', 0.5, 'true', 'Fast-track approval for urgent needs'],
-      ['Asset Loan', 8, 24, 5000000, 6, 40, 'true', '1000000', 'true', 'true', 1.5, 'true', 'Asset-backed loan with guarantor requirement'],
+      ['Personal Loan',  5, 18, 2500000, 3, 40, false, null,    true,  false, 1.0, true,  'Standard personal loan for confirmed staff'],
+      ['Emergency Loan', 2, 6,  750000,  1, 35, false, null,    true,  false, 0.5, true,  'Fast-track approval for urgent needs'],
+      ['Asset Loan',     8, 24, 5000000, 6, 40, true,  1000000, true,  true,  1.5, true,  'Asset-backed loan with guarantor requirement'],
     ]
     sampleLoans.forEach((row) => {
       loanSheet.addRow(row)
     })
+
+    // Add TRUE/FALSE dropdown validation to all boolean columns (7, 9, 10, 12)
+    // Covers rows 2–200 so newly added rows also get the dropdown.
+    const boolColumns = [7, 9, 10, 12]
+    for (let r = 2; r <= 200; r++) {
+      boolColumns.forEach((col) => {
+        loanSheet.getRow(r).getCell(col).dataValidation = {
+          type: 'list',
+          allowBlank: true,
+          formulae: ['"TRUE,FALSE"'],
+          showErrorMessage: true,
+          errorTitle: 'Invalid value',
+          error: 'Please select TRUE or FALSE from the dropdown.',
+        }
+      })
+    }
 
     // ======= BENEFIT TYPES Sheet =======
     const benefitSheet = workbook.addWorksheet('Benefit Types', {
@@ -96,14 +113,26 @@ export async function GET(request: NextRequest) {
     benefitSheet.getRow(1).height = 36
 
     const sampleBenefits = [
-      ['Comprehensive Health Coverage', 'Health', 'Primary staff and spouse cover', 500000, 'Up to ₦500,000 annual cover', '{"minServiceMonths":3}', 'true'],
-      ['Transportation Support', 'Financial', 'Monthly transportation support', 35000, '₦35,000 monthly support', '{"minServiceMonths":0}', 'true'],
-      ['Professional Certification', 'Learning', 'Reimbursement for certifications', 200000, 'Up to ₦200,000 per year', '{"minServiceMonths":6}', 'true'],
-      ['Wellness Allowance', 'Wellness', 'Quarterly wellness stipend', 25000, '₦25,000 quarterly', '{"minServiceMonths":0}', 'true'],
+      ['Comprehensive Health Coverage', 'Health',     'Primary staff and spouse cover',     500000, 'Up to ₦500,000 annual cover', '{"minServiceMonths":3}', true],
+      ['Transportation Support',        'Financial',  'Monthly transportation support',       35000, '₦35,000 monthly support',      '{"minServiceMonths":0}', true],
+      ['Professional Certification',    'Learning',   'Reimbursement for certifications',    200000, 'Up to ₦200,000 per year',     '{"minServiceMonths":6}', true],
+      ['Wellness Allowance',            'Wellness',   'Quarterly wellness stipend',           25000, '₦25,000 quarterly',            '{"minServiceMonths":0}', true],
     ]
     sampleBenefits.forEach((row) => {
       benefitSheet.addRow(row)
     })
+
+    // Dropdown validation for Active column (col 7) in Benefit Types sheet
+    for (let r = 2; r <= 200; r++) {
+      benefitSheet.getRow(r).getCell(7).dataValidation = {
+        type: 'list',
+        allowBlank: true,
+        formulae: ['"TRUE,FALSE"'],
+        showErrorMessage: true,
+        errorTitle: 'Invalid value',
+        error: 'Please select TRUE or FALSE from the dropdown.',
+      }
+    }
 
     // ======= INSTRUCTIONS Sheet =======
     const instructionSheet = workbook.addWorksheet('Instructions', {
@@ -120,9 +149,9 @@ export async function GET(request: NextRequest) {
       ['Loan Types - Max Amount (₦)', 'Maximum loan amount in Naira. Default: 500000'],
       ['Loan Types - Min Service (Months)', 'Minimum months of employment required. Default: 3'],
       ['Loan Types - Max Debt Ratio (%)', 'Maximum percentage of salary that can go to debt. Default: 40'],
-      ['Loan Types - Requires Guarantor', '"true" or "false". Default: false'],
-      ['Loan Types - Guarantor Must Be Active In Company', '"true" or "false". Whether guarantor must be an active employee in the same company. Default: true'],
-      ['Loan Types - Guarantor Must Not Have Active Loan', '"true" or "false". If true, guarantor must not have any active loan. Default: false'],
+      ['Loan Types - Requires Guarantor', 'Select TRUE or FALSE from the dropdown. Default: FALSE'],
+      ['Loan Types - Guarantor Must Be Active In Company', 'Select TRUE or FALSE. Whether guarantor must be an active employee in the same company. Default: TRUE'],
+      ['Loan Types - Guarantor Must Not Have Active Loan', 'Select TRUE or FALSE. If TRUE, guarantor must not have any active loan. Default: FALSE'],
       ['Loan Types - Salary Multiplier', 'Multiplier on gross salary for max borrowable. Default: 1.0'],
       ['Benefit Types - Category', 'Must be one of: Health, Financial, Learning, Wellness'],
       ['Benefit Types - Eligibility Rule', 'JSON object e.g. {"minServiceMonths":3}. Leave blank for open eligibility.'],

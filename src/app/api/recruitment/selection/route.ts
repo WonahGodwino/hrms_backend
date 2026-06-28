@@ -170,6 +170,15 @@ export async function POST(request: NextRequest) {
       };
     }
 
+    // Fetch the SUPER_ADMIN-configured token cost rate (falls back to default)
+    const tokenRateConfig = await prisma.tokenCostConfig.findFirst({
+      where: { isActive: true },
+      select: { tokensPerUnit: true, costPerUnit: true, providerCostPerUnit: true },
+    })
+    const rateTokensPerUnit   = tokenRateConfig?.tokensPerUnit       ?? 1000
+    const rateCostPerUnit     = tokenRateConfig?.costPerUnit         ?? 0.30  // billed to tenant
+    const rateProviderPerUnit = tokenRateConfig?.providerCostPerUnit ?? 0.015  // our actual cost
+
     const reviewResults: ReviewResult[] = []
     const shortlistedCandidates: ShortlistedCandidate[] = []
     let aiServiceUsed = 'none'
@@ -252,17 +261,55 @@ export async function POST(request: NextRequest) {
             aiServiceUsed = aiService
             aiAnalysisUsed = true
             
-            // Track AI usage
+            // Compute cost using the SUPER_ADMIN-configured token rate
             aiTokensUsed = estimateTokens(jobDescription.length + cvText.length)
-            const cost = openaiUsageTracker.recordUsage(
-              aiTokensUsed, 
+            const cost = parseFloat(
+              ((aiTokensUsed / rateTokensPerUnit) * rateCostPerUnit).toFixed(6)
+            )
+            // Our actual provider cost for the same tokens (for profit reporting)
+            const actualCost = parseFloat(
+              ((aiTokensUsed / rateTokensPerUnit) * rateProviderPerUnit).toFixed(6)
+            )
+
+            // Track in memory (for within-session banner) using the same cost
+            openaiUsageTracker.recordUsageWithCost(
+              aiTokensUsed,
+              cost,
               aiOptions.model || 'gpt-4-turbo-preview',
               'cv-review',
               user.companyId,
               user.userId,
               application.id
             )
-            
+
+            // Persist to ai_usage_logs so records survive server restarts
+            prisma.aIUsageLog.create({
+              data: {
+                companyId:     user.companyId as string,
+                applicationId: application.id,
+                service:       aiService,
+                model:         aiOptions.model || 'gpt-4-turbo-preview',
+                tokensUsed:    aiTokensUsed,
+                cost,
+                actualCost,
+                endpoint:      'cv-review',
+                inputLength:   jobDescription.length,
+                outputLength:  cvText.length,
+                metadata: {
+                  jobId:        job.id,
+                  userId:       user.userId,
+                  strictness,
+                  rateSnapshot: {
+                    tokensPerUnit:       rateTokensPerUnit,
+                    costPerUnit:         rateCostPerUnit,
+                    providerCostPerUnit: rateProviderPerUnit,
+                  },
+                },
+              },
+            }).catch((dbErr: any) =>
+              console.error('Failed to persist AI usage log:', dbErr.message)
+            )
+
             jobEstimatedCost += cost
             totalTokensUsed += aiTokensUsed
             totalEstimatedCost += cost
@@ -411,8 +458,11 @@ export async function POST(request: NextRequest) {
           }
         })
 
-        // Auto-shortlist if enabled and above threshold
-        if (autoShortlist && matchResult.overallScore >= threshold) {
+        const meetsThreshold = matchResult.overallScore >= threshold
+
+        // Only mutate application status when auto-shortlisting is enabled.
+        // The candidate is still surfaced in the response below regardless.
+        if (autoShortlist && meetsThreshold) {
           // Use camelCase for Prisma model
           await prisma.applicationStageHistory.create({
             data: {
@@ -432,17 +482,29 @@ export async function POST(request: NextRequest) {
           })
 
           shortlistedCount++
-          
+        } else {
+          // Just mark as reviewed
+          await prisma.jobApplication.update({
+            where: { id: application.id },
+            data: {
+              status: 'REVIEWING'
+            }
+          })
+        }
+
+        // Always surface candidates that meet the threshold in the response,
+        // whether or not they were auto-shortlisted in the database.
+        if (meetsThreshold) {
           const candidateData: ShortlistedCandidate = {
             applicationId: application.id,
             candidateId: application.candidateId,
-            candidateName: application.candidate 
+            candidateName: application.candidate
               ? `${application.candidate.firstName} ${application.candidate.lastName}`
               : 'Unknown Candidate',
             score: matchResult.overallScore,
             jobTitle: job.title
           }
-          
+
           if (aiAnalysisUsed && matchResult.aiAnalysis) {
             candidateData.culturalFit = matchResult.culturalFit
             candidateData.growthPotential = matchResult.growthPotential
@@ -454,16 +516,8 @@ export async function POST(request: NextRequest) {
               weaknesses: matchResult.aiAnalysis.weaknesses?.slice(0, 2)
             }
           }
-          
+
           shortlistedCandidates.push(candidateData)
-        } else {
-          // Just mark as reviewed
-          await prisma.jobApplication.update({
-            where: { id: application.id },
-            data: {
-              status: 'REVIEWING'
-            }
-          })
         }
 
         reviewedCount++
@@ -515,7 +569,7 @@ export async function POST(request: NextRequest) {
     return withCors(
       ApiResponse.success({
         results: reviewResults,
-        shortlistedCandidates: autoShortlist ? shortlistedCandidates : undefined,
+        shortlistedCandidates,
         summary: {
           totalJobs,
           totalApplications,

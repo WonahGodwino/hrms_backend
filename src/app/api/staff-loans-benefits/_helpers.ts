@@ -43,6 +43,21 @@ export async function resolveScopedCompanyIds(user: AuthUser): Promise<string[]>
       return assignments.map((assignment) => assignment.companyId)
     }
 
+    // STAFF (and any other personal-scope role): resolve their own company.
+    // Prefer the exact staff record the token was issued for
+    // (user.userId === StaffRecord.id) so the scope stays correct even if the
+    // same email exists in multiple companies — independent of login policy.
+    if (user.userId) {
+      const ownRecord = await prisma.staffRecord.findUnique({
+        where: { id: user.userId },
+        select: { companyId: true, isActive: true },
+      })
+      if (ownRecord?.isActive) {
+        return [ownRecord.companyId]
+      }
+    }
+
+    // Fallback for legacy tokens that don't carry a staff-record userId.
     const staffRecord = await prisma.staffRecord.findFirst({
       where: { email: user.email, isActive: true },
       select: { companyId: true },

@@ -16,7 +16,7 @@ declare global {
  */
 const isBuildTime =
   process.env.NEXT_PHASE === 'phase-production-build' ||
-  process.env.NODE_ENV === 'test' ||
+  (process.env.NODE_ENV === 'test' && !process.env.JEST_WORKER_ID) ||
   process.env.NEXT_PHASE === 'phase-production-server' // Added for build
 
 function readOptionalFile(filePathValue: string | null) {
@@ -121,6 +121,15 @@ function createPool() {
   return new Pool({
     connectionString,
     ssl,
+    // Keep connections alive so the server doesn't silently close them.
+    // idleTimeoutMillis must be shorter than the DB server's idle-connection
+    // cutoff (Aiven default is ~300 s) so the pool retires connections cleanly
+    // before the server kills them, avoiding P1017 ConnectionClosed errors.
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
+    idleTimeoutMillis: 60_000,
+    connectionTimeoutMillis: 10_000,
+    max: 10,
   })
 }
 

@@ -1,0 +1,63 @@
+import { NextRequest } from 'next/server'
+import { prisma } from '@/app/lib/db'
+import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
+import { buildFinancePayrollSummary } from '@/app/lib/phed/reports'
+
+export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
+
+// GET /api/phed/pay-periods/:id/reports/union-cooperative-deductions
+// PRD 13.4 — Treasury's "Unions and Cooperatives Deductions" page: a
+// consolidated view of NUEE/SSAEAC/etc. union dues and named cooperative
+// contributions, mirroring Section B of the Approval Memo. Reuses the same
+// Finance Summary aggregation already used elsewhere — no new computation.
+export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+  const origin = req.headers.get('origin')
+  const rl = phedRateLimit(req, 'report')
+  if (rl) return withCors(rl, origin)
+  try {
+    const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
+    const user = await requirePhedPageAccess(token, 'UNIONS_COOPERATIVES_DEDUCTIONS')
+
+    const period = await prisma.phedPayPeriod.findUnique({
+      where: { id: params.id },
+      select: { id: true, companyId: true, periodName: true, month: true, year: true },
+    })
+    if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
+    if (user.role !== 'SUPER_ADMIN' && period.companyId !== user.companyId) {
+      return withCors(ApiResponse.notFound('Pay period not found'), origin)
+    }
+
+    const payrolls = await prisma.phedComputedPayroll.findMany({ where: { payPeriodId: period.id } })
+    const staffIds = payrolls.map(r => r.staffId)
+
+    const [allUnions, allCoops, staffUnions, staffCoops] = await Promise.all([
+      prisma.phedUnion.findMany({ where: { companyId: period.companyId, isActive: true }, orderBy: { name: 'asc' } }),
+      prisma.phedCooperative.findMany({ where: { companyId: period.companyId, isActive: true }, orderBy: { name: 'asc' } }),
+      prisma.phedStaffUnion.findMany({ where: { staffId: { in: staffIds } } }),
+      prisma.phedStaffCooperative.findMany({ where: { staffId: { in: staffIds } } }),
+    ])
+
+    const finance = buildFinancePayrollSummary(
+      payrolls,
+      allUnions.map(u => ({ id: u.id, name: u.name, percentage: Number(u.percentage) })),
+      allCoops.map(c => ({ id: c.id, name: c.name })),
+      [],
+      staffUnions,
+      staffCoops,
+      [],
+      period.periodName,
+      period.month,
+      period.year,
+    )
+
+    const totalRow = finance.remittance.find(r => r.bankName === 'TOTAL')
+    const unions = allUnions.map(u => ({ name: u.name, amount: Number(totalRow?.[`u_${u.id}`] ?? 0) }))
+    const cooperatives = allCoops.map(c => ({ name: c.name, amount: Number(totalRow?.[`c_${c.id}`] ?? 0) }))
+    const total = [...unions, ...cooperatives].reduce((s, r) => s + r.amount, 0)
+
+    return withCors(ApiResponse.success({ periodName: period.periodName, unions, cooperatives, total }), origin)
+  } catch (e) { return withCors(handleApiError(e), origin) }
+}

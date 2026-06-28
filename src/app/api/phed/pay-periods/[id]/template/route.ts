@@ -10,9 +10,11 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 
 // GET /api/phed/pay-periods/:id/template
 // Downloads the HR-editable XLSX salary template.
-// Locked (grey): Staff ID, Name, Role, Grade, Level, Cooperative amounts, Deduction amounts.
-// Editable (yellow): all allowances, voluntary pension, insurance, cash advanced, loan, domestic loan.
-// Union and overtime columns are NOT included — they are computed by the system.
+// Locked (grey): Staff ID, Name, Role, Grade, Level.
+// Editable (yellow): cooperative amounts, deduction amounts, union amounts, all allowances,
+//   voluntary pension, insurance, cash advanced, loan, domestic loan.
+// Cooperative and union columns are pre-populated from staff membership records but can be overridden per period.
+// Overtime is computed separately and is NOT included here.
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'report')
@@ -77,12 +79,15 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       { header: 'LEVEL',         key: 'level',    width: 10, locked: false },
     ]
 
+    // Cooperative and deduction-liability cols are editable (yellow) — pre-populated from
+    // membership records but HR can override the amount for this specific period.
+    // Union deductions are NOT in the template — they are auto-computed as gross × union%.
     const cooperativeCols: Col[] = cooperatives.map((c: any) => ({
-      header: c.name, key: `coop_${c.id}`, width: 18, locked: true, numeric: true,
+      header: c.name, key: `coop_${c.id}`, width: 18, locked: false, numeric: true,
     }))
 
     const deductionCols: Col[] = deductionLiabilities.map((d: any) => ({
-      header: d.name, key: `ded_${d.id}`, width: 18, locked: true, numeric: true,
+      header: d.name, key: `ded_${d.id}`, width: 18, locked: false, numeric: true,
     }))
 
     const editableCols: Col[] = [
@@ -144,7 +149,6 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       const dedAmountMap = new Map(
         staff.deductionLiabilities.map((sd: any) => [sd.deductionLiabilityId, Number(sd.amount ?? 0)])
       )
-
       const rowValues: any[] = [
         idx + 1,
         staff.staffId,

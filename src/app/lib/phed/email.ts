@@ -188,3 +188,121 @@ For assistance, contact your HR department.
   })
 }
 
+// ============================================================
+// Payroll Approval Workflow (Module 12) — stage transition email
+// Sent whenever a memo moves to a new desk, is flagged back to
+// Stage 1, or reaches final approval (Treasury notification).
+// ============================================================
+
+export async function sendPhedApprovalNotificationEmail(options: {
+  to:            string
+  recipientName: string
+  companyName:   string
+  periodName:    string
+  subjectLine:   string
+  heading:       string
+  bodyText:      string
+  deepLink:      string
+}): Promise<{ success: boolean; error?: string }> {
+  const { to, recipientName, companyName, periodName, subjectLine, heading, bodyText, deepLink } = options
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${subjectLine}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f0f4f8;font-family:Arial,Helvetica,sans-serif;">
+
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f4f8;padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+
+          <tr>
+            <td style="background-color:${BRAND_BLUE};padding:32px 40px;text-align:center;">
+              <p style="margin:0;color:#c8d8eb;font-size:13px;letter-spacing:1px;text-transform:uppercase;">24/7HR Platform — Payroll Approvals</p>
+              <h1 style="margin:8px 0 0;color:#ffffff;font-size:22px;font-weight:700;">${companyName}</h1>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:36px 40px 0;">
+              <p style="margin:0;font-size:16px;color:#1f2937;">Dear <strong>${recipientName}</strong>,</p>
+              <p style="margin:16px 0 0;font-size:16px;font-weight:700;color:${BRAND_BLUE};">${heading}</p>
+              <p style="margin:12px 0 0;font-size:15px;color:#374151;line-height:1.7;">${bodyText}</p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:24px 40px 0;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color:${ACCENT_BLUE};border-left:4px solid ${BRAND_BLUE};border-radius:4px;padding:16px 20px;">
+                <tr>
+                  <td style="font-size:13px;color:#6b7280;">Pay Period</td>
+                  <td style="font-size:13px;color:#111827;font-weight:600;text-align:right;">${periodName}</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:32px 40px;text-align:center;">
+              <a href="${deepLink}" style="display:inline-block;background-color:${BRAND_BLUE};color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 40px;border-radius:6px;letter-spacing:0.3px;">
+                Open Memo
+              </a>
+              <p style="margin:16px 0 0;font-size:12px;color:#9ca3af;">
+                Or copy this link into your browser:<br>
+                <a href="${deepLink}" style="color:${BRAND_MID};">${deepLink}</a>
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:0 40px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;">
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:24px 40px;text-align:center;">
+              <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.7;">
+                This is an automated message from <strong>${companyName}</strong> via the 24/7HR Platform.<br>
+                Please do not reply to this email.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>
+`
+
+  const text = `
+Dear ${recipientName},
+
+${heading}
+
+${bodyText}
+
+Pay Period: ${periodName}
+
+Open the memo here: ${deepLink}
+
+This is an automated message from ${companyName}. Please do not reply.
+`.trim()
+
+  return sendEmail({
+    to,
+    subject: subjectLine,
+    html,
+    text,
+    from: `${companyName} HR <${FROM_EMAIL}>`,
+  })
+}
+

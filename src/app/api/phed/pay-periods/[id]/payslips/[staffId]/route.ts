@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
-import { requireModuleAccess } from '@/app/lib/module-access'
+import { requirePhedReadAccess } from '@/app/lib/phed/access-role'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { generatePayslipPdf } from '@/app/lib/phed/pdf-payslip'
@@ -20,7 +20,7 @@ export async function GET(
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    await requirePhedReadAccess(token)
 
     const payroll = await (prisma as any).phedComputedPayroll.findUnique({
       where: { payPeriodId_staffId: { payPeriodId: params.id, staffId: params.staffId } },

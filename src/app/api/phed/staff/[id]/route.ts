@@ -5,6 +5,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { logPayrollAffectingChanges, PHED_PAYROLL_AFFECTING_FIELDS } from '@/app/lib/phed/change-log'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -84,8 +85,12 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     // Clearing life assurance — zero out the amount
     if (effectiveHasLA === false) data.lifeAssuranceAmount = null
 
-    // Ownership check before update
-    const existing = await (prisma as any).phedStaff.findUnique({ where: { id: params.id }, select: { companyId: true } })
+    // Ownership check before update — select payroll-affecting fields too so
+    // we can diff them against `data` for the IAD Changes tab (PRD 13.3).
+    const existing = await (prisma as any).phedStaff.findUnique({
+      where: { id: params.id },
+      select: { companyId: true, ...Object.fromEntries([...PHED_PAYROLL_AFFECTING_FIELDS].map(f => [f, true])) },
+    })
     if (!existing) return withCors(ApiResponse.notFound('Staff not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && user.companyId && existing.companyId !== user.companyId)
       return withCors(ApiResponse.notFound('Staff not found'), origin)
@@ -95,6 +100,17 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       data,
       include: { grade: true, region: true, feeder: true, payPoint: true },
     })
+
+    const actor = await prisma.staffRecord.findUnique({ where: { id: user.userId }, select: { firstName: true, lastName: true } })
+    await logPayrollAffectingChanges({
+      companyId: existing.companyId,
+      staffId: params.id,
+      before: existing,
+      data,
+      changedBy: user.userId,
+      changedByName: actor ? `${actor.firstName} ${actor.lastName}` : 'Unknown',
+    })
+
     return withCors(ApiResponse.success(staff, 'Staff updated'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }

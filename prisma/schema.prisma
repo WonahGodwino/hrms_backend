@@ -10,6 +10,14 @@ datasource db {
 model Company {
   id                     String                   @id @default(cuid())
   companyName            String
+  tradingName            String?
+  rcNumber               String?
+  industry               String?
+  website                String?
+  biography              String?                  @db.Text
+  fiscalYearStart        String?
+  leaveYearStart         String?
+  status                 String                   @default("Active")
   address                String?
   phone                  String?
   email                  String
@@ -21,7 +29,10 @@ model Company {
   createdAt              DateTime                 @default(now())
   updatedAt              DateTime?                @updatedAt
   workWeekPattern        String?                  @db.VarChar(20)
-  
+
+  // Locations
+  locations              Location[]
+
   // AI & Settings
   aiSettings             AISettings?
   aiUsageLogs            AIUsageLog[]
@@ -110,6 +121,11 @@ model Company {
   phedComputedPayrolls   PhedComputedPayroll[]
   phedBulkUploads        PhedBulkUpload[]
   phedPeriodAdvances     PhedStaffPeriodAdvance[]
+  phedStaffAccessRoles   PhedStaffAccessRole[]
+  phedApprovalMemos      PhedApprovalMemo[]
+  phedRoleAccessGrants   PhedRoleAccessGrant[]
+  phedChangeLogs         PhedChangeLog[]
+  phedStaffExits         PhedStaffExit[]
 
   // Training & Certification Module relations
   trainingPrograms       TrainingProgram[]
@@ -147,6 +163,26 @@ model Company {
   staffSalaryHistory      StaffSalaryHistory[]
   staffGradeHistory       StaffGradeHistory[]
   @@map("companies")
+}
+
+model Location {
+  id        String   @id @default(cuid())
+  companyId String
+  name      String
+  code      String?
+  type      String?
+  state     String?
+  lga       String?
+  address   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staff     StaffRecord[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@map("locations")
 }
 
 model PlatformModule {
@@ -222,6 +258,7 @@ model StaffRecord {
   managerId                       String?
   avatarUrl                       String?
   location                        String?
+  locationId                      String?
 
   // Relations with matching relation names
   attendances                     Attendance[]
@@ -246,6 +283,9 @@ model StaffRecord {
   headOfDepartment                Department[]        @relation("DepartmentHead")
   assistantHeadOfDepartment       Department[]        @relation("DepartmentAssistantHead")
   departmentStaffHistories        DepartmentStaffHistory[]
+
+  // Location relation (legacy `location` string retained for back-compat)
+  locationRecord                  Location?           @relation(fields: [locationId], references: [id])
 
   // Payroll Engine relations
   employeeSalaries                EmployeeSalary[]
@@ -284,13 +324,17 @@ model StaffRecord {
   // Grade-based salary calculations
   gradeBasicSalary    Decimal?          @db.Decimal(18, 2)
   gradeAllowances     Json?
-   // Designation relation 
+   // Designation relation
   designationId       String?
   designation         Designation?       @relation(fields: [designationId], references: [id])
+
+  // PHED Approval Workflow / Access Matrix (Module 12 & 13) — independent of `role` above
+  phedAccessRole      PhedStaffAccessRole?
 
   @@unique([staffId, companyId])
   @@unique([email, companyId])
   @@index([email])
+  @@index([locationId])
   @@map("staff_records")
 }
 
@@ -622,6 +666,9 @@ model Offer {
   sentAt            DateTime?
   acceptedAt        DateTime?
   declinedAt        DateTime?
+  // Ad-hoc workflow state: trackSignature, initiateOnboarding, displayStatus,
+  // dispatchMethod, isAdHoc, executedDocument, etc. (see /api/offers/ad-hoc)
+  metadata          Json?
   createdBy         String?
   updatedBy         String?
   createdAt         DateTime       @default(now())
@@ -735,6 +782,7 @@ model AIUsageLog {
   model         String
   tokensUsed    Int
   cost          Float
+  actualCost    Float    @default(0)
   endpoint      String
   inputLength   Int
   outputLength  Int
@@ -745,6 +793,26 @@ model AIUsageLog {
   @@index([companyId])
   @@index([createdAt])
   @@map("ai_usage_logs")
+}
+
+// Global token cost rate — set by SUPER_ADMIN, one row is isActive at a time.
+// The active row is read by the recruitment selection route to price AI usage.
+model TokenCostConfig {
+  id           String   @id @default(cuid())
+  tokensPerUnit Int     @default(1000)
+  costPerUnit  Float    @default(0.30)
+  providerCostPerUnit Float @default(0.015)
+  currency     String   @default("USD") @db.VarChar(3)
+  label        String?
+  isActive     Boolean  @default(false)
+  createdBy    String
+  updatedBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([createdAt])
+  @@map("token_cost_configs")
 }
 
 model UserCompany {
@@ -1778,6 +1846,8 @@ model PhedStaff {
   overtimeEntries      PhedOvertimeEntry[]
   computedPayrolls     PhedComputedPayroll[]
   periodAdvances       PhedStaffPeriodAdvance[]
+  changeLogs           PhedChangeLog[]
+  exitRecords          PhedStaffExit[]
 
   @@unique([companyId, staffId])
   @@unique([companyId, email])
@@ -1870,6 +1940,7 @@ model PhedPayPeriod {
   computedPayrolls  PhedComputedPayroll[]
   bulkUploads       PhedBulkUpload[]
   periodAdvances    PhedStaffPeriodAdvance[]
+  approvalMemo      PhedApprovalMemo?
 
   @@unique([companyId, year, month])
   @@index([companyId, status])
@@ -2033,6 +2104,188 @@ model PhedComputedPayroll {
   @@index([payPeriodId])
   @@index([companyId])
   @@map("phed_computed_payrolls")
+}
+
+// ============================================================
+// PHED PAYROLL APPROVAL WORKFLOW & ACCESS MATRIX (Module 12 & 13)
+// These roles are created from scratch and are independent of
+// StaffRecord.role — they grant no access outside the PHED module.
+// ============================================================
+
+enum PhedAccessRole {
+  MANAGER_COMP_BENEFITS    // Stage 1 approver + full payroll page access
+  HEAD_INTERNAL_AUDIT      // Stage 2 approver + IAD Page only
+  CHIEF_PEOPLE_OFFICER     // Stage 3 approver + full payroll page access
+  CHIEF_FINANCE_OFFICER    // Stage 4 approver + full payroll page access
+  MD_CEO                   // Stage 5 approver + full payroll page access
+  TREASURY_TEAM            // no approval stage; scoped page access
+  FINANCIAL_REPORTING_TEAM // no approval stage; Cost Centre Report only
+  TAX_TEAM                 // no approval stage; PAYE Schedule only
+}
+
+model PhedStaffAccessRole {
+  id            String         @id @default(cuid())
+  companyId     String
+  staffRecordId String         @unique
+  accessRole    PhedAccessRole
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staffRecord   StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, accessRole])
+  @@map("phed_staff_access_roles")
+}
+
+// Module 12 — Payroll Approval Workflow.
+// Stage order/role mapping is fixed in application code (PHED_APPROVAL_STAGES),
+// never DB-configurable.
+enum PhedApprovalMemoStatus {
+  PENDING_REVIEW                // at Stage 2 (Head IAD)
+  PENDING_FIRST_LEVEL_APPROVAL  // at Stage 3 (CPO)
+  PENDING_SECOND_LEVEL_APPROVAL // at Stage 4 (CFO)
+  PENDING_FINAL_APPROVAL        // at Stage 5 (MD/CEO)
+  APPROVED                      // terminal — ready for disbursement
+  RETURNED_FOR_CORRECTION       // flagged back to Stage 1, awaiting resubmission
+}
+
+enum PhedApprovalStampAction {
+  SUBMITTED
+  RECOMMENDED
+  APPROVED
+  FINAL_APPROVED
+  FLAGGED
+}
+
+model PhedApprovalMemo {
+  id             String                 @id @default(cuid())
+  companyId      String
+  payPeriodId    String                 @unique // one active memo per pay period
+  currentStage   Int                            // 1–5
+  status         PhedApprovalMemoStatus
+  attemptNumber  Int                    @default(1) // bumped on every flag→resubmit cycle
+  stageEnteredAt DateTime               @default(now()) // for "time elapsed at this desk"
+  createdAt      DateTime               @default(now()) // frozen memo DATE — Stage 1's original submission
+  updatedAt      DateTime               @updatedAt
+
+  company   Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payPeriod PhedPayPeriod       @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+  stamps    PhedApprovalStamp[]
+
+  @@index([companyId, status])
+  @@map("phed_approval_memos")
+}
+
+// Append-only audit trail — no update/delete code path is ever written for
+// this model. Stamps from a superseded attempt (attemptNumber < memo.attemptNumber)
+// remain visible in history but are superseded by the current attempt's stamps.
+model PhedApprovalStamp {
+  id            String                  @id @default(cuid())
+  memoId        String
+  attemptNumber Int
+  stage         Int
+  action        PhedApprovalStampAction
+  staffRecordId String                  // not a relation — stamp must outlive the actor's record
+  actorName     String                  // snapshot, immutable even if the profile name changes later
+  actorRole     PhedAccessRole          // snapshot
+  comment       String?
+  createdAt     DateTime                @default(now())
+
+  memo PhedApprovalMemo @relation(fields: [memoId], references: [id], onDelete: Cascade)
+
+  @@index([memoId, attemptNumber])
+  @@map("phed_approval_stamps")
+}
+
+// Module 13 — Role-Based Payroll Access Matrix.
+// Page-level access is layered IN FRONT of, and independent from, the
+// approval-action permission above (PRD 12.2 / 13). Full-access roles
+// (Manager Comp&Benefits, CPO, CFO, MD/CEO) are granted every pageKey as
+// literal rows — no special-casing in the guard code (PRD 13.6 point 46).
+enum PhedPageKey {
+  BANK_PAGE
+  PENSION_SCHEDULE
+  PAYE_SCHEDULE
+  NSITF_SCHEDULE
+  ITF_SCHEDULE
+  NHF_SCHEDULE
+  UNIONS_COOPERATIVES_DEDUCTIONS
+  LIABILITIES_TO_PHED
+  COST_CENTRE_REPORT
+  IAD_SUMMARY
+  IAD_CHANGES
+  IAD_EXITED
+  IAD_NEW_HIRED
+}
+
+model PhedRoleAccessGrant {
+  id         String         @id @default(cuid())
+  companyId  String
+  accessRole PhedAccessRole
+  pageKey    PhedPageKey
+  createdAt  DateTime       @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, accessRole, pageKey])
+  @@index([companyId, accessRole])
+  @@map("phed_role_access_grants")
+}
+
+// IAD Page — "Changes" tab (PRD 13.3). Logs payroll-affecting edits to
+// PhedStaff (salary, allowances, grade, department/unit, tax inputs) so the
+// Head of Internal Audit can see what changed since the previous pay period.
+model PhedChangeLog {
+  id            String   @id @default(cuid())
+  companyId     String
+  staffId       String
+  field         String
+  oldValue      String?
+  newValue      String?
+  changedBy     String   // StaffRecord id of the actor
+  changedByName String   // snapshot, mirrors the immutability convention used for approval stamps
+  changedAt     DateTime @default(now())
+
+  company Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staff   PhedStaff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, changedAt])
+  @@index([staffId, changedAt])
+  @@map("phed_change_logs")
+}
+
+// IAD Page — "Exited" tab (PRD 13.3). Self-contained within PHED — there is
+// no Offboarding module backend to cross-reference (confirmed empty), so
+// exit detail is captured directly here rather than deferred to a module
+// that doesn't exist yet.
+enum PhedExitReason {
+  RESIGNATION
+  TERMINATION
+  RETIREMENT
+  END_OF_CONTRACT
+  OTHER
+}
+
+model PhedStaffExit {
+  id               String         @id @default(cuid())
+  companyId        String
+  staffId          String
+  exitDate         DateTime
+  reason           PhedExitReason
+  finalGrossPay    Decimal?       @db.Decimal(18, 2)
+  finalDeductions  Decimal?       @db.Decimal(18, 2)
+  finalNetPay      Decimal?       @db.Decimal(18, 2)
+  notes            String?
+  recordedBy       String
+  recordedByName   String
+  createdAt        DateTime       @default(now())
+
+  company Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staff   PhedStaff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, exitDate])
+  @@map("phed_staff_exits")
 }
 
 // ============================================================

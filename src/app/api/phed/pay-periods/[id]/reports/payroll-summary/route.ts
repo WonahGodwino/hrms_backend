@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
-import { requireModuleAccess } from '@/app/lib/module-access'
+import { requirePhedReadAccess } from '@/app/lib/phed/access-role'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    await requirePhedReadAccess(token)
 
     const rl = phedRateLimit(req, 'report')
     if (rl) return withCors(rl, origin)
@@ -171,6 +171,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const newlyHiredRegular:  IADEmployee[] = []
     const newlyHiredContract: IADEmployee[] = []
     const exitedRegular:      IADEmployee[] = []
+    const exitedContract:     IADEmployee[] = []
 
     currentPayrolls.forEach((r: any) => {
       const emp      = toIAD(r)
@@ -179,6 +180,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
       if (isExited && r.category === 'REGULAR') {
         exitedRegular.push(emp)
+      } else if (isExited && (r.category === 'CONTRACT' || r.category === 'NYSC_IT')) {
+        exitedContract.push(emp)
       } else if (isNew && r.category === 'REGULAR') {
         newlyHiredRegular.push(emp)
       } else if (isNew && r.category === 'CONTRACT') {
@@ -186,12 +189,46 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       }
     })
 
+    // ── Previous period summary for Changes sheet (Sheet 5) ──
+    const immediatePrevPeriod = await (prisma as any).phedPayPeriod.findFirst({
+      where: {
+        companyId: period.companyId,
+        computedPayrolls: { some: {} },
+        OR: [
+          { year: { lt: period.year } },
+          { year: period.year, month: { lt: period.month } },
+        ],
+      },
+      select: { id: true, periodName: true, month: true, year: true },
+      orderBy: [{ year: 'desc' }, { month: 'desc' }],
+    })
+    const prevSummaryPayrolls = immediatePrevPeriod
+      ? await (prisma as any).phedComputedPayroll.findMany({ where: { payPeriodId: immediatePrevPeriod.id } })
+      : []
+    const previousSummary = immediatePrevPeriod
+      ? buildPayrollSummary(prevSummaryPayrolls, immediatePrevPeriod.periodName, immediatePrevPeriod.month, immediatePrevPeriod.year)
+      : null
+    const varianceRows = previousSummary
+      ? summary.rows.map((c: any) => {
+          const p = previousSummary.rows.find((r: any) => r.label === c.label)
+          return {
+            label:                 c.label,
+            headCountDelta:        c.headCount        - (p?.headCount        ?? 0),
+            grossPayDelta:         r2(c.grossPay         - (p?.grossPay         ?? 0)),
+            totalPayrollCostDelta: r2(c.totalPayrollCost - (p?.totalPayrollCost ?? 0)),
+          }
+        })
+      : null
+
     const iadData: IADSummaryInput = {
-      periodName:   period.periodName,
+      periodName:      period.periodName,
       summary,
+      previousSummary,
+      varianceRows,
       newlyHiredRegular,
       newlyHiredContract,
       exitedRegular,
+      exitedContract,
       unions:       allUnions.map((u: any) => ({ id: u.id, name: u.name })),
       cooperatives: allCoops.map((c: any) => ({ id: c.id, name: c.name })),
       deductions:   allDeductions.map((d: any) => ({ id: d.id, name: d.name })),

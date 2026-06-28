@@ -14,33 +14,39 @@ class OpenAIUsageTracker {
   private usage: UsageRecord[] = []
   
   recordUsage(
-    tokens: number, 
-    model: string, 
+    tokens: number,
+    model: string,
     endpoint: string,
     companyId?: string,
     userId?: string,
     applicationId?: string
   ): number {
     const cost = this.calculateCost(tokens, model)
-    const record: UsageRecord = {
-      timestamp: new Date(),
-      tokens,
-      cost,
-      endpoint,
-      model,
-      companyId,
-      userId,
-      applicationId
-    }
-    
-    this.usage.push(record)
-    
-    // Keep only last 10000 records
+    return this._push({ tokens, cost, endpoint, model, companyId, userId, applicationId })
+  }
+
+  /**
+   * Record usage with an externally computed cost (e.g. from TokenCostConfig DB).
+   * Use this when the SUPER_ADMIN configured rate should override the built-in model rates.
+   */
+  recordUsageWithCost(
+    tokens: number,
+    cost: number,
+    model: string,
+    endpoint: string,
+    companyId?: string,
+    userId?: string,
+    applicationId?: string
+  ): number {
+    return this._push({ tokens, cost, endpoint, model, companyId, userId, applicationId })
+  }
+
+  private _push(record: Omit<UsageRecord, 'timestamp'>): number {
+    this.usage.push({ ...record, timestamp: new Date() })
     if (this.usage.length > 10000) {
       this.usage = this.usage.slice(-10000)
     }
-    
-    return cost
+    return record.cost
   }
   
   private calculateCost(tokens: number, model: string): number {

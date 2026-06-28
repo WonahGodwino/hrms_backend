@@ -20,13 +20,34 @@ export async function GET(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER', 'STAFF'])
 
-    // Always find the user's own staff record by email — never fall back to company-wide data
-    const staffRecord = await prisma.staffRecord.findFirst({
-      where: { email: user.email, isActive: true },
-      select: { id: true, companyId: true, firstName: true, lastName: true, email: true },
-    })
+    // "My Loans" is always the user's OWN, personal view, scoped to the company
+    // they were registered into — never the currently-selected/assigned company.
+    //
+    // The JWT `userId` is the StaffRecord id the user logged in with, so its
+    // companyId is the registered/home company. An ADMIN or SUPER_ADMIN with
+    // access to many companies can still only borrow from their own company, so
+    // we deliberately ignore their assigned/scoped companies here.
+    let staffRecord = user.userId
+      ? await prisma.staffRecord.findUnique({
+          where: { id: user.userId },
+          select: { id: true, companyId: true, firstName: true, lastName: true, email: true, isActive: true },
+        })
+      : null
 
+    // Fallback for older tokens that don't carry a staff-record userId: a unique
+    // email match is safe; an email shared across companies is intentionally not
+    // resolved (we can't tell which is the registered company).
     if (!staffRecord) {
+      const matches = await prisma.staffRecord.findMany({
+        where: { email: user.email, isActive: true },
+        select: { id: true, companyId: true, firstName: true, lastName: true, email: true, isActive: true },
+      })
+      if (matches.length === 1) {
+        staffRecord = matches[0]
+      }
+    }
+
+    if (!staffRecord || !staffRecord.isActive) {
       return withCors(ApiResponse.error('Staff record not found', 404), origin)
     }
 

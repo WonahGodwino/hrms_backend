@@ -334,15 +334,28 @@ export async function GET(request: NextRequest) {
       )
     })
 
-    const loans = Array.from(aggregatedByLoan.values())
+    // STAFF (and ADMIN/HR in personalScope) only ever see their OWN data — never
+    // company-wide aggregates. Every figure below is sourced from the user's own
+    // records when in personal scope.
+    const isPersonalScope = personalScope || user.role === 'STAFF'
 
-    // KPIs computed from LoanRequest table (accurate principal, rate, tenure, status)
-    const approvedLoanRequests = loanRequestsData.filter((lr) =>
+    const loans = isPersonalScope
+      ? Array.from(aggregatedByLoan.values()).filter((l) => l.employeeEmail === user.email)
+      : Array.from(aggregatedByLoan.values())
+
+    // KPIs computed from LoanRequest table (accurate principal, rate, tenure, status).
+    // In personal scope the source set is narrowed to the user's own requests so
+    // every KPI reflects the individual, not the company.
+    const kpiLoanRequests = isPersonalScope
+      ? loanRequestsData.filter((lr) => lr.staff.email === user.email)
+      : loanRequestsData
+
+    const approvedLoanRequests = kpiLoanRequests.filter((lr) =>
       ['APPROVED', 'DISBURSED'].includes(lr.status as string)
     )
 
     const activeLoans = approvedLoanRequests.length
-    const defaultedLoans = loanRequestsData.filter((lr) => lr.status === 'DEFAULTED').length
+    const defaultedLoans = kpiLoanRequests.filter((lr) => lr.status === 'DEFAULTED').length
     const overdueLoans = defaultedLoans // LoanRequest has no OVERDUE status yet; use DEFAULTED
 
     const totalIssued = approvedLoanRequests.reduce((s, lr) => s + Number(lr.requestedAmount), 0)
@@ -481,8 +494,6 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const isPersonalScope = personalScope || user.role === 'STAFF'
-
     // Helper — map a LoanRequest DB record to the API shape
     const mapLoanRequest = (lr: (typeof loanRequestsData)[number]) => ({
       id: lr.id,
@@ -568,76 +579,105 @@ export async function GET(request: NextRequest) {
         createdAt: ba.createdAt.toISOString(),
       }))
 
+    const pendingBenefitSource = isPersonalScope
+      ? benefitRequestsData.filter((br) => br.staff.email === user.email)
+      : benefitRequestsData
     const pendingRequests = [
-      ...loanRequestsData.filter((lr) => lr.status === 'PENDING'),
-      ...benefitRequestsData.filter((br) => br.status === 'PENDING'),
+      ...kpiLoanRequests.filter((lr) => lr.status === 'PENDING'),
+      ...pendingBenefitSource.filter((br) => br.status === 'PENDING'),
     ].length
 
     // ── Department-wise distribution (from staff_records, company-scoped) ──
-    // Get all active staff grouped by department for the scoped companies
-    const staffByDept = await prisma.staffRecord.groupBy({
-      by: ['department'],
-      where: {
-        companyId: { in: scopedCompanyIds },
-        isActive: true,
-        department: { not: null },
-      },
-      _count: { id: true },
-      orderBy: { _count: { id: 'desc' } },
-      take: 10,
-    })
+    // This is a company-wide breakdown, so it is omitted entirely in personal
+    // scope — STAFF must never see organisation-level distributions.
+    const departmentDistribution: { name: string; value: number; totalAmount: number }[] = []
+    if (!isPersonalScope) {
+      const staffByDept = await prisma.staffRecord.groupBy({
+        by: ['department'],
+        where: {
+          companyId: { in: scopedCompanyIds },
+          isActive: true,
+          department: { not: null },
+        },
+        _count: { id: true },
+        orderBy: { _count: { id: 'desc' } },
+        take: 10,
+      })
 
-    // Build a map of department → total deduction amount (from loanEntries, already fetched)
-    const deptAmountMap = new Map<string, number>()
-    for (const entry of loanEntries) {
-      const dept = entry.staff.department?.trim()
-      if (dept) {
-        deptAmountMap.set(dept, (deptAmountMap.get(dept) || 0) + Number(entry.amount || 0))
+      // Build a map of department → total deduction amount (from loanEntries, already fetched)
+      const deptAmountMap = new Map<string, number>()
+      for (const entry of loanEntries) {
+        const dept = entry.staff.department?.trim()
+        if (dept) {
+          deptAmountMap.set(dept, (deptAmountMap.get(dept) || 0) + Number(entry.amount || 0))
+        }
       }
+
+      for (const d of staffByDept) {
+        if (!d.department) continue
+        departmentDistribution.push({
+          name: d.department,
+          value: d._count.id,
+          totalAmount: deptAmountMap.get(d.department) || 0,
+        })
+      }
+
+      // Also include departments with deductions but no active staff (edge case)
+      for (const [dept, amount] of deptAmountMap) {
+        if (!departmentDistribution.find((d) => d.name === dept)) {
+          departmentDistribution.push({ name: dept, value: 0, totalAmount: amount })
+        }
+      }
+      // Re-sort by staff count descending
+      departmentDistribution.sort((a, b) => b.value - a.value)
     }
 
-    const departmentDistribution = staffByDept
-      .filter((d) => d.department) // safety: exclude null (already filtered above, but TS guard)
-      .map((d) => ({
-        name: d.department!,
-        value: d._count.id,
-        totalAmount: deptAmountMap.get(d.department!) || 0,
-      }))
+    // In personal scope, alerts/insights describe only the user's own loans —
+    // overdueLoans/defaultedLoans/recoveryRatePercent are already personal-scoped above.
+    const alerts = isPersonalScope
+      ? [
+          ...(overdueLoans > 0
+            ? [{ id: 'al-001', type: 'warning', message: `You have ${overdueLoans} loan(s) that are overdue.` }]
+            : []),
+          ...(defaultedLoans > 0
+            ? [{ id: 'al-002', type: 'critical', message: `You have ${defaultedLoans} loan(s) in default.` }]
+            : []),
+        ]
+      : [
+          {
+            id: 'al-001',
+            type: 'warning',
+            message: `${overdueLoans} loans are overdue and need attention.`,
+          },
+          {
+            id: 'al-002',
+            type: 'critical',
+            message: `${defaultedLoans} loans are currently in default state.`,
+          },
+        ]
 
-    // Also include departments with deductions but no active staff (edge case)
-    for (const [dept, amount] of deptAmountMap) {
-      if (!departmentDistribution.find((d) => d.name === dept)) {
-        departmentDistribution.push({ name: dept, value: 0, totalAmount: amount })
-      }
-    }
-    // Re-sort by staff count descending
-    departmentDistribution.sort((a, b) => b.value - a.value)
-
-    const alerts = [
-      {
-        id: 'al-001',
-        type: 'warning',
-        message: `${overdueLoans} loans are overdue and need attention.`,
-      },
-      {
-        id: 'al-002',
-        type: 'critical',
-        message: `${defaultedLoans} loans are currently in default state.`,
-      },
-    ]
-
-    const insights = [
-      {
-        id: 'ins-001',
-        title: 'Recovery performance trend',
-        detail: `Current recovery rate is ${recoveryRatePercent}%.`,
-      },
-      {
-        id: 'ins-002',
-        title: 'Coverage opportunity',
-        detail: `${Math.max(0, activeStaffCount - loans.length)} active staff have no loan deductions captured.`,
-      },
-    ]
+    const insights = isPersonalScope
+      ? [
+          {
+            id: 'ins-001',
+            title: 'Your loan repayment progress',
+            detail: activeLoans > 0
+              ? `You have ${activeLoans} active loan(s) with ${toNaira(Math.round(totalOutstanding))} outstanding.`
+              : 'You have no active loans at the moment.',
+          },
+        ]
+      : [
+          {
+            id: 'ins-001',
+            title: 'Recovery performance trend',
+            detail: `Current recovery rate is ${recoveryRatePercent}%.`,
+          },
+          {
+            id: 'ins-002',
+            title: 'Coverage opportunity',
+            detail: `${Math.max(0, activeStaffCount - loans.length)} active staff have no loan deductions captured.`,
+          },
+        ]
 
     return withCors(
       ApiResponse.success(

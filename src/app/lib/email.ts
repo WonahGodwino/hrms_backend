@@ -26,6 +26,7 @@ export async function sendEmail(options: {
   from?: string
   cc?: string | string[]
   bcc?: string | string[]
+  attachments?: Array<{ filename: string; data: Buffer; contentType?: string }>
 }): Promise<{ success: boolean; error?: string; data?: any }> {
   try {
     // Validate required environment variables
@@ -58,6 +59,15 @@ export async function sendEmail(options: {
 
     if (options.bcc) {
       mailOptions.bcc = Array.isArray(options.bcc) ? options.bcc : [options.bcc]
+    }
+
+    if (options.attachments && options.attachments.length > 0) {
+      // mailgun.js accepts { data: Buffer, filename } entries on `attachment`.
+      mailOptions.attachment = options.attachments.map((a) => ({
+        data: a.data,
+        filename: a.filename,
+        contentType: a.contentType,
+      }))
     }
 
     const data = await mg.messages.create(MAILGUN_DOMAIN, mailOptions)

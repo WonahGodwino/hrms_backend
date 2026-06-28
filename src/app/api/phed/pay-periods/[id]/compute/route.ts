@@ -98,18 +98,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
       const adv = advancesMap.get(staff.id)
 
-      // Union deductions = sum of (gross × union%) — computed by processor from grossSalary
+      // Cooperative and deduction-liability totals come from the uploaded template (HR-entered).
+      // Union deductions are auto-computed as gross × sum(union percentages) — never HR-entered.
+      const cooperativeDeductionTotal = Number(stored.cooperativeDeductions ?? 0)
+      const deductionLiabilityTotal   = Number(stored.deductionLiabilities  ?? 0)
+      // percentage stored as decimal fraction (e.g. 0.025 for 2.5%)
       const unionDeductionTotal = staff.unions.reduce(
         (sum: number, su: any) => sum + Number(su.union.percentage ?? 0),
-        0
-      )
-      const cooperativeDeductionTotal = staff.cooperatives.reduce(
-        (sum: number, sc: any) => sum + Number(sc.totalAmount ?? 0),
-        0
-      )
-      const deductionLiabilityTotal = staff.deductionLiabilities.reduce(
-        (sum: number, sd: any) => sum + (sd.deductionLiability?.isActive ? Number(sd.amount ?? 0) : 0),
-        0
+        0,
       )
 
       const input: PhedPayrollInput = {

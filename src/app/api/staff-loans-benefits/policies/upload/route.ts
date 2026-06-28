@@ -47,6 +47,19 @@ export async function POST(request: NextRequest) {
       benefitErrors: [] as string[],
     }
 
+    // Safely parse a boolean from an Excel cell value.
+    // ExcelJS returns actual JS booleans for Excel TRUE/FALSE cells, so we must
+    // NOT use `value || fallback` — a JS `false` is falsy and would be swapped
+    // for the fallback, silently ignoring the user's entry.
+    const parseBool = (v: unknown, def: boolean): boolean => {
+      if (v === null || v === undefined || v === '') return def
+      if (typeof v === 'boolean') return v
+      const s = String(v).trim().toLowerCase()
+      if (s === 'true'  || s === '1' || s === 'yes') return true
+      if (s === 'false' || s === '0' || s === 'no')  return false
+      return def
+    }
+
     // --- Process Loan Types Sheet ---
     const loanSheet = workbook.getWorksheet('Loan Types')
     if (loanSheet) {
@@ -61,12 +74,12 @@ export async function POST(request: NextRequest) {
           const maxAmount = parseFloat(String(row.getCell(4).value || 500000)) || 500000
           const minServiceMonths = parseInt(String(row.getCell(5).value || 3)) || 3
           const maxDebtRatioPercent = parseFloat(String(row.getCell(6).value || 40)) || 40
-          const requiresGuarantor = String(row.getCell(7).value || '').toLowerCase() === 'true'
-          const guarantorThresholdAmount = parseFloat(String(row.getCell(8).value || 0)) || null
-          const guarantorMustBeActiveInCompany = String(row.getCell(9).value || 'true').toLowerCase() !== 'false'
-          const guarantorMustNotHaveActiveLoan = String(row.getCell(10).value || 'false').toLowerCase() === 'true'
+          const requiresGuarantor              = parseBool(row.getCell(7).value,  false)
+          const guarantorThresholdAmount       = parseFloat(String(row.getCell(8).value || 0)) || null
+          const guarantorMustBeActiveInCompany = parseBool(row.getCell(9).value,  true)
+          const guarantorMustNotHaveActiveLoan = parseBool(row.getCell(10).value, false)
           const salaryMultiplier = parseFloat(String(row.getCell(11).value || 1)) || 1
-          const isActive = String(row.getCell(12).value || 'true').toLowerCase() !== 'false'
+          const isActive = parseBool(row.getCell(12).value, true)
           const rules = String(row.getCell(13).value || '').trim() || null
 
           // Upsert: update if exists by companyId+name, otherwise create
@@ -125,7 +138,7 @@ export async function POST(request: NextRequest) {
           const monetaryValue = parseFloat(String(row.getCell(4).value || 0)) || null
           const keyValue = String(row.getCell(5).value || '').trim() || null
           const eligibilityRule = String(row.getCell(6).value || '').trim() || null
-          const isActive = String(row.getCell(7).value || 'true').toLowerCase() !== 'false'
+          const isActive = parseBool(row.getCell(7).value, true)
 
           await prisma.benefitPolicy.upsert({
             where: { companyId_name: { companyId, name } },

@@ -39,9 +39,15 @@ export async function GET(request: NextRequest) {
       return withCors(ApiResponse.error('User not found', 404), origin)
     }
 
-    const enabledModules = decoded.role === 'SUPER_ADMIN'
-      ? await getEnabledModules(undefined)
-      : await getEnabledModules(staff.companyId)
+    const [enabledModules, phedRoleGrant] = await Promise.all([
+      decoded.role === 'SUPER_ADMIN'
+        ? getEnabledModules(undefined)
+        : getEnabledModules(staff.companyId),
+      prisma.phedStaffAccessRole.findUnique({
+        where: { staffRecordId: staff.id },
+        select: { accessRole: true },
+      }),
+    ])
 
     return withCors(
       ApiResponse.success({
@@ -50,7 +56,8 @@ export async function GET(request: NextRequest) {
           email: staff.email,
           firstName: staff.firstName,
           lastName: staff.lastName,
-          role: staff.role,
+          role: phedRoleGrant?.accessRole ?? staff.role,
+          phedAccessRole: phedRoleGrant?.accessRole ?? null,
           companyId: staff.companyId,
           department: staff.department,
           position: staff.position,

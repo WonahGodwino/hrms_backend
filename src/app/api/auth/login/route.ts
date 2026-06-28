@@ -84,13 +84,16 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('Invalid credentials', 401), origin)
     }
 
-    // Fetch company and enabled modules before signing the token so
-    // modules are embedded in the JWT — middleware reads them without a DB call.
-    const [company, enabledModules] = await Promise.all([
+    // Fetch company, enabled modules, and PHED access role in parallel.
+    const [company, enabledModules, phedRoleGrant] = await Promise.all([
       prisma.company.findUnique({ where: { id: staff.companyId } }),
       staff.role === 'SUPER_ADMIN'
         ? getEnabledModules(undefined)
         : getEnabledModules(staff.companyId),
+      prisma.phedStaffAccessRole.findUnique({
+        where: { staffRecordId: staff.id },
+        select: { accessRole: true },
+      }),
     ])
 
     const token = signToken({
@@ -110,7 +113,8 @@ export async function POST(request: NextRequest) {
             email: staff.email,
             firstName: staff.firstName,
             lastName: staff.lastName,
-            role: staff.role,
+            role: phedRoleGrant?.accessRole ?? staff.role,
+            phedAccessRole: phedRoleGrant?.accessRole ?? null,
             companyId: staff.companyId,
             department: staff.department,
             position: staff.position,
