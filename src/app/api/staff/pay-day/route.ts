@@ -1,7 +1,7 @@
 // src/app/api/staff/pay-day/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { requireRole } from '@/app/lib/auth'
+import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -20,22 +20,28 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['STAFF', 'HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireRoleAsync(token, ['STAFF', 'HR', 'ADMIN', 'SUPER_ADMIN'])
+
+    // Resolve companyId: always respect frontend-provided companyId first
+    // This supports the global company switcher in the Topbar
+    const { searchParams } = new URL(request.url)
+    const queryCompanyId = searchParams.get('companyId')
+    const userCompanyIds = user.companyIds || (user.companyId ? [user.companyId] : [])
 
     let companyId: string
 
     if (user.role === 'SUPER_ADMIN') {
-      const { searchParams } = new URL(request.url)
-      const queryCompanyId = searchParams.get('companyId')
       if (!queryCompanyId) {
         return withCors(ApiResponse.error('Company ID is required for SUPER_ADMIN', 400), origin)
       }
       companyId = queryCompanyId
-    } else {
-      if (!user.companyId) {
-        return withCors(ApiResponse.error('No company assigned to this user', 400), origin)
-      }
+    } else if (queryCompanyId && userCompanyIds.includes(queryCompanyId)) {
+      // ADMIN/HR with multi-company access: use the frontend-selected company
+      companyId = queryCompanyId
+    } else if (user.companyId) {
       companyId = user.companyId
+    } else {
+      return withCors(ApiResponse.error('No company assigned to this user', 400), origin)
     }
 
     const today = new Date()
@@ -130,10 +136,12 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const body = await request.json()
     const { companyId: bodyCompanyId, payDates } = body
+
+    const userCompanyIds = user.companyIds || (user.companyId ? [user.companyId] : [])
 
     let companyId: string
 
@@ -142,11 +150,13 @@ export async function POST(request: NextRequest) {
         return withCors(ApiResponse.error('Company ID is required for SUPER_ADMIN', 400), origin)
       }
       companyId = bodyCompanyId
-    } else {
-      if (!user.companyId) {
-        return withCors(ApiResponse.error('No company assigned to this user', 400), origin)
-      }
+    } else if (bodyCompanyId && userCompanyIds.includes(bodyCompanyId)) {
+      // ADMIN/HR with multi-company access: use the frontend-selected company
+      companyId = bodyCompanyId
+    } else if (user.companyId) {
       companyId = user.companyId
+    } else {
+      return withCors(ApiResponse.error('No company assigned to this user', 400), origin)
     }
 
     // Validate pay dates array
@@ -223,7 +233,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const { searchParams } = new URL(request.url)
     const payDateId = searchParams.get('id')

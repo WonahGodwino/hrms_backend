@@ -1,0 +1,533 @@
+{
+  "info": {
+    "name": "PHED — Pay Period Lifecycle (Full Flow + Revert)",
+    "description": "Complete request collection for the PHED pay period lifecycle: creation → validation → template → upload → compute → approve, plus the new REVERT endpoint that rolls any step back.\n\n## Quick start\n1. Set `baseUrl` and `companyId` in collection variables.\n2. Set `token` to an HR/Admin JWT (use `POST /api/auth/login` with hr@company.com / 0001A).\n3. Run the **Happy Path** folder top-to-bottom — `periodId` is captured automatically by the Create request.\n4. Use **Revert** at any point to roll back one step, then re-run the next step forward.\n\n## Status flow\nDRAFT → VALIDATION_OPEN → VALIDATION_CLOSED → TEMPLATE_ISSUED → PROCESSING → REVIEW → APPROVED → PAID\n\n## Approval memo trigger\nThe Module 12 approval memo (Manager Comp & Benefits → ... → MD/CEO) is submitted when the period reaches **REVIEW** status — not APPROVED. See the companion collection `PHED_Postman_Collection_Payroll_Approval_and_Access_Matrix.json` for the approval workflow.\n\n## Revert rules\n- Rolls back exactly one step at a time.\n- DRAFT and PAID cannot be reverted.\n- Blocked (409) if an active approval memo exists on the period (flag the memo first).\n- Data is never deleted by revert — uploaded salary inputs and computed results persist and are overwritten when the step is re-run.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001",
+      "description": "API base URL — dev server."
+    },
+    {
+      "key": "companyId",
+      "value": "acme-company",
+      "description": "PHED company ID."
+    },
+    {
+      "key": "token",
+      "value": "",
+      "description": "HR/Admin JWT. Run the Login request below to auto-set this."
+    },
+    {
+      "key": "periodId",
+      "value": "",
+      "description": "Auto-set by 'Create Pay Period' on success. Override to point at an existing period."
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth — Login as HR",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/login",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "login"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"hr@company.com\",\n  \"password\": \"0001A\",\n  \"companyId\": \"{{companyId}}\"\n}"
+        },
+        "description": "Logs in as the seeded ACME HR account and saves the JWT into `{{token}}` automatically."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "  pm.collectionVariables.set('token', pm.response.json().data.token);",
+              "}",
+              "pm.test('Login succeeded', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "response": [
+        {
+          "name": "200 OK",
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "body": "{\n  \"success\": true,\n  \"message\": \"Login successful\",\n  \"data\": {\n    \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n    \"user\": {\n      \"id\": \"...\",\n      \"email\": \"hr@company.com\",\n      \"role\": \"HR\",\n      \"phedAccessRole\": null,\n      \"companyId\": \"acme-company\"\n    }\n  }\n}"
+        }
+      ]
+    },
+    {
+      "name": "Happy Path — Full Lifecycle",
+      "description": "Run these in order to walk the full pay period lifecycle from DRAFT to APPROVED. periodId is captured automatically by the first request.",
+      "item": [
+        {
+          "name": "1 — Create Pay Period (DRAFT)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "phed", "pay-periods"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"year\": 2026,\n  \"month\": 6,\n  \"companyId\": \"{{companyId}}\"\n}"
+            },
+            "description": "Creates a new pay period in DRAFT status. Saves periodId automatically."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  pm.collectionVariables.set('periodId', pm.response.json().data.id);",
+                  "}",
+                  "pm.test('Created', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Pay period created\",\n  \"data\": {\n    \"id\": \"cmpzbb8zl0009x5mm126wgxvj\",\n    \"companyId\": \"acme-company\",\n    \"year\": 2026,\n    \"month\": 6,\n    \"periodName\": \"June 2026\",\n    \"status\": \"DRAFT\",\n    \"validationOpenAt\": null,\n    \"validationCloseAt\": null,\n    \"approvedBy\": null,\n    \"approvedAt\": null,\n    \"createdAt\": \"2026-06-27T08:00:00.000Z\",\n    \"updatedAt\": \"2026-06-27T08:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "2 — Open Validation (DRAFT → VALIDATION_OPEN)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/open-validation",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "phed", "pay-periods", "{{periodId}}", "open-validation"]
+            },
+            "description": "Opens the validation portal. Staff can now confirm/reject their payment for the month."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Validation portal opened\",\n  \"data\": {\n    \"id\": \"cmpzbb8zl0009x5mm126wgxvj\",\n    \"status\": \"VALIDATION_OPEN\",\n    \"validationOpenAt\": \"2026-06-27T08:05:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "400 — Wrong status",
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"Period must be in DRAFT status to open validation\",\n  \"errors\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "3 — Close Validation (VALIDATION_OPEN → VALIDATION_CLOSED)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/close-validation",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "phed", "pay-periods", "{{periodId}}", "close-validation"]
+            },
+            "description": "Closes the validation window. Staff can no longer validate after this."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Validation portal closed\",\n  \"data\": {\n    \"id\": \"cmpzbb8zl0009x5mm126wgxvj\",\n    \"status\": \"VALIDATION_CLOSED\",\n    \"validationCloseAt\": \"2026-06-27T10:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "4a — Issue Template (VALIDATION_CLOSED → TEMPLATE_ISSUED)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/issue-template",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "phed", "pay-periods", "{{periodId}}", "issue-template"]
+            },
+            "description": "POST — advances status from VALIDATION_CLOSED to TEMPLATE_ISSUED. Returns JSON confirmation only (no file). Run step 4b next to download the actual Excel."
+          },
+          "response": [
+            {
+              "name": "200 OK — status advanced to TEMPLATE_ISSUED",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Template issued. HR can now download and fill the payroll template.\",\n  \"data\": {\n    \"period\": {\n      \"id\": \"cmpzbb8zl0009x5mm126wgxvj\",\n      \"status\": \"TEMPLATE_ISSUED\"\n    }\n  }\n}"
+            },
+            {
+              "name": "400 — Wrong status",
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"Period must be in VALIDATION_CLOSED status to issue template\",\n  \"errors\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "4b — Download Payroll Template (Excel)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/template",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "phed", "pay-periods", "{{periodId}}", "template"]
+            },
+            "description": "Downloads the HR-editable Excel salary template. Use 'Send and Download' in Postman to save the file.\n\n## Template structure\n- **Grey / locked:** S/N, Employee ID, Name, Role, Grade, Level\n- **Yellow / editable (pre-populated):** one column per active cooperative (pre-filled from stored monthly deduction amounts) + one column per active deduction liability\n- **Yellow / editable (start at 0):** Basic Salary, all allowances, Voluntary Pension, Insurance, Cash Advanced, Loan, Domestic Loan\n\n## NOT in the template\n- **Union deductions** — computed automatically by the engine at /compute as `grossSalary × union.percentage`. Never HR-entered.\n- **Overtime** — managed separately via POST /pay-periods/:id/overtime.\n\nCall after step 4a has advanced the period to TEMPLATE_ISSUED. Update cooperative amounts first via PUT /staff/:id/cooperatives if needed — they will then be pre-filled here."
+          },
+          "response": [
+            {
+              "name": "200 OK — binary Excel",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                { "key": "Content-Type", "value": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+                { "key": "Content-Disposition", "value": "attachment; filename=\"payroll-template-June-2026.xlsx\"" }
+              ],
+              "body": "<binary Excel data>"
+            }
+          ]
+        },
+        {
+          "name": "5 — Upload Template (TEMPLATE_ISSUED → PROCESSING)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/upload-template",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "phed", "pay-periods", "{{periodId}}", "upload-template"]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "description": "The filled payroll Excel template"
+                }
+              ]
+            },
+            "description": "Uploads the filled HR payroll template (multipart/form-data, field name: 'file').\n\nWhat the upload reads per staff row:\n- All salary/allowance columns by header name\n- Each cooperative column (by cooperative name) — summed into a single cooperativeDeductions value\n- Each deduction liability column — summed into deductionLiabilities\n- Does NOT read union deductions (not in template — computed by engine)\n\nEngine-computed fields (gross, PAYE, pension, net, union deductions) are reset to 0 and recalculated fresh by /compute. Cooperative and deduction-liability amounts are stored and survive re-compute.\n\nAlso allowed from REVIEW for re-upload without reverting (salary inputs are overwritten; re-compute required after)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Template uploaded and salary data saved\",\n  \"data\": {\n    \"id\": \"cmpzbb8zl0009x5mm126wgxvj\",\n    \"status\": \"PROCESSING\",\n    \"staffCount\": 42\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "6 — Compute Payroll (PROCESSING → REVIEW)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/compute",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "phed", "pay-periods", "{{periodId}}", "compute"]
+            },
+            "description": "Runs the full payroll engine (PAYE, pension, NSITF, ITF, NHF, deductions) for all active staff. Also allowed from REVIEW for re-compute without reverting.\n\nUnion deductions: computed as grossSalary × sum(union.percentage) where percentage is a decimal fraction (e.g. 0.025 = 2.5%). No manual entry required.\n\nOvertime: computed as (grossBeforeOT ÷ 160) × 1.5 × overtimeHours if an PhedOvertimeEntry exists for the staff member.\n\nAfter this step the Manager Comp & Benefits can submit the approval memo (see companion collection)."
+          },
+          "response": [
+            {
+              "name": "200 OK — period now in REVIEW",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Payroll computed successfully. Period is now in REVIEW — download the review template to verify.\",\n  \"data\": {\n    \"period\": {\n      \"id\": \"cmpzbb8zl0009x5mm126wgxvj\",\n      \"status\": \"REVIEW\"\n    },\n    \"summary\": {\n      \"totalStaff\": 42,\n      \"activeStaff\": 40,\n      \"withheldStaff\": 2,\n      \"totalGross\": 13500000,\n      \"totalNet\": 9800000,\n      \"totalPAYE\": 1250000,\n      \"totalPension\": 1620000\n    }\n  }\n}"
+            },
+            {
+              "name": "400 — No salary data uploaded yet",
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"No salary data found. Please upload the filled template first.\",\n  \"errors\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "7 — Approve Pay Period (REVIEW → APPROVED)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/approve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "phed", "pay-periods", "{{periodId}}", "approve"]
+            },
+            "description": "HR's internal sign-off on the pay period. Note: the approval memo chain (Module 12) starts at REVIEW — before this step."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Pay period approved\",\n  \"data\": {\n    \"id\": \"cmpzbb8zl0009x5mm126wgxvj\",\n    \"status\": \"APPROVED\",\n    \"approvedBy\": \"cmqrz9rq30000t8mmi9ex4oyx\",\n    \"approvedAt\": \"2026-06-27T14:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Revert — Roll Back One Step",
+      "description": "POST to /revert to roll the pay period back one step at a time. Can be called repeatedly. Blocked (409) if an active approval memo exists — flag the memo first, then retry.",
+      "item": [
+        {
+          "name": "Revert Pay Period (any step)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/revert",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "phed", "pay-periods", "{{periodId}}", "revert"]
+            },
+            "description": "Rolls the period back one step. The revert map:\n\n- VALIDATION_OPEN → DRAFT (clears validationOpenAt)\n- VALIDATION_CLOSED → VALIDATION_OPEN (clears validationCloseAt)\n- TEMPLATE_ISSUED → VALIDATION_CLOSED\n- PROCESSING → TEMPLATE_ISSUED\n- REVIEW → PROCESSING\n- APPROVED → REVIEW (clears approvedBy, approvedAt)\n\nData is never deleted — uploaded salary inputs and computed results persist and are overwritten when the step is re-run. Call repeatedly to go back multiple steps."
+          },
+          "response": [
+            {
+              "name": "200 OK — reverted PROCESSING → TEMPLATE_ISSUED",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Pay period reverted from PROCESSING to TEMPLATE_ISSUED\",\n  \"data\": {\n    \"id\": \"cmpzbb8zl0009x5mm126wgxvj\",\n    \"status\": \"TEMPLATE_ISSUED\",\n    \"companyId\": \"acme-company\",\n    \"year\": 2026,\n    \"month\": 6,\n    \"periodName\": \"June 2026\",\n    \"validationOpenAt\": \"2026-06-27T08:05:00.000Z\",\n    \"validationCloseAt\": \"2026-06-27T10:00:00.000Z\",\n    \"approvedBy\": null,\n    \"approvedAt\": null,\n    \"updatedAt\": \"2026-06-27T11:30:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "200 OK — reverted APPROVED → REVIEW",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Pay period reverted from APPROVED to REVIEW\",\n  \"data\": {\n    \"id\": \"cmpzbb8zl0009x5mm126wgxvj\",\n    \"status\": \"REVIEW\",\n    \"approvedBy\": null,\n    \"approvedAt\": null,\n    \"updatedAt\": \"2026-06-27T12:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "400 — Already at DRAFT (cannot go further back)",
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"Pay period is already at the first step and cannot be reverted further\",\n  \"errors\": []\n}"
+            },
+            {
+              "name": "400 — PAID is terminal",
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"A PAID pay period cannot be reverted\",\n  \"errors\": []\n}"
+            },
+            {
+              "name": "409 — Active approval memo blocks revert",
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"Cannot revert: this pay period has an active approval memo in progress. Flag or complete the approval workflow first.\",\n  \"errors\": []\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Correction Scenarios",
+      "description": "Common correction flows combining revert + redo.",
+      "item": [
+        {
+          "name": "Scenario A — Re-open validation (HR closed it too early)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/revert",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "phed", "pay-periods", "{{periodId}}", "revert"]
+            },
+            "description": "Period must currently be VALIDATION_CLOSED.\n\nStep 1: Call revert → reverts to VALIDATION_OPEN (clears validationCloseAt).\nStep 2: Staff continue validating.\nStep 3: Call close-validation again when ready.\n\nUse the same revert request body — no body required."
+          },
+          "response": [
+            {
+              "name": "200 OK — VALIDATION_CLOSED → VALIDATION_OPEN",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Pay period reverted from VALIDATION_CLOSED to VALIDATION_OPEN\",\n  \"data\": {\n    \"id\": \"cmpzbb8zl0009x5mm126wgxvj\",\n    \"status\": \"VALIDATION_OPEN\",\n    \"validationOpenAt\": \"2026-06-27T08:05:00.000Z\",\n    \"validationCloseAt\": null\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Scenario B — Re-upload template (HR uploaded wrong file)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/revert",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "phed", "pay-periods", "{{periodId}}", "revert"]
+            },
+            "description": "Period must currently be PROCESSING.\n\nStep 1: Call revert → reverts to TEMPLATE_ISSUED.\nStep 2: Call upload-template with the correct file → back to PROCESSING.\nStep 3: Call compute.\n\nAlternative (if already in REVIEW): just re-upload directly from REVIEW — upload-template allows it without reverting."
+          },
+          "response": [
+            {
+              "name": "200 OK — PROCESSING → TEMPLATE_ISSUED",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Pay period reverted from PROCESSING to TEMPLATE_ISSUED\",\n  \"data\": {\n    \"id\": \"cmpzbb8zl0009x5mm126wgxvj\",\n    \"status\": \"TEMPLATE_ISSUED\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Scenario C — Fix salary data in REVIEW (no revert needed)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/upload-template",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "phed", "pay-periods", "{{periodId}}", "upload-template"]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [{ "key": "file", "type": "file" }]
+            },
+            "description": "Period is in REVIEW. HR spots a salary error.\n\nNo revert needed — upload-template accepts REVIEW status directly.\n\nStep 1: Re-upload corrected template (this request).\nStep 2: Re-run compute → results overwritten.\n\nNote: if an approval memo is already in progress at REVIEW, the memo must be flagged first (which sets memo to RETURNED_FOR_CORRECTION) before re-uploading."
+          },
+          "response": [
+            {
+              "name": "200 OK — re-uploaded from REVIEW",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Template uploaded and salary data saved\",\n  \"data\": {\n    \"id\": \"cmpzbb8zl0009x5mm126wgxvj\",\n    \"status\": \"PROCESSING\",\n    \"staffCount\": 42\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Cooperative Deduction Management",
+      "description": "Manage per-staff cooperative monthly deduction amounts. These amounts are pre-filled into the payroll template yellow cooperative columns. Update them before downloading the template to ensure the correct amounts appear.\n\nSet {{staffId}} to the PhedStaff id (not the human-readable staffId code).",
+      "item": [
+        {
+          "name": "GET Staff Cooperatives — view current amounts",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/staff/{{staffId}}/cooperatives",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "phed", "staff", "{{staffId}}", "cooperatives"]
+            },
+            "description": "Lists all cooperative memberships for a staff member, including their stored monthly deduction amount (totalAmount)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Success\",\n  \"data\": [\n    {\n      \"staffId\": \"...\",\n      \"cooperativeId\": \"...\",\n      \"totalAmount\": \"5000\",\n      \"cooperative\": { \"id\": \"...\", \"name\": \"PHED Staff Cooperative\" }\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST — Add Staff to Cooperative (with monthly amount)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/staff/{{staffId}}/cooperatives",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "phed", "staff", "{{staffId}}", "cooperatives"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cooperativeId\": \"<cooperative-id>\",\n  \"totalAmount\": 5000\n}"
+            },
+            "description": "Adds a staff member to a cooperative with a monthly deduction amount. Returns 409 if the staff member is already a member of this cooperative (use PUT to update amount instead)."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Cooperative membership added\",\n  \"data\": {\n    \"staffId\": \"...\",\n    \"cooperativeId\": \"...\",\n    \"totalAmount\": \"5000\",\n    \"cooperative\": { \"id\": \"...\", \"name\": \"PHED Staff Cooperative\" }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "PUT — Update Cooperative Monthly Amount",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/staff/{{staffId}}/cooperatives",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "phed", "staff", "{{staffId}}", "cooperatives"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cooperativeId\": \"<cooperative-id>\",\n  \"totalAmount\": 7500\n}"
+            },
+            "description": "Updates the monthly deduction amount for an existing cooperative membership. Returns 404 if the staff member is not a member of this cooperative (use POST first).\n\nAfter updating, re-download the payroll template — the new amount will appear pre-filled in the cooperative column for this staff member."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Cooperative deduction amount updated\",\n  \"data\": {\n    \"staffId\": \"...\",\n    \"cooperativeId\": \"...\",\n    \"totalAmount\": \"7500\",\n    \"cooperative\": { \"id\": \"...\", \"name\": \"PHED Staff Cooperative\" }\n  }\n}"
+            },
+            {
+              "name": "404 — Not a member of this cooperative",
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"Staff member is not a member of this cooperative. Use POST to add them first.\",\n  \"errors\": []\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

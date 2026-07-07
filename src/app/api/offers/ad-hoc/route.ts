@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
             metadata: { source: 'AD_HOC_DIRECT_OFFER' },
           },
           include: { offer: true },
-        }) as typeof application
+        }) as any
       } else {
         await tx.jobApplication.update({
           where: { id: application.id },

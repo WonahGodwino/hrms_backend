@@ -32,7 +32,8 @@ export async function GET(req: NextRequest) {
     const where: any = {}
     if (companyId) where.companyId = companyId
     if (search) where.OR = [{ title: { contains: search, mode: 'insensitive' } }, { code: { contains: search, mode: 'insensitive' } }]
-    if (status) where.status = status
+    // Status is stored capitalized ("Active"/"Inactive"); accept any casing.
+    if (status) where.status = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()
     if (grade) {
       where.gradeLevel = { name: { contains: grade, mode: 'insensitive' } }
     }
@@ -45,22 +46,36 @@ export async function GET(req: NextRequest) {
         take: limit,
         orderBy: { title: 'asc' },
         include: {
-          gradeLevel: { select: { name: true } },
+          gradeLevel: { select: { name: true, basePay: true, basePayFrequency: true } },
           _count: { select: { staffRecords: true } },
         },
       }),
     ])
 
-    const data = designations.map((d: any) => ({
-      id: d.id,
-      title: d.title,
-      code: d.code,
-      grade: d.gradeLevel?.name || '—',
-      description: d.description,
-      status: d.status,
-      usage: d._count?.staffRecords || d.staffCount || 0,
-      createdAt: d.createdAt,
-    }))
+    const data = designations.map((d: any) => {
+      // A designation is grade-based when it is explicitly flagged OR it already
+      // references a grade level (covers rows created before the flag existed).
+      const hasGradeLevel = d.hasGradeLevel ?? !!d.gradeLevelId
+      const base = {
+        id: d.id,
+        title: d.title,
+        code: d.code,
+        hasGradeLevel,
+        usage: d._count?.staffRecords || d.staffCount || 0,
+        status: d.status,
+        description: d.description,
+        createdAt: d.createdAt,
+      }
+      if (hasGradeLevel) {
+        return { ...base, grade: d.gradeLevel?.name || '—' }
+      }
+      // Grade-less designation: surface its own base pay.
+      return {
+        ...base,
+        basePay: d.basePay ?? null,
+        basePayFrequency: d.basePayFrequency ?? null,
+      }
+    })
 
     return withCors(ApiResponse.success({ data, meta: { total, page, totalPages: Math.ceil(total / limit) } }), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }

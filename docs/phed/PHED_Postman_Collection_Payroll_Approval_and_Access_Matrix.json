@@ -1,0 +1,1610 @@
+{
+  "info": {
+    "name": "PHED \u2014 Payroll Approval Workflow & Access Matrix (Module 12 & 13)",
+    "description": "Complete API reference for the Payroll Approval Workflow (Module 12) and Role-Based Payroll Access Matrix (Module 13). Companion to the existing `PHED_Postman_Collection.json` \u2014 this collection covers only the two new modules; everything else in PHED is unchanged.\n\n## Quick start\n1. Run every request in **Auth \u2014 Login as PHED Role** once (Collection Runner works well) \u2014 each saves its JWT into a dedicated variable automatically.\n2. Set `periodId` to a PhedPayPeriod id that is already `APPROVED` in the payroll engine lifecycle (precondition for Stage 1 submit).\n3. Run **Module 12** folder top-to-bottom to walk the full 5-stage chain \u2014 `memoId` is captured automatically.\n4. Use **Module 13** folder to exercise the access matrix; swap the Authorization token between role variables to see both the 200 and 403 sides of each rule.\n\n## The 403 vs 409 distinction (read this before testing Module 12)\n- **403** = your role is not allowed to call this endpoint *at all* (e.g. Tax Team calling `/recommend`).\n- **409** = your role is valid for this action, but the memo is not at your desk right now, or is already fully approved (e.g. the CFO trying to approve while the memo still sits with Head IAD).\n\n## New roles\nThese 8 PHED roles are independent of the existing global `role` field (HR/ADMIN/STAFF/MANAGER/SUPER_ADMIN) and have no effect on any other module. They exist only via the seeded accounts in the Auth folder \u2014 there is currently no endpoint to assign a PHED role to an arbitrary staff member.\n\n## Login response \u2014 role fields\nFor these 8 accounts, `POST /api/auth/login` (and `GET /api/auth/me`) now returns the PHED role name directly in `user.role` (e.g. `MANAGER_COMP_BENEFITS`), not `STAFF`. A companion field `user.phedAccessRole` carries the same value. Non-PHED users continue to see their global role in `user.role` and `null` for `user.phedAccessRole`. The JWT token itself still carries the global role \u2014 only the response body fields change.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001",
+      "description": "API base URL \u2014 dev server. Use your deployed URL otherwise."
+    },
+    {
+      "key": "companyId",
+      "value": "acme-company",
+      "description": "PHED company ID. acme-company is the seeded dev/test tenant."
+    },
+    {
+      "key": "token",
+      "value": "",
+      "description": "Generic token slot \u2014 set manually or via one of the role logins below."
+    },
+    {
+      "key": "token_manager",
+      "value": "",
+      "description": "Auto-set by 'Login as Manager, Comp & Benefits'"
+    },
+    {
+      "key": "token_iad",
+      "value": "",
+      "description": "Auto-set by 'Login as Head, Internal Audit'"
+    },
+    {
+      "key": "token_cpo",
+      "value": "",
+      "description": "Auto-set by 'Login as Chief People Officer'"
+    },
+    {
+      "key": "token_cfo",
+      "value": "",
+      "description": "Auto-set by 'Login as Chief Finance Officer'"
+    },
+    {
+      "key": "token_mdceo",
+      "value": "",
+      "description": "Auto-set by 'Login as MD/CEO'"
+    },
+    {
+      "key": "token_treasury",
+      "value": "",
+      "description": "Auto-set by 'Login as Treasury Team'"
+    },
+    {
+      "key": "token_finrep",
+      "value": "",
+      "description": "Auto-set by 'Login as Financial Reporting Team'"
+    },
+    {
+      "key": "token_tax",
+      "value": "",
+      "description": "Auto-set by 'Login as Tax Team'"
+    },
+    {
+      "key": "token_hr",
+      "value": "",
+      "description": "A global HR/Admin token \u2014 set manually (no seeded HR account ships with this collection)."
+    },
+    {
+      "key": "periodId",
+      "value": "",
+      "description": "A PhedPayPeriod id already in APPROVED status (precondition for Stage 1 submit)."
+    },
+    {
+      "key": "memoId",
+      "value": "",
+      "description": "Auto-set by 'Stage 1 \u2014 Submit for Approval' on success. Override to point at an existing memo."
+    },
+    {
+      "key": "exitStaffId",
+      "value": "",
+      "description": "A PhedStaff id to mark exited via the Record Staff Exit request."
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth \u2014 Login as PHED Role",
+      "item": [
+        {
+          "name": "Login as Manager, Comp & Benefits",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"manager.compbenefits@phed-approvals.local\",\n  \"password\": \"managercompensationbenefits\",\n  \"companyId\": \"{{companyId}}\"\n}"
+            },
+            "description": "Logs in as the seeded **Manager, Comp & Benefits** account and saves the JWT into `{{token_manager}}` automatically (see the Tests tab)."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 Login successful",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Login successful\",\n  \"data\": {\n    \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n    \"user\": {\n      \"id\": \"cmqri46ni0000k9mm2w0izl78\",\n      \"email\": \"manager.compbenefits@phed-approvals.local\",\n      \"firstName\": \"...\",\n      \"lastName\": \"...\",\n      \"role\": \"MANAGER_COMP_BENEFITS\",\n      \"phedAccessRole\": \"MANAGER_COMP_BENEFITS\",\n      \"companyId\": \"acme-company\",\n      \"position\": \"Manager, Comp & Benefits\",\n      \"staffId\": \"PHED-APR-...\",\n      \"requirePasswordChange\": true\n    },\n    \"company\": {\n      \"id\": \"acme-company\",\n      \"companyName\": \"Acme HR Solutions\"\n    },\n    \"enabledModules\": [\n      \"PHED\"\n    ]\n  }\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('token_manager', data.token);",
+                  "}",
+                  "pm.test('Login succeeded', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as Head, Internal Audit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"head.internalaudit@phed-approvals.local\",\n  \"password\": \"headinternalaudit\",\n  \"companyId\": \"{{companyId}}\"\n}"
+            },
+            "description": "Logs in as the seeded **Head, Internal Audit** account and saves the JWT into `{{token_iad}}` automatically (see the Tests tab)."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 Login successful",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Login successful\",\n  \"data\": {\n    \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n    \"user\": {\n      \"id\": \"cmqri46ni0000k9mm2w0izl78\",\n      \"email\": \"head.internalaudit@phed-approvals.local\",\n      \"firstName\": \"...\",\n      \"lastName\": \"...\",\n      \"role\": \"HEAD_INTERNAL_AUDIT\",\n      \"phedAccessRole\": \"HEAD_INTERNAL_AUDIT\",\n      \"companyId\": \"acme-company\",\n      \"position\": \"Head, Internal Audit\",\n      \"staffId\": \"PHED-APR-...\",\n      \"requirePasswordChange\": true\n    },\n    \"company\": {\n      \"id\": \"acme-company\",\n      \"companyName\": \"Acme HR Solutions\"\n    },\n    \"enabledModules\": [\n      \"PHED\"\n    ]\n  }\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('token_iad', data.token);",
+                  "}",
+                  "pm.test('Login succeeded', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as Chief People Officer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"cpo@phed-approvals.local\",\n  \"password\": \"chiefpeopleofficer\",\n  \"companyId\": \"{{companyId}}\"\n}"
+            },
+            "description": "Logs in as the seeded **Chief People Officer** account and saves the JWT into `{{token_cpo}}` automatically (see the Tests tab)."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 Login successful",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Login successful\",\n  \"data\": {\n    \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n    \"user\": {\n      \"id\": \"cmqri46ni0000k9mm2w0izl78\",\n      \"email\": \"cpo@phed-approvals.local\",\n      \"firstName\": \"...\",\n      \"lastName\": \"...\",\n      \"role\": \"CHIEF_PEOPLE_OFFICER\",\n      \"phedAccessRole\": \"CHIEF_PEOPLE_OFFICER\",\n      \"companyId\": \"acme-company\",\n      \"position\": \"Chief People Officer\",\n      \"staffId\": \"PHED-APR-...\",\n      \"requirePasswordChange\": true\n    },\n    \"company\": {\n      \"id\": \"acme-company\",\n      \"companyName\": \"Acme HR Solutions\"\n    },\n    \"enabledModules\": [\n      \"PHED\"\n    ]\n  }\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('token_cpo', data.token);",
+                  "}",
+                  "pm.test('Login succeeded', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as Chief Finance Officer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"cfo@phed-approvals.local\",\n  \"password\": \"chieffinanceofficer\",\n  \"companyId\": \"{{companyId}}\"\n}"
+            },
+            "description": "Logs in as the seeded **Chief Finance Officer** account and saves the JWT into `{{token_cfo}}` automatically (see the Tests tab)."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 Login successful",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Login successful\",\n  \"data\": {\n    \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n    \"user\": {\n      \"id\": \"cmqri46ni0000k9mm2w0izl78\",\n      \"email\": \"cfo@phed-approvals.local\",\n      \"firstName\": \"...\",\n      \"lastName\": \"...\",\n      \"role\": \"CHIEF_FINANCE_OFFICER\",\n      \"phedAccessRole\": \"CHIEF_FINANCE_OFFICER\",\n      \"companyId\": \"acme-company\",\n      \"position\": \"Chief Finance Officer\",\n      \"staffId\": \"PHED-APR-...\",\n      \"requirePasswordChange\": true\n    },\n    \"company\": {\n      \"id\": \"acme-company\",\n      \"companyName\": \"Acme HR Solutions\"\n    },\n    \"enabledModules\": [\n      \"PHED\"\n    ]\n  }\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('token_cfo', data.token);",
+                  "}",
+                  "pm.test('Login succeeded', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as MD/CEO",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"mdceo@phed-approvals.local\",\n  \"password\": \"mdceo\",\n  \"companyId\": \"{{companyId}}\"\n}"
+            },
+            "description": "Logs in as the seeded **MD/CEO** account and saves the JWT into `{{token_mdceo}}` automatically (see the Tests tab)."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 Login successful",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Login successful\",\n  \"data\": {\n    \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n    \"user\": {\n      \"id\": \"cmqri46ni0000k9mm2w0izl78\",\n      \"email\": \"mdceo@phed-approvals.local\",\n      \"firstName\": \"...\",\n      \"lastName\": \"...\",\n      \"role\": \"MD_CEO\",\n      \"phedAccessRole\": \"MD_CEO\",\n      \"companyId\": \"acme-company\",\n      \"position\": \"MD/CEO\",\n      \"staffId\": \"PHED-APR-...\",\n      \"requirePasswordChange\": true\n    },\n    \"company\": {\n      \"id\": \"acme-company\",\n      \"companyName\": \"Acme HR Solutions\"\n    },\n    \"enabledModules\": [\n      \"PHED\"\n    ]\n  }\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('token_mdceo', data.token);",
+                  "}",
+                  "pm.test('Login succeeded', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as Treasury Team",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"treasury@phed-approvals.local\",\n  \"password\": \"treasuryteam\",\n  \"companyId\": \"{{companyId}}\"\n}"
+            },
+            "description": "Logs in as the seeded **Treasury Team** account and saves the JWT into `{{token_treasury}}` automatically (see the Tests tab)."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 Login successful",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Login successful\",\n  \"data\": {\n    \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n    \"user\": {\n      \"id\": \"cmqri46ni0000k9mm2w0izl78\",\n      \"email\": \"treasury@phed-approvals.local\",\n      \"firstName\": \"...\",\n      \"lastName\": \"...\",\n      \"role\": \"TREASURY_TEAM\",\n      \"phedAccessRole\": \"TREASURY_TEAM\",\n      \"companyId\": \"acme-company\",\n      \"position\": \"Treasury Team\",\n      \"staffId\": \"PHED-APR-...\",\n      \"requirePasswordChange\": true\n    },\n    \"company\": {\n      \"id\": \"acme-company\",\n      \"companyName\": \"Acme HR Solutions\"\n    },\n    \"enabledModules\": [\n      \"PHED\"\n    ]\n  }\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('token_treasury', data.token);",
+                  "}",
+                  "pm.test('Login succeeded', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as Financial Reporting Team",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"financialreporting@phed-approvals.local\",\n  \"password\": \"financialreportingteam\",\n  \"companyId\": \"{{companyId}}\"\n}"
+            },
+            "description": "Logs in as the seeded **Financial Reporting Team** account and saves the JWT into `{{token_finrep}}` automatically (see the Tests tab)."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 Login successful",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Login successful\",\n  \"data\": {\n    \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n    \"user\": {\n      \"id\": \"cmqri46ni0000k9mm2w0izl78\",\n      \"email\": \"financialreporting@phed-approvals.local\",\n      \"firstName\": \"...\",\n      \"lastName\": \"...\",\n      \"role\": \"FINANCIAL_REPORTING_TEAM\",\n      \"phedAccessRole\": \"FINANCIAL_REPORTING_TEAM\",\n      \"companyId\": \"acme-company\",\n      \"position\": \"Financial Reporting Team\",\n      \"staffId\": \"PHED-APR-...\",\n      \"requirePasswordChange\": true\n    },\n    \"company\": {\n      \"id\": \"acme-company\",\n      \"companyName\": \"Acme HR Solutions\"\n    },\n    \"enabledModules\": [\n      \"PHED\"\n    ]\n  }\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('token_finrep', data.token);",
+                  "}",
+                  "pm.test('Login succeeded', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as Tax Team",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"tax@phed-approvals.local\",\n  \"password\": \"taxteam\",\n  \"companyId\": \"{{companyId}}\"\n}"
+            },
+            "description": "Logs in as the seeded **Tax Team** account and saves the JWT into `{{token_tax}}` automatically (see the Tests tab)."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 Login successful",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Login successful\",\n  \"data\": {\n    \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n    \"user\": {\n      \"id\": \"cmqri46ni0000k9mm2w0izl78\",\n      \"email\": \"tax@phed-approvals.local\",\n      \"firstName\": \"...\",\n      \"lastName\": \"...\",\n      \"role\": \"TAX_TEAM\",\n      \"phedAccessRole\": \"TAX_TEAM\",\n      \"companyId\": \"acme-company\",\n      \"position\": \"Tax Team\",\n      \"staffId\": \"PHED-APR-...\",\n      \"requirePasswordChange\": true\n    },\n    \"company\": {\n      \"id\": \"acme-company\",\n      \"companyName\": \"Acme HR Solutions\"\n    },\n    \"enabledModules\": [\n      \"PHED\"\n    ]\n  }\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('token_tax', data.token);",
+                  "}",
+                  "pm.test('Login succeeded', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "These 8 accounts are seeded by `scripts/seed-phed-approval-roles.ts` and exist only in dev/test tenants that have run it. Each login auto-saves its JWT into a dedicated collection variable (e.g. `token_iad`) via the request's Tests script, so the rest of the collection can reference `{{token_iad}}` etc. directly without manual copy/paste. Passwords shown are the seed script's default temp passwords \u2014 if you've changed them, update the request body before running.\n\nRun all 8 once at the start of a session (Collection Runner works well here) before touching the Module 12/13 folders below."
+    },
+    {
+      "name": "Module 12 \u2014 Payroll Approval Workflow",
+      "item": [
+        {
+          "name": "Stage 1 \u2014 Submit for Approval",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_manager}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/approvals/memos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "approvals",
+                "memos"
+              ]
+            },
+            "description": "**Role:** `MANAGER_COMP_BENEFITS` only.\n\n**Precondition:** the target PhedPayPeriod must be in `REVIEW` status (payroll has been computed — no further HR approval of the period is needed before submitting). `comment` is optional.\n\nIf a memo for this period already exists and is `RETURNED_FOR_CORRECTION` (i.e. was flagged), this call **reuses that same memo record** instead of creating a new one. Saves `memoId` automatically on success.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payPeriodId\": \"{{periodId}}\",\n  \"comment\": \"Ready for review\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created \u2014 Memo created, sent to Head IAD",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Approval memo created and sent to Head, Internal Audit\",\n  \"data\": {\n    \"id\": \"cmqrwn7md0000awmms9ofovat\",\n    \"companyId\": \"acme-company\",\n    \"payPeriodId\": \"cmpzbb8zl0009x5mm126wgxvj\",\n    \"currentStage\": 2,\n    \"status\": \"PENDING_REVIEW\",\n    \"attemptNumber\": 1,\n    \"stageEnteredAt\": \"2026-06-24T10:02:48.269Z\",\n    \"createdAt\": \"2026-06-24T10:02:48.277Z\",\n    \"updatedAt\": \"2026-06-24T10:02:48.277Z\"\n  }\n}"
+            },
+            {
+              "name": "400 \u2014 Period not finalized yet",
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"Only a pay period in REVIEW status can be submitted for approval\",\n  \"errors\": []\n}"
+            },
+            {
+              "name": "409 \u2014 Memo already exists for this period",
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"An approval memo already exists for this pay period\",\n  \"errors\": []\n}"
+            },
+            {
+              "name": "403 \u2014 Wrong role",
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"Insufficient permissions. Required PHED role: MANAGER_COMP_BENEFITS\",\n  \"errors\": []\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('memoId', data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Memo Archive",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_mdceo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/approvals/memos?page=1&limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "approvals",
+                "memos"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "**Roles:** all 5 approval-chain roles, or global HR/ADMIN/SUPER_ADMIN.\n\nPowers Screen 4 (Memo Archive). `displayStatus` is pre-computed \u2014 use it directly for the status column."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Success\",\n  \"data\": {\n    \"memos\": [\n      {\n        \"id\": \"cmqrwn7md0000awmms9ofovat\",\n        \"payPeriod\": {\n          \"id\": \"cmpzbb8zl0009x5mm126wgxvj\",\n          \"periodName\": \"June 2026\",\n          \"month\": 6,\n          \"year\": 2026\n        },\n        \"totalNetPay\": 194037.5,\n        \"currentStage\": 5,\n        \"status\": \"APPROVED\",\n        \"displayStatus\": \"Approved\",\n        \"dateFullyApproved\": \"2026-06-24T10:28:29.868Z\"\n      }\n    ],\n    \"total\": 1,\n    \"page\": 1,\n    \"limit\": 50,\n    \"pages\": 1\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Memo Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_mdceo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/approvals/memos/{{memoId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "approvals",
+                "memos",
+                "{{memoId}}"
+              ]
+            },
+            "description": "**Roles:** all 5 approval-chain roles, or global HR/ADMIN/SUPER_ADMIN.\n\nPowers Screen 2 (Memo Detail). `stamps[].superseded` marks stamps from an earlier (flagged) attempt \u2014 render them de-emphasized, never hide them. `iadConcurrenceStamp` is the current attempt's Stage-2 stamp (or null) \u2014 pin it in a callout box when the logged-in user is the CFO, per PRD 12.6 item 39."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 fully approved memo, after one flag/resubmit cycle",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Success\",\n  \"data\": {\n    \"memo\": {\n      \"id\": \"cmqrwn7md0000awmms9ofovat\",\n      \"companyId\": \"acme-company\",\n      \"payPeriodId\": \"cmpzbb8zl0009x5mm126wgxvj\",\n      \"currentStage\": 5,\n      \"currentStageLabel\": \"MD/CEO\",\n      \"status\": \"APPROVED\",\n      \"displayStatus\": \"Approved\",\n      \"attemptNumber\": 2,\n      \"stageEnteredAt\": \"2026-06-24T10:28:29.866Z\",\n      \"date\": \"2026-06-24T10:02:48.277Z\"\n    },\n    \"payPeriod\": {\n      \"id\": \"cmpzbb8zl0009x5mm126wgxvj\",\n      \"periodName\": \"June 2026\",\n      \"month\": 6,\n      \"year\": 2026\n    },\n    \"sections\": {\n      \"subject\": \"Payment of June 2026 Salary\",\n      \"sectionA\": [\n        {\n          \"label\": \"Regular Staff\",\n          \"gross\": 328125,\n          \"deduction\": 134087.5,\n          \"netPay\": 194037.5\n        },\n        {\n          \"label\": \"Contract Staff\",\n          \"gross\": 0,\n          \"deduction\": 0,\n          \"netPay\": 0\n        },\n        {\n          \"label\": \"NYSC/Internship\",\n          \"gross\": 0,\n          \"deduction\": 0,\n          \"netPay\": 0\n        },\n        {\n          \"label\": \"Total\",\n          \"gross\": 328125,\n          \"deduction\": 134087.5,\n          \"netPay\": 194037.5\n        }\n      ],\n      \"sectionEarnings\": [\n        {\n          \"label\": \"Basic Salary\",\n          \"amount\": 150000\n        },\n        {\n          \"label\": \"Housing Allowance\",\n          \"amount\": 50000\n        },\n        {\n          \"label\": \"Transport Allowance\",\n          \"amount\": 30000\n        },\n        {\n          \"label\": \"Meal Subsidy\",\n          \"amount\": 10000\n        },\n        {\n          \"label\": \"Overtime\",\n          \"amount\": 8125\n        },\n        {\n          \"label\": \"Total Gross Pay\",\n          \"amount\": 328125\n        }\n      ],\n      \"sectionB\": [\n        {\n          \"label\": \"Pension Remittance\",\n          \"amount\": 45000\n        },\n        {\n          \"label\": \"NSITF\",\n          \"amount\": 3281.25\n        },\n        {\n          \"label\": \"ITF\",\n          \"amount\": 3281.25\n        },\n        {\n          \"label\": \"NHF\",\n          \"amount\": 5000\n        },\n        {\n          \"label\": \"PAYE\",\n          \"amount\": 30462.5\n        },\n        {\n          \"label\": \"NUEE Check-Off Dues\",\n          \"amount\": 32812.5\n        },\n        {\n          \"label\": \"PHED Staff Cooperative\",\n          \"amount\": 3000\n        },\n        {\n          \"label\": \"Liabilities to PHED\",\n          \"amount\": 0\n        },\n        {\n          \"label\": \"Total\",\n          \"amount\": 165650\n        }\n      ],\n      \"totalNetPay\": 194037.5,\n      \"approvalSentence\": \"We request your approval for payment of N194,037.50 (One Hundred and Ninety-Four Thousand, Thirty-Seven Naira, Fifty Kobo Only) as June 2026 salary.\"\n    },\n    \"stamps\": [\n      {\n        \"id\": \"s1\",\n        \"memoId\": \"cmqrwn7md0000awmms9ofovat\",\n        \"attemptNumber\": 1,\n        \"stage\": 1,\n        \"action\": \"SUBMITTED\",\n        \"staffRecordId\": \"...\",\n        \"actorName\": \"Manager Compensation Benefits\",\n        \"actorRole\": \"MANAGER_COMP_BENEFITS\",\n        \"comment\": \"Test submission\",\n        \"createdAt\": \"2026-06-24T10:02:48.692Z\",\n        \"superseded\": true\n      },\n      {\n        \"id\": \"s2\",\n        \"attemptNumber\": 1,\n        \"stage\": 2,\n        \"action\": \"RECOMMENDED\",\n        \"actorName\": \"Head Internal Audit\",\n        \"actorRole\": \"HEAD_INTERNAL_AUDIT\",\n        \"comment\": null,\n        \"createdAt\": \"2026-06-24T10:24:41.093Z\",\n        \"superseded\": true\n      },\n      {\n        \"id\": \"s3\",\n        \"attemptNumber\": 1,\n        \"stage\": 3,\n        \"action\": \"APPROVED\",\n        \"actorName\": \"Chief People Officer\",\n        \"actorRole\": \"CHIEF_PEOPLE_OFFICER\",\n        \"comment\": null,\n        \"createdAt\": \"2026-06-24T10:24:45.290Z\",\n        \"superseded\": true\n      },\n      {\n        \"id\": \"s4\",\n        \"attemptNumber\": 1,\n        \"stage\": 4,\n        \"action\": \"FLAGGED\",\n        \"actorName\": \"Chief Finance Officer\",\n        \"actorRole\": \"CHIEF_FINANCE_OFFICER\",\n        \"comment\": \"Net pay figure looks off for Regular Staff, please recheck.\",\n        \"createdAt\": \"2026-06-24T10:25:34.153Z\",\n        \"superseded\": true\n      },\n      {\n        \"id\": \"s5\",\n        \"attemptNumber\": 2,\n        \"stage\": 1,\n        \"action\": \"SUBMITTED\",\n        \"actorName\": \"Manager Compensation Benefits\",\n        \"actorRole\": \"MANAGER_COMP_BENEFITS\",\n        \"comment\": \"Fixed the regular staff figures\",\n        \"createdAt\": \"2026-06-24T10:25:43.027Z\",\n        \"superseded\": false\n      },\n      {\n        \"id\": \"s6\",\n        \"attemptNumber\": 2,\n        \"stage\": 2,\n        \"action\": \"RECOMMENDED\",\n        \"actorName\": \"Head Internal Audit\",\n        \"actorRole\": \"HEAD_INTERNAL_AUDIT\",\n        \"comment\": null,\n        \"createdAt\": \"2026-06-24T10:28:00.000Z\",\n        \"superseded\": false\n      },\n      {\n        \"id\": \"s7\",\n        \"attemptNumber\": 2,\n        \"stage\": 3,\n        \"action\": \"APPROVED\",\n        \"actorName\": \"Chief People Officer\",\n        \"actorRole\": \"CHIEF_PEOPLE_OFFICER\",\n        \"comment\": null,\n        \"createdAt\": \"2026-06-24T10:28:10.000Z\",\n        \"superseded\": false\n      },\n      {\n        \"id\": \"s8\",\n        \"attemptNumber\": 2,\n        \"stage\": 4,\n        \"action\": \"APPROVED\",\n        \"actorName\": \"Chief Finance Officer\",\n        \"actorRole\": \"CHIEF_FINANCE_OFFICER\",\n        \"comment\": null,\n        \"createdAt\": \"2026-06-24T10:28:20.000Z\",\n        \"superseded\": false\n      },\n      {\n        \"id\": \"s9\",\n        \"attemptNumber\": 2,\n        \"stage\": 5,\n        \"action\": \"FINAL_APPROVED\",\n        \"actorName\": \"MD CEO\",\n        \"actorRole\": \"MD_CEO\",\n        \"comment\": null,\n        \"createdAt\": \"2026-06-24T10:28:29.866Z\",\n        \"superseded\": false\n      }\n    ],\n    \"iadConcurrenceStamp\": {\n      \"id\": \"s6\",\n      \"stage\": 2,\n      \"action\": \"RECOMMENDED\",\n      \"actorName\": \"Head Internal Audit\",\n      \"actorRole\": \"HEAD_INTERNAL_AUDIT\",\n      \"comment\": null,\n      \"createdAt\": \"2026-06-24T10:28:00.000Z\",\n      \"attemptNumber\": 2,\n      \"superseded\": false\n    }\n  }\n}"
+            },
+            {
+              "name": "404 \u2014 Not found / wrong company",
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"Approval memo not found\",\n  \"errors\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "Stage 2 \u2014 Recommend for Approval",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_iad}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/approvals/memos/{{memoId}}/recommend",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "approvals",
+                "memos",
+                "{{memoId}}",
+                "recommend"
+              ]
+            },
+            "description": "**Role:** `HEAD_INTERNAL_AUDIT` only. `comment` is optional for a forward action.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"comment\": \"Looks good\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 advances to Stage 3",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Memo advanced to Chief People Officer\",\n  \"data\": {\n    \"id\": \"cmqrwn7md0000awmms9ofovat\",\n    \"currentStage\": 3,\n    \"status\": \"PENDING_FIRST_LEVEL_APPROVAL\",\n    \"attemptNumber\": 1,\n    \"stageEnteredAt\": \"2026-06-24T10:24:41.093Z\",\n    \"createdAt\": \"...\",\n    \"updatedAt\": \"...\"\n  }\n}"
+            },
+            {
+              "name": "403 \u2014 Wrong role entirely",
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"Insufficient permissions. Required PHED role: HEAD_INTERNAL_AUDIT\",\n  \"errors\": []\n}"
+            },
+            {
+              "name": "409 \u2014 Right role, wrong stage / already approved",
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"This memo is not at your desk. It is currently at Stage 3 (Chief People Officer).\",\n  \"errors\": []\n}"
+            },
+            {
+              "name": "401 \u2014 No token",
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"Authentication required\",\n  \"errors\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "Stage 3 \u2014 Approve (as CPO)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_cpo}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/approvals/memos/{{memoId}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "approvals",
+                "memos",
+                "{{memoId}}",
+                "approve"
+              ]
+            },
+            "description": "**Roles:** `CHIEF_PEOPLE_OFFICER` (Stage 3) or `CHIEF_FINANCE_OFFICER` (Stage 4) \u2014 same endpoint serves both. The backend determines which stage based on the *caller's own role*, not a body field.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"comment\": \"Approved\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 advances to Stage 4",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Memo advanced to Chief Finance Officer\",\n  \"data\": {\n    \"currentStage\": 4,\n    \"status\": \"PENDING_SECOND_LEVEL_APPROVAL\",\n    \"attemptNumber\": 1\n  }\n}"
+            },
+            {
+              "name": "409 \u2014 CFO's own example from the PRD: right role, wrong stage",
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"This memo is not at your desk. It is currently at Stage 2 (Head, Internal Audit).\",\n  \"errors\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "Stage 4 \u2014 Approve (as CFO)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_cfo}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/approvals/memos/{{memoId}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "approvals",
+                "memos",
+                "{{memoId}}",
+                "approve"
+              ]
+            },
+            "description": "Same endpoint as Stage 3 \u2014 see that request's description. Run this one *after* Stage 3 has advanced the memo to Stage 4.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"comment\": \"Financials check out\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 advances to Stage 5",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Memo advanced to MD/CEO\",\n  \"data\": {\n    \"currentStage\": 5,\n    \"status\": \"PENDING_FINAL_APPROVAL\",\n    \"attemptNumber\": 1\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Stage 5 \u2014 Final Approve",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_mdceo}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/approvals/memos/{{memoId}}/finalapprove",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "approvals",
+                "memos",
+                "{{memoId}}",
+                "finalapprove"
+              ]
+            },
+            "description": "**Role:** `MD_CEO` only. On success: the memo becomes permanently read-only, Treasury Team is notified, and the period's Bank Page unlocks for Treasury (see Module 13 folder).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"comment\": \"Approved for disbursement\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 APPROVED, terminal",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Final approval recorded. Memo is now APPROVED \\u2014 Ready for Disbursement.\",\n  \"data\": {\n    \"id\": \"cmqrwn7md0000awmms9ofovat\",\n    \"currentStage\": 5,\n    \"status\": \"APPROVED\",\n    \"attemptNumber\": 1\n  }\n}"
+            },
+            {
+              "name": "409 \u2014 Already approved (e.g. double-click)",
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"This memo has already been fully approved\",\n  \"errors\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "Flag Back to Stage 1",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_cfo}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/approvals/memos/{{memoId}}/flag",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "approvals",
+                "memos",
+                "{{memoId}}",
+                "flag"
+              ]
+            },
+            "description": "**Roles:** `HEAD_INTERNAL_AUDIT`, `CHIEF_PEOPLE_OFFICER`, `CHIEF_FINANCE_OFFICER`, or `MD_CEO` \u2014 but only the one whose stage currently holds the memo (409 otherwise, same rule as the forward actions). `comment` is **mandatory** \u2014 empty/whitespace-only is rejected with 400.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"comment\": \"Net pay figure looks off for Regular Staff, please recheck.\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 returned to Stage 1",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Memo flagged and returned to Manager, Compensation & Benefits\",\n  \"data\": {\n    \"id\": \"cmqrwn7md0000awmms9ofovat\",\n    \"currentStage\": 1,\n    \"status\": \"RETURNED_FOR_CORRECTION\",\n    \"attemptNumber\": 2,\n    \"stageEnteredAt\": \"2026-06-24T10:25:34.153Z\"\n  }\n}"
+            },
+            {
+              "name": "400 \u2014 Empty comment",
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"A comment is required when flagging a memo back for correction\",\n  \"errors\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "Download Memo PDF",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_mdceo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/approvals/memos/{{memoId}}/pdf",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "approvals",
+                "memos",
+                "{{memoId}}",
+                "pdf"
+              ]
+            },
+            "description": "**Roles:** same as Get Memo Detail. Returns a **binary PDF**, not JSON \u2014 in Postman, use 'Send and Download' to save it.\n\nPDF sections in order:\n1. Header (company name, status, current stage)\n2. MEMO/DATE/TO/FROM/SUBJECT box\n3. Approval sentence\n4. Section A \u2014 Total Payroll Cost (3-column table: Gross / Deductions / Net Pay by staff category)\n5. Salary Earnings Breakdown \u2014 non-zero earnings components aggregated across all staff (Basic Salary, each allowance, Overtime), ending with Total Gross Pay totals row\n6. Section B \u2014 Deductions and Remittances\n7. Section C \u2014 Total Net Pay (bold highlight bar)\n8. Approval Stamp Ledger \u2014 current attempt only (superseded stamps from prior flagged attempts are not printed)"
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 binary PDF (headers shown, body omitted)",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "<binary PDF data>",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/pdf"
+                },
+                {
+                  "key": "Content-Disposition",
+                  "value": "attachment; filename=\"approval-memo-June-2026.pdf\""
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "3504"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "My Approval Queue",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_iad}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/approvals/my-queue",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "approvals",
+                "my-queue"
+              ]
+            },
+            "description": "**Roles:** the 5 approval-chain roles only \u2014 Treasury/Tax/Financial Reporting hold no desk and get 403. Powers Screen 1. Three possible shapes for `data`: memo at your desk, memo elsewhere (situational awareness even when it's not your turn), or nothing active at all."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 a memo is at my desk",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Success\",\n  \"data\": {\n    \"memoAtMyDesk\": {\n      \"id\": \"cmqrwn7md0000awmms9ofovat\",\n      \"payPeriod\": {\n        \"id\": \"cmpzbb8zl0009x5mm126wgxvj\",\n        \"periodName\": \"June 2026\",\n        \"month\": 6,\n        \"year\": 2026\n      },\n      \"totalNetPay\": 194037.5,\n      \"stageEnteredAt\": \"2026-06-24T10:02:48.269Z\",\n      \"timeElapsedSeconds\": 642,\n      \"status\": \"PENDING_REVIEW\"\n    },\n    \"activeMemoElsewhere\": null\n  }\n}"
+            },
+            {
+              "name": "200 OK \u2014 not my turn, memo is elsewhere",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Success\",\n  \"data\": {\n    \"memoAtMyDesk\": null,\n    \"activeMemoElsewhere\": {\n      \"id\": \"cmqrwn7md0000awmms9ofovat\",\n      \"payPeriod\": {\n        \"id\": \"cmpzbb8zl0009x5mm126wgxvj\",\n        \"periodName\": \"June 2026\",\n        \"month\": 6,\n        \"year\": 2026\n      },\n      \"currentStage\": 2,\n      \"currentStageLabel\": \"Head, Internal Audit\"\n    }\n  }\n}"
+            },
+            {
+              "name": "200 OK \u2014 nothing active anywhere",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Success\",\n  \"data\": {\n    \"memoAtMyDesk\": null,\n    \"activeMemoElsewhere\": null\n  }\n}"
+            },
+            {
+              "name": "403 \u2014 role has no desk (e.g. Tax Team)",
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"Insufficient permissions. Required PHED role: MANAGER_COMP_BENEFITS, HEAD_INTERNAL_AUDIT, CHIEF_PEOPLE_OFFICER, CHIEF_FINANCE_OFFICER, MD_CEO\",\n  \"errors\": []\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Run in order: Stage 1 (as Manager) \u2192 Stage 2 Recommend (as Head IAD) \u2192 Stage 3 Approve (as CPO) \u2192 Stage 4 Approve (as CFO) \u2192 Stage 5 Final Approve (as MD/CEO). `memoId` is captured automatically by Stage 1's Tests script. Run the 8 logins in the Auth folder first.\n\nTry 'Flag Back' after Stage 2 instead of continuing forward to see the full flag \u2192 resubmit cycle: flag it, then re-run 'Stage 1 \u2014 Submit for Approval' (it reuses the same memoId), then continue forward again."
+    },
+    {
+      "name": "Module 13 \u2014 Role-Based Payroll Access Matrix",
+      "item": [
+        {
+          "name": "Bank Schedule",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_treasury}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/bank-schedule",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "bank-schedule"
+              ]
+            },
+            "description": "**Allowed PHED roles:** TREASURY_TEAM, plus all 4 full-access roles (MANAGER_COMP_BENEFITS, CHIEF_PEOPLE_OFFICER, CHIEF_FINANCE_OFFICER, MD_CEO), plus global HR/ADMIN/SUPER_ADMIN.\n\n**Extra rule, Treasury only:** the period's Approval Memo must already be `APPROVED` (Module 12 Stage 5 outcome). Full-access roles and HR/Admin bypass this \u2014 they may need to review it before approving."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 memo already APPROVED",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"sn\": 1,\n      \"staffId\": \"emp-001\",\n      \"staffName\": \"Nnam Abraham\",\n      \"bankName\": \"GTBank\",\n      \"accountNumber\": \"0123456789\",\n      \"accountName\": \"Nnam Abraham\",\n      \"netSalary\": 194037.5,\n      \"department\": \"Finance\",\n      \"region\": \"\"\n    }\n  ]\n}"
+            },
+            {
+              "name": "403 \u2014 Treasury, but memo not yet APPROVED",
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"The Bank Page is not yet available \\u2014 this period's payroll approval memo has not reached final approval.\",\n  \"errors\": []\n}"
+            },
+            {
+              "name": "403 \u2014 TAX_TEAM lacks this page",
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"Insufficient permissions. Your PHED role (TAX_TEAM) does not have access to this page.\",\n  \"errors\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "Pension Schedule",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_treasury}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/pension",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "pension"
+              ]
+            },
+            "description": "**Allowed PHED roles:** TREASURY_TEAM, plus the 4 full-access roles, plus HR/ADMIN/SUPER_ADMIN."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"sn\": 1,\n      \"staffId\": \"emp-001\",\n      \"staffName\": \"Nnam Abraham\",\n      \"pfaName\": \"ARM Pension\",\n      \"rsaPin\": \"PEN123456789\",\n      \"pensionEmployee\": 24000,\n      \"pensionEmployer\": 30000,\n      \"totalPension\": 54000,\n      \"grossSalary\": 300000\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "PAYE Schedule",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_tax}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/paye",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "paye"
+              ]
+            },
+            "description": "**Allowed PHED roles:** TAX_TEAM, TREASURY_TEAM, plus the 4 full-access roles, plus HR/ADMIN/SUPER_ADMIN."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"sn\": 1,\n      \"staffId\": \"emp-001\",\n      \"staffName\": \"Nnam Abraham\",\n      \"tin\": \"TIN-001\",\n      \"grossSalary\": 300000,\n      \"annualGrossIncome\": 3600000,\n      \"annualChargeableIncome\": 1924000,\n      \"annualPAYE\": 365650,\n      \"monthlyPAYE\": 30462.5,\n      \"department\": \"Finance\"\n    }\n  ]\n}"
+            },
+            {
+              "name": "403 \u2014 FINANCIAL_REPORTING_TEAM lacks this page",
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"Insufficient permissions. Your PHED role (FINANCIAL_REPORTING_TEAM) does not have access to this page.\",\n  \"errors\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "NSITF Schedule",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_treasury}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/nsitf",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "nsitf"
+              ]
+            },
+            "description": "**Allowed PHED roles:** TREASURY_TEAM, plus the 4 full-access roles, plus HR/ADMIN/SUPER_ADMIN."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"sn\": 1,\n      \"staffId\": \"emp-001\",\n      \"staffName\": \"Nnam Abraham\",\n      \"grossSalary\": 300000,\n      \"amount\": 3000,\n      \"department\": \"Finance\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "ITF Schedule",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_treasury}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/itf",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "itf"
+              ]
+            },
+            "description": "**Allowed PHED roles:** TREASURY_TEAM, plus the 4 full-access roles, plus HR/ADMIN/SUPER_ADMIN."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"sn\": 1,\n      \"staffId\": \"emp-001\",\n      \"staffName\": \"Nnam Abraham\",\n      \"grossSalary\": 300000,\n      \"amount\": 3000,\n      \"department\": \"Finance\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "NHF Schedule",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_treasury}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/nhf",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "nhf"
+              ]
+            },
+            "description": "**Allowed PHED roles:** TREASURY_TEAM, plus the 4 full-access roles, plus HR/ADMIN/SUPER_ADMIN."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"sn\": 1,\n      \"staffId\": \"emp-001\",\n      \"staffName\": \"Nnam Abraham\",\n      \"grossSalary\": 300000,\n      \"amount\": 6250,\n      \"department\": \"Finance\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Cost Centre Report",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_finrep}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/cost-centre",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "cost-centre"
+              ]
+            },
+            "description": "**Allowed PHED roles:** FINANCIAL_REPORTING_TEAM, plus the 4 full-access roles, plus HR/ADMIN/SUPER_ADMIN."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"region\": \"South-South\",\n      \"department\": \"Finance\",\n      \"unit\": \"Payroll\",\n      \"headCount\": 1,\n      \"totalGross\": 300000,\n      \"totalNet\": 194037.5,\n      \"totalPAYE\": 30462.5,\n      \"totalPension\": 54000\n    }\n  ]\n}"
+            },
+            {
+              "name": "403 \u2014 TAX_TEAM lacks this page",
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"Insufficient permissions. Your PHED role (TAX_TEAM) does not have access to this page.\",\n  \"errors\": []\n}"
+            },
+            {
+              "name": "403 \u2014 TREASURY_TEAM lacks this page",
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"Insufficient permissions. Your PHED role (TREASURY_TEAM) does not have access to this page.\",\n  \"errors\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "Unions & Cooperatives Deductions (new)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_treasury}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/union-cooperative-deductions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "union-cooperative-deductions"
+              ]
+            },
+            "description": "**New endpoint** \u2014 no pre-existing single-purpose route covered this slice before. **Allowed roles:** TREASURY_TEAM, plus the 4 full-access roles, plus HR/ADMIN/SUPER_ADMIN. Reuses the same Finance Summary aggregation already used by the existing `finance-summary` report."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Success\",\n  \"data\": {\n    \"periodName\": \"June 2026\",\n    \"unions\": [\n      {\n        \"name\": \"NUEE Check-Off Dues\",\n        \"amount\": 32812.5\n      }\n    ],\n    \"cooperatives\": [\n      {\n        \"name\": \"PHED Staff Cooperative\",\n        \"amount\": 3000\n      },\n      {\n        \"name\": \"PH Zonal Thrift\",\n        \"amount\": 10000\n      }\n    ],\n    \"total\": 45812.5\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Liabilities to PHED (new)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_treasury}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/liabilities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "liabilities"
+              ]
+            },
+            "description": "**New endpoint.** **Allowed roles:** TREASURY_TEAM, plus the 4 full-access roles, plus HR/ADMIN/SUPER_ADMIN."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Success\",\n  \"data\": {\n    \"periodName\": \"June 2026\",\n    \"liabilities\": [\n      {\n        \"name\": \"Staff Loan Recovery\",\n        \"amount\": 5000\n      }\n    ],\n    \"total\": 5000\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "IAD Page \u2014 Summary tab",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_iad}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/iad-summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "iad-summary"
+              ]
+            },
+            "description": "**Allowed roles:** HEAD_INTERNAL_AUDIT, plus the 4 full-access roles, plus HR/ADMIN/SUPER_ADMIN.\n\nPure reuse of the Approval Memo's Section A \u2014 figures are guaranteed identical to what's on the memo this officer is about to stamp."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Success\",\n  \"data\": {\n    \"periodName\": \"June 2026\",\n    \"sectionA\": [\n      {\n        \"label\": \"Regular Staff\",\n        \"gross\": 328125,\n        \"deduction\": 134087.5,\n        \"netPay\": 194037.5\n      },\n      {\n        \"label\": \"Contract Staff\",\n        \"gross\": 0,\n        \"deduction\": 0,\n        \"netPay\": 0\n      },\n      {\n        \"label\": \"NYSC/Internship\",\n        \"gross\": 0,\n        \"deduction\": 0,\n        \"netPay\": 0\n      },\n      {\n        \"label\": \"Total\",\n        \"gross\": 328125,\n        \"deduction\": 134087.5,\n        \"netPay\": 194037.5\n      }\n    ]\n  }\n}"
+            },
+            {
+              "name": "403 \u2014 TAX_TEAM lacks this page",
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"Insufficient permissions. Your PHED role (TAX_TEAM) does not have access to this page.\",\n  \"errors\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "IAD Page \u2014 Changes tab",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_iad}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/iad-changes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "iad-changes"
+              ]
+            },
+            "description": "Lists every **payroll-affecting** staff edit between the previous period's approval and this one's (salary, allowances, grade, category, department/unit, rent/life-assurance tax inputs only \u2014 contact/banking edits are never logged here)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Success\",\n  \"data\": [\n    {\n      \"staffName\": \"Nnam Abraham\",\n      \"staffIdCode\": \"emp-001\",\n      \"field\": \"basicSalary\",\n      \"oldValue\": null,\n      \"newValue\": \"150000\",\n      \"changedBy\": \"Test HR\",\n      \"changedAt\": \"2026-06-24T11:31:10.831Z\"\n    },\n    {\n      \"staffName\": \"Nnam Abraham\",\n      \"staffIdCode\": \"emp-001\",\n      \"field\": \"department\",\n      \"oldValue\": \"Access\",\n      \"newValue\": \"Finance\",\n      \"changedBy\": \"Test HR\",\n      \"changedAt\": \"2026-06-24T11:31:10.831Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "IAD Page \u2014 Exited tab",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_iad}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/iad-exited",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "iad-exited"
+              ]
+            },
+            "description": "Staff who exited during this period's calendar month. Self-contained within PHED \u2014 no Offboarding module dependency."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Success\",\n  \"data\": [\n    {\n      \"staffName\": \"Nnam Abraham\",\n      \"staffIdCode\": \"emp-001\",\n      \"department\": \"Finance\",\n      \"exitDate\": \"2026-06-20T00:00:00.000Z\",\n      \"reason\": \"RESIGNATION\",\n      \"finalGrossPay\": \"150000\",\n      \"finalDeductions\": \"40000\",\n      \"finalNetPay\": \"110000\",\n      \"notes\": \"Resigned to pursue further studies\",\n      \"recordedBy\": \"Test HR\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "IAD Page \u2014 New Hired tab",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_iad}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/pay-periods/{{periodId}}/reports/iad-new-hired",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "pay-periods",
+                "{{periodId}}",
+                "reports",
+                "iad-new-hired"
+              ]
+            },
+            "description": "Staff created during this period's calendar month, with starting salary and a best-effort Recruitment cross-reference (matched by email \u2014 `onboardingMatched: false` is common and expected)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Success\",\n  \"data\": [\n    {\n      \"staffName\": \"New Hire\",\n      \"staffIdCode\": \"PHED-NEWHIRE-1\",\n      \"department\": \"Operations\",\n      \"category\": \"REGULAR\",\n      \"gradeName\": null,\n      \"startingBasicSalary\": 120000,\n      \"hireDate\": \"2026-06-24T11:40:41.174Z\",\n      \"onboardingMatched\": false,\n      \"onboardingStartDate\": null,\n      \"onboardingStatus\": null\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Record Staff Exit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token_hr}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/phed/staff/{{exitStaffId}}/exit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "phed",
+                "staff",
+                "{{exitStaffId}}",
+                "exit"
+              ]
+            },
+            "description": "**Roles:** global HR/ADMIN/SUPER_ADMIN only \u2014 this is a write action, not page-matrix gated. `reason` must be one of: RESIGNATION, TERMINATION, RETIREMENT, END_OF_CONTRACT, OTHER. Also deactivates the staff member (`isActive: false`) in the same transaction \u2014 you don't need to call the plain `DELETE /api/phed/staff/:id` separately for a formal exit.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"exitDate\": \"2026-06-20\",\n  \"reason\": \"RESIGNATION\",\n  \"finalGrossPay\": 150000,\n  \"finalDeductions\": 40000,\n  \"finalNetPay\": 110000,\n  \"notes\": \"Resigned to pursue further studies\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": true,\n  \"message\": \"Staff exit recorded\",\n  \"data\": {\n    \"id\": \"cmqs015qk0000djmmkggtte7n\",\n    \"companyId\": \"acme-company\",\n    \"staffId\": \"cmpzbascd0006x5mmkn82caen\",\n    \"exitDate\": \"2026-06-20T00:00:00.000Z\",\n    \"reason\": \"RESIGNATION\",\n    \"finalGrossPay\": \"150000\",\n    \"finalDeductions\": \"40000\",\n    \"finalNetPay\": \"110000\",\n    \"notes\": \"Resigned to pursue further studies\",\n    \"recordedBy\": \"cmqrz9rq30000t8mmi9ex4oyx\",\n    \"recordedByName\": \"Test HR\",\n    \"createdAt\": \"2026-06-24T11:37:37.868Z\"\n  }\n}"
+            },
+            {
+              "name": "400 \u2014 bad reason value",
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"success\": false,\n  \"message\": \"reason must be one of: RESIGNATION, TERMINATION, RETIREMENT, END_OF_CONTRACT, OTHER\",\n  \"errors\": []\n}"
+            }
+          ]
+        }
+      ],
+      "description": "All `GET .../reports/*` requests here need `periodId` set to a real PhedPayPeriod with computed payroll. Switch the Authorization token between role variables (`token_treasury`, `token_tax`, `token_finrep`, `token_iad`, `token_mdceo`, ...) to see the matrix enforced in both directions \u2014 every request below already targets the role it's *supposed* to work for; change the token to one that shouldn't have access to reproduce the 403 examples saved on each request."
+    }
+  ]
+}

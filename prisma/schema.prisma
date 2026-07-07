@@ -41,6 +41,8 @@ model Company {
   attendances            Attendance[]
   
   // Recruitment
+  assessmentPlans        RecruitmentAssessmentPlan[]
+  candidateAssessments   RecruitmentCandidateAssessment[]
   candidateDocuments     CandidateDocument[]
   candidateFiles         CandidateFile[]
   candidates             Candidate[]
@@ -162,6 +164,7 @@ model Company {
   gradeAllowanceTemplates GradeAllowanceTemplate[] //opposite of GradeAllowanceTemplate.company
   staffSalaryHistory      StaffSalaryHistory[]
   staffGradeHistory       StaffGradeHistory[]
+  offboardings         Offboarding[]
   @@map("companies")
 }
 
@@ -330,6 +333,8 @@ model StaffRecord {
 
   // PHED Approval Workflow / Access Matrix (Module 12 & 13) — independent of `role` above
   phedAccessRole      PhedStaffAccessRole?
+  offboardings                    Offboarding[]       @relation("StaffOffboardings")
+  reviewedOffboardings            Offboarding[]       @relation("OffboardingReviewer")
 
   @@unique([staffId, companyId])
   @@unique([email, companyId])
@@ -473,6 +478,120 @@ model PayrollUpload {
   @@map("payroll_uploads")
 }
 
+// ==================== RECRUITMENT: ASSESSMENT PLANS ====================
+
+model RecruitmentAssessmentPlan {
+  id                     String              @id @default(cuid())
+  companyId              String
+  name                   String
+  description            String?             @db.Text
+  status                 PlanStatus          @default(DRAFT)
+  totalDurationMins      Int?
+  createdBy              String?
+  updatedBy              String?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  archived               Int?                @default(0)
+
+  company                Company                         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  rounds                 RecruitmentAssessmentRound[]
+  candidateAssessments   RecruitmentCandidateAssessment[]
+
+  @@index([companyId, status])
+  @@index([companyId, archived])
+  @@map("assessment_plans")
+}
+
+model RecruitmentAssessmentRound {
+  id                    String            @id @default(cuid())
+  planId                String
+  order                 Int
+  title                 String
+  interviewType         InterviewType     @default(VIDEO)
+  duration              Int
+  gradingMetric         String?
+  questionBanks         Json?
+  requiredInterviewers  Json?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  plan                  RecruitmentAssessmentPlan    @relation(fields: [planId], references: [id], onDelete: Cascade)
+  scorecards            RecruitmentScorecard[]
+
+  @@unique([planId, order])
+  @@index([planId])
+  @@map("assessment_rounds")
+}
+
+// ==================== RECRUITMENT: ASSESSMENT QUEUE ====================
+
+model RecruitmentCandidateAssessment {
+  id                String        @id @default(cuid())
+  applicationId     String        @unique
+  planId            String
+  companyId         String
+  currentRoundOrder Int           @default(1)
+  roundStatus       RoundStatus   @default(AWAITING_SCHEDULING)
+  scheduledAt       DateTime?
+  schedulingNotes   String?       @db.Text
+  interviewerIds    Json?
+  averageScore      Float?
+  createdBy         String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  application       JobApplication                @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  plan              RecruitmentAssessmentPlan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  company           Company                       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  scorecards        RecruitmentScorecard[]
+
+  @@index([companyId, roundStatus])
+  @@index([planId])
+  @@map("candidate_assessments")
+}
+
+model RecruitmentScorecard {
+  id                     String                  @id @default(cuid())
+  candidateAssessmentId  String
+  roundId                String
+  interviewerId          String
+  interviewerName        String?
+  interviewerRole        String?
+  scores                 Json
+  notes                  String?                 @db.Text
+  recommendation         ScorecardRecommendation
+  submittedAt            DateTime                @default(now())
+
+  candidateAssessment    RecruitmentCandidateAssessment  @relation(fields: [candidateAssessmentId], references: [id], onDelete: Cascade)
+  round                  RecruitmentAssessmentRound      @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateAssessmentId, roundId, interviewerId])
+  @@index([candidateAssessmentId])
+  @@index([roundId])
+  @@map("scorecards")
+}
+
+// ==================== RECRUITMENT: OFFER APPROVAL WORKFLOW ====================
+
+model RecruitmentOfferApproval {
+  id            String              @id @default(cuid())
+  offerId       String
+  approverId    String
+  approverName  String?
+  approverRole  String?
+  step          Int
+  status        OfferApprovalStatus @default(PENDING)
+  notes         String?             @db.Text
+  actedAt       DateTime?
+  createdAt     DateTime            @default(now())
+
+  offer         Offer               @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@unique([offerId, approverId])
+  @@index([offerId, step])
+  @@map("offer_approvals")
+}
+
 model JobApplication {
   id              String                    @id @default(cuid())
   companyId       String
@@ -501,6 +620,7 @@ model JobApplication {
   cvFile          CandidateFile?            @relation("ApplicationCVFile", fields: [cvFileId], references: [id])
   job             Job                       @relation(fields: [jobId], references: [id], onDelete: Cascade)
   offer           Offer?
+  candidateAssessment RecruitmentCandidateAssessment?
 
   @@unique([jobId, candidateId])
   @@index([companyId, jobId, status])
@@ -656,18 +776,38 @@ model Offer {
   companyId         String
   applicationId     String         @unique
   candidateId       String
+  jobId            String?         // job this offer is for
   status            OfferStatus    @default(DRAFT)
   proposedStartDate DateTime?
   employmentType    String?
   salary            Decimal?       @db.Decimal(18, 2)
   currency          String?
+  // Compensation details (expanded from generic metadata)
+  gradeId           String?        // linked GradeLevel
+  gradeName         String?        // snapshot e.g. "Grade 6 - Senior Engineer"
+  step              Int?
+  bonusPercentage   Float?
+  hmoTier           String?
+  stockOptions      Int?
+  signOnBonus       Decimal?       @db.Decimal(18, 2)
+  relocationAllowance Decimal?     @db.Decimal(18, 2)
+  additionalBenefits Json?         // extensible benefits blob
+  // Offer workflow
+  routingMode       ApprovalRoutingMode?
+  internalNotes     String?        @db.Text
+  rejectionReason   String?        @db.Text
+  // Document tracking
+  draftPdfPath      String?
+  executedPdfPath   String?
+  dispatchMethod    String?
+  dispatchedAt      DateTime?
+  // Offer lifecycle
   offerLetterPath   String?
   offerLetterName   String?
   sentAt            DateTime?
   acceptedAt        DateTime?
   declinedAt        DateTime?
-  // Ad-hoc workflow state: trackSignature, initiateOnboarding, displayStatus,
-  // dispatchMethod, isAdHoc, executedDocument, etc. (see /api/offers/ad-hoc)
+  // Ad-hoc workflow state (existing)
   metadata          Json?
   createdBy         String?
   updatedBy         String?
@@ -678,9 +818,11 @@ model Offer {
   candidate         Candidate      @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   company           Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   onboarding        Onboarding?
+  approvals         RecruitmentOfferApproval[]
 
   @@index([companyId, status])
   @@index([companyId, archived])
+  @@index([jobId])
   @@map("offers")
 }
 
@@ -1096,11 +1238,46 @@ enum InterviewOutcome {
 
 enum OfferStatus {
   DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  AWAITING_SIGNATURE
   SENT
   ACCEPTED
   DECLINED
+  REJECTED
   EXPIRED
   WITHDRAWN
+}
+
+enum PlanStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum RoundStatus {
+  AWAITING_SCHEDULING
+  SCHEDULED
+  PENDING_FEEDBACK
+  COMPLETED
+}
+
+enum ScorecardRecommendation {
+  HIRE
+  NO_HIRE
+  MAYBE
+}
+
+enum OfferApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  AWAITING_PREVIOUS
+}
+
+enum ApprovalRoutingMode {
+  SEQUENTIAL
+  CONCURRENT
 }
 
 enum OnboardingStatus {
@@ -2727,6 +2904,7 @@ model Department {
   staffHistory  DepartmentStaffHistory[]
   transferredFrom DepartmentStaffHistory[] @relation("FromDepartmentTransfer")
   transferredTo   DepartmentStaffHistory[] @relation("ToDepartmentTransfer")
+  offboardings  Offboarding[]  @relation("OffboardingDepartment")
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -2990,6 +3168,12 @@ model Designation {
   description  String?     @db.Text
   status       String      @default("Active")
   staffCount   Int         @default(0)
+  // Whether this designation derives pay from a grade level. When false, base
+  // pay is stored directly on the designation via basePay/basePayFrequency.
+  hasGradeLevel     Boolean            @default(false)
+  basePay           Float?
+  basePayFrequency  BasePayFrequency?
+  benefits          Json?
   gradeLevel   GradeLevel? @relation(fields: [gradeLevelId], references: [id])
   staffRecords  StaffRecord[]
   createdAt    DateTime    @default(now())
@@ -3203,4 +3387,73 @@ model BenefitPolicy {
 
   @@unique([companyId, name])
   @@index([companyId, isActive])
+}
+
+// Add to schema.prisma
+
+enum OffboardingType {
+  RESIGNATION
+  TERMINATION
+}
+
+enum OffboardingStatus {
+  PENDING_REVIEW
+  HANDOVER_REQUESTED
+  HANDOVER_SUBMITTED
+  COMPLETED
+  REJECTED
+}
+
+enum InitiatedBy {
+  STAFF
+  HR
+}
+
+model Offboarding {
+  id                   String            @id @default(cuid())
+  companyId            String
+  staffId              String
+  departmentId         String?
+  
+  type                 OffboardingType
+  status               OffboardingStatus @default(PENDING_REVIEW)
+  initiatedBy          InitiatedBy
+  
+  // Resignation specific
+  resignationLetter    String?           // File URL/path
+  resignationComment   String?
+  
+  // Handover
+  handoverRequired     Boolean           @default(true)
+  handoverDocument     String?           // File URL/path
+  handoverSubmittedAt  DateTime?
+  
+  // Review
+  reviewComment        String?
+  reviewedBy           String?
+  reviewedAt           DateTime?
+  
+  // Timestamps
+  createdAt            DateTime          @default(now())
+  submittedAt          DateTime?
+  completedAt          DateTime?
+  updatedAt            DateTime          @updatedAt
+  
+  // Relations
+  company              Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  // Staff who is being offboarded
+  staff                StaffRecord       @relation("StaffOffboardings", fields: [staffId], references: [id], onDelete: Cascade)
+  
+  // Staff who reviewed this offboarding (HR/Admin)
+  reviewer             StaffRecord?      @relation("OffboardingReviewer", fields: [reviewedBy], references: [id])
+  department           Department? @relation("OffboardingDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+
+  @@unique([companyId, staffId, status])
+  @@index([companyId, status])
+  @@index([companyId, type])
+  @@index([staffId])
+  @@index([departmentId])
+  @@index([createdAt])
+  @@map("offboardings")
 }
