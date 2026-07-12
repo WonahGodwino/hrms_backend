@@ -25,7 +25,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     await prisma.recruitmentCandidateAssessment.update({
       where: { id: params.id },
-      data: { roundStatus: 'AWAITING_SCHEDULING', schedulingNotes: null, scheduledAt: null, interviewerIds: Prisma.JsonNull },
+      data: { roundStatus: 'AWAITING_SCHEDULING', schedulingNotes: null, scheduledAt: null, interviewerIds: Prisma.DbNull },
     })
 
     return withCors(ApiResponse.success({ roundStatus: 'AWAITING_SCHEDULING' }, 'Interview cancelled. Status reverted to awaiting_scheduling.'), origin)

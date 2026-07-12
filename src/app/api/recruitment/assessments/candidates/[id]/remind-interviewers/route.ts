@@ -29,7 +29,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const submittedCount = await prisma.recruitmentScorecard.count({
       where: { candidateAssessmentId: params.id, roundId: currentRound.id },
     })
-    const requiredInterviewers = (currentRound.requiredInterviewers as any[]) || []
+    const requiredInterviewers: any[] = Array.isArray(currentRound.requiredInterviewers) ? currentRound.requiredInterviewers as any[] : []
     const requiredCount = requiredInterviewers.length
     const pendingInterviewers = Math.max(0, requiredCount - submittedCount)
 

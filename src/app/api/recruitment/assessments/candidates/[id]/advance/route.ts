@@ -41,7 +41,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     return withCors(ApiResponse.success({
       currentRound: { id: nextRound?.id, order: nextRound?.order, title: nextRound?.title },
-      roundStatus: 'awaiting_scheduling',
+      roundStatus: 'AWAITING_SCHEDULING',
     }, `Candidate advanced to Round ${nextOrder}: ${nextRound?.title || 'Unknown'}.`), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }
 }
