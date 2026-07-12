@@ -36,9 +36,19 @@ export async function POST(request: NextRequest) {
     const existingDepartment = await prisma.department.findFirst({
       where: { companyId, code }
     })
-    
+
     if (existingDepartment) {
       return withCors(ApiResponse.error('Department with this code already exists', 400), origin)
+    }
+
+    // Names are unique per company, case-insensitively (see the lower(name)
+    // index). Compare case-insensitively but store the name exactly as typed.
+    const existingByName = await prisma.department.findFirst({
+      where: { companyId, name: { equals: name, mode: 'insensitive' } }
+    })
+
+    if (existingByName) {
+      return withCors(ApiResponse.error('A department with this name already exists', 400), origin)
     }
     
     if (headId) {

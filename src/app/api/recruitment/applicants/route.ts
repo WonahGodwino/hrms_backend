@@ -7,6 +7,7 @@ import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { resolveRecruitmentCompanyId } from '@/app/lib/recruitment/companyScope'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -25,12 +26,16 @@ export async function GET(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
-    if (!user.companyId) {
-      return withCors(ApiResponse.error('Company context missing for this user', 400), origin)
-    }
-
-    const companyId = user.companyId as string
     const { searchParams } = new URL(request.url)
+
+    // Honour the caller's active company selection (global company switcher),
+    // enforcing per-role access. Falls back to the token company when omitted,
+    // so existing callers that don't pass companyId are unaffected.
+    const scope = await resolveRecruitmentCompanyId(user, searchParams.get('companyId'))
+    if (scope.error) {
+      return withCors(ApiResponse.error(scope.error.message, scope.error.status), origin)
+    }
+    const companyId = scope.companyId as string
 
     // Pagination
     const page = Number(searchParams.get('page') || '1')

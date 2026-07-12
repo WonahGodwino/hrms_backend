@@ -51,7 +51,7 @@ export type LocationUpdateResult =
 export async function updateCompanyLocation(
   companyId: string,
   locationId: string,
-  fields: { name?: unknown; type?: unknown; state?: unknown; lga?: unknown; address?: unknown }
+  fields: { name?: unknown; type?: unknown; country?: unknown; state?: unknown; lga?: unknown; address?: unknown }
 ): Promise<LocationUpdateResult> {
   const location = await prisma.location.findFirst({ where: { id: locationId, companyId } })
   if (!location) {
@@ -65,6 +65,7 @@ export async function updateCompanyLocation(
     data.name = name
   }
   if (fields.type !== undefined) data.type = fields.type ? String(fields.type).trim() : null
+  if (fields.country !== undefined) data.country = fields.country ? String(fields.country).trim() : null
   if (fields.state !== undefined) data.state = fields.state ? String(fields.state).trim() : null
   if (fields.lga !== undefined) data.lga = fields.lga ? String(fields.lga).trim() : null
   if (fields.address !== undefined) data.address = fields.address ? String(fields.address).trim() : null

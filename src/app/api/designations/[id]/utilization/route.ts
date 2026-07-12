@@ -18,8 +18,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const designation = await (prisma as any).designation.findUnique({ where: { id } })
     if (!designation) return withCors(ApiResponse.error('Designation not found', 404), origin)
 
+    // Multi-tenant guard: only SUPER_ADMIN may read another company's designation.
+    if (user.role !== 'SUPER_ADMIN' && designation.companyId && designation.companyId !== user.companyId) {
+      return withCors(ApiResponse.error('You do not have access to this designation', 403), origin)
+    }
+
+    const staffWhere: any = { designationId: id, isActive: true }
+    if (designation.companyId) staffWhere.companyId = designation.companyId
     const staffRecords = await prisma.staffRecord.findMany({
-      where: { designationId: id, isActive: true },
+      where: staffWhere,
       select: { id: true, departmentId: true, department: true },
     })
 

@@ -33,6 +33,50 @@ async function authorize(request: NextRequest, companyId: string, origin: string
   return { user: decoded }
 }
 
+// List a company's locations (including country), for the profile Locations tab.
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  const origin = request.headers.get('origin')
+  try {
+    const companyId = params.id
+    const auth = await authorize(request, companyId, origin)
+    if ('error' in auth) return auth.error
+
+    const locations = await prisma.location.findMany({
+      where: { companyId },
+      orderBy: [{ type: 'asc' }, { name: 'asc' }],
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        type: true,
+        address: true,
+        // country is additive; select via a cast until the client is regenerated.
+        ...( { country: true } as any),
+        state: true,
+        lga: true,
+        staff: { select: { id: true }, where: { isActive: true } },
+      } as any,
+    })
+
+    const data = (locations as any[]).map((loc) => ({
+      id: loc.id,
+      name: loc.name,
+      code: loc.code,
+      type: loc.type,
+      address: loc.address,
+      country: loc.country || null,
+      state: loc.state,
+      lga: loc.lga,
+      staffCount: Array.isArray(loc.staff) ? loc.staff.length : 0,
+    }))
+
+    return withCors(ApiResponse.success({ locations: data, total: data.length }, 'Locations fetched'), origin)
+  } catch (error) {
+    console.error('❌ List locations error:', error)
+    return withCors(handleApiError(error), origin)
+  }
+}
+
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   const origin = request.headers.get('origin')
   try {
@@ -56,10 +100,11 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         name,
         code,
         type: body?.type ? String(body.type).trim() : null,
+        country: body?.country ? String(body.country).trim() : null,
         state,
         lga: body?.lga ? String(body.lga).trim() : null,
         address: body?.address ? String(body.address).trim() : null,
-      },
+      } as any,
     })
 
     return withCors(

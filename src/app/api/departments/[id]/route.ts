@@ -73,6 +73,23 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     
     updateData.updatedAt = new Date()
 
+    // Enforce per-company, case-insensitive name uniqueness with a friendly
+    // message (a rename to an existing name — regardless of case — would
+    // otherwise hit the lower(name) unique index).
+    if (updateData.name !== undefined) {
+      const clash = await prisma.department.findFirst({
+        where: {
+          companyId: department.companyId,
+          name: { equals: updateData.name, mode: 'insensitive' },
+          NOT: { id: params.id },
+        },
+        select: { id: true },
+      })
+      if (clash) {
+        return withCors(ApiResponse.error('A department with this name already exists', 400), origin)
+      }
+    }
+
     if (updateData.headId) {
       const headStaff = await prisma.staffRecord.findFirst({
         where: { id: updateData.headId, companyId: department.companyId, isActive: true }

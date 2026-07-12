@@ -6,6 +6,7 @@ import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { sanitizeOfferDefaults } from '@/app/lib/jobs/offer-defaults'
 
 type UpdateJobBody = {
 	title?: string
@@ -13,7 +14,18 @@ type UpdateJobBody = {
 	department?: string
 	position?: string
 	expirationDate?: string | null
+	offerDefaults?: Record<string, unknown>
+	employmentType?: string | null
+	workplaceType?: string | null
+	experienceLevel?: string | null
+	salaryRange?: string | null
+	locations?: unknown
+	status?: string
+	designationId?: string | null
+	departmentId?: string | null
 }
+
+const ALLOWED_STATUSES = ['ACTIVE', 'DRAFT', 'CLOSED', 'EXPIRED']
 
 function extractBearerToken(authHeader: string | null): string | null {
 	if (!authHeader) return null
@@ -117,12 +129,41 @@ export async function PUT(
 			updatedAt: new Date(),
 		}
 
+		// Resolve the designation this vacancy recruits for. Its name is the
+		// fallback title/position when the author leaves the title blank.
+		let designationTitle: string | null = null
+		if (body.designationId !== undefined) {
+			const desigId = body.designationId ? String(body.designationId).trim() : ''
+			if (desigId) {
+				const designation = await (prisma as any).designation.findFirst({
+					where: { id: desigId, companyId: job.companyId },
+					select: { id: true, title: true },
+				})
+				if (!designation) {
+					return withCors(ApiResponse.error('Selected designation was not found for this company', 400), origin)
+				}
+				data.designationId = desigId
+				designationTitle = designation.title
+			} else {
+				data.designationId = null
+			}
+		}
+
 		if (typeof body.title === 'string') {
 			const title = body.title.trim()
 			if (!title) {
-				return withCors(ApiResponse.error('Title cannot be empty', 400), origin)
+				// Blank title falls back to the designation name (if one is set).
+				if (!designationTitle) {
+					return withCors(ApiResponse.error('Enter a job title or select a designation', 400), origin)
+				}
+				data.title = designationTitle
+			} else {
+				data.title = title
 			}
-			data.title = title
+			// Keep position aligned with the title unless one is explicitly provided.
+			if (typeof body.position !== 'string' || !body.position.trim()) {
+				data.position = data.title
+			}
 		}
 
 		if (typeof body.description === 'string') {
@@ -139,6 +180,27 @@ export async function PUT(
 				return withCors(ApiResponse.error('Department cannot be empty', 400), origin)
 			}
 			data.department = department
+		}
+
+		// Keep the department FK in sync — prefer an explicit id, else resolve by
+		// the (new or existing) department name within the company.
+		if (body.departmentId !== undefined || typeof body.department === 'string') {
+			let deptId: string | null = null
+			const requestedDeptId = body.departmentId ? String(body.departmentId).trim() : ''
+			if (requestedDeptId) {
+				const dep = await prisma.department.findFirst({
+					where: { id: requestedDeptId, companyId: job.companyId },
+					select: { id: true },
+				})
+				deptId = dep?.id || null
+			} else if (typeof body.department === 'string' && body.department.trim()) {
+				const dep = await prisma.department.findFirst({
+					where: { companyId: job.companyId, name: { equals: body.department.trim(), mode: 'insensitive' } },
+					select: { id: true },
+				})
+				deptId = dep?.id || null
+			}
+			data.departmentId = deptId
 		}
 
 		if (typeof body.position === 'string') {
@@ -159,6 +221,44 @@ export async function PUT(
 				}
 				data.expirationDate = parsedDate
 			}
+		}
+
+		if (body.offerDefaults !== undefined) {
+			// Merge the whitelisted employment-term defaults for the offer letter.
+			data.offerDefaults = sanitizeOfferDefaults(body.offerDefaults) ?? undefined
+		}
+
+		// Optional string fields — empty string clears them to null.
+		const optionalStrings: Array<keyof UpdateJobBody> = [
+			'employmentType',
+			'workplaceType',
+			'experienceLevel',
+			'salaryRange',
+		]
+		for (const field of optionalStrings) {
+			const value = body[field]
+			if (value !== undefined) {
+				data[field] = typeof value === 'string' && value.trim() ? value.trim() : null
+			}
+		}
+
+		if (body.locations !== undefined) {
+			// Persist the postings array as-is (Json column); strip any UI-only keys.
+			if (Array.isArray(body.locations)) {
+				data.locations = body.locations
+					.map((loc: any) => ({ state: loc?.state ?? '', lga: loc?.lga ?? '' }))
+					.filter((loc: any) => loc.state || loc.lga)
+			} else {
+				data.locations = body.locations ?? null
+			}
+		}
+
+		if (body.status !== undefined) {
+			const status = String(body.status).trim().toUpperCase()
+			if (!ALLOWED_STATUSES.includes(status)) {
+				return withCors(ApiResponse.error('Invalid status value', 400), origin)
+			}
+			data.status = status
 		}
 
 		if (Object.keys(data).length === 2) {

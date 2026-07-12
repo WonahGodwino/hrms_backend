@@ -30,8 +30,23 @@ model Company {
   updatedAt              DateTime?                @updatedAt
   workWeekPattern        String?                  @db.VarChar(20)
 
+  // Offer letter / employer details (populated onto the offer letter template).
+  // Every company-specific value comes from here so the shared template stays generic.
+  secondedCompany        String?                  // client org a hire may be seconded to
+  hrRepName              String?                  // HR representative who signs the letter
+  hrRepTitle             String?                  // e.g. "HRBP"
+  communicationTool      String?                  // official comms tool, e.g. "Lark"
+  governingLaw           String?                  @default("Laws of the Federal Republic of Nigeria")
+  arbitrationVenue       String?                  @default("Lagos")
+  // Days a candidate has to accept + return the signed offer letter before the
+  // offer lapses. Per-company (multi-tenant); null falls back to the 14-day default.
+  offerResponseDays      Int?
+
   // Locations
   locations              Location[]
+
+  // Offer letter templates
+  offerTemplates         OfferTemplate[]
 
   // AI & Settings
   aiSettings             AISettings?
@@ -100,6 +115,12 @@ model Company {
   departments            Department[]
   departmentAuditLogs    DepartmentAuditLog[]
   departmentStaffHistories DepartmentStaffHistory[]
+
+  // Business Unit Relations
+  businessUnits          BusinessUnit[]
+
+  // Temporary role elevations granted within this company
+  roleElevations         RoleElevation[]
 
   // Staff Loans & Benefits
   loanRequests           LoanRequest[]       @relation("CompanyLoanRequests")
@@ -174,8 +195,9 @@ model Location {
   name      String
   code      String?
   type      String?
-  state     String?
-  lga       String?
+  country   String?  // e.g. Nigeria, United Kingdom (defaults to Nigeria for legacy rows)
+  state     String?  // level 1: State (NG) / Nation (UK) / State-Province (other)
+  lga       String?  // level 2: LGA (NG) / County (UK) / City (other)
   address   String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -286,6 +308,13 @@ model StaffRecord {
   headOfDepartment                Department[]        @relation("DepartmentHead")
   assistantHeadOfDepartment       Department[]        @relation("DepartmentAssistantHead")
   departmentStaffHistories        DepartmentStaffHistory[]
+
+  // Business Unit relations (as head / assistant head)
+  headOfBusinessUnit              BusinessUnit[]      @relation("BusinessUnitHead")
+  assistantHeadOfBusinessUnit     BusinessUnit[]      @relation("BusinessUnitAssistantHead")
+
+  // Temporary role elevations granted to this staff member
+  roleElevations                  RoleElevation[]     @relation("StaffRoleElevations")
 
   // Location relation (legacy `location` string retained for back-compat)
   locationRecord                  Location?           @relation(fields: [locationId], references: [id])
@@ -685,22 +714,68 @@ model Job {
   salaryRange     String?          // e.g., "N500,000 - N800,000"
   benefits        Json?            // Array of strings: ["health", "equity", "pto", "gym"]
   locations       Json?            // Array of objects: [{"state": "Lagos", "lga": "Ikeja"}, ...]
-  
+  // Default employment terms for offers generated against this role. Per-offer
+  // values may override these. e.g. { contractDuration, probationPeriod,
+  // noticePeriod, weeklyHours, dailyHours, lunchBreak, jobLocation }
+  offerDefaults   Json?
+
   createdBy      String
   createdAt      DateTime         @default(now())
   updatedBy      String?
   updatedAt      DateTime         @updatedAt
   archived       Int?             @default(0)
   
+  // The designation (from Core Setup) this vacancy recruits for. A job is tied
+  // to one designation; many jobs/hires can map to the same designation. When a
+  // candidate is hired, their staff record inherits this designation.
+  designationId  String?
+
+  // The Core Setup department this vacancy belongs to. Nullable FK alongside the
+  // denormalised `department` name (mirrors StaffRecord's name+id pairing) so
+  // existing rows are unaffected and new/edited jobs gain referential integrity.
+  departmentId   String?
+
   // Relations
   applications   JobApplication[]
   company        Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  designation    Designation?     @relation(fields: [designationId], references: [id])
+  departmentRef  Department?      @relation(fields: [departmentId], references: [id])
   keywords       Keyword[]
   //savedBy        SavedJob[]       // this for saved jobs feature
 
   @@index([companyId, status])
   @@index([companyId, archived])
+  @@index([designationId])
+  @@index([departmentId])
   @@map("jobs")
+}
+
+// Company-scoped offer letter templates. bodyHtml holds rich text with
+// {{placeholder}} tokens (see lib/offers/template-variables) that are resolved
+// from company / candidate / job / offer data at render time. The template
+// itself is generic — no company-specific values are baked in.
+model OfferTemplate {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  description String?  @db.Text
+  bodyHtml    String   @db.Text
+  sections    Json?    // optional structured section/clause config for the builder
+  variables   Json?    // snapshot of placeholder keys referenced by this template
+  status      String   @default("DRAFT") // DRAFT | PUBLISHED | ARCHIVED
+  isDefault   Boolean  @default(false)
+  createdBy   String?
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  archived    Int?     @default(0)
+
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, status])
+  @@index([companyId, archived])
+  @@index([companyId, isDefault])
+  @@map("offer_templates")
 }
 
 model Candidate {
@@ -715,11 +790,15 @@ model Candidate {
   linkedInUrl     String?
   portfolioUrl    String?
   locationState   String?   // New field for state
+  // When true the candidate has unsubscribed from talent-pool job-advert emails
+  // (via the unsubscribe link). They stay visible to HR but receive no bulk
+  // vacancy notifications. See lib/talent-pool.
+  talentPoolOptOut Boolean  @default(false)
   createdBy       String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   archived        Int?      @default(0)
-  
+
   // Relations
   documents       CandidateDocument[]
   files           CandidateFile[]
@@ -857,6 +936,7 @@ model OnboardingTask {
   description  String?
   department   String?
   assigneeId   String?
+  note         String?
   dueDate      DateTime?
   status       OnboardingTaskStatus @default(PENDING)
   completedAt  DateTime?
@@ -2884,7 +2964,10 @@ model Department {
   id            String      @id @default(cuid())
   name          String
   code          String
+  // Denormalised business unit NAME (legacy / display). The canonical link is
+  // businessUnitId → BusinessUnit; the name string is kept in sync for back-compat.
   businessUnit  String?
+  businessUnitId String?
   companyId     String
   headId        String?
   assistantHeadId String?
@@ -2898,8 +2981,10 @@ model Department {
   positionCapacity Json?
   company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   staff         StaffRecord[]
+  jobs          Job[]
   head          StaffRecord? @relation("DepartmentHead", fields: [headId], references: [id])
   assistantHead StaffRecord? @relation("DepartmentAssistantHead", fields: [assistantHeadId], references: [id])
+  businessUnitRef BusinessUnit? @relation(fields: [businessUnitId], references: [id])
   auditLogs     DepartmentAuditLog[]
   staffHistory  DepartmentStaffHistory[]
   transferredFrom DepartmentStaffHistory[] @relation("FromDepartmentTransfer")
@@ -2907,9 +2992,92 @@ model Department {
   offboardings  Offboarding[]  @relation("OffboardingDepartment")
 
   @@unique([companyId, code])
+  // Case-insensitive name uniqueness per company is enforced by a functional
+  // unique index on (companyId, lower(name)) — see migration
+  // 20260711020000_department_unique_name. Prisma can't express expression
+  // indexes in the schema, so it lives in the migration and app-level checks
+  // compare with mode: 'insensitive'. Stored names keep their original casing.
   @@index([companyId])
   @@index([status])
+  @@index([businessUnitId])
   @@map("departments")
+}
+
+// A Business Unit groups departments under a common cost centre / leadership.
+// Company-scoped (multi-tenant). Departments link via Department.businessUnitId
+// (canonical) while Department.businessUnit keeps the denormalised name.
+model BusinessUnit {
+  id              String   @id @default(cuid())
+  companyId       String
+  name            String
+  code            String?
+  costCenter      String?
+  description     String?  @db.Text
+  headId          String?
+  assistantHeadId String?
+  status          String   @default("Active") // Active | Inactive
+  createdBy       String?
+  updatedBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  archived        Int?     @default(0)
+
+  company         Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  head            StaffRecord? @relation("BusinessUnitHead", fields: [headId], references: [id])
+  assistantHead   StaffRecord? @relation("BusinessUnitAssistantHead", fields: [assistantHeadId], references: [id])
+  departments     Department[]
+  auditLogs       BusinessUnitAuditLog[]
+
+  @@index([companyId, status])
+  @@index([companyId, archived])
+  @@map("business_units")
+}
+
+model BusinessUnitAuditLog {
+  id             String   @id @default(cuid())
+  businessUnitId String
+  companyId      String
+  action         String
+  performedBy    String?
+  performedByName String?
+  details        String?  @db.Text
+  createdAt      DateTime @default(now())
+
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  @@index([businessUnitId, createdAt])
+  @@index([companyId])
+  @@map("business_unit_audit_logs")
+}
+
+// A temporary elevation of a staff member's access role within a company (e.g. a
+// developer given HR access to sit on an interview panel). It's an OVERLAY: the
+// staff's base role is never mutated. While ACTIVE (and not past expiresAt) the
+// auth layer resolves the elevated role; on revoke/expiry it falls back to base.
+model RoleElevation {
+  id            String    @id @default(cuid())
+  companyId     String
+  staffId       String    // StaffRecord being elevated
+  fromRole      String    // base role captured at grant time (display only)
+  toRole        String    // elevated role: ADMIN | HR
+  reason        String    @db.Text
+  status        String    @default("ACTIVE") // ACTIVE | REVOKED | EXPIRED
+  grantedBy     String    // StaffRecord id of the granter
+  grantedByName String?
+  grantedByRole String?
+  revokedBy     String?
+  revokedByName String?
+  revokedAt     DateTime?
+  expiresAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staff         StaffRecord @relation("StaffRoleElevations", fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, status])
+  @@index([staffId, status])
+  @@map("role_elevations")
 }
 
 // Add DepartmentStaffHistory model for tracking staff movements
@@ -3176,6 +3344,7 @@ model Designation {
   benefits          Json?
   gradeLevel   GradeLevel? @relation(fields: [gradeLevelId], references: [id])
   staffRecords  StaffRecord[]
+  jobs          Job[]
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
@@ -3380,6 +3549,17 @@ model BenefitPolicy {
   keyValue        String?
   eligibilityRule String?   @db.Text
   isActive        Boolean   @default(true)
+  // Optional job scope: when set, this benefit applies only to that job role;
+  // when null it applies to all roles (the default).
+  jobId           String?
+  // Optional designation/grade scope. When designationId is set the benefit only
+  // applies to staff in that designation; if gradeLevelId is ALSO set it is
+  // further restricted to staff in that grade level within the designation. A
+  // blank gradeLevelId means all staff in the designation qualify. Both blank =
+  // company-wide. FKs are enforced in SQL only (no Prisma relation) so the
+  // generated client is not required to read/write these columns.
+  designationId   String?
+  gradeLevelId    String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -3387,6 +3567,28 @@ model BenefitPolicy {
 
   @@unique([companyId, name])
   @@index([companyId, isActive])
+  @@index([companyId, jobId])
+  @@index([companyId, designationId])
+}
+
+// Required onboarding documents uploaded by a new hire (STAFF). One row per
+// category per staff (re-upload replaces). Bytes are stored in the DB.
+model StaffOnboardingDocument {
+  id         String   @id @default(cuid())
+  companyId  String
+  staffId    String
+  category   String   // MEANS_OF_ID | GUARANTOR_FORM | SIGNED_OFFER
+  fileName   String
+  mimeType   String
+  sizeBytes  Int
+  data       Bytes
+  uploadedBy String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([staffId, category])
+  @@index([companyId, staffId])
+  @@map("staff_onboarding_documents")
 }
 
 // Add to schema.prisma

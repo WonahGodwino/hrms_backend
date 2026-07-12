@@ -102,6 +102,9 @@ export async function GET(request: NextRequest) {
       { header: 'Key Value (text)', key: 'keyValue', width: 30 },
       { header: 'Eligibility Rule (JSON)', key: 'eligibilityRule', width: 35 },
       { header: 'Active (true/false)', key: 'isActive', width: 18 },
+      { header: 'Job ID (blank = all roles)', key: 'jobId', width: 26 },
+      { header: 'Designation (blank = all)', key: 'designation', width: 24 },
+      { header: 'Grade Level (blank = all in designation)', key: 'gradeLevel', width: 34 },
     ]
 
     benefitSheet.getRow(1).eachCell((cell) => {
@@ -113,10 +116,10 @@ export async function GET(request: NextRequest) {
     benefitSheet.getRow(1).height = 36
 
     const sampleBenefits = [
-      ['Comprehensive Health Coverage', 'Health',     'Primary staff and spouse cover',     500000, 'Up to ₦500,000 annual cover', '{"minServiceMonths":3}', true],
-      ['Transportation Support',        'Financial',  'Monthly transportation support',       35000, '₦35,000 monthly support',      '{"minServiceMonths":0}', true],
-      ['Professional Certification',    'Learning',   'Reimbursement for certifications',    200000, 'Up to ₦200,000 per year',     '{"minServiceMonths":6}', true],
-      ['Wellness Allowance',            'Wellness',   'Quarterly wellness stipend',           25000, '₦25,000 quarterly',            '{"minServiceMonths":0}', true],
+      ['Comprehensive Health Coverage', 'Health',     'Primary staff and spouse cover',     500000, 'Up to ₦500,000 annual cover', '{"minServiceMonths":3}', true, '', '', ''],
+      ['Transportation Support',        'Financial',  'Monthly transportation support',       35000, '₦35,000 monthly support',      '{"minServiceMonths":0}', true, '', '', ''],
+      ['Executive Car Allowance',       'Financial',  'Grade-restricted car allowance',      750000, '₦750,000 annually',            '{"minServiceMonths":6}', true, '', 'Software Engineer', 'Level 5'],
+      ['Wellness Allowance',            'Wellness',   'Quarterly wellness stipend',           25000, '₦25,000 quarterly',            '{"minServiceMonths":0}', true, '', '', ''],
     ]
     sampleBenefits.forEach((row) => {
       benefitSheet.addRow(row)
@@ -155,6 +158,9 @@ export async function GET(request: NextRequest) {
       ['Loan Types - Salary Multiplier', 'Multiplier on gross salary for max borrowable. Default: 1.0'],
       ['Benefit Types - Category', 'Must be one of: Health, Financial, Learning, Wellness'],
       ['Benefit Types - Eligibility Rule', 'JSON object e.g. {"minServiceMonths":3}. Leave blank for open eligibility.'],
+      ['Benefit Types - Job ID', 'Optional. Paste a Job ID to make this benefit specific to that role. Leave blank to apply to all roles.'],
+      ['Benefit Types - Designation', 'Optional. Enter an existing Designation TITLE (from Core Setup) to scope this benefit to staff in that designation. Leave blank to apply company-wide.'],
+      ['Benefit Types - Grade Level', 'Optional. Enter an existing Grade Level NAME to further restrict to staff in that grade WITHIN the designation. Requires a Designation. Blank = all grades in the designation.'],
       ['', 'Delete sample rows before uploading your actual data.'],
       ['', 'Save as .xlsx and upload using the Upload Template button.'],
     ]

@@ -3,6 +3,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRole, getUserFromToken } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { resolveScopedCompanyId } from '@/app/lib/company-scope'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -24,10 +25,13 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20')))
     const skip = (page - 1) * limit
 
-    let companyId: string | undefined
-    if (user.role !== 'SUPER_ADMIN') {
-      companyId = user.companyId
-    }
+    // Honour the global company switcher (companyId param) so a multi-company
+    // ADMIN/SUPER_ADMIN lists designations for the company they are working in.
+    // HR is always locked to their own company. SUPER_ADMIN with no selection
+    // and no token company → across all companies.
+    const scope = await resolveScopedCompanyId(user as any, searchParams.get('companyId'))
+    if (scope.forbidden) return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
+    const companyId = scope.companyId
 
     const where: any = {}
     if (companyId) where.companyId = companyId

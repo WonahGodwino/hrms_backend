@@ -6,6 +6,7 @@ import { requireRole } from "@/app/lib/auth";
 import { requireModuleAccess } from "@/app/lib/module-access";
 import { ApiResponse, formatError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
+import { resolveRecruitmentCompanyId } from "@/app/lib/recruitment/companyScope";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -29,16 +30,15 @@ export async function GET(
     }
 
     const token = authHeader.replace("Bearer ", "");
-    const user = await requireModuleAccess(token, 'RECRUITMENT', ["HR", "SUPER_ADMIN"]);
+    const user = await requireModuleAccess(token, 'RECRUITMENT', ["HR", "ADMIN", "SUPER_ADMIN"]);
 
-    if (!user.companyId) {
-      return withCors(
-        ApiResponse.error("Company context missing for this user", 400),
-        origin
-      );
+    // Scope to the caller's active company (global switcher), role-enforced, so a
+    // multi-company ADMIN can view CVs of the currently selected company.
+    const scope = await resolveRecruitmentCompanyId(user, request.nextUrl.searchParams.get("companyId"));
+    if (scope.error) {
+      return withCors(ApiResponse.error(scope.error.message, scope.error.status), origin);
     }
-
-    const companyId = String(user.companyId);
+    const companyId = String(scope.companyId);
     const applicationId = params.applicationId;
     const dispositionParam = request.nextUrl.searchParams.get("disposition");
     const disposition = dispositionParam === "inline" ? "inline" : "attachment";

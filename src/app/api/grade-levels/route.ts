@@ -5,6 +5,7 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { GradeLevelService } from '@/app/lib/services/grade-level.service'
+import { resolveScopedCompanyId } from '@/app/lib/company-scope'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -12,7 +13,7 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
-  
+
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
@@ -22,23 +23,19 @@ export async function GET(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = await requireRole(token, ['SUPER_ADMIN', 'HR', 'ADMIN', 'STAFF'])
 
-    // Get user's company ID
-    let companyId = user.companyId
-    
-    if (!companyId && user.role === 'SUPER_ADMIN') {
-      // SUPER_ADMIN needs to specify which company they're working with
-      const url = new URL(request.url)
-      companyId = url.searchParams.get('companyId') || ''
-      if (!companyId) {
-        return withCors(ApiResponse.error('Company ID required for SUPER_ADMIN', 400), origin)
-      }
+    const { searchParams } = new URL(request.url)
+
+    // Scope to the globally selected company (companyId param), honouring role
+    // access. A concrete company is required to read grade levels.
+    const scope = await resolveScopedCompanyId(user, searchParams.get('companyId'))
+    if (scope.forbidden) {
+      return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
     }
-    
+    const companyId = scope.companyId
     if (!companyId) {
-      return withCors(ApiResponse.error('No company access found', 403), origin)
+      return withCors(ApiResponse.error('Company ID is required', 400), origin)
     }
 
-    const { searchParams } = new URL(request.url)
     const search = searchParams.get('search') || undefined
     const status = searchParams.get('status') || undefined
     const page = parseInt(searchParams.get('page') || '1')

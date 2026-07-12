@@ -5,6 +5,7 @@ import { prisma } from '@/app/lib/db'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { fileTypeFromBuffer } from 'file-type'
+import { extractCvText } from '@/app/lib/recruitment/cvText'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -184,6 +185,13 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('You have already applied for this job', 400), origin);
     }
 
+    // Extract CV text so the AI / keyword review has real input (best-effort).
+    const parsedCvContent = await extractCvText(
+      cvFileBuffer,
+      cvFileType?.mime || '',
+      cvFile.name,
+    );
+
     // Convert file buffer to Uint8Array for Prisma
     const cvUint8Array = new Uint8Array(cvFileBuffer);
 
@@ -231,6 +239,7 @@ export async function POST(request: NextRequest) {
         cvFilePath: cvFileData.fileName,
         cvFileName: cvFileData.fileName,
         cvFileId: cvFileData.id, // Link to the CV file
+        parsedCvContent: parsedCvContent || null,
         status: 'SUBMITTED',
         createdBy: createdBy,
         // Store additional metadata

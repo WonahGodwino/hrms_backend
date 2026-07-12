@@ -25,6 +25,10 @@ export async function requireModuleAccess(
   moduleKey:    ModuleKey,
   allowedRoles: string[],
 ): Promise<AuthUser> {
+  // Intentionally sync `requireRole` (reads the role from the JWT): temporary
+  // role elevations are deliberately NOT honoured for module-gated routes, so an
+  // elevation grants only limited rights (the async-guarded areas, e.g. the
+  // interview panel) rather than full module access.
   const user = requireRole(token, allowedRoles)
 
   if (user.role === 'SUPER_ADMIN') return user

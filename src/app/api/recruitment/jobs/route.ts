@@ -7,6 +7,7 @@ import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { resolveRecruitmentCompanyId } from '@/app/lib/recruitment/companyScope'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -27,20 +28,22 @@ export async function GET(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'ADMIN','SUPER_ADMIN'])
 
-    if (!user.companyId) {
-      return withCors(
-        ApiResponse.error('Company context missing for this user', 400),
-        origin
-      )
-    }
-
     const { searchParams } = new URL(request.url)
+
+    // Honour the global company switcher (companyId param) with per-role access,
+    // so a multi-company ADMIN/SUPER_ADMIN sees jobs for the selected company.
+    const scope = await resolveRecruitmentCompanyId(user, searchParams.get('companyId'))
+    if (scope.error) {
+      return withCors(ApiResponse.error(scope.error.message, scope.error.status), origin)
+    }
+    const companyId = scope.companyId as string
+
     const status = searchParams.get('status') // optional filter
     const take = Number(searchParams.get('take') || '50')
     const skip = Number(searchParams.get('skip') || '0')
 
     const where: any = {
-      companyId: user.companyId,
+      companyId,
       company: { archived: 0 },
     }
     if (status) where.status = status

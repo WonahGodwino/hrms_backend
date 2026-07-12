@@ -8,6 +8,24 @@ export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
 }
 
+// Normalise the Json `locations` field into a readable label, prefixed with the
+// workplace type (Remote/Hybrid/On-site) so the public card always shows context.
+const toLocationLabel = (locations: any, workplaceType?: string | null): string => {
+  const parts: string[] = [];
+  let list = locations;
+  if (typeof list === "string") {
+    try { list = JSON.parse(list); } catch { list = null; }
+  }
+  if (Array.isArray(list) && list.length > 0) {
+    const first = list[0] || {};
+    const loc = [first.lga, first.state].filter(Boolean).join(", ");
+    if (loc) parts.push(loc);
+    if (list.length > 1) parts.push(`+${list.length - 1} more`);
+  }
+  if (workplaceType) parts.unshift(workplaceType);
+  return parts.join(" · ") || (workplaceType || "");
+};
+
 export async function GET(request: NextRequest) {
   const origin = request.headers.get("origin");
 
@@ -69,6 +87,11 @@ export async function GET(request: NextRequest) {
           department: true,
           position: true,
           description: true,
+          employmentType: true,
+          workplaceType: true,
+          experienceLevel: true,
+          salaryRange: true,
+          locations: true,
           createdAt: true,
           expirationDate: true,
           company: {
@@ -89,6 +112,11 @@ export async function GET(request: NextRequest) {
       department: job.department,
       position: job.position,
       description: job.description,
+      employmentType: job.employmentType ?? null,
+      workplaceType: job.workplaceType ?? null,
+      experienceLevel: job.experienceLevel ?? null,
+      salary: job.salaryRange ?? null,
+      location: toLocationLabel(job.locations, job.workplaceType),
       companyName: job.company?.companyName ?? null,
       publishedAt: job.createdAt,
       expirationDate: job.expirationDate, // can be null

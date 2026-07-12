@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       prisma.offer.findMany({
         where,
         include: {
-          candidate: { select: { id: true, firstName: true, lastName: true } },
+          candidate: { select: { id: true, firstName: true, lastName: true, email: true } },
           application: { select: { job: { select: { title: true, department: true } } } },
         },
         orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit,
@@ -40,12 +40,19 @@ export async function GET(request: NextRequest) {
 
     const data = offers.map(o => ({
       id: o.id,
-      candidate: { id: o.candidate.id, name: `${o.candidate.firstName} ${o.candidate.lastName}`.trim() },
+      candidate: {
+        id: o.candidate.id,
+        name: `${o.candidate.firstName} ${o.candidate.lastName}`.trim(),
+        email: o.candidate.email || null,
+      },
       role: o.application.job?.title || 'Unknown',
       department: o.application.job?.department || '',
       baseSalary: o.salary ? Number(o.salary) : 0,
+      currency: o.currency || 'NGN',
       status: o.status,
+      gradeName: o.gradeName || null,
       createdAt: o.createdAt.toISOString(),
+      updatedAt: o.updatedAt.toISOString(),
     }))
 
     return withCors(ApiResponse.success({ data, meta: { total, page, totalPages: Math.ceil(total / limit) } }, 'Success', 200), origin)

@@ -16,50 +16,71 @@ export async function GET(request: NextRequest) {
     const sheet = workbook.addWorksheet('Jobs Template')
 
     const headers = [
+      'designation',
       'title',
       'description',
       'department',
-      'position',
       'employmentType',
       'workplaceType',
       'experienceLevel',
       'salaryRange',
-      'benefits',
       'locations',
       'expirationDate',
       'status'
     ]
-    
+
     sheet.addRow(headers)
 
-    sheet.addRow([
+    // Plain-text example description. Formatting (paragraphs / bullet lists) is
+    // applied automatically on import — do NOT put HTML tags in this column.
+    const exampleDescription = [
+      'We are looking for a Senior Product Designer to lead design across our products.',
+      '',
+      'Responsibilities:',
+      '- Own the end-to-end design process',
+      '- Partner with engineering and product teams',
+      '- Mentor junior designers',
+      '',
+      'Requirements:',
+      '- 5+ years of product design experience',
+      '- A strong portfolio of shipped work',
+    ].join('\n')
+
+    const exampleRow = sheet.addRow([
       'Senior Product Designer',
-      '<h2>Job Description</h2><p>We are looking for a senior product designer...</p>',
+      '',
+      exampleDescription,
       'Engineering',
-      'Senior Product Designer',
       'Full-time',
       'Hybrid',
       'Senior',
       'N500,000 - N800,000',
-      'health,equity,pto,gym',
       'Lagos:Ikeja,Abuja:Wuse',
       '2026-05-30',
       'ACTIVE'
     ])
+    // Wrap the multi-line description cell so it stays readable.
+    exampleRow.getCell(3).alignment = { wrapText: true, vertical: 'top' }
 
     sheet.addRow([])
     sheet.addRow(['INSTRUCTIONS:'])
-    sheet.addRow(['- benefits: comma-separated values without spaces'])
+    sheet.addRow(['- designation: REQUIRED. Must match an existing designation (by title or code) in Core Setup → Designations.'])
+    sheet.addRow(['- title: OPTIONAL. Leave blank to use the designation name as the job title.'])
+    sheet.addRow(['- department: REQUIRED. Must match an existing department name in Core Setup → Departments.'])
+    sheet.addRow(['- description: plain text only. Do NOT use HTML tags.'])
+    sheet.addRow(['    • Leave a blank line between paragraphs.'])
+    sheet.addRow(['    • Start a line with "-" for a bullet point.'])
+    sheet.addRow(['    • Formatting is applied automatically when the file is imported.'])
     sheet.addRow(['- locations: format "State:LGA" separated by commas'])
-    sheet.addRow(['- employmentType: Full-time, Part-time, Contract, Intern, Temporary'])
-    sheet.addRow(['- workplaceType: Remote, Hybrid, On-site'])
-    sheet.addRow(['- experienceLevel: Entry, Mid, Senior, Lead, Executive'])
+    sheet.addRow(['- employmentType: Full-time, Part-time, Contract, Internship, Temporary'])
+    sheet.addRow(['- workplaceType: On-site, Hybrid, Remote'])
+    sheet.addRow(['- experienceLevel: Entry-level, Mid-level, Senior, Lead, Executive'])
     sheet.addRow(['- expirationDate: YYYY-MM-DD format (leave empty for open-ended)'])
     sheet.addRow(['- status: DRAFT, ACTIVE, CLOSED, EXPIRED (default ACTIVE)'])
+    sheet.addRow(['- Benefits are NOT set here — after import, link benefits to each designation/job in the Loans & Benefits module.'])
 
-    sheet.getColumn(2).width = 50
+    sheet.getColumn(3).width = 60
     sheet.getColumn(9).width = 30
-    sheet.getColumn(10).width = 30
 
     const buffer = await workbook.xlsx.writeBuffer()
     

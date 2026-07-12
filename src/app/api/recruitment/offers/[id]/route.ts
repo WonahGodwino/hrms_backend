@@ -47,8 +47,11 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         draftPdf: offer.draftPdfPath || null,
         executedPdf: offer.executedPdfPath || null,
       },
+      sentAt: offer.sentAt?.toISOString() || null,
+      dispatchedAt: offer.dispatchedAt?.toISOString() || null,
       approvalHistory: offer.approvals.map(s => ({
         userId: s.approverId,
+        name: s.approverName || '',
         role: s.approverRole,
         status: s.status,
         notes: s.notes,

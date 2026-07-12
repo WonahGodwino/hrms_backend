@@ -256,11 +256,12 @@ export async function POST(request: NextRequest) {
               name: deriveLocationName(loc),
               code: `${prefix}-${String(n).padStart(3, '0')}`,
               type: loc.type ? String(loc.type).trim() : null,
+              country: loc.country ? String(loc.country).trim() : null,
               state: loc.state ? String(loc.state).trim() : null,
               lga: loc.lga ? String(loc.lga).trim() : null,
               address: loc.address ? String(loc.address).trim() : null,
             }
-          }),
+          }) as any,
         })
       }
 

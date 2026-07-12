@@ -5,6 +5,8 @@ import { requireRole } from "@/app/lib/auth";
 import { requireModuleAccess } from "@/app/lib/module-access";
 import { ApiResponse, formatError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
+import { sanitizeOfferDefaults } from "@/app/lib/jobs/offer-defaults";
+import { notifyTalentPoolOfJob } from "@/app/lib/talent-pool/notify";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -29,6 +31,9 @@ type CreateJobBody = {
   expirationDate?: string | null;
   status?: "DRAFT" | "ACTIVE" | "CLOSED" | "EXPIRED";
   companyId?: string;
+  designationId?: string;
+  departmentId?: string;
+  offerDefaults?: Record<string, unknown>;
 };
 
 function parseDate(value?: string | null): Date | null {
@@ -125,15 +130,53 @@ export async function POST(request: NextRequest) {
     }
 
     // Extract and validate required fields
-    const title = body.title?.trim();
     const description = body.description?.trim();
     const department = body.department?.trim();
-    const position = body.position?.trim();
 
-    if (!title) return withCors(ApiResponse.error("Title is required", 400), origin);
     if (!description) return withCors(ApiResponse.error("Description is required", 400), origin);
     if (!department) return withCors(ApiResponse.error("Department is required", 400), origin);
-    if (!position) return withCors(ApiResponse.error("Position is required", 400), origin);
+
+    // A job is tied to a designation (the role from Core Setup). The title is
+    // optional — when omitted it defaults to the designation's name, and the
+    // stored position mirrors the title.
+    const designationId = body.designationId?.trim() || null;
+    let designationTitle: string | null = null;
+    if (designationId) {
+      const designation = await (prisma as any).designation.findFirst({
+        where: { id: designationId, companyId },
+        select: { id: true, title: true },
+      });
+      if (!designation) {
+        return withCors(ApiResponse.error("Selected designation was not found for this company", 400), origin);
+      }
+      designationTitle = designation.title;
+    }
+
+    const title = (body.title?.trim() || designationTitle || "").trim();
+    if (!title) {
+      return withCors(ApiResponse.error("Select a designation or enter a job title", 400), origin);
+    }
+    const position = (body.position?.trim() || title).trim();
+
+    // Resolve the Core Setup department for the FK — prefer an explicit id,
+    // otherwise match by name within the company. The `department` name is kept
+    // regardless; the FK is best-effort so legacy/free-text names don't block.
+    let departmentId: string | null = null;
+    const requestedDeptId = body.departmentId?.trim() || null;
+    if (requestedDeptId) {
+      const dep = await prisma.department.findFirst({
+        where: { id: requestedDeptId, companyId },
+        select: { id: true },
+      });
+      departmentId = dep?.id || null;
+    }
+    if (!departmentId) {
+      const dep = await prisma.department.findFirst({
+        where: { companyId, name: { equals: department, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      departmentId = dep?.id || null;
+    }
 
     // Parse optional fields
     const expirationDate = parseDate(body.expirationDate ?? null);
@@ -173,6 +216,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const offerDefaults = sanitizeOfferDefaults(body.offerDefaults);
+
     // Create the job with all fields
     const job = await prisma.job.create({
       data: {
@@ -181,20 +226,44 @@ export async function POST(request: NextRequest) {
         department,
         position,
         companyId: companyId!,
+        ...(designationId ? { designationId } : {}),
+        ...(departmentId ? { departmentId } : {}),
         employmentType: body.employmentType,
         workplaceType: body.workplaceType,
         experienceLevel: body.experienceLevel,
         salaryRange: body.salaryRange,
         benefits: benefits ? JSON.parse(JSON.stringify(benefits)) : undefined,
         locations: locations ? JSON.parse(JSON.stringify(locations)) : undefined,
+        ...(offerDefaults ? { offerDefaults } : {}),
         expirationDate,
         status: status as any,
         createdBy: user.userId,
         updatedBy: user.userId,
-      },
+      } as any,
     });
 
     console.log(`[JOB_CREATE] Job created: ${job.id} for company ${companyId} (${company.companyName}) by ${user.role}:${user.email}`);
+
+    // Advertise to the talent pool: email every past applicant (not hired / not
+    // opted out) about the new opening. Fire-and-forget so it never blocks or
+    // fails job creation. Only for live (ACTIVE) postings.
+    if (job.status === 'ACTIVE') {
+      void notifyTalentPoolOfJob(
+        {
+          id: job.id,
+          title: job.title,
+          department: job.department,
+          position: job.position,
+          employmentType: job.employmentType,
+          workplaceType: job.workplaceType,
+          salaryRange: job.salaryRange,
+          companyId: companyId!,
+        },
+        company.companyName,
+      )
+        .then((r) => console.log(`[JOB_CREATE] Talent-pool advert for ${job.id}:`, r))
+        .catch((err) => console.error(`[JOB_CREATE] Talent-pool advert failed for ${job.id}:`, err));
+    }
 
     return withCors(
       ApiResponse.success({ 

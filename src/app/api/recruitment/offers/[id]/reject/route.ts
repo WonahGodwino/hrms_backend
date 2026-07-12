@@ -22,23 +22,31 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)
 
-    // Verify user is in the approval chain
+    const body = await request.json().catch(() => ({}))
+
+    // HR/ADMIN/SUPER_ADMIN may reject directly even when not a named approver.
     const userStep = offer.approvals.find(s => s.approverId === user.userId)
-    if (!userStep) return withCors(ApiResponse.error('You are not in the approval chain for this offer', 403), origin)
+    const canOverride = ['HR', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)
+    if (!userStep && !canOverride)
+      return withCors(ApiResponse.error('You are not in the approval chain for this offer', 403), origin)
 
-    const body = await request.json()
-
-    // Mark this step as rejected
-    await prisma.recruitmentOfferApproval.update({
-      where: { id: userStep.id },
-      data: { status: 'REJECTED', notes: body.reason || 'Rejected', actedAt: new Date() },
-    })
-
-    // Reset all other steps
-    await prisma.recruitmentOfferApproval.updateMany({
-      where: { offerId: params.id, id: { not: userStep.id } },
-      data: { status: 'AWAITING_PREVIOUS', notes: null, actedAt: null },
-    })
+    if (userStep) {
+      // Mark this step as rejected, reset the others.
+      await prisma.recruitmentOfferApproval.update({
+        where: { id: userStep.id },
+        data: { status: 'REJECTED', notes: body.reason || 'Rejected', actedAt: new Date() },
+      })
+      await prisma.recruitmentOfferApproval.updateMany({
+        where: { offerId: params.id, id: { not: userStep.id } },
+        data: { status: 'AWAITING_PREVIOUS', notes: null, actedAt: null },
+      })
+    } else {
+      // Override reject: mark the whole chain rejected.
+      await prisma.recruitmentOfferApproval.updateMany({
+        where: { offerId: params.id },
+        data: { status: 'REJECTED', notes: body.reason || 'Rejected', actedAt: new Date() },
+      })
+    }
 
     // Revert offer to DRAFT
     await prisma.offer.update({

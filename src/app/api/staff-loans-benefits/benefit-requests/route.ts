@@ -4,6 +4,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { extractBearerToken, findStaffByEmail, findStaffByEmailAndCompany, findStaffById, resolveScopedCompanyIds } from '@/app/api/staff-loans-benefits/_helpers'
 import { prisma } from '@/app/lib/db'
+import { matchesBenefitScope, scopeIneligibilityReason } from '@/app/lib/benefits/eligibility'
 
 const MIN_REASON_LENGTH = 8
 
@@ -94,6 +95,24 @@ export async function POST(request: NextRequest) {
         ApiResponse.error('You do not have access to this staff company', 403),
         origin
       )
+    }
+
+    // Enforce designation/grade scope: the benefit must apply to the requester's
+    // designation (and grade level when the benefit is grade-scoped). This blocks
+    // requesting a benefit the staff member isn't entitled to.
+    const policy = await (prisma as any).benefitPolicy.findFirst({
+      where: { id: benefitId, companyId: requesterStaff.companyId },
+      select: { designationId: true, gradeLevelId: true },
+    })
+    if (policy && (policy.designationId || policy.gradeLevelId)) {
+      const staffScope = await prisma.staffRecord.findFirst({
+        where: { id: requesterStaff.id },
+        select: { designationId: true, currentGradeId: true } as any,
+      }) as any
+      if (!matchesBenefitScope(policy, staffScope || {})) {
+        const reason = scopeIneligibilityReason(policy, staffScope || {}) || 'Not eligible for this benefit'
+        return withCors(ApiResponse.error(`${reason}. This benefit is restricted to a specific designation/grade.`, 403), origin)
+      }
     }
 
     // Create benefit request

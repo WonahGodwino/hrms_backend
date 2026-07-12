@@ -35,7 +35,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         prisma.recruitmentOfferApproval.create({
           data: {
             offerId: params.id,
-            approverId: a.userId, approverRole: a.role,
+            approverId: a.userId, approverName: a.name || null, approverRole: a.role,
             step: a.order || i + 1,
             status: isSequential && i > 0 ? 'AWAITING_PREVIOUS' : 'PENDING',
           },

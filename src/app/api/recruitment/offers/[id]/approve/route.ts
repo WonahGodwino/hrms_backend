@@ -22,12 +22,23 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)
 
-    // Verify user is in the approval chain
-    const userStep = offer.approvals.find(s => s.approverId === user.userId)
-    if (!userStep) return withCors(ApiResponse.error('You are not in the approval chain for this offer', 403), origin)
-    if (userStep.status === 'APPROVED') return withCors(ApiResponse.error('You have already approved this offer', 409), origin)
+    const body = await request.json().catch(() => ({}))
 
-    const body = await request.json()
+    // HR/ADMIN/SUPER_ADMIN may approve directly (executive override) even when
+    // they are not a named approver in the chain.
+    const userStep = offer.approvals.find(s => s.approverId === user.userId)
+    const canOverride = ['HR', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)
+    if (!userStep) {
+      if (!canOverride) return withCors(ApiResponse.error('You are not in the approval chain for this offer', 403), origin)
+      // Approve every outstanding step and the offer itself.
+      await prisma.recruitmentOfferApproval.updateMany({
+        where: { offerId: params.id, status: { not: 'APPROVED' } },
+        data: { status: 'APPROVED', actedAt: new Date() },
+      })
+      await prisma.offer.update({ where: { id: params.id }, data: { status: 'APPROVED' } })
+      return withCors(ApiResponse.success({ offerId: offer.id, status: 'APPROVED' }, 'Offer approved.'), origin)
+    }
+    if (userStep.status === 'APPROVED') return withCors(ApiResponse.error('You have already approved this offer', 409), origin)
 
     // Approve this step
     await prisma.recruitmentOfferApproval.update({

@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/app/lib/db'
+import { getActiveElevatedRole, rankOf } from '@/app/lib/role-elevation'
 
 export type JwtPayload = {
   userId: string
@@ -95,11 +96,27 @@ export async function getUserFromToken(token: string): Promise<AuthUser | null> 
         currentCompanyId = decoded.companyId
       }
     }
-    
+
+    // Temporary role-elevation overlay: if this staff member has an ACTIVE
+    // elevation in the current company, resolve the elevated role (only ever an
+    // upgrade). The base role is never mutated, so revoking/expiring the
+    // elevation returns them to their original role automatically. SUPER_ADMIN is
+    // never overlaid (already top of the tree).
+    let effectiveRole = decoded.role || 'STAFF'
+    const staffId = decoded.userId || decoded.sub
+    if (effectiveRole !== 'SUPER_ADMIN' && staffId && currentCompanyId) {
+      const elevatedRole = await getActiveElevatedRole(staffId, currentCompanyId)
+      if (elevatedRole && rankOf(elevatedRole) > rankOf(effectiveRole)) {
+        effectiveRole = elevatedRole
+        // Ensure the elevated company is in scope for company-access checks.
+        if (!companyIds.includes(currentCompanyId)) companyIds.push(currentCompanyId)
+      }
+    }
+
     return {
       userId: decoded.userId || decoded.sub,
       email: decoded.email,
-      role: decoded.role || 'STAFF',
+      role: effectiveRole,
       companyId: currentCompanyId,
       companyIds: companyIds.length > 0 ? companyIds : undefined,
       permissions: decoded.permissions || []

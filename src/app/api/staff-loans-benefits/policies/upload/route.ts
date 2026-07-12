@@ -127,6 +127,15 @@ export async function POST(request: NextRequest) {
     // --- Process Benefit Types Sheet ---
     const benefitSheet = workbook.getWorksheet('Benefit Types')
     if (benefitSheet) {
+      // Preload the company's designations + grade levels so the sheet can
+      // reference them by human-readable name (resolved to ids, case-insensitive).
+      const [designationRows, gradeRows] = await Promise.all([
+        (prisma as any).designation.findMany({ where: { companyId }, select: { id: true, title: true } }),
+        prisma.gradeLevel.findMany({ where: { companyId }, select: { id: true, name: true } }),
+      ])
+      const desByName = new Map<string, string>(designationRows.map((d: any) => [String(d.title).trim().toLowerCase(), d.id]))
+      const gradeByName = new Map<string, string>(gradeRows.map((g: any) => [String(g.name).trim().toLowerCase(), g.id]))
+
       const rows = benefitSheet.getRows(2, benefitSheet.rowCount - 1) || []
       for (const row of rows) {
         const name = String(row.getCell(1).value || '').trim()
@@ -139,8 +148,25 @@ export async function POST(request: NextRequest) {
           const keyValue = String(row.getCell(5).value || '').trim() || null
           const eligibilityRule = String(row.getCell(6).value || '').trim() || null
           const isActive = parseBool(row.getCell(7).value, true)
+          // Optional job scope (blank = applies to all roles).
+          const jobId = String(row.getCell(8).value || '').trim() || null
 
-          await prisma.benefitPolicy.upsert({
+          // Optional designation + grade scope (by name).
+          const designationName = String(row.getCell(9).value || '').trim()
+          const gradeLevelName = String(row.getCell(10).value || '').trim()
+          let designationId: string | null = null
+          let gradeLevelId: string | null = null
+          if (designationName) {
+            designationId = desByName.get(designationName.toLowerCase()) || null
+            if (!designationId) throw new Error(`Designation "${designationName}" not found in this company`)
+          }
+          if (gradeLevelName) {
+            if (!designationId) throw new Error('Grade Level requires a Designation on the same row')
+            gradeLevelId = gradeByName.get(gradeLevelName.toLowerCase()) || null
+            if (!gradeLevelId) throw new Error(`Grade Level "${gradeLevelName}" not found in this company`)
+          }
+
+          await (prisma as any).benefitPolicy.upsert({
             where: { companyId_name: { companyId, name } },
             update: {
               category,
@@ -149,6 +175,9 @@ export async function POST(request: NextRequest) {
               keyValue,
               eligibilityRule,
               isActive,
+              jobId,
+              designationId,
+              gradeLevelId,
             },
             create: {
               companyId,
@@ -159,6 +188,9 @@ export async function POST(request: NextRequest) {
               keyValue,
               eligibilityRule,
               isActive,
+              jobId,
+              designationId,
+              gradeLevelId,
             },
           })
           results.benefitsCreated++
