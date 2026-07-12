@@ -6,7 +6,7 @@ import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { Prisma } from '@prisma/client'
-import { notifyInterviewScheduled } from '@/app/lib/assessments/panel-notify'
+import { notifyInterviewScheduled, notifyCandidateInterviewScheduled } from '@/app/lib/assessments/panel-notify'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -61,6 +61,15 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       .then((r) => console.log(`[INTERVIEW_SCHEDULE] Interviewers notified for ${params.id}:`, r))
       .catch((err) => console.error(`[INTERVIEW_SCHEDULE] Notify failed for ${params.id}:`, err))
 
+    // Notify the candidate (without revealing interviewer identities).
+    void notifyCandidateInterviewScheduled(params.id, {
+      scheduledAt,
+      notes: body.notes || null,
+      meetingUrl: body.meetingUrl || null,
+    })
+      .then((r) => console.log(`[INTERVIEW_SCHEDULE] Candidate notified for ${params.id}:`, r))
+      .catch((err) => console.error(`[INTERVIEW_SCHEDULE] Candidate notify failed for ${params.id}:`, err))
+
     return withCors(ApiResponse.success({
       candidateId: assessment.application?.candidateId,
       applicationId: assessment.applicationId,
@@ -112,6 +121,16 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     })
       .then((r) => console.log(`[INTERVIEW_RESCHEDULE] Interviewers notified for ${params.id}:`, r))
       .catch((err) => console.error(`[INTERVIEW_RESCHEDULE] Notify failed for ${params.id}:`, err))
+
+    // Re-notify the candidate.
+    void notifyCandidateInterviewScheduled(params.id, {
+      scheduledAt: newWhen || assessment.scheduledAt || null,
+      notes: body.notes ?? assessment.schedulingNotes ?? null,
+      meetingUrl: body.meetingUrl || null,
+      reschedule: true,
+    })
+      .then((r) => console.log(`[INTERVIEW_RESCHEDULE] Candidate notified for ${params.id}:`, r))
+      .catch((err) => console.error(`[INTERVIEW_RESCHEDULE] Candidate notify failed for ${params.id}:`, err))
 
     return withCors(ApiResponse.success({
       candidateId: assessment.application?.candidateId,

@@ -46,36 +46,40 @@ function roundRow(r: PanelRound): string {
 function buildHtml(name: string, companyName: string, planName: string, rounds: PanelRound[]): string {
   const rows = rounds.sort((a, b) => a.order - b.order).map(roundRow).join('')
   return `
-    <p>Dear ${name || 'Colleague'},</p>
-    <p>You have been added to the <strong>interview panel</strong> for the assessment plan
-       <strong>“${planName}”</strong> at <strong>${companyName}</strong>.</p>
-    <p>Below are the round(s) you will be interviewing on. You will receive a separate
-       calendar invitation for each candidate once their interview is scheduled.</p>
-    <table style="border-collapse:collapse;width:100%;margin:18px 0;font-size:14px">
-      <thead>
-        <tr style="background:#f1f5f9">
-          <th style="padding:10px 12px;border:1px solid #e2e8f0;text-align:left;color:#334155">Round</th>
-          <th style="padding:10px 12px;border:1px solid #e2e8f0;text-align:left;color:#334155">Title</th>
-          <th style="padding:10px 12px;border:1px solid #e2e8f0;text-align:left;color:#334155">Format</th>
-          <th style="padding:10px 12px;border:1px solid #e2e8f0;text-align:left;color:#334155">Duration</th>
-          <th style="padding:10px 12px;border:1px solid #e2e8f0;text-align:left;color:#334155">Scoring</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <p style="margin:20px 0">
-      <a href="${FRONTEND_URL.replace(/\/$/, '')}/interviews"
-         style="background:#137fec;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:8px;display:inline-block">
-        View my interviews
-      </a>
-    </p>
-    <p style="color:#475569;font-size:13px">
-      What to expect: when a candidate is scheduled for one of your rounds you will be notified with
-      the candidate, role and time. During the interview you will score the candidate using the
-      scoring method shown above and submit your recommendation on the interviewer dashboard.
-    </p>
-    <p>Thank you for supporting our hiring process.</p>
-    <p>Best regards,<br/>${companyName} — Talent Team</p>`
+    <table cellpadding="0" cellspacing="0" border="0" width="100%%" style="max-width:600px;margin:0 auto">
+      <tr><td style="padding:20px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif">
+        <p style="margin:0 0 16px;font-size:16px;color:#0f172a">Dear ${name || 'Colleague'},</p>
+        <p style="margin:0 0 16px;font-size:15px;color:#334155;line-height:1.6">
+          You have been included on the <strong>interview panel</strong> for
+          <strong>${planName}</strong> at <strong>${companyName}</strong>.
+        </p>
+        <p style="margin:0 0 16px;font-size:14px;color:#475569">Your assigned rounds are listed below. A separate notification with the candidate's details, scheduled date, and joining link will follow once each interview is confirmed.</p>
+
+        <table style="border-collapse:collapse;width:100%%;margin:20px 0;font-size:13px">
+          <thead>
+            <tr style="background:#f8fafc">
+              <th style="padding:10px 14px;border:1px solid #e2e8f0;text-align:left;color:#475569;font-weight:600">Round</th>
+              <th style="padding:10px 14px;border:1px solid #e2e8f0;text-align:left;color:#475569;font-weight:600">Title</th>
+              <th style="padding:10px 14px;border:1px solid #e2e8f0;text-align:left;color:#475569;font-weight:600">Format</th>
+              <th style="padding:10px 14px;border:1px solid #e2e8f0;text-align:left;color:#475569;font-weight:600">Duration</th>
+              <th style="padding:10px 14px;border:1px solid #e2e8f0;text-align:left;color:#475569;font-weight:600">Scoring</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+
+        <div style="margin:24px 0">
+          <a href="${FRONTEND_URL.replace(/\/$/, '')}/interviews"
+             style="display:inline-block;background:#137fec;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 28px;border-radius:8px">
+            View Interviewer Dashboard
+          </a>
+        </div>
+
+        <p style="margin:0 0 8px;font-size:13px;color:#94a3b8">Your contribution to our hiring process is greatly valued. Please review the evaluation criteria above and submit your scorecard promptly after each session.</p>
+        <p style="margin:0;font-size:14px;color:#0f172a">Kind regards,</p>
+        <p style="margin:4px 0 0;font-size:14px;color:#0f172a;font-weight:600">${companyName} Talent Team</p>
+      </td></tr>
+    </table>`
 }
 
 function buildText(name: string, companyName: string, planName: string, rounds: PanelRound[]): string {
@@ -88,18 +92,18 @@ function buildText(name: string, companyName: string, planName: string, rounds: 
     .join('\n')
   return `Dear ${name || 'Colleague'},
 
-You have been added to the interview panel for the assessment plan "${planName}" at ${companyName}.
+You have been included on the interview panel for "${planName}" at ${companyName}. Your assigned rounds are listed below.
 
-Your round(s):
 ${lines}
 
-You will receive details for each candidate once their interview is scheduled. Score and submit your
-recommendation on the interviewer dashboard: ${FRONTEND_URL.replace(/\/$/, '')}/interviews
+A separate notification with the candidate's details, scheduled date, and joining link will follow once each interview is confirmed.
 
-Thank you for supporting our hiring process.
+Interviewer Dashboard: ${FRONTEND_URL.replace(/\/$/, '')}/interviews
 
-Best regards,
-${companyName} — Talent Team`
+Your contribution to our hiring process is greatly valued.
+
+Kind regards,
+${companyName} Talent Team`
 }
 
 // ------- Plan re-use (instance) notification -------
@@ -184,20 +188,29 @@ export async function notifyPlanInstance(
   const results = await Promise.allSettled(
     targets.map((t) => {
       const html = `
-        <p>Dear ${t.name || 'Colleague'},</p>
-        <p>You have been added to the <strong>interview panel</strong> for <strong>${roleLabel}</strong> at
-           <strong>${companyName}</strong>${roleContext && roleContext !== roleLabel ? ` <span style="color:#64748b">(${roleContext})</span>` : ''}.</p>
-        <p>Here are the round(s) you will run for this role. You'll receive a separate note with the
-           candidate and time once each interview is scheduled.</p>
-        <div style="margin:16px 0">${t.rounds.sort((a, b) => a.order - b.order).map(roundRowFull).join('')}</div>
-        <p style="margin:20px 0">
-          <a href="${FRONTEND_URL.replace(/\/$/, '')}/interviews" style="background:#137fec;color:#fff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:8px;display:inline-block">View my interviews</a>
+    <table cellpadding="0" cellspacing="0" border="0" width="100%%" style="max-width:600px;margin:0 auto">
+      <tr><td style="padding:20px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif">
+        <p style="margin:0 0 16px;font-size:16px;color:#0f172a">Dear ${t.name || 'Colleague'},</p>
+        <p style="margin:0 0 16px;font-size:15px;color:#334155;line-height:1.6">
+          You have been included on the <strong>interview panel</strong> for
+          <strong>${roleLabel}</strong> at <strong>${companyName}</strong>.${roleContext && roleContext !== roleLabel ? ` <span style="color:#64748b">(${roleContext})</span>` : ''}
         </p>
-        <p>Thank you for supporting our hiring process.</p>
-        <p>Best regards,<br/>${companyName} — Talent Team</p>`
+        <p style="margin:0 0 16px;font-size:14px;color:#475569">The round(s) you will be evaluating are detailed below. A separate notification with the candidate's name, scheduled date, and joining instructions will follow once each interview is confirmed.</p>
+        <div style="margin:16px 0">${t.rounds.sort((a, b) => a.order - b.order).map(roundRowFull).join('')}</div>
+        <div style="margin:24px 0">
+          <a href="${FRONTEND_URL.replace(/\/$/, '')}/interviews"
+             style="display:inline-block;background:#137fec;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 28px;border-radius:8px">
+            View Interviewer Dashboard
+          </a>
+        </div>
+        <p style="margin:0 0 8px;font-size:13px;color:#94a3b8">Please review the evaluation criteria before the session and submit your scorecard promptly afterwards. Your assessment plays a key role in our hiring decision.</p>
+        <p style="margin:0;font-size:14px;color:#0f172a">Kind regards,</p>
+        <p style="margin:4px 0 0;font-size:14px;color:#0f172a;font-weight:600">${companyName} Talent Team</p>
+      </td></tr>
+    </table>`
       const text = `Dear ${t.name || 'Colleague'},
 
-You have been added to the interview panel for ${roleLabel} at ${companyName}${roleContext ? ` (${roleContext})` : ''}.
+You have been included on the interview panel for ${roleLabel} at ${companyName}${roleContext ? ` (${roleContext})` : ''}.
 
 Your round(s):
 ${t.rounds.sort((a, b) => a.order - b.order).map((r) => {
@@ -206,11 +219,13 @@ ${t.rounds.sort((a, b) => a.order - b.order).map((r) => {
   return `  Round ${r.order}: ${r.title} — ${type}, ${r.duration || 0} mins${ev}`
 }).join('\n')}
 
-Interviewer dashboard: ${FRONTEND_URL.replace(/\/$/, '')}/interviews
+Interviewer Dashboard: ${FRONTEND_URL.replace(/\/$/, '')}/interviews
 
-Best regards,
-${companyName} — Talent Team`
-      return sendEmail({ to: t.email as string, subject: `You're on the interview panel — ${roleLabel}`, html, text })
+Please review the evaluation criteria before the session and submit your scorecard promptly afterwards.
+
+Kind regards,
+${companyName} Talent Team`
+      return sendEmail({ to: t.email as string, subject: `Interview Panel Assignment — ${roleLabel}`, html, text })
     }),
   )
   let sent = 0, failed = 0
@@ -279,38 +294,47 @@ export async function notifyInterviewScheduled(
   const subject = `${opts.reschedule ? 'Interview rescheduled' : 'Interview scheduled'}: ${candidateName} — ${jobTitle}`
 
   const html = (name: string) => `
-    <p>Dear ${name || 'Colleague'},</p>
-    <p>An interview ${verb} for you to conduct on behalf of <strong>${companyName}</strong>.</p>
-    <table style="border-collapse:collapse;width:100%;margin:16px 0;font-size:14px">
-      <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700;width:160px">Candidate</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${candidateName}</td></tr>
-      <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Role</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${jobTitle}${jobDept ? ` · ${jobDept}` : ''}</td></tr>
-      <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Round</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${roundLabel}</td></tr>
-      <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">When</td><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:700;color:#137fec">${whenText}</td></tr>
-      ${opts.notes ? `<tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Notes</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${opts.notes}</td></tr>` : ''}
-      ${evaluationPlan ? `<tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Evaluation plan</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${evaluationPlan}</td></tr>` : ''}
-    </table>
-    <p style="margin:20px 0">
-      <a href="${FRONTEND_URL.replace(/\/$/, '')}/interviews"
-         style="background:#137fec;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:8px;display:inline-block">
-        Open interviewer dashboard
-      </a>
-    </p>
-    <p style="color:#475569;font-size:13px">Please review the candidate's CV ahead of time and submit your scorecard on the interviewer dashboard after the session.</p>
-    <p>Best regards,<br/>${companyName} — Talent Team</p>`
+    <table cellpadding="0" cellspacing="0" border="0" width="100%%" style="max-width:600px;margin:0 auto">
+      <tr><td style="padding:20px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif">
+        <p style="margin:0 0 16px;font-size:16px;color:#0f172a">Dear ${name || 'Colleague'},</p>
+        <p style="margin:0 0 16px;font-size:15px;color:#334155;line-height:1.6">
+          An interview you have been assigned to ${verb} for <strong>${companyName}</strong>. Please review the details below.
+        </p>
+        <table style="border-collapse:collapse;width:100%%;margin:16px 0;font-size:13px">
+          <tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569;width:150px">Candidate</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#0f172a;font-weight:600">${candidateName}</td></tr>
+          <tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Position</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#334155">${jobTitle}${jobDept ? ` · ${jobDept}` : ''}</td></tr>
+          <tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Round</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#334155">${roundLabel}</td></tr>
+          <tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Date &amp; Time</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#137fec;font-weight:600">${whenText}</td></tr>
+          ${opts.notes ? `<tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Notes</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#334155">${opts.notes}</td></tr>` : ''}
+          ${evaluationPlan ? `<tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Evaluation Plan</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#334155">${evaluationPlan}</td></tr>` : ''}
+        </table>
+        <div style="margin:24px 0">
+          <a href="${FRONTEND_URL.replace(/\/$/, '')}/interviews"
+             style="display:inline-block;background:#137fec;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 28px;border-radius:8px">
+            Open Interviewer Dashboard
+          </a>
+        </div>
+        <p style="margin:0 0 8px;font-size:13px;color:#94a3b8">Please review the candidate's CV beforehand and submit your scorecard on the interviewer dashboard after the session. Timely feedback ensures a smooth process for all candidates.</p>
+        <p style="margin:0;font-size:14px;color:#0f172a">Kind regards,</p>
+        <p style="margin:4px 0 0;font-size:14px;color:#0f172a;font-weight:600">${companyName} Talent Team</p>
+      </td></tr>
+    </table>`
 
   const text = (name: string) => `Dear ${name || 'Colleague'},
 
-An interview ${verb} for you to conduct on behalf of ${companyName}.
+An interview you have been assigned to ${verb} for ${companyName}. Please review the details below.
 
-Candidate: ${candidateName}
-Role:      ${jobTitle}${jobDept ? ` · ${jobDept}` : ''}
-${roundLabel}
-When:      ${whenText}${opts.notes ? `\nNotes:     ${opts.notes}` : ''}${evaluationPlan ? `\nEvaluation plan: ${evaluationPlan}` : ''}
+Candidate:         ${candidateName}
+Position:          ${jobTitle}${jobDept ? ` · ${jobDept}` : ''}
+Round:             ${roundLabel}
+Date & Time:       ${whenText}${opts.notes ? `\nNotes:             ${opts.notes}` : ''}${evaluationPlan ? `\nEvaluation Plan:   ${evaluationPlan}` : ''}
 
-Interviewer dashboard: ${FRONTEND_URL.replace(/\/$/, '')}/interviews
+Interviewer Dashboard: ${FRONTEND_URL.replace(/\/$/, '')}/interviews
 
-Best regards,
-${companyName} — Talent Team`
+Please review the candidate's CV beforehand and submit your scorecard after the session.
+
+Kind regards,
+${companyName} Talent Team`
 
   const results = await Promise.allSettled(
     targets.map((s) => {
@@ -402,4 +426,88 @@ export async function notifyAssessmentPanel(
     else failed++
   }
   return { attempted: targets.length, sent, failed }
+}
+
+// ------- Candidate-facing interview scheduling notification -------
+// Emails the CANDIDATE when their interview is scheduled. Includes the role,
+// date/time, round info and any notes — but never reveals interviewer identities.
+
+export async function notifyCandidateInterviewScheduled(
+  assessmentId: string,
+  opts: { scheduledAt: Date | null; notes?: string | null; reschedule?: boolean; meetingUrl?: string | null },
+): Promise<{ success: boolean }> {
+  const a: any = await (prisma as any).recruitmentCandidateAssessment.findUnique({
+    where: { id: assessmentId },
+    include: {
+      company: { select: { companyName: true } },
+      application: {
+        select: {
+          job: { select: { title: true, department: true } },
+          candidate: { select: { firstName: true, lastName: true, email: true } },
+        },
+      },
+      plan: {
+        select: {
+          name: true,
+          rounds: { select: { order: true, title: true, interviewType: true, duration: true } },
+        },
+      },
+    },
+  })
+  if (!a) return { success: false }
+
+  const candidate = a.application?.candidate
+  const candidateEmail = candidate?.email
+  if (!candidateEmail) return { success: false }
+
+  const companyName = a.company?.companyName || 'the company'
+  const candidateName = `${candidate?.firstName || ''} ${candidate?.lastName || ''}`.trim() || 'there'
+  const jobTitle = a.application?.job?.title || 'the role'
+  const jobDept = a.application?.job?.department || ''
+  const round = (a.plan?.rounds || []).find((r: any) => r.order === a.currentRoundOrder) || null
+  const roundLabel = round
+    ? `${round.title || 'Interview'} (${INTERVIEW_TYPE_LABEL[round.interviewType] || round.interviewType}, ${round.duration || 0} mins)`
+    : 'Interview round'
+  const whenText = fmtWhen(opts.scheduledAt)
+  const verb = opts.reschedule ? 'has been rescheduled' : 'has been scheduled'
+  const intro = opts.reschedule
+    ? `Your interview for <strong>${jobTitle}</strong>${jobDept ? ` (${jobDept})` : ''} at <strong>${companyName}</strong> has been rescheduled. Please review the updated details below.`
+    : `Congratulations — your application for <strong>${jobTitle}</strong>${jobDept ? ` (${jobDept})` : ''} at <strong>${companyName}</strong> has progressed to the interview stage.`
+  const subject = `${opts.reschedule ? 'Interview rescheduled' : 'Interview invitation'}: ${jobTitle} — ${companyName}`
+
+  const html = `
+    <p>Dear ${candidateName},</p>
+    <p>${intro}</p>
+    <table style="border-collapse:collapse;width:100%;margin:16px 0;font-size:14px">
+      <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700;width:160px">Position</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${jobTitle}${jobDept ? ` · ${jobDept}` : ''}</td></tr>
+      <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Round</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${roundLabel}</td></tr>
+      <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Date & Time</td><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:700;color:#137fec">${whenText}</td></tr>
+      ${opts.meetingUrl ? `<tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Meeting Link</td><td style="padding:8px 12px;border:1px solid #e2e8f0"><a href="${opts.meetingUrl}" style="color:#137fec;text-decoration:underline">${opts.meetingUrl}</a></td></tr>` : ''}
+      ${opts.notes ? `<tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Notes</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${opts.notes}</td></tr>` : ''}
+    </table>
+    ${opts.meetingUrl ? `<p style="margin:16px 0">Click the link above at the scheduled time to join your interview.</p>` : ''}
+    <p style="color:#475569;font-size:13px">Please ensure you have a stable internet connection and a quiet environment for the interview. If you have any questions, reach out to the hiring team.</p>
+    <p>We look forward to speaking with you.</p>
+    <p>Best regards,<br/>${companyName} — Talent Team</p>`
+
+  const text = `Dear ${candidateName},
+
+${opts.reschedule
+    ? `Your interview for ${jobTitle}${jobDept ? ` (${jobDept})` : ''} at ${companyName} has been rescheduled. Please review the updated details below.`
+    : `Congratulations — your application for ${jobTitle}${jobDept ? ` (${jobDept})` : ''} at ${companyName} has progressed to the interview stage.`}
+
+Position:     ${jobTitle}${jobDept ? ` · ${jobDept}` : ''}
+Round:        ${roundLabel}
+Date & Time:  ${whenText}${opts.meetingUrl ? `\nMeeting Link: ${opts.meetingUrl}` : ''}${opts.notes ? `\nNotes:       ${opts.notes}` : ''}
+${opts.meetingUrl ? `\nClick the link above at the scheduled time to join your interview.` : ''}
+
+Please ensure you have a stable internet connection and a quiet environment. Contact the hiring team if you have any questions.
+
+We look forward to speaking with you.
+
+Best regards,
+${companyName} — Talent Team`
+
+  const result = await sendEmail({ to: candidateEmail, subject, html, text })
+  return { success: result.success }
 }
