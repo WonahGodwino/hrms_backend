@@ -10,7 +10,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
-export const REQUIRED_CATEGORIES = ['MEANS_OF_ID', 'GUARANTOR_FORM', 'SIGNED_OFFER'] as const
+const REQUIRED_CATEGORIES = ['MEANS_OF_ID', 'GUARANTOR_FORM', 'SIGNED_OFFER'] as const
 const CATEGORY_LABELS: Record<string, string> = {
   MEANS_OF_ID: 'Means of Identification',
   GUARANTOR_FORM: 'Guarantor Form',
