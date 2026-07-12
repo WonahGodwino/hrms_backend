@@ -41,17 +41,28 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('Job ID, first name, last name, and email are required', 400), origin);
     }
 
-    // Parse location if provided
+    // Parse location if provided. Accept either a JSON object
+    // ({"state","lga"}) or a plain free-text string (e.g. "Ikeja, Lagos" or a
+    // non-Nigerian city). LGA is optional — a state/city alone is fine.
     let parsedLocation: { state: string; lga: string } | null = null;
-    if (location) {
+    if (location && location.trim()) {
+      const raw = location.trim();
+      let state = '';
+      let lga = '';
       try {
-        parsedLocation = JSON.parse(location);
-        if (!parsedLocation || !parsedLocation.state || !parsedLocation.lga) {
-          return withCors(ApiResponse.error('Invalid location format. Expected {"state": "State Name", "lga": "LGA Name"}', 400), origin);
+        const obj = JSON.parse(raw);
+        if (obj && typeof obj === 'object' && (obj.state || obj.lga)) {
+          state = String(obj.state || '').trim();
+          lga = String(obj.lga || '').trim();
+        } else {
+          // Valid JSON but not the expected shape (e.g. a bare string) → free-text.
+          state = raw;
         }
-      } catch (error) {
-        return withCors(ApiResponse.error('Invalid location JSON format', 400), origin);
+      } catch {
+        // Not JSON at all → treat the whole value as a free-text location.
+        state = raw;
       }
+      if (state) parsedLocation = { state, lga };
     }
 
     // Check if the job exists
@@ -144,8 +155,9 @@ export async function POST(request: NextRequest) {
       applicationStartDate: applicationStartDate ? new Date(applicationStartDate) : null,
       linkedInUrl: linkedInUrl || null,
       portfolioUrl: portfolioUrl || null,
+      // Candidate has no dedicated LGA column; the state is stored here and the
+      // full {state, lga} is retained in the application metadata below.
       locationState: parsedLocation?.state || null,
-      locationLga: parsedLocation?.lga || null,
       createdBy: createdBy,
     };
 
