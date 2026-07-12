@@ -77,7 +77,8 @@ export async function POST(request: NextRequest) {
 
     if (!name?.trim()) return withCors(ApiResponse.error('Plan name is required', 400), origin)
 
-    const companyId = user.companyId
+    const { searchParams } = new URL(request.url)
+    const companyId = body.companyId || searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
 
     const plan = await prisma.recruitmentAssessmentPlan.create({
