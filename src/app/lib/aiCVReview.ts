@@ -293,7 +293,7 @@ async function analyzeWithAnthropic(prompt: string, options: AICVReviewOptions):
   }
 
   const apiKey = options.apiKey || process.env.ANTHROPIC_API_KEY || '';
-  const model = options.model || 'claude-3-opus-20240229';
+  const model = options.model || 'claude-3-5-sonnet-20241022';
   
   // Create headers object with proper type
   const headers: Record<string, string> = {

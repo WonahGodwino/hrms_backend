@@ -32,15 +32,15 @@ export type ServiceConfigs = {
 }
 
 export const aiConfig = {
-  defaultService: process.env.DEFAULT_AI_SERVICE || 'openai',
-  defaultModel: process.env.DEFAULT_AI_MODEL || 'gpt-4-turbo-preview',
+  defaultService: process.env.DEFAULT_AI_SERVICE || 'anthropic',
+  defaultModel: process.env.DEFAULT_AI_MODEL || 'claude-3-5-sonnet-20241022',
   
   services: {
     openai: {
       apiKey: process.env.OPENAI_API_KEY,
       enabled: !!process.env.OPENAI_API_KEY,
-      defaultModel: 'gpt-4-turbo-preview',
-      fallbackModel: 'gpt-3.5-turbo',
+      defaultModel: 'gpt-4o',
+      fallbackModel: 'gpt-4o-mini',
       maxTokens: 2000,
       temperature: 0.2
     } as OpenAIConfig,
