@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     const companyId = searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
 
-    const assessments = await prisma.recruitmentCandidateAssessment.findMany({
+    const assessments = await (prisma as any).recruitmentCandidateAssessment.findMany({
       where: {
         companyId,
         roundStatus: { in: ['SCHEDULED', 'PENDING_FEEDBACK'] },
@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
               select: {
                 id: true, order: true, title: true, duration: true,
                 interviewType: true, gradingMetric: true, requiredInterviewers: true,
+                evaluationPlan: true,
               },
               orderBy: { order: 'asc' },
             },
@@ -50,12 +51,12 @@ export async function GET(request: NextRequest) {
 
     // Rounds the current user has already scored (to hide the evaluate CTA).
     const scorecards = await prisma.recruitmentScorecard.findMany({
-      where: { interviewerId: user.userId, candidateAssessmentId: { in: assessments.map(a => a.id) } },
+      where: { interviewerId: user.userId, candidateAssessmentId: { in: assessments.map((a: any) => a.id) } },
       select: { candidateAssessmentId: true, roundId: true },
     })
     const submitted = new Set(scorecards.map(s => `${s.candidateAssessmentId}:${s.roundId}`))
 
-    const data = assessments.map(a => {
+    const data = assessments.map((a: any) => {
       const currentRound = a.plan.rounds.find((r: any) => r.order === a.currentRoundOrder)
       const c = a.application?.candidate
       return {
@@ -74,6 +75,7 @@ export async function GET(request: NextRequest) {
               duration: currentRound.duration,
               interviewType: currentRound.interviewType,
               gradingMetric: currentRound.gradingMetric,
+              evaluationPlan: currentRound.evaluationPlan ?? null,
             }
           : null,
         roundStatus: a.roundStatus,

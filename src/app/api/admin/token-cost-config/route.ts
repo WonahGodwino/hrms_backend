@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { tokensPerUnit, costPerUnit, providerCostPerUnit, currency = 'USD', label, activate = false } = body
+    const { tokensPerUnit, costPerUnit, providerCostPerUnit, currency = 'USD', label, defaultAiService, defaultAiModel, activate = false } = body
 
     if (!tokensPerUnit || tokensPerUnit <= 0) {
       return withCors(ApiResponse.error('tokensPerUnit must be a positive integer', 400), origin)
@@ -101,6 +101,8 @@ export async function POST(request: NextRequest) {
       providerCostPerUnit: providerCostPerUnit != null ? parseFloat(providerCostPerUnit) : 0.015,
       currency:            currency.toUpperCase().slice(0, 3),
       label:               label || null,
+      defaultAiService:    defaultAiService || null,
+      defaultAiModel:      defaultAiModel || null,
       createdBy:           user.userId as string,
     }
 

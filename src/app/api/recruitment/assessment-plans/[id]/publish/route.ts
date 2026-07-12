@@ -4,6 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { notifyAssessmentPanel } from '@/app/lib/assessments/panel-notify'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -27,6 +28,11 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     await prisma.recruitmentAssessmentPlan.update({
       where: { id: params.id }, data: { status: 'ACTIVE' },
     })
+
+    // Notify the interview panel (fire-and-forget so email never blocks publish).
+    void notifyAssessmentPanel(plan.id, companyId)
+      .then((r) => console.log(`[ASSESSMENT_PUBLISH] Panel notified for ${plan.id}:`, r))
+      .catch((err) => console.error(`[ASSESSMENT_PUBLISH] Panel notify failed for ${plan.id}:`, err))
 
     return withCors(ApiResponse.success({ id: plan.id, status: 'ACTIVE' }, 'Plan published successfully.'), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }

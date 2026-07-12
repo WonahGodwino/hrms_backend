@@ -6,9 +6,10 @@ import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { resolveRecruitmentCompanyId } from '@/app/lib/recruitment/companyScope'
 import { calculateIndustryMatchScore, extractKeywords } from '@/app/lib/keywordExtractor'
 import { calculateAICVReviewScore, AICVReviewOptions } from '@/app/lib/aiCVReview'
-import { aiConfig, getAPIKey, getDefaultModel } from '@/app/lib/aiConfig'
+import { aiConfig, resolveDefaultAiFromDb, getDefaultAiService, getAPIKey, getDefaultModel } from '@/app/lib/aiConfig'
 import rateLimit from '@/app/lib/rateLimiter'
 import { openaiUsageTracker } from '@/app/lib/openaiUsage'
 
@@ -35,14 +36,7 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'SUPER_ADMIN'])
-
-    if (!user.companyId) {
-      return withCors(
-        ApiResponse.error('Company context missing for this user', 400),
-        origin
-      )
-    }
+    const user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     // Apply rate limiting
     try {
@@ -55,13 +49,29 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { 
-      jobIds, 
+
+    // Honour the globally selected company (companyId in body/query) so ranking
+    // targets the same company the pipeline is scoped to — otherwise an
+    // ADMIN/SUPER_ADMIN on a switched company would match no jobs (404).
+    const scope = await resolveRecruitmentCompanyId(user, body?.companyId || new URL(request.url).searchParams.get('companyId'))
+    if (scope.error) {
+      return withCors(ApiResponse.error(scope.error.message, scope.error.status), origin)
+    }
+    const companyId = scope.companyId as string
+
+    // Resolve the default AI service & model from the SUPER_ADMIN setting
+    // (token-cost-config table). If not set, falls back to env vars.
+    await resolveDefaultAiFromDb();
+    const effectiveService = getDefaultAiService();
+    const effectiveModel = getDefaultModel(effectiveService);
+
+    const {
+      jobIds,
       useAI = aiConfig.services.openai.enabled, // Auto-detect if OpenAI is available
       autoShortlist = false, 
       threshold = 70,
-      aiService = aiConfig.defaultService,
-      aiModel = aiConfig.defaultModel,
+      aiService = effectiveService,
+      aiModel = effectiveModel,
       aiTemperature = 0.2,
       includeCulturalFit = true,
       includeGrowthPotential = true,
@@ -93,7 +103,7 @@ export async function POST(request: NextRequest) {
 
     // Get company info for AI context
     const company = await prisma.company.findUnique({
-      where: { id: user.companyId as string },
+      where: { id: companyId },
       select: { 
         companyName: true, 
         id: true 
@@ -111,7 +121,7 @@ export async function POST(request: NextRequest) {
     const jobs = await prisma.job.findMany({
       where: {
         id: { in: jobIds },
-        companyId: user.companyId as string,
+        companyId: companyId,
       },
       include: {
         applications: {
@@ -277,15 +287,17 @@ export async function POST(request: NextRequest) {
               cost,
               aiOptions.model || 'gpt-4-turbo-preview',
               'cv-review',
-              user.companyId,
+              companyId,
               user.userId,
               application.id
             )
 
-            // Persist to ai_usage_logs so records survive server restarts
-            prisma.aIUsageLog.create({
+            // Persist to ai_usage_logs so records survive server restarts.
+            // Await so the write completes before continuing — ensures reliable
+            // cost tracking even under load.
+            await prisma.aIUsageLog.create({
               data: {
-                companyId:     user.companyId as string,
+                companyId:     companyId,
                 applicationId: application.id,
                 service:       aiService,
                 model:         aiOptions.model || 'gpt-4-turbo-preview',
@@ -306,9 +318,7 @@ export async function POST(request: NextRequest) {
                   },
                 },
               },
-            }).catch((dbErr: any) =>
-              console.error('Failed to persist AI usage log:', dbErr.message)
-            )
+            })
 
             jobEstimatedCost += cost
             totalTokensUsed += aiTokensUsed

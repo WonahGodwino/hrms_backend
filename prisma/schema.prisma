@@ -541,6 +541,9 @@ model RecruitmentAssessmentRound {
   gradingMetric         String?
   questionBanks         Json?
   requiredInterviewers  Json?
+  // Optional evaluation plan for the round (scoring rubric / what to assess /
+  // guidance, or a link). Not required — a round can be saved without one.
+  evaluationPlan        String?           @db.Text
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
@@ -550,6 +553,32 @@ model RecruitmentAssessmentRound {
   @@unique([planId, order])
   @@index([planId])
   @@map("recruitment_assessment_rounds")
+}
+
+// A re-use of a published assessment plan for a specific Job and/or Designation.
+// The plan's rounds stay the reusable template; the instance carries the panel
+// chosen for THIS job/designation (editable before finalising), keyed by round.
+// FKs are enforced in SQL only (no Prisma relations) so the generated client is
+// not required — access via (prisma as any). panelByRound shape:
+//   { [roundId]: [{ staffId, name, email, role }] }
+model AssessmentPlanInstance {
+  id            String    @id @default(cuid())
+  companyId     String
+  planId        String
+  jobId         String?
+  designationId String?
+  panelByRound  Json?
+  status        String    @default("ACTIVE") // ACTIVE | ARCHIVED
+  createdBy     String?
+  createdByName String?
+  notifiedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([companyId, planId])
+  @@index([companyId, jobId])
+  @@index([companyId, designationId])
+  @@map("assessment_plan_instances")
 }
 
 // ==================== RECRUITMENT: ASSESSMENT QUEUE ====================
@@ -1020,13 +1049,15 @@ model AIUsageLog {
 // Global token cost rate — set by SUPER_ADMIN, one row is isActive at a time.
 // The active row is read by the recruitment selection route to price AI usage.
 model TokenCostConfig {
-  id           String   @id @default(cuid())
-  tokensPerUnit Int     @default(1000)
-  costPerUnit  Float    @default(0.30)
-  providerCostPerUnit Float @default(0.015)
-  currency     String   @default("USD") @db.VarChar(3)
-  label        String?
-  isActive     Boolean  @default(false)
+  id                  String   @id @default(cuid())
+  tokensPerUnit       Int      @default(1000)
+  costPerUnit         Float    @default(0.30)
+  providerCostPerUnit Float    @default(0.015)
+  currency            String   @default("USD") @db.VarChar(3)
+  label               String?
+  defaultAiService    String?
+  defaultAiModel      String?
+  isActive            Boolean  @default(false)
   createdBy    String
   updatedBy    String?
   createdAt    DateTime @default(now())

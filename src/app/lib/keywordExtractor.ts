@@ -183,8 +183,11 @@ export function calculateIndustryMatchScore(
 // Helper functions
 function calculateExperienceScore(cvText: string): number {
   const yearPatterns = [
-    /(\d+)\+?\s*years?.*experience/gi,
-    /experience.*(\d+)\+?\s*years?/gi
+    /(\d+)\+?\s*years?\s*(?:of)?\s*experience/gi,
+    /experience\s*(?:of)?\s*(\d+)\+?\s*years?/gi,
+    /(\d{4})\s*[-–—to]+\s*(?:present|current|date|now|202\d)/gi,
+    /worked\s*(?:for|since)\s*(\d+)\s*years?/gi,
+    /(\d+)\s*\+?\s*yrs?/gi,
   ];
   
   let maxYears = 0;
@@ -195,7 +198,14 @@ function calculateExperienceScore(cvText: string): number {
         const years = match.match(/\d+/);
         if (years) {
           const num = parseInt(years[0]);
-          if (num > maxYears) maxYears = num;
+          if (num >= 1900) {
+            // It's a year, not a duration — estimate from current year
+            const currentYear = new Date().getFullYear();
+            const estimatedYears = Math.min(currentYear - num, 40);
+            if (estimatedYears > maxYears) maxYears = estimatedYears;
+          } else if (num > maxYears && num <= 60) {
+            maxYears = num;
+          }
         }
       });
     }
@@ -205,27 +215,33 @@ function calculateExperienceScore(cvText: string): number {
 }
 
 function calculateEducationScore(cvText: string): number {
-  const education = {
-    'phd': 100,
-    'doctorate': 100,
-    'masters': 80,
-    'bachelor': 60,
-    'associate': 40,
-    'diploma': 30,
-    'certificate': 20,
-    'high school': 10
-  };
+  const educationLevels: { pattern: RegExp; score: number }[] = [
+    { pattern: /ph\.?d|doctorate|doctoral|d\.?phil/i, score: 100 },
+    { pattern: /m\.?ba|master(?:'s|s)?\s*(?:of|in)?\s*(?:business|science|arts|engineering|technology)/i, score: 88 },
+    { pattern: /master(?:'s|s)|m\.?sc|m\.?a|m\.?eng|post.?graduate/i, score: 80 },
+    { pattern: /bachelor(?:'s|s)?|b\.?sc|b\.?a|b\.?eng|undergraduate|hnd|higher.?national.?diploma/i, score: 60 },
+    { pattern: /associate(?:'s|s)?\s*(?:degree)?|a\.?a|a\.?s|ond|ordinary.?national.?diploma/i, score: 45 },
+    { pattern: /diploma|nce|nigerian.?certificate|certificate\s*(?:of|in)?\s*(?:higher|advanced)/i, score: 35 },
+    { pattern: /certificate|vocational|trade.?school|apprenticeship|nano.?degree|bootcamp/i, score: 25 },
+    { pattern: /high.?school|secondary.?school|ssce|waec|neco|ged|a.?levels?|o.?levels?|ib.?diploma/i, score: 15 },
+  ];
   
   const lowerText = cvText.toLowerCase();
   let maxScore = 0;
+  let matchedLevel = '';
   
-  Object.entries(education).forEach(([level, score]) => {
-    if (lowerText.includes(level)) {
-      maxScore = Math.max(maxScore, score);
+  for (const level of educationLevels) {
+    if (level.pattern.test(lowerText) && level.score > maxScore) {
+      maxScore = level.score;
+      matchedLevel = level.pattern.source;
     }
-  });
+  }
   
-  return maxScore || 30;
+  // Boost for multiple qualifications
+  const qualificationCount = educationLevels.filter(l => l.pattern.test(lowerText)).length;
+  const multiQualBonus = Math.min(qualificationCount - 1, 3) * 3;
+  
+  return Math.min(maxScore + multiQualBonus, 100) || 30;
 }
 
 function calculateSoftSkillsScore(cvText: string): number {
@@ -246,8 +262,29 @@ function analyzeSkillGaps(missingKeywords: string[]): {
   moderate: string[];
   minor: string[];
 } {
-  const criticalSkills = ['javascript', 'python', 'java', 'react', 'aws', 'nodejs'];
-  const moderateSkills = ['typescript', 'angular', 'vue', 'mysql', 'mongodb', 'docker'];
+  // Internationally-relevant critical skills across multiple domains
+  const criticalPatterns: RegExp[] = [
+    // Core programming & architecture
+    /^(javascript|typescript|python|java|c#|go|rust|ruby|swift|kotlin|php|scala)$/i,
+    // Cloud & DevOps
+    /^(aws|azure|gcp|cloud|docker|kubernetes|terraform|ci\/?cd|devops|jenkins)$/i,
+    // Data & ML
+    /^(machine.?learning|ai|artificial.?intelligence|data.?science|deep.?learning|nlp|tensorflow|pytorch)$/i,
+    // Leadership & management
+    /^(leadership|strategy|stakeholder.?management|budget.?management|team.?lead|executive)$/i,
+    // Security
+    /^(security|cryptography|penetration.?testing|cyber.?security|compliance|gdpr|iso.?27001)$/i,
+    // Database
+    /^(sql|postgres|oracle|database.?design|data.?modeling|data.?warehouse|etl)$/i,
+  ];
+
+  const moderatePatterns: RegExp[] = [
+    /^(react|angular|vue|next\.?js|node\.?js|express|django|flask|spring\.?boot|\.?net)$/i,
+    /^(mongodb|redis|elasticsearch|rabbitmq|kafka|graphql|rest|api|microservices)$/i,
+    /^(agile|scrum|kanban|jira|confluence|testing|unit.?test|integration.?test)$/i,
+    /^(communication|presentation|negotiation|mentoring|coaching|training)$/i,
+    /^(figma|sketch|adobe|ui\/?ux|user.?experience|design.?system|accessibility)$/i,
+  ];
   
   const gaps = {
     critical: [] as string[],
@@ -258,9 +295,9 @@ function analyzeSkillGaps(missingKeywords: string[]): {
   missingKeywords.forEach(keyword => {
     const lowerKeyword = keyword.toLowerCase();
     
-    if (criticalSkills.some(skill => lowerKeyword.includes(skill) || skill.includes(lowerKeyword))) {
+    if (criticalPatterns.some(pat => pat.test(lowerKeyword))) {
       gaps.critical.push(keyword);
-    } else if (moderateSkills.some(skill => lowerKeyword.includes(skill) || skill.includes(lowerKeyword))) {
+    } else if (moderatePatterns.some(pat => pat.test(lowerKeyword))) {
       gaps.moderate.push(keyword);
     } else {
       gaps.minor.push(keyword);
@@ -274,24 +311,35 @@ function generateRecommendations(score: number, skillGaps: any): string[] {
   const recommendations: string[] = [];
   
   if (score >= 90) {
-    recommendations.push('Top-tier candidate - Immediate hire consideration');
-    recommendations.push('Schedule executive interview within 48 hours');
+    recommendations.push('Exceptional candidate — Immediate hire recommended');
+    recommendations.push('Schedule final interview within 48 hours');
+    recommendations.push('Fast-track offer with competitive package');
   } else if (score >= 80) {
-    recommendations.push('Strong candidate - Proceed with interviews');
-    recommendations.push('Technical assessment recommended');
+    recommendations.push('Strong candidate — Advance to final interview stage');
+    recommendations.push('Conduct technical deep-dive or practical assessment');
+    recommendations.push('Check references and verify claims');
   } else if (score >= 70) {
-    recommendations.push('Qualified candidate - Evaluate carefully');
-    recommendations.push('Focus interview on skill gaps');
+    recommendations.push('Qualified candidate — Include in interview shortlist');
+    recommendations.push('Focus interview on identified skill gaps');
+    recommendations.push('Consider pairing with a stronger candidate');
   } else if (score >= 60) {
-    recommendations.push('Borderline candidate - Secondary option');
-    recommendations.push('Only consider if no better candidates available');
+    recommendations.push('Potential candidate — Hold for comparison');
+    recommendations.push('Only proceed if top-tier pool is exhausted');
+    recommendations.push('Consider for junior or adjacent roles');
+  } else if (score >= 40) {
+    recommendations.push('Below threshold — Not recommended for this role');
+    recommendations.push('May be suitable for entry-level or different department');
+    recommendations.push('Retain in talent pool for future openings');
   } else {
-    recommendations.push('Not recommended - Consider rejection');
-    recommendations.push('Keep in talent pool for future openings');
+    recommendations.push('Not qualified — Decline or suggest other roles');
+    recommendations.push('Encourage skill development in identified gap areas');
   }
   
   if (skillGaps.critical.length > 0) {
-    recommendations.push(`Critical skill gaps: ${skillGaps.critical.slice(0, 3).join(', ')}`);
+    recommendations.push(`Critical skill gaps: ${skillGaps.critical.slice(0, 4).join(', ')}`);
+  }
+  if (skillGaps.moderate.length > 0) {
+    recommendations.push(`Moderate gaps to address: ${skillGaps.moderate.slice(0, 3).join(', ')}`);
   }
   
   return recommendations;

@@ -93,9 +93,30 @@ export function getAPIKey(service: string): string | undefined {
   return undefined;
 }
 
+// Default model resolver — checks DB first (SUPER_ADMIN setting), falls back to env.
+let _cachedDefaultService: string | null = null;
+let _cachedDefaultModel: string | null = null;
+
+export async function resolveDefaultAiFromDb() {
+  if (_cachedDefaultService && _cachedDefaultModel) return;
+  try {
+    const { prisma } = await import('@/app/lib/db');
+    const active = await (prisma as any).tokenCostConfig.findFirst({
+      where: { isActive: true },
+      select: { defaultAiService: true, defaultAiModel: true },
+    });
+    if (active?.defaultAiService) _cachedDefaultService = active.defaultAiService;
+    if (active?.defaultAiModel) _cachedDefaultModel = active.defaultAiModel;
+  } catch { /* non-critical — fall back to env */ }
+}
+
+export function getDefaultAiService(): string {
+  return _cachedDefaultService || aiConfig.defaultService;
+}
+
 export function getDefaultModel(service: string): string {
   const config = getServiceConfig(service);
-  return config?.defaultModel || aiConfig.defaultModel;
+  return _cachedDefaultModel || config?.defaultModel || aiConfig.defaultModel;
 }
 
 export function isServiceEnabled(service: string): boolean {

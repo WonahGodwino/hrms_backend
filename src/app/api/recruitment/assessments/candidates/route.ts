@@ -33,14 +33,14 @@ export async function GET(request: NextRequest) {
 
     const [total, assessments] = await Promise.all([
       prisma.recruitmentCandidateAssessment.count({ where }),
-      prisma.recruitmentCandidateAssessment.findMany({
+      (prisma as any).recruitmentCandidateAssessment.findMany({
         where,
         include: {
           application: {
             select: {
               candidateId: true,
               jobId: true,
-              job: { select: { title: true } },
+              job: { select: { title: true, designationId: true } },
               candidate: { select: { firstName: true, lastName: true, email: true } },
             },
           },
@@ -62,8 +62,32 @@ export async function GET(request: NextRequest) {
       }),
     ])
 
-    const data = assessments.map(a => {
+    // Load matching plan instances so the schedule modal can pre-fill the panel
+    // for each candidate's current round (from the panel chosen for their job/
+    // designation when the plan was re-used).
+    const planIds = Array.from(new Set(assessments.map((a: any) => a.plan?.id).filter(Boolean)))
+    const instances: any[] = planIds.length
+      ? await (prisma as any).assessmentPlanInstance.findMany({
+          where: { companyId, status: 'ACTIVE', planId: { in: planIds } },
+          select: { planId: true, jobId: true, designationId: true, panelByRound: true },
+        })
+      : []
+    const instByJob = new Map<string, any>()
+    const instByDes = new Map<string, any>()
+    for (const i of instances) {
+      if (i.jobId) instByJob.set(`${i.planId}:${i.jobId}`, i)
+      if (i.designationId) instByDes.set(`${i.planId}:${i.designationId}`, i)
+    }
+
+    const data = assessments.map((a: any) => {
       const currentRound = a.plan.rounds.find((r: any) => r.order === a.currentRoundOrder)
+      // Suggested panel for the current round (job match wins over designation).
+      const inst =
+        instByJob.get(`${a.plan?.id}:${a.application?.jobId}`) ||
+        (a.application?.job?.designationId ? instByDes.get(`${a.plan?.id}:${a.application.job.designationId}`) : null)
+      const suggestedInterviewers = (inst && currentRound && inst.panelByRound && typeof inst.panelByRound === 'object')
+        ? (inst.panelByRound[currentRound.id] || [])
+        : []
       return {
         id: a.id,
         candidateId: a.application?.candidateId,
@@ -90,6 +114,9 @@ export async function GET(request: NextRequest) {
         averageScore: a.averageScore,
         scheduledAt: a.scheduledAt ? a.scheduledAt.toISOString() : null,
         interviewerIds: a.interviewerIds || [],
+        // Default panel for this round (from the re-used plan instance), so the
+        // schedule modal can pre-select interviewers.
+        suggestedInterviewers,
       }
     })
 

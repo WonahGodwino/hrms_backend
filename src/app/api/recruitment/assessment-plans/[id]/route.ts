@@ -27,10 +27,11 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
     return withCors(ApiResponse.success({
       id: plan.id, name: plan.name, description: plan.description, status: plan.status, totalDurationMins,
-      rounds: plan.rounds.map(r => ({
+      rounds: plan.rounds.map((r: any) => ({
         id: r.id, order: r.order, title: r.title, duration: r.duration,
         interviewType: r.interviewType, requiredInterviewers: r.requiredInterviewers,
         gradingMetric: r.gradingMetric, questionBanks: r.questionBanks,
+        evaluationPlan: r.evaluationPlan ?? null,
       })),
     }), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }

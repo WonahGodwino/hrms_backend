@@ -16,9 +16,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!user || !['ADMIN', 'HR', 'SUPER_ADMIN'].includes(user.role)) return withCors(ApiResponse.error('Unauthorized', 403), origin)
 
     const { id } = await params
-    const { title, code, grade, description, hasGradeLevel, basePay, basePayFrequency, benefits } = await req.json()
+    const { title, code, grade, description, hasGradeLevel, basePay, basePayFrequency, benefits, companyId: bodyCompanyId } = await req.json()
 
-    const companyId = user.role === 'SUPER_ADMIN' ? undefined : user.companyId
+    // Honour the global company selector (query param) so SUPER_ADMIN and
+    // multi-company ADMIN updates are scoped to the selected company.
+    const { searchParams } = new URL(req.url)
+    const companyId = user.role === 'SUPER_ADMIN'
+      ? (searchParams.get('companyId') || bodyCompanyId || undefined)
+      : user.companyId
     const existing = await (prisma as any).designation.findUnique({ where: { id } })
     if (!existing || (companyId && existing.companyId !== companyId)) return withCors(ApiResponse.error('Designation not found', 404), origin)
 

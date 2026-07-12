@@ -31,8 +31,12 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (body.gradingMetric !== undefined) update.gradingMetric = body.gradingMetric
     if (body.questionBanks !== undefined) update.questionBanks = body.questionBanks
     if (body.requiredInterviewers !== undefined) update.requiredInterviewers = body.requiredInterviewers
+    // Optional evaluation plan (empty string clears it).
+    if (body.evaluationPlan !== undefined) {
+      update.evaluationPlan = body.evaluationPlan ? String(body.evaluationPlan) : null
+    }
 
-    const updated = await prisma.recruitmentAssessmentRound.update({
+    const updated: any = await (prisma as any).recruitmentAssessmentRound.update({
       where: { id: params.roundId }, data: update,
     })
 
@@ -40,6 +44,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       id: updated.id, title: updated.title, duration: updated.duration,
       interviewType: updated.interviewType, gradingMetric: updated.gradingMetric,
       requiredInterviewers: updated.requiredInterviewers, questionBanks: updated.questionBanks,
+      evaluationPlan: updated.evaluationPlan ?? null,
     }, 'Round updated successfully.'), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }
 }

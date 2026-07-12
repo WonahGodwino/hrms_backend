@@ -8,6 +8,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { sendEmail } from '@/app/lib/email'
+import { resolveRecruitmentCompanyId } from '@/app/lib/recruitment/companyScope'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -31,13 +32,16 @@ export async function PATCH(request: NextRequest) {
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'ADMIN', 'SUPER_ADMIN'])
-    if (!user.companyId) {
-      return withCors(ApiResponse.error('Company context missing for this user', 400), origin)
-    }
-    const companyId = String(user.companyId)
     const actor = user.userId || user.email || 'system'
 
     const body = await request.json().catch(() => ({}))
+
+    // Honour the global company switcher (companyId in body or query) so status
+    // updates target the same company the applicant list is scoped to.
+    const requestedCompanyId = body?.companyId || new URL(request.url).searchParams.get('companyId')
+    const scope = await resolveRecruitmentCompanyId(user, requestedCompanyId)
+    if (scope.error) return withCors(ApiResponse.error(scope.error.message, scope.error.status), origin)
+    const companyId = scope.companyId as string
     const applicationIds: string[] = Array.isArray(body?.applicationIds) ? body.applicationIds : []
     const status = String(body?.status || '').trim() as AppStatus
     const rejectionReason = body?.rejectionReason ? String(body.rejectionReason) : null
@@ -73,9 +77,12 @@ export async function PATCH(request: NextRequest) {
       return withCors(ApiResponse.error('One or more application IDs could not be found.', 404), origin)
     }
 
-    // 5. Rejected applications are locked
-    if (applications.some((a) => a.status === 'REJECTED')) {
-      return withCors(ApiResponse.error('Action denied: Rejected applications are locked.', 400), origin)
+    // 5. Rejected applications are reversible: HR/ADMIN may reinstate a rejected
+    // candidate (e.g. "Undo Decision") by moving them to a non-REJECTED status.
+    // The only thing disallowed is re-rejecting an already-rejected application
+    // (a no-op). Every change is captured in ApplicationStageHistory below.
+    if (status === 'REJECTED' && applications.every((a) => a.status === 'REJECTED')) {
+      return withCors(ApiResponse.error('These application(s) are already rejected.', 400), origin)
     }
 
     const now = new Date()
@@ -101,14 +108,30 @@ export async function PATCH(request: NextRequest) {
           metaAdditions.withdrawalReason = withdrawalReason
         }
 
-        const nextMeta = { ...existingMeta, ...metaAdditions }
+        // Reinstating a previously rejected/withdrawn candidate: clear the stale
+        // rejection/withdrawal metadata so it doesn't linger on the active record.
+        const reinstating =
+          (previousStatus === 'REJECTED' || previousStatus === 'WITHDRAWN') &&
+          status !== 'REJECTED' && status !== 'WITHDRAWN'
+        const cleanedMeta = { ...existingMeta }
+        if (reinstating) {
+          delete cleanedMeta.rejectionReason
+          delete cleanedMeta.withdrawalReason
+          delete cleanedMeta.notifiedOn
+          delete cleanedMeta.emailTemplateId
+          cleanedMeta.reinstatedBy = actor
+          cleanedMeta.reinstatedFrom = previousStatus
+          cleanedMeta.reinstatedAt = now.toISOString()
+        }
+
+        const nextMeta = { ...cleanedMeta, ...metaAdditions }
 
         const row = await tx.jobApplication.update({
           where: { id: app.id },
           data: {
             status,
             updatedBy: actor,
-            ...(status === 'REJECTED' || status === 'WITHDRAWN' ? { metadata: nextMeta } : {}),
+            ...(status === 'REJECTED' || status === 'WITHDRAWN' || reinstating ? { metadata: nextMeta } : {}),
             ...(status === 'REVIEWING' || status === 'SHORTLISTED'
               ? { reviewedBy: actor, reviewedAt: now }
               : {}),

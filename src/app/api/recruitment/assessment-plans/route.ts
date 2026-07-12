@@ -39,9 +39,24 @@ export async function GET(request: NextRequest) {
       }),
     ])
 
+    // Resolve creator ids → display names (createdBy stores a StaffRecord id).
+    const creatorIds = Array.from(new Set(plans.map(p => p.createdBy).filter(Boolean))) as string[]
+    const creators = creatorIds.length
+      ? await prisma.staffRecord.findMany({
+          where: { id: { in: creatorIds } },
+          select: { id: true, firstName: true, lastName: true, email: true },
+        })
+      : []
+    const creatorById = new Map(
+      creators.map(c => [c.id, `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.email || 'Unknown']),
+    )
+
     const data = plans.map(p => ({
       id: p.id, name: p.name,
-      creator: p.createdBy,
+      creator: p.createdBy ? (creatorById.get(p.createdBy) || 'Unknown') : 'System',
+      creatorId: p.createdBy || null,
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
       totalRounds: p.rounds.length,
       estimatedDurationMins: p.rounds.reduce((s, r) => s + r.duration, 0),
       activeJobsCount: p.candidateAssessments.length,

@@ -56,15 +56,24 @@ export async function GET(request: NextRequest) {
     }
 
     const designationFilter = searchParams.get('designationId')
+    const andConds: any[] = []
+
+    // When a job is supplied, benefits MUST be scoped to THAT job's company —
+    // otherwise "all-roles" (jobId=null) benefits from other companies the caller
+    // can access would leak onto the job. Return role-specific + all-roles
+    // benefits, but only within the job's own company.
+    if (jobId) {
+      const job = await prisma.job.findUnique({ where: { id: jobId }, select: { companyId: true } })
+      if (!job || !companyFilter.includes(job.companyId)) {
+        return withCors(ApiResponse.success([], 'No benefits for this job'), origin)
+      }
+      companyFilter = [job.companyId]
+      andConds.push({ OR: [{ jobId: null }, { jobId }] })
+    }
 
     const where: any = { companyId: { in: companyFilter } }
-    const andConds: any[] = []
     if (!showInactive && !['ADMIN', 'SUPER_ADMIN', 'HR'].includes(user.role)) {
       where.isActive = true
-    }
-    // When a job is supplied, return benefits scoped to it plus the all-roles ones.
-    if (jobId) {
-      andConds.push({ OR: [{ jobId: null }, { jobId }] })
     }
     // Management view may filter by a specific designation.
     if (designationFilter && user.role !== 'STAFF') {

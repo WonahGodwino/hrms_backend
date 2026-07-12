@@ -6,8 +6,16 @@ import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { Prisma } from '@prisma/client'
+import { notifyInterviewScheduled } from '@/app/lib/assessments/panel-notify'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
+
+// Combine a date ("YYYY-MM-DD") + time ("HH:mm") into a Date; null if unparseable.
+function parseWhen(date?: string, time?: string): Date | null {
+  if (!date) return null
+  const d = new Date(`${date}T${time || '09:00'}`)
+  return isNaN(d.getTime()) ? null : d
+}
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   const origin = request.headers.get('origin')
@@ -32,22 +40,33 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     if (assessment.roundStatus === 'SCHEDULED')
       return withCors(ApiResponse.error('Interview already scheduled for this round', 409), origin)
 
+    const scheduledAt = parseWhen(body.date, body.time) || new Date()
+
     await prisma.recruitmentCandidateAssessment.update({
       where: { id: params.id },
       data: {
         roundStatus: 'SCHEDULED',
-        scheduledAt: new Date(),
+        scheduledAt,
         schedulingNotes: body.notes || null,
         interviewerIds: body.interviewerIds as Prisma.InputJsonValue,
       },
     })
+
+    // Notify the assigned interviewers (with candidate, job, round & time).
+    void notifyInterviewScheduled(params.id, {
+      interviewerIds: body.interviewerIds,
+      scheduledAt,
+      notes: body.notes || null,
+    })
+      .then((r) => console.log(`[INTERVIEW_SCHEDULE] Interviewers notified for ${params.id}:`, r))
+      .catch((err) => console.error(`[INTERVIEW_SCHEDULE] Notify failed for ${params.id}:`, err))
 
     return withCors(ApiResponse.success({
       candidateId: assessment.application?.candidateId,
       applicationId: assessment.applicationId,
       roundStatus: 'SCHEDULED',
       updatedAt: new Date().toISOString(),
-      scheduledAt: new Date().toISOString(),
+      scheduledAt: scheduledAt.toISOString(),
     }, 'Interview scheduled successfully.'), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }
 }
@@ -75,11 +94,24 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     const updateData: any = {}
     if (body.notes !== undefined) updateData.schedulingNotes = body.notes
     if (body.interviewerIds) updateData.interviewerIds = body.interviewerIds as Prisma.InputJsonValue
-    if (body.date || body.time) updateData.scheduledAt = new Date()
+    const newWhen = (body.date || body.time) ? parseWhen(body.date, body.time) : null
+    if (newWhen) updateData.scheduledAt = newWhen
 
     await prisma.recruitmentCandidateAssessment.update({
       where: { id: params.id }, data: updateData,
     })
+
+    // Re-notify the interviewers about the updated schedule.
+    const interviewerIds = body.interviewerIds
+      || (Array.isArray(assessment.interviewerIds) ? assessment.interviewerIds : [])
+    void notifyInterviewScheduled(params.id, {
+      interviewerIds: interviewerIds as string[],
+      scheduledAt: newWhen || assessment.scheduledAt || null,
+      notes: body.notes ?? assessment.schedulingNotes ?? null,
+      reschedule: true,
+    })
+      .then((r) => console.log(`[INTERVIEW_RESCHEDULE] Interviewers notified for ${params.id}:`, r))
+      .catch((err) => console.error(`[INTERVIEW_RESCHEDULE] Notify failed for ${params.id}:`, err))
 
     return withCors(ApiResponse.success({
       candidateId: assessment.application?.candidateId,

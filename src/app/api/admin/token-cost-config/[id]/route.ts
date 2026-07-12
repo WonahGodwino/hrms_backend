@@ -39,7 +39,7 @@ export async function PATCH(
     }
 
     const body = await request.json()
-    const { tokensPerUnit, costPerUnit, providerCostPerUnit, currency, label, activate } = body
+    const { tokensPerUnit, costPerUnit, providerCostPerUnit, currency, label, defaultAiService, defaultAiModel, activate } = body
 
     if (tokensPerUnit !== undefined && tokensPerUnit <= 0) {
       return withCors(ApiResponse.error('tokensPerUnit must be a positive integer', 400), origin)
@@ -57,6 +57,8 @@ export async function PATCH(
     if (providerCostPerUnit !== undefined) updateData.providerCostPerUnit = parseFloat(providerCostPerUnit)
     if (currency            !== undefined) updateData.currency            = currency.toUpperCase().slice(0, 3)
     if (label               !== undefined) updateData.label               = label
+    if (defaultAiService    !== undefined) updateData.defaultAiService    = defaultAiService || null
+    if (defaultAiModel      !== undefined) updateData.defaultAiModel      = defaultAiModel || null
 
     let updatedConfig: any
 

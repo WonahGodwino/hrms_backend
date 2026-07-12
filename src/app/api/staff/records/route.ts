@@ -36,26 +36,40 @@ export async function GET(request: NextRequest) {
 
     const skip = (page - 1) * limit
 
-    // Base where clause
+    // Base where clause. The query MUST always be scoped to a single company so
+    // staff from other companies (that an ADMIN/SUPER_ADMIN can otherwise access)
+    // never leak into the results.
     const where: any = {
-      // ✅ CHANGE THIS: Use companyId from query param
-      // If user is not SUPER_ADMIN, require companyId
-      ...(user.role !== 'SUPER_ADMIN' && companyId ? { companyId } : {}),
       isActive: includeInactive ? undefined : true,
       company: { archived: 0 }
     }
 
-    // ✅ If SUPER_ADMIN and companyId provided, filter by it
-    if (user.role === 'SUPER_ADMIN' && companyId) {
+    // Resolve the effective company:
+    //  - No companyId at all: SUPER_ADMIN falls back to their own company (NEVER
+    //    all companies); other roles must supply one.
+    //  - companyId supplied: ADMIN/HR/MANAGER must actually have access to it.
+    if (!companyId) {
+      if (user.role === 'SUPER_ADMIN' && user.companyId) {
+        where.companyId = user.companyId
+      } else {
+        return withCors(
+          ApiResponse.error('Company ID is required. Please select a company.', 400),
+          origin
+        )
+      }
+    } else {
+      if (user.role !== 'SUPER_ADMIN') {
+        const hasAccess = await prisma.userCompany.findFirst({
+          where: { userId: user.userId, companyId },
+          select: { id: true },
+        })
+        // Fall back to the token company rather than leaking a company they
+        // aren't assigned to.
+        if (!hasAccess && companyId !== user.companyId) {
+          return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
+        }
+      }
       where.companyId = companyId
-    }
-
-    // If user is not SUPER_ADMIN and no companyId provided, return error
-    if (user.role !== 'SUPER_ADMIN' && !companyId) {
-      return withCors(
-        ApiResponse.error('Company ID is required. Please select a company.', 400),
-        origin
-      )
     }
 
     // Department filter if provided
