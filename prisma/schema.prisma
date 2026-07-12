@@ -528,7 +528,7 @@ model RecruitmentAssessmentPlan {
 
   @@index([companyId, status])
   @@index([companyId, archived])
-  @@map("assessment_plans")
+  @@map("recruitment_assessment_plans")
 }
 
 model RecruitmentAssessmentRound {
@@ -549,7 +549,7 @@ model RecruitmentAssessmentRound {
 
   @@unique([planId, order])
   @@index([planId])
-  @@map("assessment_rounds")
+  @@map("recruitment_assessment_rounds")
 }
 
 // ==================== RECRUITMENT: ASSESSMENT QUEUE ====================
@@ -576,7 +576,7 @@ model RecruitmentCandidateAssessment {
 
   @@index([companyId, roundStatus])
   @@index([planId])
-  @@map("candidate_assessments")
+  @@map("recruitment_candidate_assessments")
 }
 
 model RecruitmentScorecard {
@@ -597,7 +597,7 @@ model RecruitmentScorecard {
   @@unique([candidateAssessmentId, roundId, interviewerId])
   @@index([candidateAssessmentId])
   @@index([roundId])
-  @@map("scorecards")
+  @@map("recruitment_scorecards")
 }
 
 // ==================== RECRUITMENT: OFFER APPROVAL WORKFLOW ====================
@@ -618,7 +618,7 @@ model RecruitmentOfferApproval {
 
   @@unique([offerId, approverId])
   @@index([offerId, step])
-  @@map("offer_approvals")
+  @@map("recruitment_offer_approvals")
 }
 
 model JobApplication {
