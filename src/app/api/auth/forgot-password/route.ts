@@ -72,32 +72,33 @@ export async function POST(req: NextRequest) {
 
     // Prepare email sending and OTP saving for each account
     const emailPromises = staffRecords.map(async (staff) => {
-      // Check for recent OTP attempts for this email+company
-      const recentReset = await prisma.passwordReset.findUnique({
-        where: { 
-          email_companyId: {
-            email: normalizedEmail,
-            companyId: staff.companyId
+      try {
+        // Check for recent OTP attempts for this email+company
+        const recentReset = await prisma.passwordReset.findUnique({
+          where: { 
+            email_companyId: {
+              email: normalizedEmail,
+              companyId: staff.companyId
+            }
+          },
+        });
+
+        // Prevent too frequent requests
+        if (recentReset) {
+          const timeSinceLastAttempt = Date.now() - recentReset.updatedAt.getTime();
+          const oneMinute = 60 * 1000;
+
+          if (timeSinceLastAttempt < oneMinute) {
+            return { success: false, reason: `Please wait before requesting another OTP for ${staff.company.companyName}` };
           }
-        },
-      });
-
-      // Prevent too frequent requests
-      if (recentReset) {
-        const timeSinceLastAttempt = Date.now() - recentReset.updatedAt.getTime();
-        const oneMinute = 60 * 1000;
-
-        if (timeSinceLastAttempt < oneMinute) {
-          throw new Error(`Please wait before requesting another OTP for ${staff.company.companyName}`);
         }
-      }
 
-      // Save OTP for this company
-      await prisma.passwordReset.upsert({
-        where: { 
-          email_companyId: {
-            email: normalizedEmail,
-            companyId: staff.companyId
+        // Save OTP for this company
+        await prisma.passwordReset.upsert({
+          where: { 
+            email_companyId: {
+              email: normalizedEmail,
+              companyId: staff.companyId
           }
         },
         update: {
@@ -118,13 +119,22 @@ export async function POST(req: NextRequest) {
       });
 
       // Send email
-      return sendEmail({
-        to: normalizedEmail,
-        subject: `Password Reset OTP - ${staff.company.companyName}`,
-        html: generateOtpEmailHtml(staff, otp, staff.company.companyName),
-        text: generateOtpEmailText(staff, otp, staff.company.companyName),
-      });
-    });
+      try {
+        return await sendEmail({
+          to: normalizedEmail,
+          subject: `Password Reset OTP - ${staff.company.companyName}`,
+          html: generateOtpEmailHtml(staff, otp, staff.company.companyName),
+          text: generateOtpEmailText(staff, otp, staff.company.companyName),
+        });
+      } catch (emailErr) {
+        console.error(`Failed to send OTP email to ${normalizedEmail}:`, emailErr);
+        return { success: false, error: 'Failed to send email' };
+      }
+    } catch (saveErr) {
+      console.error(`Failed to save OTP for ${normalizedEmail} at ${staff.company.companyName}:`, saveErr);
+      return { success: false, error: 'Failed to create password reset record' };
+    }
+  });
 
     // Execute all promises
     const emailResults = await Promise.allSettled(emailPromises);

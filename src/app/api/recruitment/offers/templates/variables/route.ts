@@ -2,9 +2,10 @@
 // Returns the placeholder catalog for the template builder's variable panel,
 // plus the system default template body so a company can start from it.
 import { NextRequest } from 'next/server'
-import { requireRoleAsync } from '@/app/lib/auth'
+import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { extractBearerToken, resolveScopedCompanyIds } from '@/app/api/staff-loans-benefits/_helpers'
 import { VARIABLE_CATALOG } from '@/app/lib/offers/template-variables'
 import { DEFAULT_OFFER_TEMPLATE_HTML, DEFAULT_OFFER_TEMPLATE_NAME } from '@/app/lib/offers/default-offer-template'
 
@@ -13,8 +14,10 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 export async function GET(req: NextRequest) {
   const origin = req.headers.get('origin')
   try {
-    const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const token = extractBearerToken(req.headers.get('authorization'))
+    if (!token) return withCors(ApiResponse.error('Authorization header missing', 401), origin)
+
+    requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     // Group the catalog by category for the builder UI.
     const groups: Record<string, any[]> = {}
