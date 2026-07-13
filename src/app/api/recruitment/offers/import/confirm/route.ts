@@ -24,7 +24,17 @@ export async function POST(request: NextRequest) {
 
     const formData = await request.formData()
     const file = formData.get('file') as File | null
+    const templateId = String(formData.get('templateId') || '').trim() || null
     if (!file) return withCors(ApiResponse.error('file is required', 400), origin)
+
+    // Resolve template body when a template is selected
+    let templateBody: string | null = null
+    if (templateId) {
+      const tpl = await (prisma as any).offerTemplate.findFirst({ where: { id: templateId, companyId } })
+      if (!tpl) return withCors(ApiResponse.error('Selected template not found', 400), origin)
+      if (tpl.archived) return withCors(ApiResponse.error('Selected template has been archived', 400), origin)
+      templateBody = tpl.bodyHtml || null
+    }
 
     let rows
     try {
@@ -149,6 +159,8 @@ export async function POST(request: NextRequest) {
               designationId: designation.id,
               designationCode: designation.code,
               offerExpirationDate: row.offerExpirationDate,
+              templateId: templateId || undefined,
+              templateBody: templateBody || undefined,
             },
           },
         })
