@@ -33,6 +33,7 @@ export async function POST(request: NextRequest) {
     const saved = await prisma.candidateFile.create({
       data: {
         companyId,
+        candidateId: 'system', // evaluation guides are not tied to a specific candidate
         type: 'EVALUATION_GUIDE',
         fileName: pdf.name,
         mimeType: pdf.mime,
