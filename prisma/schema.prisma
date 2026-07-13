@@ -1420,6 +1420,7 @@ enum CandidateFileType {
   CV
   COVER_LETTER
   OTHER
+  EVALUATION_GUIDE
 }
 
 model Notification {
