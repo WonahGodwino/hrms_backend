@@ -32,6 +32,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         interviewType: r.interviewType, requiredInterviewers: r.requiredInterviewers,
         gradingMetric: r.gradingMetric, questionBanks: r.questionBanks,
         evaluationPlan: r.evaluationPlan ?? null,
+        evaluationDeadlineHours: r.evaluationDeadlineHours ?? null,
       })),
     }), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }

@@ -18,6 +18,7 @@ export interface VariableDef {
 export const VARIABLE_CATALOG: VariableDef[] = [
   // Employer / company
   { key: 'company.name', label: 'Company Name', category: 'company', source: 'Company profile', sample: 'Isurf Global Services Ltd' },
+  { key: 'company.logo', label: 'Company Logo', category: 'company', source: 'Company profile', sample: '<img src="logo.png" width="120" />' },
   { key: 'company.rcNumber', label: 'Company Registration (RC)', category: 'company', source: 'Company profile', sample: 'RC 1927139' },
   { key: 'company.secondedCompany', label: 'Seconded Company', category: 'company', source: 'Company profile', sample: 'OPay Digital Services Limited' },
   { key: 'company.hrRepName', label: 'HR Representative', category: 'company', source: 'Company profile', sample: 'Ogunmola Okikiola' },
@@ -103,6 +104,7 @@ export function resolveOfferVariables(src: OfferLetterSources): Record<string, s
 
   const values: Record<string, any> = {
     'company.name': company.companyName || company.tradingName || '',
+    'company.logo': company.logo ? `<img src="${company.logo}" alt="${company.companyName || 'Company'}" style="max-width:150px;height:auto;" />` : '',
     'company.rcNumber': company.rcNumber || '',
     'company.secondedCompany': company.secondedCompany || '',
     'company.hrRepName': company.hrRepName || '',

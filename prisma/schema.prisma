@@ -544,6 +544,10 @@ model RecruitmentAssessmentRound {
   // Optional evaluation plan for the round (scoring rubric / what to assess /
   // guidance, or a link). Not required — a round can be saved without one.
   evaluationPlan        String?           @db.Text
+  // Hours after scheduling before the evaluation deadline expires. When set,
+  // panelists who haven't submitted within this window are automatically
+  // bypassed and the round completes without their scorecard.
+  evaluationDeadlineHours Int?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 

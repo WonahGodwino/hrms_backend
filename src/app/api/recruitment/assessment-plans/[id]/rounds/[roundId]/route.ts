@@ -31,6 +31,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (body.gradingMetric !== undefined) update.gradingMetric = body.gradingMetric
     if (body.questionBanks !== undefined) update.questionBanks = body.questionBanks
     if (body.requiredInterviewers !== undefined) update.requiredInterviewers = body.requiredInterviewers
+    // Optional evaluation deadline (hours after scheduling)
+    if (body.evaluationDeadlineHours !== undefined) update.evaluationDeadlineHours = body.evaluationDeadlineHours ? Number(body.evaluationDeadlineHours) : null
     // Optional evaluation plan (empty string clears it).
     if (body.evaluationPlan !== undefined) {
       update.evaluationPlan = body.evaluationPlan ? String(body.evaluationPlan) : null
@@ -45,6 +47,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       interviewType: updated.interviewType, gradingMetric: updated.gradingMetric,
       requiredInterviewers: updated.requiredInterviewers, questionBanks: updated.questionBanks,
       evaluationPlan: updated.evaluationPlan ?? null,
+      evaluationDeadlineHours: updated.evaluationDeadlineHours ?? null,
     }, 'Round updated successfully.'), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }
 }

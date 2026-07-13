@@ -21,6 +21,25 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const offer = await prisma.offer.findFirst({ where })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)
 
+    // Validate required company offer letter settings before dispatch
+    const company = await prisma.company.findUnique({
+      where: { id: offer.companyId },
+      select: { hrRepName: true, hrRepTitle: true, offerResponseDays: true, communicationTool: true },
+    })
+    if (!company) return withCors(ApiResponse.error('Company not found', 404), origin)
+
+    const missing: string[] = []
+    if (!company.hrRepName) missing.push('HR Representative (hrRepName)')
+    if (!company.hrRepTitle) missing.push('HR Representative Title (hrRepTitle)')
+    if (!company.communicationTool) missing.push('Communication Tool (communicationTool)')
+    const responseDays = company.offerResponseDays ?? 14
+    if (missing.length > 0) {
+      return withCors(ApiResponse.error(
+        `Cannot dispatch offer. Configure these company settings first: ${missing.join(', ')}. Go to Offer Letter Settings.`,
+        400,
+      ), origin)
+    }
+
     await prisma.offer.update({
       where: { id: params.id },
       data: { status: 'AWAITING_SIGNATURE', dispatchedAt: new Date() },
