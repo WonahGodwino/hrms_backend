@@ -77,12 +77,24 @@ export async function GET(request: NextRequest) {
           headId: true,
           status: true,
           activeHeadcount: true,
+          createdBy: true,
+          createdAt: true,
           head: { select: { id: true, firstName: true, lastName: true } }
         }
       }),
       prisma.department.count({ where })
     ])
     
+    // Resolve creator names
+    const creatorIds = [...new Set(departments.map(d => d.createdBy).filter(Boolean))] as string[]
+    const creators = creatorIds.length
+      ? await prisma.staffRecord.findMany({
+          where: { id: { in: creatorIds } },
+          select: { id: true, firstName: true, lastName: true },
+        })
+      : []
+    const creatorMap = new Map(creators.map(c => [c.id, `${c.firstName} ${c.lastName}`.trim()]))
+
     const data = departments.map(dep => ({
       id: dep.id,
       name: dep.name,
@@ -91,7 +103,9 @@ export async function GET(request: NextRequest) {
       headName: dep.head ? `${dep.head.firstName} ${dep.head.lastName}` : '',
       headId: dep.headId,
       activeHeadcount: dep.activeHeadcount || 0,
-      status: dep.status
+      status: dep.status,
+      createdBy: dep.createdBy ? (creatorMap.get(dep.createdBy) || dep.createdBy) : null,
+      createdAt: dep.createdAt || null,
     }))
     
     return withCors(ApiResponse.success({

@@ -175,7 +175,9 @@ export async function notifyPlanInstance(
     const type = INTERVIEW_TYPE_LABEL[r.interviewType] || r.interviewType || '—'
     const metric = r.gradingMetric ? (METRIC_LABEL[r.gradingMetric] || r.gradingMetric) : '—'
     const evalRow = r.evaluationPlan
-      ? `<div style="margin-top:6px;padding:8px 10px;background:#f8fafc;border-left:3px solid #137fec;border-radius:4px;color:#334155;font-size:13px"><strong>Evaluation plan:</strong> ${r.evaluationPlan}</div>`
+      ? `<div style="margin-top:6px;padding:10px 12px;background:#f0f9ff;border-left:3px solid #137fec;border-radius:4px;color:#334155;font-size:13px">
+          <strong style="color:#137fec">📋 Evaluation Plan:</strong><br/>${r.evaluationPlan.replace(/\[Evaluation Guide: (.+?)\]\((.+?)\)/g, `<a href="$2" style="color:#137fec;text-decoration:underline">📎 $1</a>`)}
+        </div>`
       : ''
     return `
       <div style="padding:12px 0;border-bottom:1px solid #e2e8f0">

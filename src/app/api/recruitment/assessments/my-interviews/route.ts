@@ -13,16 +13,22 @@ export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN', 'STAFF'])
     const { searchParams } = new URL(request.url)
     const companyId = searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
 
+    // Include assessments where the user is either:
+    // 1) A panelist (their id appears in interviewerIds), OR
+    // 2) The HR/ADMIN who created the schedule (so they can monitor progress)
     const assessments = await (prisma as any).recruitmentCandidateAssessment.findMany({
       where: {
         companyId,
         roundStatus: { in: ['SCHEDULED', 'PENDING_FEEDBACK'] },
-        interviewerIds: { array_contains: user.userId },
+        OR: [
+          { interviewerIds: { array_contains: user.userId } },
+          { createdBy: user.userId },
+        ],
       },
       include: {
         application: {
@@ -81,6 +87,7 @@ export async function GET(request: NextRequest) {
         roundStatus: a.roundStatus,
         scheduledAt: a.scheduledAt ? a.scheduledAt.toISOString() : null,
         hasSubmitted: currentRound ? submitted.has(`${a.id}:${currentRound.id}`) : false,
+        isPanelist: Array.isArray(a.interviewerIds) && a.interviewerIds.includes(user.userId),
       }
     })
 
