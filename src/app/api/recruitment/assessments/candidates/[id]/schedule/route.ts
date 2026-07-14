@@ -6,6 +6,7 @@ import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { Prisma } from '@prisma/client'
+import { signPanelToken } from '@/app/lib/assessments/panel-token'
 import { notifyInterviewScheduled, notifyCandidateInterviewScheduled } from '@/app/lib/assessments/panel-notify'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
@@ -41,6 +42,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return withCors(ApiResponse.error('Interview already scheduled for this round', 409), origin)
 
     const scheduledAt = parseWhen(body.date, body.time) || new Date()
+    // Generate a signed JWT panel access token (24h expiry) so panelists can
+    // access the interviewer dashboard even without being logged in.
+    const panelAccessToken = signPanelToken(params.id)
 
     await prisma.recruitmentCandidateAssessment.update({
       where: { id: params.id },
@@ -49,14 +53,17 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         scheduledAt,
         schedulingNotes: body.notes || null,
         interviewerIds: body.interviewerIds as Prisma.InputJsonValue,
+        panelAccessToken,
       },
     })
 
-    // Notify the assigned interviewers (with candidate, job, round & time).
+    // Notify the assigned interviewers (with candidate, job, round & time)
+    // including the one-time panel access token link.
     void notifyInterviewScheduled(params.id, {
       interviewerIds: body.interviewerIds,
       scheduledAt,
       notes: body.notes || null,
+      panelAccessToken,
     })
       .then((r) => console.log(`[INTERVIEW_SCHEDULE] Interviewers notified for ${params.id}:`, r))
       .catch((err) => console.error(`[INTERVIEW_SCHEDULE] Notify failed for ${params.id}:`, err))

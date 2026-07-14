@@ -29,6 +29,9 @@ export const VARIABLE_CATALOG: VariableDef[] = [
   { key: 'company.address', label: 'Company Address', category: 'company', source: 'Company profile', sample: '[Address]' },
   { key: 'company.email', label: 'Company Email', category: 'company', source: 'Company profile', sample: '[Company Email]' },
   { key: 'company.phone', label: 'Company Phone', category: 'company', source: 'Company profile', sample: '[Company Phone]' },
+  { key: 'company.signatoryName', label: 'Signatory Name', category: 'company', source: 'Offer Letter Settings', sample: '[Signatory Name, e.g. John Okafor]' },
+  { key: 'company.signatoryPosition', label: 'Signatory Position', category: 'company', source: 'Offer Letter Settings', sample: '[e.g. HR Manager / CEO]' },
+  { key: 'company.signatureImage', label: 'Signature Image', category: 'company', source: 'Offer Letter Settings', sample: '[Uploaded signature image]' },
 
   // Candidate
   { key: 'candidate.fullName', label: 'Candidate Full Name', category: 'candidate', source: 'Candidate / onboarding', sample: 'John Doe' },
@@ -115,6 +118,11 @@ export function resolveOfferVariables(src: OfferLetterSources): Record<string, s
     'company.address': company.address || '',
     'company.email': company.email || '',
     'company.phone': company.phone || '',
+    'company.signatoryName': company.signatoryName || '',
+    'company.signatoryPosition': company.signatoryPosition || '',
+    'company.signatureImage': company.signatureImage
+      ? `<img src="${company.signatureImage}" alt="Authorised Signature" style="max-width:180px;height:auto;display:block;" />`
+      : '',
 
     'candidate.fullName': fullName,
     'candidate.firstName': first,

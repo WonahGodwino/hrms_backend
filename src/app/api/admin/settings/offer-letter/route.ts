@@ -12,6 +12,7 @@ type AuthUser = { userId: string; role: string; companyId?: string }
 const OFFER_FIELDS = [
   'secondedCompany', 'hrRepName', 'hrRepTitle',
   'communicationTool', 'governingLaw', 'arbitrationVenue',
+  'signatoryName', 'signatoryPosition',
 ] as const
 
 async function getAccessibleCompanyIds(user: AuthUser): Promise<string[]> {
@@ -80,6 +81,10 @@ export async function PUT(request: NextRequest) {
     const data: Record<string, any> = {}
     for (const f of OFFER_FIELDS) {
       if (body[f] !== undefined) data[f] = body[f] === '' ? null : String(body[f]).trim()
+    }
+    // Signature image — base64 data URI or URL
+    if (body.signatureImage !== undefined) {
+      data.signatureImage = body.signatureImage === '' || body.signatureImage === null ? null : String(body.signatureImage)
     }
     // Offer response window (days) — numeric, clamped to a sensible range.
     if (body.offerResponseDays !== undefined) {

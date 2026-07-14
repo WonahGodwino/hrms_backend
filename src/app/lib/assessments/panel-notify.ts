@@ -249,7 +249,7 @@ function fmtWhen(d: Date | null): string {
 // scheduled — including the JOB they're interviewing for, the round and the time.
 export async function notifyInterviewScheduled(
   assessmentId: string,
-  opts: { interviewerIds: string[]; scheduledAt: Date | null; notes?: string | null; reschedule?: boolean },
+  opts: { interviewerIds: string[]; scheduledAt: Date | null; notes?: string | null; reschedule?: boolean; panelAccessToken?: string },
 ): Promise<{ attempted: number; sent: number; failed: number }> {
   const interviewerIds = (opts.interviewerIds || []).map(String).filter(Boolean)
   if (interviewerIds.length === 0) return { attempted: 0, sent: 0, failed: 0 }
@@ -311,7 +311,7 @@ export async function notifyInterviewScheduled(
           ${evaluationPlan ? `<tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Evaluation Plan</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#334155">${evaluationPlan}</td></tr>` : ''}
         </table>
         <div style="margin:24px 0">
-          <a href="${FRONTEND_URL.replace(/\/$/, '')}/interviews"
+          <a href="${FRONTEND_URL.replace(/\/$/, '')}/interviews${opts.panelAccessToken ? `?token=${opts.panelAccessToken}` : ''}"
              style="display:inline-block;background:#137fec;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 28px;border-radius:8px">
             Open Interviewer Dashboard
           </a>

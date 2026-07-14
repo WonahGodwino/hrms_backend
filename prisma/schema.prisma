@@ -42,6 +42,12 @@ model Company {
   // offer lapses. Per-company (multi-tenant); null falls back to the 14-day default.
   offerResponseDays      Int?
 
+  // Offer letter signature — uploaded by HR/Admin in Offer Letter Settings.
+  // Rendered below the body in generated offer letters.
+  signatureImage         String?                  @db.Text  // base64 or URL of uploaded signature image
+  signatoryName          String?                  // e.g. "John Okafor"
+  signatoryPosition      String?                  // e.g. "HR Manager" or "CEO"
+
   // Locations
   locations              Location[]
 
@@ -597,6 +603,7 @@ model RecruitmentCandidateAssessment {
   scheduledAt       DateTime?
   schedulingNotes   String?       @db.Text
   interviewerIds    Json?
+  panelAccessToken  String?       @unique  // one-time access token for panelist dashboard link
   averageScore      Float?
   createdBy         String?
   createdAt         DateTime      @default(now())

@@ -85,6 +85,10 @@ function wrapLetterhead(company: any, bodyHtml: string): string {
   .letter-head .co { text-align:right; }
   .letter-head .co .name { font-size:16px; font-weight:700; color:#0f172a; }
   .letter-head .co .meta { font-size:10px; color:#64748b; margin-top:2px; }
+  .signature-block { margin-top:36px; padding-top:18px; border-top:1px solid #e2e8f0; }
+  .signature-block .sig-name { font-size:13px; font-weight:700; color:#0f172a; margin-bottom:2px; }
+  .signature-block .sig-title { font-size:11px; color:#64748b; margin-bottom:12px; }
+  .signature-block img { display:block; max-width:180px; height:auto; margin-bottom:8px; }
   h2 { font-size:15px; text-align:center; letter-spacing:.5px; margin:18px 0; color:#0f172a; }
   h3 { font-size:13px; color:#0f172a; margin:18px 0 6px; border-left:3px solid #2563eb; padding-left:8px; }
   p { margin:8px 0; }
@@ -100,6 +104,14 @@ function wrapLetterhead(company: any, bodyHtml: string): string {
     </div>
   </div>
   <div class="letter-body">${bodyHtml}</div>
+  ${company?.signatoryName || company?.signatureImage ? `
+  <div class="signature-block">
+    ${company?.signatureImage ? `<img src="${esc(company.signatureImage)}" alt="Signature" />` : ''}
+    ${company?.signatoryName ? `<div class="sig-name">${esc(company.signatoryName)}</div>` : ''}
+    ${company?.signatoryPosition ? `<div class="sig-title">${esc(company.signatoryPosition)}</div>` : ''}
+    <p style="margin-top:4px;font-size:11px;color:#94a3b8;">Authorised Signatory</p>
+  </div>
+  ` : ''}
 </body></html>`
 }
 

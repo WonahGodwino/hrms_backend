@@ -6,6 +6,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { verifyPanelToken } from '@/app/lib/assessments/panel-token'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -13,8 +14,69 @@ export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN', 'STAFF'])
     const { searchParams } = new URL(request.url)
+    const panelAccessToken = searchParams.get('token')
+
+    // ---- Panelist token access: verify JWT, then look up assessment ----
+    if (panelAccessToken) {
+      const payload = verifyPanelToken(panelAccessToken)
+      if (!payload) return withCors(ApiResponse.error('Invalid or expired interview link', 401), origin)
+
+      const assessment = await (prisma as any).recruitmentCandidateAssessment.findUnique({
+        where: { id: payload.assessmentId },
+        include: {
+          company: { select: { companyName: true } },
+          application: {
+            select: {
+              candidateId: true,
+              job: { select: { title: true, designation: true } },
+              candidate: { select: { firstName: true, lastName: true, email: true } },
+            },
+          },
+          plan: {
+            select: {
+              id: true, name: true,
+              rounds: {
+                select: {
+                  id: true, order: true, title: true, duration: true,
+                  interviewType: true, gradingMetric: true, requiredInterviewers: true,
+                  evaluationPlan: true,
+                },
+                orderBy: { order: 'asc' },
+              },
+            },
+          },
+        },
+      })
+      if (!assessment) return withCors(ApiResponse.error('Invalid or expired interview link', 404), origin)
+
+      const currentRound = assessment.plan.rounds.find((r: any) => r.order === assessment.currentRoundOrder)
+      const c = assessment.application?.candidate
+      return withCors(ApiResponse.success([{
+        id: assessment.id,
+        candidateId: assessment.application?.candidateId,
+        applicationId: assessment.applicationId,
+        name: c ? `${c.firstName || ''} ${c.lastName || ''}`.trim() : 'Candidate',
+        email: c?.email || '',
+        role: assessment.application?.job?.title || 'Unknown',
+        designation: assessment.application?.job?.designation || '',
+        companyName: assessment.company?.companyName || '',
+        planName: assessment.plan.name,
+        currentRound: currentRound ? {
+          id: currentRound.id, order: currentRound.order, title: currentRound.title,
+          duration: currentRound.duration, interviewType: currentRound.interviewType,
+          gradingMetric: currentRound.gradingMetric,
+          evaluationPlan: currentRound.evaluationPlan ?? null,
+        } : null,
+        roundStatus: assessment.roundStatus,
+        scheduledAt: assessment.scheduledAt ? assessment.scheduledAt.toISOString() : null,
+        evaluationDeadlineHours: currentRound?.evaluationDeadlineHours ?? null,
+        hasSubmitted: false,
+      }], 'Success', 200), origin)
+    }
+
+    // ---- Standard authenticated access ----
+    const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN', 'STAFF'])
     const companyId = searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
 
