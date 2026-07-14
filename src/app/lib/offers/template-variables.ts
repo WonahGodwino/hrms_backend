@@ -17,50 +17,50 @@ export interface VariableDef {
 // Grouped for the builder's variable panel. Order is display order.
 export const VARIABLE_CATALOG: VariableDef[] = [
   // Employer / company
-  { key: 'company.name', label: 'Company Name', category: 'company', source: 'Company profile', sample: 'Isurf Global Services Ltd' },
-  { key: 'company.logo', label: 'Company Logo', category: 'company', source: 'Company profile', sample: '<img src="logo.png" width="120" />' },
-  { key: 'company.rcNumber', label: 'Company Registration (RC)', category: 'company', source: 'Company profile', sample: 'RC 1927139' },
-  { key: 'company.secondedCompany', label: 'Seconded Company', category: 'company', source: 'Company profile', sample: 'OPay Digital Services Limited' },
-  { key: 'company.hrRepName', label: 'HR Representative', category: 'company', source: 'Company profile', sample: 'Ogunmola Okikiola' },
-  { key: 'company.hrRepTitle', label: 'HR Representative Title', category: 'company', source: 'Company profile', sample: 'HRBP' },
-  { key: 'company.communicationTool', label: 'Communication Tool', category: 'company', source: 'Company profile', sample: 'Lark' },
-  { key: 'company.governingLaw', label: 'Governing Law', category: 'company', source: 'Company profile', sample: 'Laws of the Federal Republic of Nigeria' },
-  { key: 'company.arbitrationVenue', label: 'Arbitration Venue', category: 'company', source: 'Company profile', sample: 'Lagos' },
-  { key: 'company.address', label: 'Company Address', category: 'company', source: 'Company profile', sample: '' },
-  { key: 'company.email', label: 'Company Email', category: 'company', source: 'Company profile', sample: '' },
-  { key: 'company.phone', label: 'Company Phone', category: 'company', source: 'Company profile', sample: '' },
+  { key: 'company.name', label: 'Company Name', category: 'company', source: 'Company profile', sample: '[Your Company Name]' },
+  { key: 'company.logo', label: 'Company Logo', category: 'company', source: 'Company profile', sample: '[Company Logo]' },
+  { key: 'company.rcNumber', label: 'Company Registration (RC)', category: 'company', source: 'Company profile', sample: 'RC XXXXXXX' },
+  { key: 'company.secondedCompany', label: 'Seconded Company', category: 'company', source: 'Company profile', sample: '[Seconded Company Name]' },
+  { key: 'company.hrRepName', label: 'HR Representative', category: 'company', source: 'Company profile', sample: '[HR Name]' },
+  { key: 'company.hrRepTitle', label: 'HR Representative Title', category: 'company', source: 'Company profile', sample: '[HR Title, e.g. HRBP]' },
+  { key: 'company.communicationTool', label: 'Communication Tool', category: 'company', source: 'Company profile', sample: '[e.g. Lark, Slack, Teams]' },
+  { key: 'company.governingLaw', label: 'Governing Law', category: 'company', source: 'Company profile', sample: '[Laws of Jurisdiction]' },
+  { key: 'company.arbitrationVenue', label: 'Arbitration Venue', category: 'company', source: 'Company profile', sample: '[City]' },
+  { key: 'company.address', label: 'Company Address', category: 'company', source: 'Company profile', sample: '[Address]' },
+  { key: 'company.email', label: 'Company Email', category: 'company', source: 'Company profile', sample: '[Company Email]' },
+  { key: 'company.phone', label: 'Company Phone', category: 'company', source: 'Company profile', sample: '[Company Phone]' },
 
   // Candidate
-  { key: 'candidate.fullName', label: 'Candidate Full Name', category: 'candidate', source: 'Candidate / onboarding', sample: 'Bello Salihu' },
-  { key: 'candidate.firstName', label: 'Candidate First Name', category: 'candidate', source: 'Candidate / onboarding', sample: 'Bello' },
-  { key: 'candidate.lastName', label: 'Candidate Last Name', category: 'candidate', source: 'Candidate / onboarding', sample: 'Salihu' },
-  { key: 'candidate.email', label: 'Candidate Email', category: 'candidate', source: 'Candidate / onboarding', sample: 'bello@example.com' },
-  { key: 'candidate.residentialState', label: 'Residential State', category: 'candidate', source: 'Candidate / onboarding', sample: 'Sokoto State' },
+  { key: 'candidate.fullName', label: 'Candidate Full Name', category: 'candidate', source: 'Candidate / onboarding', sample: 'John Doe' },
+  { key: 'candidate.firstName', label: 'Candidate First Name', category: 'candidate', source: 'Candidate / onboarding', sample: 'John' },
+  { key: 'candidate.lastName', label: 'Candidate Last Name', category: 'candidate', source: 'Candidate / onboarding', sample: 'Doe' },
+  { key: 'candidate.email', label: 'Candidate Email', category: 'candidate', source: 'Candidate / onboarding', sample: 'candidate@example.com' },
+  { key: 'candidate.residentialState', label: 'Residential State', category: 'candidate', source: 'Candidate / onboarding', sample: '[State/Region]' },
 
   // Job role
-  { key: 'job.title', label: 'Job Title', category: 'job', source: 'Job role', sample: 'Business Developer' },
-  { key: 'job.location', label: 'Job Location', category: 'job', source: 'Job role', sample: 'Sokoto' },
-  { key: 'job.description', label: 'Job Description', category: 'job', source: 'Job role', sample: 'Onboarding key merchants…' },
-  { key: 'job.department', label: 'Department', category: 'job', source: 'Job role', sample: 'Sales' },
+  { key: 'job.title', label: 'Job Title', category: 'job', source: 'Job role', sample: 'Software Engineer' },
+  { key: 'job.location', label: 'Job Location', category: 'job', source: 'Job role', sample: '[Office Location]' },
+  { key: 'job.description', label: 'Job Description', category: 'job', source: 'Job role', sample: '[Insert job responsibilities…]' },
+  { key: 'job.department', label: 'Department', category: 'job', source: 'Job role', sample: 'Engineering' },
 
   // Offer dates
-  { key: 'offer.letterDate', label: 'Offer Letter Date', category: 'offer', source: 'Offer', sample: 'June 8, 2026' },
-  { key: 'offer.effectiveDate', label: 'Effective Date', category: 'offer', source: 'Offer', sample: 'June 9, 2026' },
+  { key: 'offer.letterDate', label: 'Offer Letter Date', category: 'offer', source: 'Offer', sample: '[Date]' },
+  { key: 'offer.effectiveDate', label: 'Effective Date', category: 'offer', source: 'Offer', sample: '[Date]' },
 
   // Employment terms (job defaults, per-offer override)
-  { key: 'terms.contractDuration', label: 'Contract Duration', category: 'terms', source: 'Job defaults / Offer', sample: 'one (1) year, renewable' },
-  { key: 'terms.probationPeriod', label: 'Probation Period', category: 'terms', source: 'Job defaults / Offer', sample: 'Three (3) months' },
-  { key: 'terms.noticePeriod', label: 'Notice Period', category: 'terms', source: 'Job defaults / Offer', sample: 'two (2) weeks' },
-  { key: 'terms.weeklyHours', label: 'Weekly Working Hours', category: 'terms', source: 'Job defaults / Offer', sample: '45' },
-  { key: 'terms.dailyHours', label: 'Daily Working Hours', category: 'terms', source: 'Job defaults / Offer', sample: '9' },
+  { key: 'terms.contractDuration', label: 'Contract Duration', category: 'terms', source: 'Job defaults / Offer', sample: '1 year, renewable' },
+  { key: 'terms.probationPeriod', label: 'Probation Period', category: 'terms', source: 'Job defaults / Offer', sample: '3 months' },
+  { key: 'terms.noticePeriod', label: 'Notice Period', category: 'terms', source: 'Job defaults / Offer', sample: '2 weeks' },
+  { key: 'terms.weeklyHours', label: 'Weekly Working Hours', category: 'terms', source: 'Job defaults / Offer', sample: '40' },
+  { key: 'terms.dailyHours', label: 'Daily Working Hours', category: 'terms', source: 'Job defaults / Offer', sample: '8' },
   { key: 'terms.lunchBreak', label: 'Lunch Break', category: 'terms', source: 'Job defaults / Offer', sample: '1 hour' },
-  { key: 'terms.lineManager', label: 'Line Manager', category: 'terms', source: 'Offer', sample: 'To be assigned' },
+  { key: 'terms.lineManager', label: 'Line Manager', category: 'terms', source: 'Offer', sample: '[Line Manager]' },
 
   // Compensation & benefits
-  { key: 'comp.basicSalary', label: 'Basic Monthly Salary', category: 'comp', source: 'Offer', sample: 'NGN 100,000' },
-  { key: 'comp.performanceBonus', label: 'Performance Bonus', category: 'comp', source: 'Offer', sample: 'NGN 200,000' },
-  { key: 'comp.walletSplit', label: 'Wallet Payment Split', category: 'comp', source: 'Offer', sample: 'NGN 10,000' },
-  { key: 'comp.benefits', label: 'Benefits', category: 'comp', source: 'Benefits module', sample: 'Health Insurance, Contributory Pension' },
+  { key: 'comp.basicSalary', label: 'Basic Monthly Salary', category: 'comp', source: 'Offer', sample: '[Amount]' },
+  { key: 'comp.performanceBonus', label: 'Performance Bonus', category: 'comp', source: 'Offer', sample: '[Amount]' },
+  { key: 'comp.walletSplit', label: 'Wallet Payment Split', category: 'comp', source: 'Offer', sample: '[Amount]' },
+  { key: 'comp.benefits', label: 'Benefits', category: 'comp', source: 'Benefits module', sample: 'Health Insurance, Pension' },
 ]
 
 // ---------- formatting helpers ----------

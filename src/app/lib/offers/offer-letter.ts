@@ -46,6 +46,41 @@ function wrapLetterhead(company: any, bodyHtml: string): string {
   @page { size: A4; margin: 20mm 18mm; }
   * { box-sizing: border-box; }
   body { font-family: 'Segoe UI', Arial, sans-serif; color: #1f2937; font-size: 12.5px; line-height: 1.6; }
+
+  /* "PRIVATE & CONFIDENTIAL" watermark — spans every A4 page when printed to PDF */
+  body::before {
+    content: "PRIVATE & CONFIDENTIAL";
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%) rotate(-30deg);
+    font-size: 4.5rem;
+    font-weight: 900;
+    color: rgba(0, 0, 0, 0.05);
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 0;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    user-select: none;
+  }
+  /* Repeat watermark a second time higher on the page for coverage */
+  body::after {
+    content: "PRIVATE & CONFIDENTIAL";
+    position: fixed;
+    top: 18%; left: 55%;
+    transform: translate(-50%, -50%) rotate(-30deg);
+    font-size: 4rem;
+    font-weight: 900;
+    color: rgba(0, 0, 0, 0.04);
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 0;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    user-select: none;
+  }
+  body > * { position: relative; z-index: 1; }
+
   .letter-head { display:flex; align-items:center; justify-content:space-between; border-bottom:2px solid #0f172a; padding-bottom:12px; margin-bottom:22px; }
   .letter-head .co { text-align:right; }
   .letter-head .co .name { font-size:16px; font-weight:700; color:#0f172a; }

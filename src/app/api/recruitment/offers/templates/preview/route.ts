@@ -16,7 +16,9 @@ export async function POST(req: NextRequest) {
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
-    const companyId = user.companyId
+    const searchParams = req.nextUrl?.searchParams ?? new URL(req.url).searchParams
+    // For SUPER_ADMIN, allow the global company selector to override companyId
+    const companyId = searchParams.get('companyId') || user.companyId
     const body = await req.json()
 
     // Resolve the template body: explicit bodyHtml wins, else load the template.
@@ -63,7 +65,32 @@ export async function POST(req: NextRequest) {
         },
       })
     } else {
+      // Sample mode — use generic placeholders but overlay the current company's
+      // real details so every user sees their own company name, logo, etc.
       values = sampleValues()
+
+      // Load the caller's company profile and overlay company-specific keys.
+      try {
+        const comp = await prisma.company.findUnique({ where: { id: companyId } })
+        if (comp) {
+          if (comp.companyName) {
+            values['company.name'] = comp.companyName
+            values['company.secondedCompany'] = comp.secondedCompany || comp.companyName
+          }
+          if (comp.rcNumber) values['company.rcNumber'] = comp.rcNumber
+          if (comp.logo) {
+            values['company.logo'] = `<img src="${comp.logo}" alt="${comp.companyName || 'Company'}" style="max-width:150px;height:auto;" />`
+          }
+          if ((comp as any).hrRepName) values['company.hrRepName'] = (comp as any).hrRepName
+          if ((comp as any).hrRepTitle) values['company.hrRepTitle'] = (comp as any).hrRepTitle
+          if (comp.communicationTool) values['company.communicationTool'] = comp.communicationTool
+          if ((comp as any).governingLaw) values['company.governingLaw'] = (comp as any).governingLaw
+          if ((comp as any).arbitrationVenue) values['company.arbitrationVenue'] = (comp as any).arbitrationVenue
+          if (comp.address) values['company.address'] = comp.address
+          if (comp.email) values['company.email'] = comp.email
+          if (comp.phone) values['company.phone'] = comp.phone
+        }
+      } catch { /* no-op — fall back to generic placeholders if company lookup fails */ }
     }
 
     const html = renderTemplate(bodyHtml, values)
