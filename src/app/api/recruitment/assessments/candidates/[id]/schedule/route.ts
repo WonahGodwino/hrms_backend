@@ -11,11 +11,30 @@ import { notifyInterviewScheduled, notifyCandidateInterviewScheduled } from '@/a
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
-// Combine a date ("YYYY-MM-DD") + time ("HH:mm") into a Date; null if unparseable.
+// Combine a date ("YYYY-MM-DD") + time into a Date. Accepts 24-hour ("14:30")
+// AND 12-hour ("02:30 PM") — the scheduling modal sends "hh:mm A". Null if bad.
 function parseWhen(date?: string, time?: string): Date | null {
   if (!date) return null
-  const d = new Date(`${date}T${time || '09:00'}`)
+  let t = (time || '09:00').trim()
+  const m = t.match(/^(\d{1,2}):(\d{2})\s*([AaPp][Mm])$/)
+  if (m) {
+    let h = parseInt(m[1], 10) % 12
+    if (/[Pp][Mm]/.test(m[3])) h += 12
+    t = `${String(h).padStart(2, '0')}:${m[2]}`
+  }
+  const d = new Date(`${date}T${t}`)
   return isNaN(d.getTime()) ? null : d
+}
+
+// Assemble the logistics blob persisted for the candidate/panel invite + reminders.
+function buildMeetingDetails(body: any) {
+  return {
+    interviewType: body.type || null,        // 'virtual' | 'in-person'
+    platform: body.platform || null,
+    meetingUrl: body.meetingUrl || null,
+    location: body.location || null,
+    duration: body.duration || null,
+  }
 }
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
@@ -46,7 +65,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     // access the interviewer dashboard even without being logged in.
     const panelAccessToken = signPanelToken(params.id)
 
-    await prisma.recruitmentCandidateAssessment.update({
+    const meetingDetails = buildMeetingDetails(body)
+    await (prisma as any).recruitmentCandidateAssessment.update({
       where: { id: params.id },
       data: {
         roundStatus: 'SCHEDULED',
@@ -54,6 +74,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         schedulingNotes: body.notes || null,
         interviewerIds: body.interviewerIds as Prisma.InputJsonValue,
         panelAccessToken,
+        meetingDetails,
       },
     })
 
@@ -112,8 +133,12 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (body.interviewerIds) updateData.interviewerIds = body.interviewerIds as Prisma.InputJsonValue
     const newWhen = (body.date || body.time) ? parseWhen(body.date, body.time) : null
     if (newWhen) updateData.scheduledAt = newWhen
+    // Refresh meeting logistics when any of them are supplied.
+    if (body.type !== undefined || body.platform !== undefined || body.meetingUrl !== undefined || body.location !== undefined) {
+      updateData.meetingDetails = buildMeetingDetails(body)
+    }
 
-    await prisma.recruitmentCandidateAssessment.update({
+    await (prisma as any).recruitmentCandidateAssessment.update({
       where: { id: params.id }, data: updateData,
     })
 

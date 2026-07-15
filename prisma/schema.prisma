@@ -603,6 +603,9 @@ model RecruitmentCandidateAssessment {
   scheduledAt       DateTime?
   schedulingNotes   String?       @db.Text
   interviewerIds    Json?
+  // Logistics captured at scheduling: { interviewType, platform, meetingUrl,
+  // location, duration } — used in the candidate/panel invitation + reminders.
+  meetingDetails    Json?
   panelAccessToken  String?       @unique  // one-time access token for panelist dashboard link
   averageScore      Float?
   createdBy         String?

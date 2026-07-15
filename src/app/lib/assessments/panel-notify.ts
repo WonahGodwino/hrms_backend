@@ -249,7 +249,7 @@ function fmtWhen(d: Date | null): string {
 // scheduled — including the JOB they're interviewing for, the round and the time.
 export async function notifyInterviewScheduled(
   assessmentId: string,
-  opts: { interviewerIds: string[]; scheduledAt: Date | null; notes?: string | null; reschedule?: boolean; panelAccessToken?: string },
+  opts: { interviewerIds: string[]; scheduledAt: Date | null; notes?: string | null; reschedule?: boolean; reminder?: boolean; panelAccessToken?: string },
 ): Promise<{ attempted: number; sent: number; failed: number }> {
   const interviewerIds = (opts.interviewerIds || []).map(String).filter(Boolean)
   if (interviewerIds.length === 0) return { attempted: 0, sent: 0, failed: 0 }
@@ -285,6 +285,19 @@ export async function notifyInterviewScheduled(
   const evaluationPlan = round?.evaluationPlan || null
   const whenText = fmtWhen(opts.scheduledAt)
 
+  // Meeting logistics persisted at scheduling (so reminders carry the real link).
+  const md = (a.meetingDetails && typeof a.meetingDetails === 'object') ? a.meetingDetails : {}
+  const isVirtual = String(md.interviewType || '').toLowerCase() !== 'in-person'
+  const meetingUrl: string | null = md.meetingUrl || null
+  const platform: string | null = md.platform || null
+  const location: string | null = md.location || null
+  const joinRowHtml = isVirtual
+    ? (meetingUrl
+        ? `<tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Join link</td><td style="padding:10px 14px;border:1px solid #e2e8f0"><a href="${meetingUrl}" style="color:#137fec;font-weight:700">${meetingUrl}</a>${platform ? ` <span style="color:#64748b">(${platform})</span>` : ''}</td></tr>`
+        : `<tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Format</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#334155">Virtual${platform ? ` — ${platform}` : ''} (link to follow)</td></tr>`)
+    : `<tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Location</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#334155">${location || 'On-site — details to follow'}</td></tr>`
+  const joinRowText = isVirtual ? `Join:              ${meetingUrl || 'link to follow'}${platform ? ` (${platform})` : ''}` : `Location:          ${location || 'to follow'}`
+
   const interviewers = await prisma.staffRecord.findMany({
     where: { id: { in: interviewerIds }, companyId: a.companyId },
     select: { id: true, firstName: true, lastName: true, email: true },
@@ -292,21 +305,27 @@ export async function notifyInterviewScheduled(
   const targets = interviewers.filter((s) => !!s.email)
   if (targets.length === 0) return { attempted: 0, sent: 0, failed: 0 }
 
-  const verb = opts.reschedule ? 'has been rescheduled' : 'has been scheduled'
-  const subject = `${opts.reschedule ? 'Interview rescheduled' : 'Interview scheduled'}: ${candidateName} — ${jobTitle}`
+  const verb = opts.reminder ? 'is scheduled' : opts.reschedule ? 'has been rescheduled' : 'has been scheduled'
+  const subject = opts.reminder
+    ? `Reminder: your interview with ${candidateName} — ${jobTitle}`
+    : `${opts.reschedule ? 'Interview rescheduled' : 'Interview scheduled'}: ${candidateName} — ${jobTitle}`
+  const leadIn = opts.reminder
+    ? `This is a <strong>reminder</strong> about an interview you are scheduled to conduct for <strong>${companyName}</strong>. Please review the details below.`
+    : `An interview you have been assigned to ${verb} for <strong>${companyName}</strong>. Please review the details below.`
 
   const html = (name: string) => `
     <table cellpadding="0" cellspacing="0" border="0" width="100%%" style="max-width:600px;margin:0 auto">
       <tr><td style="padding:20px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif">
         <p style="margin:0 0 16px;font-size:16px;color:#0f172a">Dear ${name || 'Colleague'},</p>
         <p style="margin:0 0 16px;font-size:15px;color:#334155;line-height:1.6">
-          An interview you have been assigned to ${verb} for <strong>${companyName}</strong>. Please review the details below.
+          ${leadIn}
         </p>
         <table style="border-collapse:collapse;width:100%%;margin:16px 0;font-size:13px">
           <tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569;width:150px">Candidate</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#0f172a;font-weight:600">${candidateName}</td></tr>
           <tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Position</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#334155">${jobTitle}${jobDept ? ` · ${jobDept}` : ''}</td></tr>
           <tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Round</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#334155">${roundLabel}</td></tr>
           <tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Date &amp; Time</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#137fec;font-weight:600">${whenText}</td></tr>
+          ${joinRowHtml}
           ${opts.notes ? `<tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Notes</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#334155">${opts.notes}</td></tr>` : ''}
           ${evaluationPlan ? `<tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Evaluation Plan</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#334155">${evaluationPlan}</td></tr>` : ''}
         </table>
@@ -329,7 +348,8 @@ An interview you have been assigned to ${verb} for ${companyName}. Please review
 Candidate:         ${candidateName}
 Position:          ${jobTitle}${jobDept ? ` · ${jobDept}` : ''}
 Round:             ${roundLabel}
-Date & Time:       ${whenText}${opts.notes ? `\nNotes:             ${opts.notes}` : ''}${evaluationPlan ? `\nEvaluation Plan:   ${evaluationPlan}` : ''}
+Date & Time:       ${whenText}
+${joinRowText}${opts.notes ? `\nNotes:             ${opts.notes}` : ''}${evaluationPlan ? `\nEvaluation Plan:   ${evaluationPlan}` : ''}
 
 Interviewer Dashboard: ${FRONTEND_URL.replace(/\/$/, '')}/interviews
 
@@ -436,7 +456,7 @@ export async function notifyAssessmentPanel(
 
 export async function notifyCandidateInterviewScheduled(
   assessmentId: string,
-  opts: { scheduledAt: Date | null; notes?: string | null; reschedule?: boolean; meetingUrl?: string | null },
+  opts: { scheduledAt: Date | null; notes?: string | null; reschedule?: boolean; reminder?: boolean; meetingUrl?: string | null },
 ): Promise<{ success: boolean }> {
   const a: any = await (prisma as any).recruitmentCandidateAssessment.findUnique({
     where: { id: assessmentId },
@@ -471,11 +491,29 @@ export async function notifyCandidateInterviewScheduled(
     ? `${round.title || 'Interview'} (${INTERVIEW_TYPE_LABEL[round.interviewType] || round.interviewType}, ${round.duration || 0} mins)`
     : 'Interview round'
   const whenText = fmtWhen(opts.scheduledAt)
-  const verb = opts.reschedule ? 'has been rescheduled' : 'has been scheduled'
-  const intro = opts.reschedule
-    ? `Your interview for <strong>${jobTitle}</strong>${jobDept ? ` (${jobDept})` : ''} at <strong>${companyName}</strong> has been rescheduled. Please review the updated details below.`
-    : `Congratulations — your application for <strong>${jobTitle}</strong>${jobDept ? ` (${jobDept})` : ''} at <strong>${companyName}</strong> has progressed to the interview stage.`
-  const subject = `${opts.reschedule ? 'Interview rescheduled' : 'Interview invitation'}: ${jobTitle} — ${companyName}`
+
+  // Meeting logistics — fall back to what was persisted at scheduling so reminders
+  // carry the real link/location.
+  const md = (a.meetingDetails && typeof a.meetingDetails === 'object') ? a.meetingDetails : {}
+  const isVirtual = String(md.interviewType || '').toLowerCase() !== 'in-person'
+  const meetingUrl: string | null = opts.meetingUrl || md.meetingUrl || null
+  const location: string | null = md.location || null
+  const platform: string | null = md.platform || null
+
+  const intro = opts.reminder
+    ? `This is a <strong>friendly reminder</strong> about your upcoming interview for <strong>${jobTitle}</strong>${jobDept ? ` (${jobDept})` : ''} at <strong>${companyName}</strong>.`
+    : opts.reschedule
+      ? `Your interview for <strong>${jobTitle}</strong>${jobDept ? ` (${jobDept})` : ''} at <strong>${companyName}</strong> has been rescheduled. Please review the updated details below.`
+      : `Congratulations — your application for <strong>${jobTitle}</strong>${jobDept ? ` (${jobDept})` : ''} at <strong>${companyName}</strong> has progressed to the interview stage.`
+  const subject = opts.reminder
+    ? `Reminder: your interview with ${companyName} — ${jobTitle}`
+    : `${opts.reschedule ? 'Interview rescheduled' : 'Interview invitation'}: ${jobTitle} — ${companyName}`
+
+  const joinRow = isVirtual
+    ? (meetingUrl
+        ? `<tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Meeting Link</td><td style="padding:8px 12px;border:1px solid #e2e8f0"><a href="${meetingUrl}" style="color:#137fec;text-decoration:underline">${meetingUrl}</a>${platform ? ` (${platform})` : ''}</td></tr>`
+        : `<tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Format</td><td style="padding:8px 12px;border:1px solid #e2e8f0">Virtual${platform ? ` — ${platform}` : ''} (joining link to follow)</td></tr>`)
+    : `<tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Location</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${location || 'On-site — details to follow'}</td></tr>`
 
   const html = `
     <p>Dear ${candidateName},</p>
@@ -484,24 +522,26 @@ export async function notifyCandidateInterviewScheduled(
       <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700;width:160px">Position</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${jobTitle}${jobDept ? ` · ${jobDept}` : ''}</td></tr>
       <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Round</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${roundLabel}</td></tr>
       <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Date & Time</td><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:700;color:#137fec">${whenText}</td></tr>
-      ${opts.meetingUrl ? `<tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Meeting Link</td><td style="padding:8px 12px;border:1px solid #e2e8f0"><a href="${opts.meetingUrl}" style="color:#137fec;text-decoration:underline">${opts.meetingUrl}</a></td></tr>` : ''}
+      ${joinRow}
       ${opts.notes ? `<tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Notes</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${opts.notes}</td></tr>` : ''}
     </table>
-    ${opts.meetingUrl ? `<p style="margin:16px 0">Click the link above at the scheduled time to join your interview.</p>` : ''}
-    <p style="color:#475569;font-size:13px">Please ensure you have a stable internet connection and a quiet environment for the interview. If you have any questions, reach out to the hiring team.</p>
+    ${isVirtual && meetingUrl ? `<p style="margin:16px 0"><a href="${meetingUrl}" style="background:#137fec;color:#fff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:8px;display:inline-block">Join the interview</a></p>` : ''}
+    <p style="color:#475569;font-size:13px">Please join a few minutes early${isVirtual ? ' and check your camera and microphone beforehand' : ''}. If you have any questions, reach out to the hiring team.</p>
     <p>We look forward to speaking with you.</p>
     <p>Best regards,<br/>${companyName} — Talent Team</p>`
 
   const text = `Dear ${candidateName},
 
-${opts.reschedule
-    ? `Your interview for ${jobTitle}${jobDept ? ` (${jobDept})` : ''} at ${companyName} has been rescheduled. Please review the updated details below.`
-    : `Congratulations — your application for ${jobTitle}${jobDept ? ` (${jobDept})` : ''} at ${companyName} has progressed to the interview stage.`}
+${opts.reminder
+    ? `This is a friendly reminder about your upcoming interview for ${jobTitle}${jobDept ? ` (${jobDept})` : ''} at ${companyName}.`
+    : opts.reschedule
+      ? `Your interview for ${jobTitle}${jobDept ? ` (${jobDept})` : ''} at ${companyName} has been rescheduled. Please review the updated details below.`
+      : `Congratulations — your application for ${jobTitle}${jobDept ? ` (${jobDept})` : ''} at ${companyName} has progressed to the interview stage.`}
 
 Position:     ${jobTitle}${jobDept ? ` · ${jobDept}` : ''}
 Round:        ${roundLabel}
-Date & Time:  ${whenText}${opts.meetingUrl ? `\nMeeting Link: ${opts.meetingUrl}` : ''}${opts.notes ? `\nNotes:       ${opts.notes}` : ''}
-${opts.meetingUrl ? `\nClick the link above at the scheduled time to join your interview.` : ''}
+Date & Time:  ${whenText}
+${isVirtual ? `Meeting Link: ${meetingUrl || 'to follow'}${platform ? ` (${platform})` : ''}` : `Location:     ${location || 'to follow'}`}${opts.notes ? `\nNotes:        ${opts.notes}` : ''}
 
 Please ensure you have a stable internet connection and a quiet environment. Contact the hiring team if you have any questions.
 

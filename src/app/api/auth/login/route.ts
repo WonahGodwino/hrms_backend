@@ -7,6 +7,7 @@ import { signToken } from '@/app/lib/auth'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { getEnabledModules } from '@/app/lib/module-access'
+import { getActiveElevatedRole } from '@/app/lib/role-elevation'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -84,8 +85,10 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('Invalid credentials', 401), origin)
     }
 
-    // Fetch company, enabled modules, and PHED access role in parallel.
-    const [company, enabledModules, phedRoleGrant] = await Promise.all([
+    // Fetch company, enabled modules, PHED access role, and any ACTIVE temporary
+    // role-elevation (e.g. staff elevated to HR/ADMIN to sit on an interview panel)
+    // in parallel.
+    const [company, enabledModules, phedRoleGrant, elevatedRole] = await Promise.all([
       prisma.company.findUnique({ where: { id: staff.companyId } }),
       staff.role === 'SUPER_ADMIN'
         ? getEnabledModules(undefined)
@@ -94,6 +97,7 @@ export async function POST(request: NextRequest) {
         where: { staffRecordId: staff.id },
         select: { accessRole: true },
       }),
+      staff.role === 'SUPER_ADMIN' ? null : getActiveElevatedRole(staff.id, staff.companyId),
     ])
 
     const token = signToken({
@@ -115,6 +119,7 @@ export async function POST(request: NextRequest) {
             lastName: staff.lastName,
             role: phedRoleGrant?.accessRole ?? staff.role,
             phedAccessRole: phedRoleGrant?.accessRole ?? null,
+            elevatedRole: elevatedRole || null,
             companyId: staff.companyId,
             department: staff.department,
             position: staff.position,

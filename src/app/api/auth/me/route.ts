@@ -5,6 +5,7 @@ import { requireAuth } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { getEnabledModules } from '@/app/lib/module-access'
+import { getActiveElevatedRole } from '@/app/lib/role-elevation'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -39,7 +40,7 @@ export async function GET(request: NextRequest) {
       return withCors(ApiResponse.error('User not found', 404), origin)
     }
 
-    const [enabledModules, phedRoleGrant] = await Promise.all([
+    const [enabledModules, phedRoleGrant, elevatedRole] = await Promise.all([
       decoded.role === 'SUPER_ADMIN'
         ? getEnabledModules(undefined)
         : getEnabledModules(staff.companyId),
@@ -47,6 +48,7 @@ export async function GET(request: NextRequest) {
         where: { staffRecordId: staff.id },
         select: { accessRole: true },
       }),
+      decoded.role === 'SUPER_ADMIN' ? null : getActiveElevatedRole(staff.id, staff.companyId),
     ])
 
     return withCors(
@@ -58,6 +60,7 @@ export async function GET(request: NextRequest) {
           lastName: staff.lastName,
           role: phedRoleGrant?.accessRole ?? staff.role,
           phedAccessRole: phedRoleGrant?.accessRole ?? null,
+          elevatedRole: elevatedRole || null,
           companyId: staff.companyId,
           department: staff.department,
           position: staff.position,
