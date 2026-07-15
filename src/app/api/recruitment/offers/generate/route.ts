@@ -4,6 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { applyApprovalWorkflow } from '@/app/lib/offers/approval-workflow'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -93,6 +94,9 @@ export async function POST(request: NextRequest) {
         } as any,
       },
     })
+
+    // Apply the company's default approval workflow (if configured).
+    await applyApprovalWorkflow(offer.id, companyId)
 
     const message = requiresException
       ? 'Offer drafted successfully. This offer exceeds the approved budget band and requires Executive Exception routing.'

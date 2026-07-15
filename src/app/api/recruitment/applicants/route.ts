@@ -124,6 +124,13 @@ export async function GET(request: NextRequest) {
               createdAt: true,
             },
           },
+          candidateAssessment: {
+            select: {
+              averageScore: true,
+              roundStatus: true,
+              currentRoundOrder: true,
+            },
+          },
         },
         orderBy: {
           createdAt: 'desc',
@@ -145,6 +152,10 @@ export async function GET(request: NextRequest) {
       updatedAt: app.updatedAt,
       notes: app.notes,
       rating: app.score ?? null,
+      // Interview panel score — average across all completed assessment
+      // rounds for this candidate (null until at least one round completes).
+      interviewScore: app.candidateAssessment?.averageScore ?? null,
+      interviewRoundStatus: app.candidateAssessment?.roundStatus ?? null,
       
       // Job details
       job: {

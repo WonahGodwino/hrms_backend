@@ -4,6 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { REQUIRED_CATEGORIES } from '@/app/lib/offers/candidate-documents'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -61,6 +62,22 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Pre-promotion: document progress from what the candidate uploaded via their
+    // offer link (candidate_documents), keyed by candidate.
+    const candidateIds = rows
+      .filter((o) => !o.staffRecordId)
+      .map((o) => (o.offer as any)?.candidateId)
+      .filter(Boolean) as string[]
+    const candDocsByCandidate: Record<string, any[]> = {}
+    if (candidateIds.length) {
+      const cds = await (prisma as any).candidateDocument.findMany({
+        where: { candidateId: { in: candidateIds }, category: { in: REQUIRED_CATEGORIES }, archived: 0 },
+        select: { candidateId: true, category: true, fileName: true, filePath: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      })
+      for (const d of cds) (candDocsByCandidate[d.candidateId] ||= []).push(d)
+    }
+
     const data = rows.map((o) => {
       const c = o.offer?.candidate
       const appMeta = ((o.offer as any)?.application?.metadata && typeof (o.offer as any).application.metadata === 'object')
@@ -68,10 +85,23 @@ export async function GET(request: NextRequest) {
       const offerMeta = ((o.offer as any)?.metadata && typeof (o.offer as any).metadata === 'object')
         ? (o.offer as any).metadata : {}
       const handoff = (offerMeta.handoff && typeof offerMeta.handoff === 'object') ? offerMeta.handoff : {}
+      // Pre-promotion document progress + list (candidate uploads).
+      const cid = (o.offer as any)?.candidateId
+      const candDocs = (!o.staffRecordId && cid) ? (candDocsByCandidate[cid] || []) : []
+      const uniqueCats = new Set(candDocs.map((d) => d.category))
+      const candidateDocProgress = !o.staffRecordId
+        ? Math.round(([...uniqueCats].filter((c2) => REQUIRED_CATEGORIES.includes(c2 as string)).length / REQUIRED_CATEGORIES.length) * 100)
+        : null
       return {
         id: o.id,
         offerId: o.offerId,
         candidate: c ? { id: c.id, name: `${c.firstName} ${c.lastName}`.trim(), email: c.email } : null,
+        candidateDocuments: candDocs.map((d) => ({
+          category: d.category,
+          fileName: d.fileName,
+          url: d.filePath,
+          uploadedAt: d.createdAt ? new Date(d.createdAt).toISOString() : null,
+        })),
         role: handoff.jobTitle || (o.offer as any)?.application?.job?.title || 'Unknown',
         department: handoff.department || (o.offer as any)?.application?.job?.department || '',
         manager: handoff.managerName || '',
@@ -80,7 +110,7 @@ export async function GET(request: NextRequest) {
         isExternalHire: appMeta.source === 'EXTERNAL_HIRE' || offerMeta.source === 'EXTERNAL_HIRE',
         staffId: offerMeta.staffId || '',
         staffRecordId: o.staffRecordId || null,
-        documentProgress: o.staffRecordId ? (progressByStaff[o.staffRecordId] ?? 0) : null,
+        documentProgress: o.staffRecordId ? (progressByStaff[o.staffRecordId] ?? 0) : candidateDocProgress,
         startDate: o.startDate ? o.startDate.toISOString() : null,
         completedAt: o.completedAt ? o.completedAt.toISOString() : null,
         createdAt: o.createdAt.toISOString(),

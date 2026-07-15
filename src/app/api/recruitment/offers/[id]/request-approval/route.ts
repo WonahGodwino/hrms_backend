@@ -22,38 +22,78 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     const offer = await prisma.offer.findFirst({
       where: { id: params.id, companyId },
-      include: { approvals: { where: { status: { in: ['PENDING', 'AWAITING_PREVIOUS'] } } } },
+      include: { approvals: { orderBy: { step: 'asc' } } },
     })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)
-    if (offer.approvals.length > 0) return withCors(ApiResponse.error('Approval chain already active', 409), origin)
 
-    const isSequential = routingMode === 'sequential'
+    const isSequential = routingMode !== 'parallel' // default to sequential
 
-    // Create approval steps using RecruitmentOfferApproval model
-    const steps = await Promise.all(
-      approvers.map((a: any, i: number) =>
+    // Preserve steps that have ALREADY been approved — reassigning only changes
+    // the steps still outstanding, and never undoes a completed approval.
+    const approvedSteps = offer.approvals
+      .filter((s) => s.status === 'APPROVED')
+      .sort((a, b) => a.step - b.step)
+    const approvedIds = new Set(approvedSteps.map((s) => s.approverId))
+
+    // Remove only the not-yet-approved steps (PENDING / AWAITING_PREVIOUS).
+    await prisma.recruitmentOfferApproval.deleteMany({
+      where: { offerId: params.id, status: { not: 'APPROVED' } },
+    })
+
+    // Renumber the kept (approved) steps to 1..k so numbering stays contiguous.
+    for (let i = 0; i < approvedSteps.length; i++) {
+      if (approvedSteps[i].step !== i + 1) {
+        await prisma.recruitmentOfferApproval.update({
+          where: { id: approvedSteps[i].id }, data: { step: i + 1 },
+        })
+      }
+    }
+
+    // New approvers for the remaining steps — drop anyone who already approved
+    // (their completed step is kept) and de-duplicate.
+    const seen = new Set<string>()
+    const newApprovers = (approvers as any[])
+      .filter((a) => a?.userId && !approvedIds.has(a.userId) && !seen.has(a.userId) && seen.add(a.userId))
+    if (newApprovers.length === 0) {
+      return withCors(ApiResponse.error('The selected approver(s) have already approved this offer. Choose someone who has not yet approved.', 400), origin)
+    }
+
+    const base = approvedSteps.length
+    const created = await Promise.all(
+      newApprovers.map((a, i) =>
         prisma.recruitmentOfferApproval.create({
           data: {
             offerId: params.id,
             approverId: a.userId, approverName: a.name || null, approverRole: a.role,
-            step: a.order || i + 1,
+            step: base + i + 1,
+            // Sequential: the first outstanding step (after all kept approvals) is
+            // live; the rest wait their turn. Parallel: all outstanding are live.
             status: isSequential && i > 0 ? 'AWAITING_PREVIOUS' : 'PENDING',
           },
-        })
-      )
+        }),
+      ),
     )
 
-    // Update offer routing info
     await prisma.offer.update({
       where: { id: params.id },
-      data: { routingMode: routingMode || 'SEQUENTIAL', internalNotes: internalNotes || null, status: 'PENDING_APPROVAL' },
+      data: {
+        routingMode: (isSequential ? 'SEQUENTIAL' : 'PARALLEL') as any,
+        internalNotes: internalNotes ?? offer.internalNotes ?? null,
+        status: 'PENDING_APPROVAL',
+      },
     })
 
     return withCors(ApiResponse.success({
       offerId: offer.id,
       status: 'PENDING_APPROVAL',
-      routingMode: routingMode || 'sequential',
-      approvalChain: steps.map(s => ({ userId: s.approverId, status: s.status, step: s.step })),
-    }, 'Approval chain configured and sequential routing initiated.'), origin)
+      routingMode: isSequential ? 'sequential' : 'parallel',
+      preservedApprovedSteps: approvedSteps.length,
+      approvalChain: [
+        ...approvedSteps.map((s, i) => ({ userId: s.approverId, status: 'APPROVED', step: i + 1 })),
+        ...created.map((s) => ({ userId: s.approverId, status: s.status, step: s.step })),
+      ],
+    }, approvedSteps.length
+      ? `Remaining approver(s) reassigned. ${approvedSteps.length} completed approval(s) kept.`
+      : 'Approval chain configured.'), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }
 }

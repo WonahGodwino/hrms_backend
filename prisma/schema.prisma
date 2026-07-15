@@ -41,6 +41,10 @@ model Company {
   // Days a candidate has to accept + return the signed offer letter before the
   // offer lapses. Per-company (multi-tenant); null falls back to the 14-day default.
   offerResponseDays      Int?
+  // Reusable company-wide offer approval workflow (set once, applied to every new
+  // offer). Shape: { mode: 'sequential'|'parallel', steps: [{ order, approverId,
+  // approverName, approverRole }] }. Null = no default flow (approvers assigned ad-hoc).
+  offerApprovalWorkflow  Json?
 
   // Offer letter signature — uploaded by HR/Admin in Offer Letter Settings.
   // Rendered below the body in generated offer letters.
@@ -591,6 +595,59 @@ model AssessmentPlanInstance {
   @@map("assessment_plan_instances")
 }
 
+// ==================== VIRTUAL MEETINGS (video conferencing) ====================
+// A generic video/audio meeting room — reusable by Recruitment interviews AND
+// internal work meetings. The media itself is handled by an external SFU
+// (LiveKit — managed now, self-hostable later); this row is our own record of
+// the room + who's invited. Enum-like fields are Strings (no PG enums) to match
+// the rest of the app. companyId/candidateAssessmentId are scalar (FKs in SQL).
+model Meeting {
+  id                    String    @id @default(cuid())
+  companyId             String
+  title                 String
+  purpose               String    @default("WORK_MEETING") // INTERVIEW | WORK_MEETING
+  provider              String    @default("livekit")       // media provider key
+  roomName              String    @unique                   // maps 1:1 to the SFU room
+  scheduledAt           DateTime?
+  durationMins          Int?
+  status                String    @default("SCHEDULED")     // SCHEDULED | LIVE | ENDED | CANCELLED
+  createdBy             String?
+  // Optional link back to the recruitment interview this meeting serves.
+  candidateAssessmentId String?   @unique
+  recordingUrl          String?
+  recordingRequested    Boolean   @default(false)
+  recordingEgressId     String?
+  lobbyEnabled          Boolean   @default(false)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  participants          MeetingParticipant[]
+
+  @@index([companyId, status])
+  @@index([scheduledAt])
+  @@map("meetings")
+}
+
+// Who is invited to / attended a meeting. A participant is EITHER a known staff
+// member (staffId) OR an external person captured by name+email (candidates,
+// external interview panelists) — mirroring the existing panel-token pattern.
+model MeetingParticipant {
+  id            String    @id @default(cuid())
+  meetingId     String
+  staffId       String?
+  externalName  String?
+  externalEmail String?
+  role          String    @default("ATTENDEE") // HOST | ATTENDEE
+  joinedAt      DateTime?
+  leftAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  meeting       Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@index([meetingId])
+  @@map("meeting_participants")
+}
+
 // ==================== RECRUITMENT: ASSESSMENT QUEUE ====================
 
 model RecruitmentCandidateAssessment {
@@ -632,7 +689,10 @@ model RecruitmentScorecard {
   scores                 Json
   notes                  String?                 @db.Text
   recommendation         ScorecardRecommendation
-  submittedAt            DateTime                @default(now())
+  // Null while saved as a DRAFT (still editable by the panelist); set to the
+  // actual submission time only when finalized. A row existing with a null
+  // submittedAt must NOT count toward round completion or block re-submission.
+  submittedAt            DateTime?
 
   candidateAssessment    RecruitmentCandidateAssessment  @relation(fields: [candidateAssessmentId], references: [id], onDelete: Cascade)
   round                  RecruitmentAssessmentRound      @relation(fields: [roundId], references: [id], onDelete: Cascade)
@@ -1000,6 +1060,7 @@ model CandidateDocument {
   candidateId  String
   onboardingId String?
   type         CandidateDocumentType @default(OTHER)
+  category     String?               // stable required-doc key: SIGNED_OFFER | MEANS_OF_ID | GUARANTOR_FORM
   filePath     String
   fileName     String
   uploadedBy   String?
@@ -1011,6 +1072,7 @@ model CandidateDocument {
   onboarding   Onboarding?           @relation(fields: [onboardingId], references: [id])
 
   @@index([candidateId, type])
+  @@index([candidateId, category])
   @@index([companyId, archived])
   @@map("candidate_documents")
 }

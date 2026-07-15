@@ -6,6 +6,7 @@
 // on this (fire-and-forget).
 import { prisma } from '@/app/lib/db'
 import { sendEmail } from '@/app/lib/email'
+import { buildIcsAttachment } from '@/app/lib/calendar/ics'
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://247hr.co.uk'
 
@@ -288,7 +289,9 @@ export async function notifyInterviewScheduled(
   // Meeting logistics persisted at scheduling (so reminders carry the real link).
   const md = (a.meetingDetails && typeof a.meetingDetails === 'object') ? a.meetingDetails : {}
   const isVirtual = String(md.interviewType || '').toLowerCase() !== 'in-person'
-  const meetingUrl: string | null = md.meetingUrl || null
+  // Interviewers join the plain room link via their session; the candidate's
+  // tokenised link (md.meetingUrl) must NOT be reused for the panel.
+  const meetingUrl: string | null = md.panelMeetingUrl || md.meetingUrl || null
   const platform: string | null = md.platform || null
   const location: string | null = md.location || null
   const joinRowHtml = isVirtual
@@ -358,10 +361,41 @@ Please review the candidate's CV beforehand and submit your scorecard after the 
 Kind regards,
 ${companyName} Talent Team`
 
+  const icsLocation = isVirtual ? (meetingUrl || (platform ? `Virtual — ${platform}` : 'Virtual')) : (location || 'On-site')
+  const icsDescription = [
+    `Candidate: ${candidateName}`,
+    `Position: ${jobTitle}${jobDept ? ` · ${jobDept}` : ''}`,
+    roundLabel,
+    isVirtual && meetingUrl ? `Join: ${meetingUrl}` : null,
+    opts.notes ? `Notes: ${opts.notes}` : null,
+    `Interviewer dashboard: ${FRONTEND_URL.replace(/\/$/, '')}/interviews`,
+  ].filter(Boolean).join('\n')
+
   const results = await Promise.allSettled(
     targets.map((s) => {
       const name = `${s.firstName || ''} ${s.lastName || ''}`.trim()
-      return sendEmail({ to: s.email as string, subject, html: html(name), text: text(name) })
+      const attachment = buildIcsAttachment(
+        {
+          uid: `interview-${assessmentId}-panel-${s.id}@247hr`,
+          title: `Interview with ${candidateName} — ${jobTitle}`,
+          description: icsDescription,
+          location: icsLocation,
+          url: isVirtual ? meetingUrl : null,
+          start: opts.scheduledAt as Date,
+          durationMins: round?.duration || 60,
+          organizerName: `${companyName} Talent Team`,
+          attendeeName: name,
+          attendeeEmail: s.email as string,
+        },
+        'interview.ics',
+      )
+      return sendEmail({
+        to: s.email as string,
+        subject,
+        html: html(name),
+        text: text(name),
+        ...(attachment ? { attachments: [attachment] } : {}),
+      })
     }),
   )
   let sent = 0, failed = 0
@@ -550,6 +584,35 @@ We look forward to speaking with you.
 Best regards,
 ${companyName} — Talent Team`
 
-  const result = await sendEmail({ to: candidateEmail, subject, html, text })
+  const icsLocation = isVirtual ? (meetingUrl || (platform ? `Virtual — ${platform}` : 'Virtual')) : (location || 'On-site')
+  const icsDescription = [
+    `Interview for ${jobTitle}${jobDept ? ` · ${jobDept}` : ''} at ${companyName}`,
+    roundLabel,
+    isVirtual && meetingUrl ? `Join: ${meetingUrl}` : null,
+    opts.notes ? `Notes: ${opts.notes}` : null,
+  ].filter(Boolean).join('\n')
+  const attachment = buildIcsAttachment(
+    {
+      uid: `interview-${assessmentId}-candidate@247hr`,
+      title: `Interview: ${jobTitle} — ${companyName}`,
+      description: icsDescription,
+      location: icsLocation,
+      url: isVirtual ? meetingUrl : null,
+      start: opts.scheduledAt as Date,
+      durationMins: round?.duration || 60,
+      organizerName: `${companyName} Talent Team`,
+      attendeeName: candidateName,
+      attendeeEmail: candidateEmail,
+    },
+    'interview.ics',
+  )
+
+  const result = await sendEmail({
+    to: candidateEmail,
+    subject,
+    html,
+    text,
+    ...(attachment ? { attachments: [attachment] } : {}),
+  })
   return { success: result.success }
 }

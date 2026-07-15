@@ -24,21 +24,20 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     const body = await request.json().catch(() => ({}))
 
-    // HR/ADMIN/SUPER_ADMIN may approve directly (executive override) even when
-    // they are not a named approver in the chain.
+    // ONLY an assigned approver may approve — no blanket HR/ADMIN/SUPER_ADMIN
+    // override. If nobody has been assigned yet, an approver must be assigned first.
+    if (offer.approvals.length === 0) {
+      return withCors(ApiResponse.error('No approver has been assigned to this offer yet. Assign an approver first.', 409), origin)
+    }
     const userStep = offer.approvals.find(s => s.approverId === user.userId)
-    const canOverride = ['HR', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)
     if (!userStep) {
-      if (!canOverride) return withCors(ApiResponse.error('You are not in the approval chain for this offer', 403), origin)
-      // Approve every outstanding step and the offer itself.
-      await prisma.recruitmentOfferApproval.updateMany({
-        where: { offerId: params.id, status: { not: 'APPROVED' } },
-        data: { status: 'APPROVED', actedAt: new Date() },
-      })
-      await prisma.offer.update({ where: { id: params.id }, data: { status: 'APPROVED' } })
-      return withCors(ApiResponse.success({ offerId: offer.id, status: 'APPROVED' }, 'Offer approved.'), origin)
+      return withCors(ApiResponse.error('You are not an assigned approver for this offer. Only an assigned approver can approve it.', 403), origin)
     }
     if (userStep.status === 'APPROVED') return withCors(ApiResponse.error('You have already approved this offer', 409), origin)
+    // Sequential routing: an earlier approver must go first.
+    if (userStep.status === 'AWAITING_PREVIOUS') {
+      return withCors(ApiResponse.error('It is not your turn yet — an earlier approver must approve first.', 409), origin)
+    }
 
     // Approve this step
     await prisma.recruitmentOfferApproval.update({

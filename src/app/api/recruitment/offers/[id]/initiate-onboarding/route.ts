@@ -21,7 +21,18 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)
     if (offer.status !== 'ACCEPTED')
-      return withCors(ApiResponse.error('Offer not yet accepted', 400), origin)
+      return withCors(ApiResponse.error('Onboarding can only start once the candidate has accepted the offer.', 400), origin)
+
+    // Idempotent: if onboarding already started for this offer, return it.
+    const existing = await prisma.onboarding.findFirst({
+      where: { offerId: offer.id, archived: 0 },
+      select: { id: true, status: true },
+    })
+    if (existing) {
+      return withCors(ApiResponse.success({
+        offerId: offer.id, onboardingId: existing.id, status: 'ALREADY_STARTED',
+      }, 'Onboarding already started for this offer.'), origin)
+    }
 
     // Create onboarding record
     const onboarding = await prisma.onboarding.create({
@@ -33,6 +44,12 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         createdBy: user.userId,
       },
     })
+
+    // Attach any documents the candidate already uploaded post-acceptance.
+    await (prisma as any).candidateDocument.updateMany({
+      where: { candidateId: offer.candidateId, onboardingId: null, archived: 0 },
+      data: { onboardingId: onboarding.id },
+    }).catch(() => {})
 
     return withCors(ApiResponse.success({
       offerId: offer.id,

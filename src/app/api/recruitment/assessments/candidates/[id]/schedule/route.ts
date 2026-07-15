@@ -8,6 +8,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { Prisma } from '@prisma/client'
 import { signPanelToken } from '@/app/lib/assessments/panel-token'
 import { notifyInterviewScheduled, notifyCandidateInterviewScheduled } from '@/app/lib/assessments/panel-notify'
+import { ensureInterviewMeeting } from '@/app/lib/meetings/interview-meeting'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
     const body = await request.json()
     const { searchParams } = new URL(request.url)
     const companyId = searchParams.get('companyId')
@@ -65,7 +66,32 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     // access the interviewer dashboard even without being logged in.
     const panelAccessToken = signPanelToken(params.id)
 
-    const meetingDetails = buildMeetingDetails(body)
+    const meetingDetails: any = buildMeetingDetails(body)
+
+    // Auto-provision an internal 247HR meeting room when this is a virtual
+    // interview and no external link (Zoom/Meet/etc.) was supplied. The
+    // candidate joins by a tokenised link; interviewers join the plain room
+    // link via their session.
+    const isVirtual = String(body.type || '').toLowerCase() !== 'in-person'
+    if (isVirtual && !body.meetingUrl) {
+      try {
+        const internal = await ensureInterviewMeeting(params.id, {
+          scheduledAt,
+          durationMins: body.duration || null,
+          interviewerIds: body.interviewerIds,
+          createdBy: user.userId,
+        })
+        if (internal) {
+          meetingDetails.meetingUrl = internal.candidateLink
+          meetingDetails.panelMeetingUrl = internal.panelLink
+          meetingDetails.meetingId = internal.meetingId
+          meetingDetails.platform = internal.platformLabel
+        }
+      } catch (err) {
+        console.error(`[INTERVIEW_SCHEDULE] Internal room provisioning failed for ${params.id}:`, err)
+      }
+    }
+
     await (prisma as any).recruitmentCandidateAssessment.update({
       where: { id: params.id },
       data: {
@@ -112,7 +138,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
     const body = await request.json()
     const { searchParams } = new URL(request.url)
     const companyId = searchParams.get('companyId')
@@ -128,15 +154,44 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (assessment.roundStatus !== 'SCHEDULED')
       return withCors(ApiResponse.error('No interview is currently scheduled', 400), origin)
 
+    const existingMd: any = (assessment as any).meetingDetails && typeof (assessment as any).meetingDetails === 'object'
+      ? (assessment as any).meetingDetails
+      : {}
+
     const updateData: any = {}
     if (body.notes !== undefined) updateData.schedulingNotes = body.notes
     if (body.interviewerIds) updateData.interviewerIds = body.interviewerIds as Prisma.InputJsonValue
     const newWhen = (body.date || body.time) ? parseWhen(body.date, body.time) : null
     if (newWhen) updateData.scheduledAt = newWhen
     // Refresh meeting logistics when any of them are supplied.
-    if (body.type !== undefined || body.platform !== undefined || body.meetingUrl !== undefined || body.location !== undefined) {
-      updateData.meetingDetails = buildMeetingDetails(body)
+    const logisticsChanged = body.type !== undefined || body.platform !== undefined || body.meetingUrl !== undefined || body.location !== undefined
+    let meetingDetails: any = logisticsChanged ? buildMeetingDetails(body) : { ...existingMd }
+
+    // Keep the internal 247HR room in sync (time/panel), or provision one now if
+    // the interview is virtual with no external link and doesn't have a room yet.
+    const effectiveType = body.type !== undefined ? body.type : existingMd.interviewType
+    const isVirtual = String(effectiveType || '').toLowerCase() !== 'in-person'
+    const hasExternalUrl = body.meetingUrl || (!logisticsChanged && existingMd.meetingUrl && !existingMd.meetingId)
+    if (isVirtual && !hasExternalUrl) {
+      try {
+        const internal = await ensureInterviewMeeting(params.id, {
+          scheduledAt: newWhen || assessment.scheduledAt || null,
+          durationMins: body.duration || existingMd.duration || null,
+          interviewerIds: (body.interviewerIds || assessment.interviewerIds || []) as string[],
+          createdBy: user.userId,
+        })
+        if (internal) {
+          meetingDetails.meetingUrl = internal.candidateLink
+          meetingDetails.panelMeetingUrl = internal.panelLink
+          meetingDetails.meetingId = internal.meetingId
+          meetingDetails.platform = internal.platformLabel
+          meetingDetails.interviewType = effectiveType || meetingDetails.interviewType || 'virtual'
+        }
+      } catch (err) {
+        console.error(`[INTERVIEW_RESCHEDULE] Internal room sync failed for ${params.id}:`, err)
+      }
     }
+    if (logisticsChanged || meetingDetails.meetingId) updateData.meetingDetails = meetingDetails
 
     await (prisma as any).recruitmentCandidateAssessment.update({
       where: { id: params.id }, data: updateData,

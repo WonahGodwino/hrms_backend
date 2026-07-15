@@ -31,10 +31,11 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const round = assessment.plan.rounds[0]
     if (!round) return withCors(ApiResponse.error('Round not found for this plan', 404), origin)
 
-    // Final submission: check for existing and lock it.
+    // Final submission: block only if a FINAL (non-draft) evaluation already
+    // exists for this interviewer/round — a saved draft must not lock them out.
     if (!isDraft) {
       const existing = await prisma.recruitmentScorecard.findFirst({
-        where: { candidateAssessmentId: params.id, roundId: params.roundId, interviewerId: user.userId },
+        where: { candidateAssessmentId: params.id, roundId: params.roundId, interviewerId: user.userId, submittedAt: { not: null } },
         select: { id: true },
       })
       if (existing) {
@@ -42,7 +43,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       }
     }
 
-    // Upsert: draft updates, final create (locked by the check above)
+    // Upsert either way: a draft may already occupy this interviewer/round's
+    // unique row, so finalizing it must UPDATE that row (stamping submittedAt)
+    // rather than INSERT a new one, which would violate the unique constraint.
     if (isDraft) {
       await prisma.recruitmentScorecard.upsert({
         where: { candidateAssessmentId_roundId_interviewerId: { candidateAssessmentId: params.id, roundId: params.roundId, interviewerId: user.userId } },
@@ -50,16 +53,24 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
           candidateAssessmentId: params.id, roundId: params.roundId, interviewerId: user.userId,
           scores: scores as any, notes: notes || null,
           recommendation: recommendation === 'hire' ? 'HIRE' : recommendation === 'no_hire' ? 'NO_HIRE' : 'MAYBE',
+          submittedAt: null,
         },
         update: {
           scores: scores as any, notes: notes || null,
           recommendation: recommendation === 'hire' ? 'HIRE' : recommendation === 'no_hire' ? 'NO_HIRE' : 'MAYBE',
+          submittedAt: null,
         },
       })
     } else {
-      await prisma.recruitmentScorecard.create({
-        data: {
+      await prisma.recruitmentScorecard.upsert({
+        where: { candidateAssessmentId_roundId_interviewerId: { candidateAssessmentId: params.id, roundId: params.roundId, interviewerId: user.userId } },
+        create: {
           candidateAssessmentId: params.id, roundId: params.roundId, interviewerId: user.userId,
+          scores: scores as any, notes: notes || null,
+          recommendation: recommendation === 'hire' ? 'HIRE' : recommendation === 'no_hire' ? 'NO_HIRE' : 'MAYBE',
+          submittedAt: new Date(),
+        },
+        update: {
           scores: scores as any, notes: notes || null,
           recommendation: recommendation === 'hire' ? 'HIRE' : recommendation === 'no_hire' ? 'NO_HIRE' : 'MAYBE',
           submittedAt: new Date(),
@@ -110,6 +121,30 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         ? parseFloat((Object.values(aggregatedScores).reduce((a, b) => a + b, 0) / Object.values(aggregatedScores).length).toFixed(1))
         : 0
 
+      // Candidate-level FINAL score: `averageScore` used to be overwritten with
+      // just this round's average, silently discarding earlier rounds' scores
+      // when a candidate progressed through multiple rounds. Instead, average
+      // this round's score together with every other already-completed
+      // round's average (each round's own average, computed from ITS
+      // persisted scorecards) so earlier panel evaluations still count.
+      const priorRoundScorecards = await prisma.recruitmentScorecard.findMany({
+        where: { candidateAssessmentId: params.id, roundId: { not: params.roundId }, submittedAt: { not: null } },
+        select: { roundId: true, scores: true },
+      })
+      const priorRoundScoreLists = new Map<string, number[]>()
+      for (const sc of priorRoundScorecards) {
+        const values = Object.values(sc.scores as any).filter((v): v is number => typeof v === 'number')
+        if (values.length === 0) continue
+        if (!priorRoundScoreLists.has(sc.roundId)) priorRoundScoreLists.set(sc.roundId, [])
+        priorRoundScoreLists.get(sc.roundId)!.push(values.reduce((a, b) => a + b, 0) / values.length)
+      }
+      const priorRoundAverages = Array.from(priorRoundScoreLists.values())
+        .map((vals) => vals.reduce((a, b) => a + b, 0) / vals.length)
+      const allRoundAverages = [...priorRoundAverages, avgScore]
+      const overallAverageScore = parseFloat(
+        (allRoundAverages.reduce((a, b) => a + b, 0) / allRoundAverages.length).toFixed(1)
+      )
+
       const hire = allScorecards.filter((s) => s.recommendation === 'HIRE').length
       const noHire = allScorecards.filter((s) => s.recommendation === 'NO_HIRE').length
       const maybe = allScorecards.filter((s) => s.recommendation === 'MAYBE').length
@@ -121,7 +156,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         where: { id: params.id },
         data: {
           roundStatus: 'COMPLETED',
-          averageScore: avgScore,
+          averageScore: overallAverageScore,
         },
       })
 
@@ -129,7 +164,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         isRoundComplete: true,
         roundStatus: 'completed',
         pendingInterviewers: 0,
-        averageScore: avgScore,
+        roundAverageScore: avgScore,
+        averageScore: overallAverageScore,
         finalRecommendation,
         scoreBreakdown: allScorecards.map((sc) => ({
           interviewerId: sc.interviewerId,
@@ -144,5 +180,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
           : 'All panelists have submitted. Evaluation complete.',
       }), origin)
     }
+
+    // Round still awaiting other panelists — the scorecard was saved
+    // successfully, this just isn't the round-completing submission.
+    return withCors(ApiResponse.success({
+      isRoundComplete: false,
+      roundStatus: isDraft ? 'draft_saved' : 'pending_feedback',
+      pendingInterviewers: Math.max(requiredInterviewers.length - submitted, 0),
+    }, isDraft ? 'Draft saved.' : 'Evaluation submitted successfully.'), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }
 }

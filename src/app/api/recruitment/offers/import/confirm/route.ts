@@ -9,6 +9,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { parseOfferImportFile, EMAIL_RE } from '@/app/lib/offers/bulk-import-helpers'
 import { splitName } from '@/app/lib/offers/ad-hoc-helpers'
+import { applyApprovalWorkflow } from '@/app/lib/offers/approval-workflow'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -142,7 +143,7 @@ export async function POST(request: NextRequest) {
 
         const basePay = designation.basePay ?? designation.gradeLevel?.basePay ?? null
 
-        await prisma.offer.create({
+        const offer = await prisma.offer.create({
           data: {
             companyId,
             applicationId: application.id,
@@ -169,6 +170,8 @@ export async function POST(request: NextRequest) {
           where: { id: application.id },
           data: { status: 'OFFERED', updatedBy: actor },
         })
+
+        await applyApprovalWorkflow(offer.id, companyId)
 
         created++
       } catch (rowErr: any) {

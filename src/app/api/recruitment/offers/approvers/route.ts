@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
 
     const memberships = await prisma.userCompany.findMany({
-      where: { companyId, role: { in: ['HR', 'ADMIN'] } },
+      where: { companyId, role: { in: ['HR', 'ADMIN', 'SUPER_ADMIN'] } },
       include: {
         user: { select: { id: true, firstName: true, lastName: true, email: true, position: true, isActive: true } },
       },

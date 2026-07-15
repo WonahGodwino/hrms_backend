@@ -112,12 +112,19 @@ export async function GET(request: NextRequest) {
       orderBy: { scheduledAt: 'asc' },
     })
 
-    // Rounds the current user has already scored (to hide the evaluate CTA).
+    // Rounds the current user has already scored. A FINAL (submittedAt set)
+    // scorecard hides/locks the evaluate CTA; a DRAFT (submittedAt null) keeps
+    // it open so the panelist can resume and finish their evaluation.
     const scorecards = await prisma.recruitmentScorecard.findMany({
       where: { interviewerId: user.userId, candidateAssessmentId: { in: assessments.map((a: any) => a.id) } },
-      select: { candidateAssessmentId: true, roundId: true },
+      select: { candidateAssessmentId: true, roundId: true, submittedAt: true },
     })
-    const submitted = new Set(scorecards.map(s => `${s.candidateAssessmentId}:${s.roundId}`))
+    const submitted = new Set(
+      scorecards.filter((s) => s.submittedAt !== null).map((s) => `${s.candidateAssessmentId}:${s.roundId}`)
+    )
+    const drafted = new Set(
+      scorecards.filter((s) => s.submittedAt === null).map((s) => `${s.candidateAssessmentId}:${s.roundId}`)
+    )
 
     const data = assessments.map((a: any) => {
       const currentRound = a.plan.rounds.find((r: any) => r.order === a.currentRoundOrder)
@@ -145,6 +152,7 @@ export async function GET(request: NextRequest) {
         scheduledAt: a.scheduledAt ? a.scheduledAt.toISOString() : null,
         evaluationDeadlineHours: currentRound?.evaluationDeadlineHours ?? null,
         hasSubmitted: currentRound ? submitted.has(`${a.id}:${currentRound.id}`) : false,
+        hasDraft: currentRound ? drafted.has(`${a.id}:${currentRound.id}`) : false,
       }
     })
 

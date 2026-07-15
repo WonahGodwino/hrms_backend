@@ -15,7 +15,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const { searchParams } = new URL(request.url)
     const companyId = searchParams.get('companyId')
 
-    const where: any = { candidateAssessmentId: params.id, roundId: params.roundId }
+    // Only FINAL (non-draft) evaluations count as official feedback.
+    const where: any = { candidateAssessmentId: params.id, roundId: params.roundId, submittedAt: { not: null } }
     if (companyId) where.candidateAssessment = { companyId }
 
     const evaluations = await prisma.recruitmentScorecard.findMany({ where })
