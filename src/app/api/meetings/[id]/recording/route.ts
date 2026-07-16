@@ -8,6 +8,7 @@ import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { getMeetingProvider } from '@/app/lib/meetings/provider'
+import { hasModuleAccess } from '@/app/lib/module-access'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -21,6 +22,8 @@ async function loadHostMeeting(req: NextRequest, id: string) {
     where: { id }, include: { participants: true },
   })
   if (!meeting) return { error: 'Meeting not found', code: 404 as const }
+  const canUseMeetings = await hasModuleAccess(meeting.companyId, 'MEETINGS')
+  if (!canUseMeetings) return { error: 'This module is not available for your organisation', code: 403 as const }
   const isHost = meeting.participants.some((p: any) => p.staffId === user.userId && p.role === 'HOST')
   const isPrivileged = PRIVILEGED.includes(user.role) &&
     (user.companyId === meeting.companyId || (user.companyIds || []).includes(meeting.companyId))

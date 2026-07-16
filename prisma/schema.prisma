@@ -246,6 +246,30 @@ model CompanyModuleAccess {
   @@map("company_module_access")
 }
 
+model DemoRequest {
+  id               String   @id @default(cuid())
+  firstName        String
+  lastName         String
+  workEmail        String
+  phone            String
+  companyName      String
+  jobTitle         String
+  companySize      String
+  modules          Json
+  currentHRSystem  String
+  message          String?
+  status           String   @default("NOT_CONTACTED")
+  outcomeNote      String?
+  outcomeUpdatedBy String?
+  outcomeUpdatedAt DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([workEmail])
+  @@map("demo_requests")
+}
+
 model CompanyExchangeRate {
   id            String   @id @default(cuid())
   companyId     String

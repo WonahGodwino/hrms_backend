@@ -11,6 +11,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveScopedCompanyId } from '@/app/lib/company-scope'
 import { signMeetingAccessToken } from '@/app/lib/meetings/meeting-token'
+import { hasModuleAccess } from '@/app/lib/module-access'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -28,6 +29,8 @@ export async function GET(req: NextRequest) {
     if (scope.forbidden) return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
     if (!scope.companyId) return withCors(ApiResponse.error('Company ID is required', 400), origin)
     const companyId = scope.companyId
+    const canUseMeetings = await hasModuleAccess(companyId, 'MEETINGS')
+    if (!canUseMeetings) return withCors(ApiResponse.error('This module is not available for your organisation', 403), origin)
 
     const status = (searchParams.get('status') || '').trim().toUpperCase()
     const purpose = (searchParams.get('purpose') || '').trim().toUpperCase()
@@ -77,6 +80,8 @@ export async function POST(req: NextRequest) {
     if (scope.forbidden) return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
     if (!scope.companyId) return withCors(ApiResponse.error('Company ID is required', 400), origin)
     const companyId = scope.companyId
+    const canUseMeetings = await hasModuleAccess(companyId, 'MEETINGS')
+    if (!canUseMeetings) return withCors(ApiResponse.error('This module is not available for your organisation', 403), origin)
 
     const title = String(body.title || '').trim()
     if (!title) return withCors(ApiResponse.error('A meeting title is required', 400), origin)

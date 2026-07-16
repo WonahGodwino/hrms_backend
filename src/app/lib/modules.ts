@@ -14,6 +14,11 @@ export const PLATFORM_MODULES = [
     description: 'Job postings, applicant tracking, interviews and selection',
   },
   {
+    key:         'MEETINGS',
+    name:        'Meetings',
+    description: 'In-app video meetings, scheduling, lobby controls and recordings',
+  },
+  {
     key:         'ONBOARDING',
     name:        'Onboarding',
     description: 'New hire onboarding workflows, checklists and command centre',
