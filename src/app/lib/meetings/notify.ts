@@ -7,6 +7,13 @@ const FRONTEND_URL = (process.env.FRONTEND_URL || 'https://247hr.co.uk').replace
 
 type NotifyType = 'created' | 'rescheduled'
 
+type DeliverySummary = {
+  attempted: number
+  sent: number
+  failed: number
+  failures: Array<{ recipient: string; reason: string }>
+}
+
 function fmtWhen(d: Date | null): string {
   if (!d || isNaN(d.getTime())) return 'To be confirmed'
   return d.toLocaleString('en-GB', {
@@ -56,7 +63,8 @@ function outlookCalendarLink(args: {
 export async function notifyMeetingParticipants(
   meetingId: string,
   type: NotifyType,
-): Promise<{ attempted: number; sent: number; failed: number }> {
+  opts?: { triggeredBy?: string | null },
+): Promise<DeliverySummary> {
   const meeting: any = await (prisma as any).meeting.findUnique({
     where: { id: meetingId },
     include: {
@@ -64,11 +72,11 @@ export async function notifyMeetingParticipants(
       company: { select: { companyName: true } },
     },
   })
-  if (!meeting) return { attempted: 0, sent: 0, failed: 0 }
+  if (!meeting) return { attempted: 0, sent: 0, failed: 0, failures: [] }
 
   const companyName = meeting.company?.companyName || 'Your organisation'
   const participants = Array.isArray(meeting.participants) ? meeting.participants : []
-  if (participants.length === 0) return { attempted: 0, sent: 0, failed: 0 }
+  if (participants.length === 0) return { attempted: 0, sent: 0, failed: 0, failures: [] }
 
   const staffIds = participants.map((p: any) => p.staffId).filter(Boolean)
   const staff = staffIds.length
@@ -112,10 +120,14 @@ export async function notifyMeetingParticipants(
     })
     .filter(Boolean) as Array<{ participantId: string; role: string; to: string; name: string; joinLink: string }>
 
-  if (targets.length === 0) return { attempted: 0, sent: 0, failed: 0 }
+  if (targets.length === 0) return { attempted: 0, sent: 0, failed: 0, failures: [] }
 
-  const results = await Promise.allSettled(
-    targets.map((t) => {
+  let sent = 0
+  let failed = 0
+  const failures: Array<{ recipient: string; reason: string }> = []
+
+  for (const t of targets) {
+    try {
       const intro = type === 'rescheduled'
         ? `Your meeting <strong>${meeting.title}</strong> at <strong>${companyName}</strong> has been <strong>rescheduled</strong>. Please use your same secure link below.`
         : `You have been invited to a meeting: <strong>${meeting.title}</strong> at <strong>${companyName}</strong>.`
@@ -205,21 +217,61 @@ ${companyName} Team`
         'meeting-invite.ics',
       )
 
-      return sendEmail({
+      const result = await sendEmail({
         to: t.to,
         subject,
         html,
         text,
         ...(attachment ? { attachments: [attachment] } : {}),
       })
-    }),
-  )
+      if (result.success) {
+        sent++
+      } else {
+        failed++
+        failures.push({ recipient: t.to, reason: result.error || 'Email provider rejected message' })
+      }
 
-  let sent = 0
-  let failed = 0
-  for (const r of results) {
-    if (r.status === 'fulfilled' && (r.value as any)?.success) sent++
-    else failed++
+      await prisma.emailLog.create({
+        data: {
+          companyId: meeting.companyId,
+          emailType: type === 'rescheduled' ? 'MEETING_RESCHEDULE' : 'MEETING_INVITATION',
+          recipient: t.to,
+          status: result.success ? 'SENT' : 'FAILED',
+          sentBy: opts?.triggeredBy || meeting.createdBy || null,
+          error: result.success ? null : (result.error || 'Email delivery failed'),
+          metadata: {
+            meetingId: meeting.id,
+            participantId: t.participantId,
+            participantRole: t.role,
+            isExternal: t.joinLink.includes('?token='),
+            purpose: meeting.purpose,
+            trigger: type,
+          },
+        },
+      }).catch(() => {})
+    } catch (e: any) {
+      failed++
+      const reason = e?.message || 'Unhandled meeting notification error'
+      failures.push({ recipient: t.to, reason })
+
+      await prisma.emailLog.create({
+        data: {
+          companyId: meeting.companyId,
+          emailType: type === 'rescheduled' ? 'MEETING_RESCHEDULE' : 'MEETING_INVITATION',
+          recipient: t.to,
+          status: 'FAILED',
+          sentBy: opts?.triggeredBy || meeting.createdBy || null,
+          error: reason,
+          metadata: {
+            meetingId: meeting.id,
+            participantId: t.participantId,
+            participantRole: t.role,
+            trigger: type,
+          },
+        },
+      }).catch(() => {})
+    }
   }
-  return { attempted: targets.length, sent, failed }
+
+  return { attempted: targets.length, sent, failed, failures }
 }

@@ -106,12 +106,27 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const hadRescheduleFields = body.scheduledAt !== undefined || body.durationMins !== undefined || body.title !== undefined
     const updated = await (prisma as any).meeting.update({ where: { id }, data })
 
-    // Best-effort update notifications for meeting changes. Existing participant
-    // links remain stable because tokens are always derived from participant id.
+    // Update notifications for meeting changes. Existing participant links
+    // remain stable because tokens are always derived from participant id.
+    let emailDelivery = null
     if (hadRescheduleFields) {
-      notifyMeetingParticipants(updated.id, 'rescheduled').catch(() => {})
+      emailDelivery = await notifyMeetingParticipants(updated.id, 'rescheduled', { triggeredBy: user.userId })
+      if (emailDelivery.failed > 0) {
+        console.warn('[meetings] reschedule email failures', {
+          meetingId: updated.id,
+          failed: emailDelivery.failed,
+          attempted: emailDelivery.attempted,
+          failures: emailDelivery.failures,
+        })
+      } else {
+        console.info('[meetings] reschedule email delivery', {
+          meetingId: updated.id,
+          sent: emailDelivery.sent,
+          attempted: emailDelivery.attempted,
+        })
+      }
     }
-    return withCors(ApiResponse.success({ id: updated.id, status: updated.status }, 'Meeting updated'), origin)
+    return withCors(ApiResponse.success({ id: updated.id, status: updated.status, emailDelivery }, 'Meeting updated'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 

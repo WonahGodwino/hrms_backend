@@ -18,6 +18,7 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 
 const ROLES = ['HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER', 'STAFF']
 const PRIVILEGED = ['HR', 'ADMIN', 'SUPER_ADMIN']
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i
 
 export async function GET(req: NextRequest) {
   const origin = req.headers.get('origin')
@@ -105,6 +106,17 @@ export async function POST(req: NextRequest) {
         role: String(p.role || 'ATTENDEE').toUpperCase() === 'HOST' ? 'HOST' : 'ATTENDEE',
       }))
       .filter((p) => p.staffId || p.externalEmail)
+
+    const invalidExternalEmails = participants
+      .filter((p) => !p.staffId && p.externalEmail && !EMAIL_RE.test(p.externalEmail))
+      .map((p) => p.externalEmail)
+    if (invalidExternalEmails.length > 0) {
+      return withCors(
+        ApiResponse.error(`Invalid external participant email(s): ${[...new Set(invalidExternalEmails)].join(', ')}`, 400),
+        origin,
+      )
+    }
+
     if (!participants.some((p) => p.staffId === user.userId)) {
       participants.unshift({ staffId: user.userId, externalName: null, externalEmail: null, role: 'HOST' })
     }
@@ -137,9 +149,21 @@ export async function POST(req: NextRequest) {
       accessToken: signMeetingAccessToken(meeting.id, p.id),
     }))
 
-    // Best-effort: send invitation emails (with calendar attachments/links) to all
-    // participants. Response is not blocked by email provider latency/failures.
-    notifyMeetingParticipants(meeting.id, 'created').catch(() => {})
+    const emailDelivery = await notifyMeetingParticipants(meeting.id, 'created', { triggeredBy: user.userId })
+    if (emailDelivery.failed > 0) {
+      console.warn('[meetings] invitation email failures', {
+        meetingId: meeting.id,
+        failed: emailDelivery.failed,
+        attempted: emailDelivery.attempted,
+        failures: emailDelivery.failures,
+      })
+    } else {
+      console.info('[meetings] invitation email delivery', {
+        meetingId: meeting.id,
+        sent: emailDelivery.sent,
+        attempted: emailDelivery.attempted,
+      })
+    }
 
     return withCors(ApiResponse.success({
       id: meeting.id,
@@ -149,6 +173,7 @@ export async function POST(req: NextRequest) {
       status: meeting.status,
       scheduledAt: meeting.scheduledAt,
       invites,
+      emailDelivery,
     }, 'Meeting created', 201), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }

@@ -76,6 +76,7 @@ model Company {
   jobs                   Job[]
   offers                 Offer[]
   onboardings            Onboarding[]
+  meetings               Meeting[]
   
   // Leave Management
   leave_blackout_periods leave_blackout_periods[]
@@ -645,6 +646,7 @@ model Meeting {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
+  company               Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   participants          MeetingParticipant[]
 
   @@index([companyId, status])
