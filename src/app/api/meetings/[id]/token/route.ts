@@ -24,6 +24,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { id } = await params
     const body = await req.json().catch(() => ({}))
     const accessToken = body?.token || new URL(req.url).searchParams.get('token')
+    const accessEmail = body?.email ? String(body.email).trim().toLowerCase() : ''
 
     const provider = getMeetingProvider()
     if (!provider.isConfigured()) {
@@ -56,6 +57,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       }
       participant = meeting.participants.find((p: any) => p.id === decoded.participantId)
       if (!participant) return withCors(ApiResponse.error('You are not a participant of this meeting', 403), origin)
+
+      // External participant security: bind this invite token to the participant's
+      // invited email address. First successful join stores accessEmail on the
+      // participant record; subsequent joins must use the same email.
+      if (participant.externalEmail) {
+        if (!accessEmail) {
+          return withCors(ApiResponse.error('Please provide your invitation email to continue', 400), origin)
+        }
+        const invited = String(participant.externalEmail).trim().toLowerCase()
+        if (accessEmail !== invited) {
+          return withCors(ApiResponse.error('This invitation link is not valid for this email address', 403), origin)
+        }
+        if (participant.accessEmail && String(participant.accessEmail).trim().toLowerCase() !== accessEmail) {
+          return withCors(ApiResponse.error('This invitation link has already been bound to another email', 403), origin)
+        }
+        if (!participant.accessEmail) {
+          await (prisma as any).meetingParticipant.update({
+            where: { id: participant.id },
+            data: { accessEmail },
+          }).catch(() => {})
+        }
+      }
       identity = `p_${participant.id}`
       displayName = participant.externalName
         || (participant.staffId ? await staffName(participant.staffId) : 'Guest')
@@ -104,6 +127,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       token: joinToken,
       wsUrl: provider.wsUrl,
       roomName: meeting.roomName,
+      meetingTitle: meeting.title,
       identity,
       name: displayName,
       isHost,

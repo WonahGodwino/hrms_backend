@@ -9,6 +9,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { getMeetingProvider } from '@/app/lib/meetings/provider'
 import { hasModuleAccess } from '@/app/lib/module-access'
+import { notifyMeetingParticipants } from '@/app/lib/meetings/notify'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -31,7 +32,12 @@ async function loadForUser(id: string, user: any) {
   if (!isParticipant && !isPrivileged && !isCreator) {
     return { error: { message: 'You do not have access to this meeting', status: 403 } as const }
   }
-  return { meeting, canManage: isPrivileged || isCreator }
+  // Reschedule/update policy:
+  // - Creator can manage their own meeting.
+  // - Privileged users can manage interview-linked rooms (recruitment workflow).
+  // - For normal work meetings, HR/ADMIN/SUPER_ADMIN cannot edit someone else's meeting.
+  const canManage = isCreator || (isPrivileged && !!meeting.candidateAssessmentId)
+  return { meeting, canManage }
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -74,7 +80,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const res = await loadForUser(id, user)
     if (res.error) return withCors(ApiResponse.error(res.error.message, res.error.status), origin)
-    if (!res.canManage) return withCors(ApiResponse.error('Only the host can update this meeting', 403), origin)
+
+    const creatorIsAdminOrHr =
+      res.meeting.createdBy === user.userId && ['ADMIN', 'HR'].includes(user.role)
+    const privilegedInterviewOwner =
+      PRIVILEGED.includes(user.role) && !!res.meeting.candidateAssessmentId
+    if (!creatorIsAdminOrHr && !privilegedInterviewOwner) {
+      return withCors(ApiResponse.error('Only the ADMIN/HR creator can update this meeting', 403), origin)
+    }
 
     const data: any = {}
     if (body.title !== undefined) {
@@ -90,7 +103,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       data.status = s
     }
 
+    const hadRescheduleFields = body.scheduledAt !== undefined || body.durationMins !== undefined || body.title !== undefined
     const updated = await (prisma as any).meeting.update({ where: { id }, data })
+
+    // Best-effort update notifications for meeting changes. Existing participant
+    // links remain stable because tokens are always derived from participant id.
+    if (hadRescheduleFields) {
+      notifyMeetingParticipants(updated.id, 'rescheduled').catch(() => {})
+    }
     return withCors(ApiResponse.success({ id: updated.id, status: updated.status }, 'Meeting updated'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }

@@ -12,6 +12,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveScopedCompanyId } from '@/app/lib/company-scope'
 import { signMeetingAccessToken } from '@/app/lib/meetings/meeting-token'
 import { hasModuleAccess } from '@/app/lib/module-access'
+import { notifyMeetingParticipants } from '@/app/lib/meetings/notify'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -99,8 +100,8 @@ export async function POST(req: NextRequest) {
     const participants = rawParts
       .map((p) => ({
         staffId: p.staffId ? String(p.staffId) : null,
-        externalName: p.externalName ? String(p.externalName) : null,
-        externalEmail: p.externalEmail ? String(p.externalEmail) : null,
+        externalName: p.externalName ? String(p.externalName).trim() : null,
+        externalEmail: p.externalEmail ? String(p.externalEmail).trim().toLowerCase() : null,
         role: String(p.role || 'ATTENDEE').toUpperCase() === 'HOST' ? 'HOST' : 'ATTENDEE',
       }))
       .filter((p) => p.staffId || p.externalEmail)
@@ -135,6 +136,10 @@ export async function POST(req: NextRequest) {
       role: p.role,
       accessToken: signMeetingAccessToken(meeting.id, p.id),
     }))
+
+    // Best-effort: send invitation emails (with calendar attachments/links) to all
+    // participants. Response is not blocked by email provider latency/failures.
+    notifyMeetingParticipants(meeting.id, 'created').catch(() => {})
 
     return withCors(ApiResponse.success({
       id: meeting.id,

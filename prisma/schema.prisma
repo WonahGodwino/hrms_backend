@@ -662,6 +662,9 @@ model MeetingParticipant {
   externalName  String?
   externalEmail String?
   role          String    @default("ATTENDEE") // HOST | ATTENDEE
+  // First email that redeemed this participant link. Enforces one-invite-per-person
+  // when organisations invite external/non-staff participants.
+  accessEmail   String?
   joinedAt      DateTime?
   leftAt        DateTime?
   createdAt     DateTime  @default(now())
