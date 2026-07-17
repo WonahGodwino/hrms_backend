@@ -26,11 +26,13 @@ export const ReviewResignationSchema = z.object({
 // Upload Handover Schema
 export const UploadHandoverSchema = z.object({
 	handoverDocument: z.string().min(1, 'Handover document is required'),
+	companyId: z.string().optional(),
 });
 
 // Approve Offboarding Schema
 export const ApproveOffboardingSchema = z.object({
 	comment: z.string().optional(),
+	companyId: z.string().optional(),
 });
 
 // Query Filters Schema

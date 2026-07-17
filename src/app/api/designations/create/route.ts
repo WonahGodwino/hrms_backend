@@ -22,9 +22,18 @@ export async function POST(req: NextRequest) {
     // Grade-based unless explicitly told otherwise (or a grade string is supplied).
     const useGrade = hasGradeLevel === undefined ? !!grade : !!hasGradeLevel
 
-    const companyId = user.role === 'SUPER_ADMIN' ? (body.companyId || undefined) : user.companyId
+    // Resolve companyId from the global selector (body) first, then fall back
+    // to the value stored in the JWT at login time.
+    const companyId = body.companyId || user.companyId
 
-    const existing = await (prisma as any).designation.findFirst({ where: { code, companyId: companyId || null } })
+    if (!companyId) {
+      return withCors(ApiResponse.error('Company ID is required', 400), origin)
+    }
+    if (user.companyIds && !user.companyIds.includes(companyId)) {
+      return withCors(ApiResponse.error('You do not have access to the selected company', 403), origin)
+    }
+
+    const existing = await (prisma as any).designation.findFirst({ where: { code, companyId } })
     if (existing) return withCors(ApiResponse.error(`Code "${code}" already exists`, 409), origin)
 
     let gradeLevelId: string | null = null
