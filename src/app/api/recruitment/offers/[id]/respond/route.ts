@@ -16,13 +16,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
     const { id } = await params
-    const companyId = new URL(request.url).searchParams.get('companyId') || user.companyId
+    const body = await request.json().catch(() => ({}))
+    const companyId = new URL(request.url).searchParams.get('companyId') || body.companyId || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
 
     const offer = await prisma.offer.findFirst({ where: { id, companyId } })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)
 
-    const body = await request.json().catch(() => ({}))
     const decision = String(body.decision || '').toUpperCase()
     if (!['ACCEPTED', 'DECLINED'].includes(decision))
       return withCors(ApiResponse.error("decision must be 'ACCEPTED' or 'DECLINED'", 400), origin)

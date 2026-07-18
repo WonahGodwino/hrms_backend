@@ -34,9 +34,8 @@ async function loadForUser(id: string, user: any) {
   }
   // Reschedule/update policy:
   // - Creator can manage their own meeting.
-  // - Privileged users can manage interview-linked rooms (recruitment workflow).
-  // - For normal work meetings, HR/ADMIN/SUPER_ADMIN cannot edit someone else's meeting.
-  const canManage = isCreator || (isPrivileged && !!meeting.candidateAssessmentId)
+  // - Privileged users (HR/ADMIN/SUPER_ADMIN) can manage any meeting in their company.
+  const canManage = isCreator || isPrivileged;
   return { meeting, canManage }
 }
 

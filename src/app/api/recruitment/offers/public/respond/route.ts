@@ -163,10 +163,31 @@ export async function POST(request: NextRequest) {
       }).catch(() => {})
     }
 
+    // Begin onboarding immediately upon acceptance so the candidate's subsequent
+    // document uploads are part of the onboarding process from day one.
+    let onboardingId: string | null = null
+    if (decision === 'ACCEPTED') {
+      const existing = await prisma.onboarding.findUnique({ where: { offerId: offer.id } }).catch(() => null)
+      if (existing) {
+        onboardingId = existing.id
+      } else {
+        const onboarding = await prisma.onboarding.create({
+          data: {
+            companyId: offer.companyId,
+            offerId: offer.id,
+            status: 'IN_PROGRESS',
+            startDate: offer.proposedStartDate || now,
+            createdBy: 'candidate',
+          },
+        })
+        onboardingId = onboarding.id
+      }
+    }
+
     return withCors(ApiResponse.success(
-      { decision, canUpload: decision === 'ACCEPTED' },
+      { decision, canUpload: decision === 'ACCEPTED', onboardingId },
       decision === 'ACCEPTED'
-        ? 'Offer accepted. Please upload your signed offer letter below to complete the process.'
+        ? 'Offer accepted. Your onboarding has been started. Please upload your signed offer letter and required documents below.'
         : 'Your response has been recorded. Thank you for letting us know.',
     ), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }

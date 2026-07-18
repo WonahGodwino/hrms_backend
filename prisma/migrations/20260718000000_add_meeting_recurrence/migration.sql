@@ -1,0 +1,13 @@
+-- Recurrence config for recurring meetings. Stores the repeat pattern as a JSON
+-- column so the backend can generate individual Meeting records for each
+-- occurrence. NULL means one-time (non-recurring).
+--
+-- Structure:
+--   {"frequency":"daily"|"weekly"|"biweekly"|"monthly",
+--    "daysOfWeek":[1,3,5],     -- 0=Sun…6=Sat (only for weekly/biweekly)
+--    "interval":1,             -- every N weeks/months
+--    "endDate":"2026-12-31",   -- optional cutoff
+--    "occurrences":10}         -- optional max count
+--
+-- Additive / nullable — existing rows are unaffected.
+ALTER TABLE "meetings" ADD COLUMN "recurrence" JSONB;

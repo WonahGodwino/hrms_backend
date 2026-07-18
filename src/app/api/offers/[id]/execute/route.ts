@@ -23,7 +23,14 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     if (!user.companyId) {
       return withCors(ApiResponse.error('Company context missing for this user', 400), origin)
     }
-    const companyId = String(user.companyId)
+
+    const formData = await request.formData()
+    const pdf = await readPdfUpload(formData.get('file') as File | null)
+    if ('error' in pdf) return withCors(ApiResponse.error(pdf.error, 400), origin)
+
+    // Resolve companyId: global selector (formData) > JWT
+    const formCompanyId = (formData.get('companyId') as string | null) || undefined
+    const companyId = formCompanyId || String(user.companyId)
     const actor = user.userId || user.email || 'system'
 
     const offer = await prisma.offer.findFirst({
@@ -31,10 +38,6 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       select: { id: true, candidateId: true, applicationId: true, metadata: true, status: true },
     })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)
-
-    const formData = await request.formData()
-    const pdf = await readPdfUpload(formData.get('file') as File | null)
-    if ('error' in pdf) return withCors(ApiResponse.error(pdf.error, 400), origin)
 
     const meta = readOfferMetadata(offer.metadata)
     const initiateOnboarding = !!meta.initiateOnboarding
@@ -89,7 +92,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         await tx.onboarding.upsert({
           where: { offerId: offer.id },
           update: {},
-          create: { companyId, offerId: offer.id, status: 'NOT_STARTED', createdBy: actor },
+          create: { companyId, offerId: offer.id, status: 'IN_PROGRESS', createdBy: actor },
         })
       }
     })

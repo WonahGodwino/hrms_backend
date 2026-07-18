@@ -20,6 +20,105 @@ const ROLES = ['HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER', 'STAFF']
 const PRIVILEGED = ['HR', 'ADMIN', 'SUPER_ADMIN']
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i
 
+// Generates meeting instances from a recurrence config. Returns created instances.
+async function generateRecurringInstances(
+  companyId: string,
+  parent: any,
+  participants: any[],
+  createdBy: string,
+): Promise<any[]> {
+  const rec = parent.recurrence
+  if (!rec || !parent.scheduledAt) return []
+  const { frequency, daysOfWeek, interval, endDate, occurrences } = rec
+  if (!frequency) return []
+
+  const start = new Date(parent.scheduledAt)
+  const maxOccurrences = Math.min(occurrences || 52, 365)
+  const end = endDate ? new Date(endDate) : new Date(start.getTime() + 365 * 24 * 60 * 60 * 1000)
+  const durationMs = parent.durationMins ? parent.durationMins * 60 * 1000 : 60 * 60 * 1000
+  const instances: Date[] = []
+
+  const advance = (d: Date, freq: string, intervalNum: number) => {
+    const next = new Date(d)
+    if (freq === 'daily') next.setDate(next.getDate() + intervalNum)
+    else if (freq === 'weekly') next.setDate(next.getDate() + 7 * intervalNum)
+    else if (freq === 'biweekly') next.setDate(next.getDate() + 14 * intervalNum)
+    else if (freq === 'monthly') next.setMonth(next.getMonth() + intervalNum)
+    return next
+  }
+
+  if (frequency === 'weekly' || frequency === 'biweekly') {
+    // Generate the next N weeks, then filter by selected daysOfWeek.
+    const weekInterval = frequency === 'biweekly' ? 2 : 1
+    const weekCount = Math.min(
+      Math.ceil((end.getTime() - start.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1,
+      Math.ceil(maxOccurrences / (daysOfWeek?.length || 1)) + 1,
+    )
+    const selectedDays: number[] = Array.isArray(daysOfWeek) && daysOfWeek.length
+      ? daysOfWeek.map((d: number) => d % 7)
+      : [start.getDay()]
+
+    for (let w = 0; w < weekCount * weekInterval; w += weekInterval) {
+      const weekStart = new Date(start)
+      weekStart.setDate(weekStart.getDate() + w * 7)
+      for (const day of selectedDays) {
+        const candidate = new Date(weekStart)
+        candidate.setDate(candidate.getDate() - start.getDay() + day + (day < start.getDay() ? 7 : 0))
+        candidate.setHours(start.getHours(), start.getMinutes(), start.getSeconds(), start.getMilliseconds())
+        if (candidate > start && candidate <= end && instances.length < maxOccurrences) {
+          instances.push(candidate)
+        }
+      }
+    }
+  } else {
+    // daily / monthly: sequential advance
+    let current = new Date(start)
+    while (current <= end && instances.length < maxOccurrences - 1) {
+      const next = advance(new Date(current), frequency, interval || 1)
+      if (next > end || instances.length >= maxOccurrences - 1) break
+      instances.push(next)
+      current = next
+    }
+  }
+
+  if (instances.length === 0) return []
+
+  const created: any[] = []
+  for (const date of instances) {
+    const instanceRoom = `mtg-${randomUUID()}`
+    const instance = await (prisma as any).meeting.create({
+      data: {
+        companyId,
+        title: parent.title,
+        purpose: parent.purpose,
+        provider: parent.provider || 'livekit',
+        roomName: instanceRoom,
+        scheduledAt: date,
+        durationMins: parent.durationMins,
+        status: 'SCHEDULED',
+        createdBy,
+        lobbyEnabled: !!parent.lobbyEnabled,
+        recurrence: { ...rec, parentMeetingId: parent.id },
+        participants: { create: participants.map((p: any) => ({
+          staffId: p.staffId,
+          externalName: p.externalName,
+          externalEmail: p.externalEmail,
+          role: p.role,
+        })) },
+      },
+      include: { participants: true },
+    })
+    created.push(instance)
+
+    // Notify participants for each instance.
+    try {
+      await notifyMeetingParticipants(instance.id, 'created', { triggeredBy: createdBy })
+    } catch { /* non-fatal */ }
+  }
+
+  return created
+}
+
 export async function GET(req: NextRequest) {
   const origin = req.headers.get('origin')
   try {
@@ -64,6 +163,7 @@ export async function GET(req: NextRequest) {
       candidateAssessmentId: m.candidateAssessmentId,
       recordingUrl: m.recordingUrl || null,
       lobbyEnabled: !!m.lobbyEnabled,
+      recurrence: m.recurrence || null,
       participantCount: m.participants.length,
     }))
 
@@ -134,10 +234,19 @@ export async function POST(req: NextRequest) {
         createdBy: user.userId,
         candidateAssessmentId: body.candidateAssessmentId ? String(body.candidateAssessmentId) : null,
         lobbyEnabled: !!body.lobbyEnabled,
+        recurrence: body.recurrence || null,
         participants: { create: participants },
       },
       include: { participants: true },
     })
+
+    // ---- Generate recurring instances if recurrence is configured ----
+    let instances: any[] = []
+    if (body.recurrence && body.scheduledAt) {
+      instances = await generateRecurringInstances(
+        companyId, meeting, participants, user.userId,
+      )
+    }
 
     // Per-participant access tokens (for building join links in invitations).
     const invites = meeting.participants.map((p: any) => ({
@@ -172,6 +281,8 @@ export async function POST(req: NextRequest) {
       roomName: meeting.roomName,
       status: meeting.status,
       scheduledAt: meeting.scheduledAt,
+      recurrence: meeting.recurrence,
+      instanceCount: instances.length,
       invites,
       emailDelivery,
     }, 'Meeting created', 201), origin)

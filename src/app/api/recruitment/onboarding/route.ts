@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
     if (candidateIds.length) {
       const cds = await (prisma as any).candidateDocument.findMany({
         where: { candidateId: { in: candidateIds }, category: { in: REQUIRED_CATEGORIES }, archived: 0 },
-        select: { candidateId: true, category: true, fileName: true, filePath: true, createdAt: true },
+        select: { id: true, candidateId: true, category: true, fileName: true, filePath: true, reviewStatus: true, rejectionReason: true, createdAt: true },
         orderBy: { createdAt: 'desc' },
       })
       for (const d of cds) (candDocsByCandidate[d.candidateId] ||= []).push(d)
@@ -97,9 +97,12 @@ export async function GET(request: NextRequest) {
         offerId: o.offerId,
         candidate: c ? { id: c.id, name: `${c.firstName} ${c.lastName}`.trim(), email: c.email } : null,
         candidateDocuments: candDocs.map((d) => ({
+          id: d.id,
           category: d.category,
           fileName: d.fileName,
           url: d.filePath,
+          reviewStatus: d.reviewStatus || 'PENDING',
+          rejectionReason: d.rejectionReason || null,
           uploadedAt: d.createdAt ? new Date(d.createdAt).toISOString() : null,
         })),
         role: handoff.jobTitle || (o.offer as any)?.application?.job?.title || 'Unknown',

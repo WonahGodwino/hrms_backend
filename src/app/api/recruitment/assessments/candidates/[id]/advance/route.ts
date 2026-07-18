@@ -12,8 +12,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const body = await request.json().catch(() => ({}))
     const { searchParams } = new URL(request.url)
-    const companyId = searchParams.get('companyId')
+    const companyId = searchParams.get('companyId') || body.companyId
 
     const where: any = { id: params.id }
     if (companyId) where.companyId = companyId

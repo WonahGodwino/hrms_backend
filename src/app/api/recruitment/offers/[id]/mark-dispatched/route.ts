@@ -11,15 +11,19 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const body = await request.json().catch(() => ({}))
     const { searchParams } = new URL(request.url)
-    const companyId = searchParams.get('companyId')
+    const companyId = searchParams.get('companyId') || body.companyId
 
     const where: any = { id: params.id }
     if (companyId) where.companyId = companyId
 
     const offer = await prisma.offer.findFirst({ where })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)
+    if (offer.status !== 'APPROVED') {
+      return withCors(ApiResponse.error('Only approved offers can be dispatched. Current status: ' + offer.status, 400), origin)
+    }
 
     // Validate required company offer letter settings before dispatch
     const company = await prisma.company.findUnique({

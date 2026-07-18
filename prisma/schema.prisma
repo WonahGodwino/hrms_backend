@@ -643,6 +643,7 @@ model Meeting {
   recordingRequested    Boolean   @default(false)
   recordingEgressId     String?
   lobbyEnabled          Boolean   @default(false)
+  recurrence            Json?     // recurring schedule: { frequency, daysOfWeek, interval, endDate, occurrences }
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -1093,6 +1094,10 @@ model CandidateDocument {
   filePath     String
   fileName     String
   uploadedBy   String?
+  reviewStatus String?   @default("PENDING")  // PENDING | APPROVED | REJECTED
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  rejectionReason String?
   createdAt    DateTime              @default(now())
   updatedAt    DateTime              @default(now()) @updatedAt
   archived     Int?                  @default(0)

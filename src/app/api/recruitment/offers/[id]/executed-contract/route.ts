@@ -55,17 +55,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
     const { id } = await params
-    const companyId = new URL(request.url).searchParams.get('companyId') || user.companyId
-    if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
+
+    // For POST: parse formData first to extract companyId from the global selector.
+    const formData = await request.formData()
+    const formCompanyId = (formData.get('companyId') as string | null) || undefined
+    const effectiveCompanyId = formCompanyId || new URL(request.url).searchParams.get('companyId') || user.companyId
+    if (!effectiveCompanyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
     const actor = user.userId || user.email || 'system'
 
-    const offer = await prisma.offer.findFirst({ where: { id, companyId } })
+    const offer = await prisma.offer.findFirst({ where: { id, companyId: effectiveCompanyId } })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)
     if (!['APPROVED', 'AWAITING_SIGNATURE', 'SENT', 'ACCEPTED'].includes(offer.status)) {
       return withCors(ApiResponse.error('This offer has not been dispatched for signature yet', 400), origin)
     }
 
-    const formData = await request.formData()
     const file = formData.get('file') as File | null
     const initiateOnboarding = String(formData.get('initiateOnboarding') ?? 'true') !== 'false'
     if (!file) return withCors(ApiResponse.error('No file uploaded', 400), origin)
@@ -114,7 +117,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       } else {
         const onboarding = await prisma.onboarding.create({
           data: {
-            companyId,
+            companyId: effectiveCompanyId,
             offerId: offer.id,
             status: 'IN_PROGRESS',
             startDate: offer.proposedStartDate || now,
