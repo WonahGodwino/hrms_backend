@@ -181,6 +181,51 @@ export async function PATCH(request: NextRequest) {
       emailsDispatched = sends.some((r) => r.status === 'fulfilled' && (r.value as any)?.success)
     }
 
+    // 7b. Best-effort shortlist congratulations emails
+    if (status === 'SHORTLISTED' && notifyCandidate) {
+      const sends = await Promise.allSettled(
+        applications.map((a) => {
+          const name = `${a.candidate.firstName} ${a.candidate.lastName}`.trim()
+          return sendEmail({
+            to: a.candidate.email,
+            subject: `Congratulations — You've Been Shortlisted!`,
+            html: `
+              <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px;">
+                <div style="text-align: center; padding: 24px 0 16px; border-bottom: 2px solid #137fec;">
+                  <h1 style="margin: 0; font-size: 20px; color: #137fec; font-weight: 800;">Congratulations!</h1>
+                </div>
+                <p style="margin: 20px 0 12px; font-size: 15px;">Dear ${name || 'Candidate'},</p>
+                <p style="margin: 12px 0; font-size: 15px; line-height: 1.7;">
+                  We are pleased to inform you that you have been <strong>shortlisted</strong> for the position you applied for.
+                  Your application stood out, and we are excited about the possibility of you joining our team.
+                </p>
+                <p style="margin: 16px 0; font-size: 15px; line-height: 1.7;">
+                  You can expect to receive an interview invitation or further follow-up message from our recruitment team shortly.
+                  Please keep an eye on your email and phone for updates.
+                </p>
+                <div style="background: #f0f7ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
+                  <p style="margin: 0; font-size: 14px; line-height: 1.6;">
+                    <strong>What happens next?</strong>
+                  </p>
+                  <p style="margin: 8px 0 0; font-size: 14px; line-height: 1.6;">
+                    Our recruitment team will review your profile and reach out with the next steps, which may include
+                    an interview invitation, assessment, or additional information requests.
+                  </p>
+                </div>
+                <p style="margin: 16px 0 4px; font-size: 14px;">Best regards,</p>
+                <p style="margin: 4px 0; font-size: 14px; font-weight: 700;">The Recruitment Team</p>
+                <div style="margin-top: 28px; padding-top: 14px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #9ca3af; text-align: center;">
+                  This is an automated message from the recruitment platform.
+                </div>
+              </div>
+            `,
+            text: `Dear ${name || 'Candidate'},\n\nCongratulations! We are pleased to inform you that you have been shortlisted for the position you applied for. Your application stood out and we are excited about the possibility of you joining our team.\n\nYou can expect to receive an interview invitation or further follow-up message from our recruitment team shortly. Please keep an eye on your email and phone for updates.\n\nBest regards,\nThe Recruitment Team`,
+          })
+        })
+      )
+      emailsDispatched = sends.some((r) => r.status === 'fulfilled' && (r.value as any)?.success)
+    }
+
     // 8. Status-specific success message
     let message: string
     if (status === 'REJECTED') {

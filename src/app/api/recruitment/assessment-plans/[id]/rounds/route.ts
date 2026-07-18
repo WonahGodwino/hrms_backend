@@ -7,9 +7,10 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const origin = request.headers.get('origin')
   try {
+    const { id } = await params
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
     const { searchParams } = new URL(request.url)
@@ -17,7 +18,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     if (!companyId) return withCors(ApiResponse.error('Company ID is required', 400), origin)
 
     const plan = await prisma.recruitmentAssessmentPlan.findFirst({
-      where: { id: params.id, companyId },
+      where: { id, companyId },
     })
     if (!plan) return withCors(ApiResponse.error('Assessment plan not found', 404), origin)
 
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return withCors(ApiResponse.error('Title and interview type are required', 400), origin)
 
     const maxOrder = await prisma.recruitmentAssessmentRound.findFirst({
-      where: { planId: params.id },
+      where: { planId: id },
       orderBy: { order: 'desc' },
       select: { order: true },
     })
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     const round = await prisma.recruitmentAssessmentRound.create({
       data: {
-        planId: params.id, order: nextOrder,
+        planId: id, order: nextOrder,
         title: title.trim(), interviewType: interviewType.trim(),
         duration: duration || 30,
       },

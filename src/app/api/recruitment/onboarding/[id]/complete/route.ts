@@ -1,11 +1,16 @@
 // POST /api/recruitment/onboarding/:id/complete
 // Completes an onboarding and promotes the person into staff_records (StaffRecord).
 // Works for both external hires and recruited candidates whose offer was accepted.
+// Sends a congratulatory email with a link to set up their profile/password.
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { sendEmail } from '@/app/lib/email'
+import { sign } from 'jsonwebtoken'
+
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://247hr.co.uk'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -139,6 +144,91 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
       return staff
     })
+
+    // ── Send congratulatory welcome email with profile setup link ───────────
+    const comp = await prisma.company.findUnique({ where: { id: companyId }, select: { companyName: true } }).catch(() => null)
+    const companyName = comp?.companyName || 'the company'
+    const staffName = `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() || 'Valued Staff'
+    const setupUrl = `${FRONTEND_URL}/complete-registration?email=${encodeURIComponent(email)}&staffId=${encodeURIComponent(created.staffId)}`
+
+    const welcomeHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"></head>
+      <body style="font-family: 'Segoe UI', Arial, sans-serif; color: #1f2937; padding: 24px; max-width: 560px; margin: 0 auto;">
+        <div style="text-align: center; padding: 32px 0 24px; border-bottom: 2px solid #10b981;">
+          <h1 style="margin: 0; font-size: 22px; color: #10b981; font-weight: 800;">Welcome to ${companyName}!</h1>
+        </div>
+
+        <p style="margin: 24px 0 16px; font-size: 15px;">Dear ${staffName},</p>
+
+        <p style="margin: 12px 0; font-size: 15px; line-height: 1.7;">
+          Congratulations on successfully completing your onboarding process.
+          We are delighted to officially welcome you to the <strong>${companyName}</strong> team.
+        </p>
+
+        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 20px; margin: 24px 0;">
+          <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.6;">
+            <strong>Your Staff ID:</strong> ${created.staffId}
+          </p>
+          <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.6;">
+            Click the button below to set up your profile and create your password.
+            You will need to set your password before you can log in to the portal.
+          </p>
+          <div style="text-align: center; margin: 20px 0;">
+            <a href="${setupUrl}"
+               style="display: inline-block; background: #10b981; color: #ffffff; text-decoration: none;
+                      font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 8px;">
+              Set Up Your Profile
+            </a>
+          </div>
+          <p style="margin: 8px 0 0; font-size: 12px; color: #6b7280; text-align: center;">
+            If the button does not work, copy and paste this URL into your browser:<br/>
+            <span style="word-break: break-all;">${setupUrl}</span>
+          </p>
+        </div>
+
+        <p style="margin: 16px 0; font-size: 14px; line-height: 1.6;">
+          Once your profile is set up, you will have access to your dashboard, payslips,
+          leave management, and other employee resources.
+        </p>
+
+        <p style="margin: 20px 0 4px; font-size: 14px;">Best regards,</p>
+        <p style="margin: 4px 0; font-size: 14px; font-weight: 700;">The ${companyName} Team</p>
+
+        <div style="margin-top: 28px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #9ca3af; text-align: center;">
+          <p style="margin: 0;">This is an automated message from the 247HR platform. Please do not reply to this email.</p>
+        </div>
+      </body>
+      </html>
+    `
+
+    const welcomeText = `Welcome to ${companyName}!
+
+Dear ${staffName},
+
+Congratulations on successfully completing your onboarding process. We are delighted to officially welcome you to the ${companyName} team.
+
+Your Staff ID: ${created.staffId}
+
+Click the link below to set up your profile and create your password. You will need to set your password before you can log in to the portal.
+
+${setupUrl}
+
+Once your profile is set up, you will have access to your dashboard, payslips, leave management, and other employee resources.
+
+Best regards,
+The ${companyName} Team`
+
+    // Fire-and-forget email send — never block the complete response.
+    sendEmail({
+      to: email,
+      subject: `🎉 Welcome to ${companyName} — Set Up Your Profile`,
+      html: welcomeHtml,
+      text: welcomeText,
+    }).then((r) => {
+      if (!r.success) console.error('[ONBOARDING_COMPLETE] Welcome email failed:', r.error)
+    }).catch((err) => console.error('[ONBOARDING_COMPLETE] Welcome email error:', err))
 
     return withCors(ApiResponse.success({
       staffRecordId: created.id,

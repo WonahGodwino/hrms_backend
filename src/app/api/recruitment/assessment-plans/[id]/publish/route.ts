@@ -8,9 +8,10 @@ import { notifyAssessmentPanel } from '@/app/lib/assessments/panel-notify'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const origin = request.headers.get('origin')
   try {
+    const { id } = await params
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
     const { searchParams } = new URL(request.url)
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     if (!companyId) return withCors(ApiResponse.error('Company ID is required', 400), origin)
 
     const plan = await prisma.recruitmentAssessmentPlan.findFirst({
-      where: { id: params.id, companyId },
+      where: { id, companyId },
       include: { rounds: { select: { id: true } } },
     })
     if (!plan) return withCors(ApiResponse.error('Assessment plan not found', 404), origin)
@@ -26,11 +27,11 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     if (plan.rounds.length === 0) return withCors(ApiResponse.error('Plan must have at least one round', 400), origin)
 
     await prisma.recruitmentAssessmentPlan.update({
-      where: { id: params.id }, data: { status: 'ACTIVE' },
+      where: { id }, data: { status: 'ACTIVE' },
     })
 
     // Notify the interview panel (fire-and-forget so email never blocks publish).
-    void notifyAssessmentPanel(plan.id, companyId)
+    void notifyAssessmentPanel(id, companyId)
       .then((r) => console.log(`[ASSESSMENT_PUBLISH] Panel notified for ${plan.id}:`, r))
       .catch((err) => console.error(`[ASSESSMENT_PUBLISH] Panel notify failed for ${plan.id}:`, err))
 

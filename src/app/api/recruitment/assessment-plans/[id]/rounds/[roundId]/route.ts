@@ -8,9 +8,10 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string; roundId: string } }) {
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string; roundId: string }> }) {
   const origin = request.headers.get('origin')
   try {
+    const { id, roundId } = await params
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
     const { searchParams } = new URL(request.url)
@@ -19,7 +20,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     // The plan lookup below scopes to the correct planId
 
     const round = await prisma.recruitmentAssessmentRound.findFirst({
-      where: { id: params.roundId, planId: params.id },
+      where: { id: roundId, planId: id },
     })
     if (!round) return withCors(ApiResponse.error('Round not found', 404), origin)
 
@@ -39,7 +40,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     }
 
     const updated: any = await (prisma as any).recruitmentAssessmentRound.update({
-      where: { id: params.roundId }, data: update,
+      where: { id: roundId }, data: update,
     })
 
     return withCors(ApiResponse.success({
@@ -52,22 +53,23 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   } catch (error) { return withCors(handleApiError(error), origin) }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string; roundId: string } }) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string; roundId: string }> }) {
   const origin = request.headers.get('origin')
   try {
+    const { id, roundId } = await params
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const round = await prisma.recruitmentAssessmentRound.findFirst({
-      where: { id: params.roundId, planId: params.id },
+      where: { id: roundId, planId: id },
     })
     if (!round) return withCors(ApiResponse.error('Round not found', 404), origin)
 
-    await prisma.recruitmentAssessmentRound.delete({ where: { id: params.roundId } })
+    await prisma.recruitmentAssessmentRound.delete({ where: { id: roundId } })
 
     // Reorder remaining rounds
     const remaining = await prisma.recruitmentAssessmentRound.findMany({
-      where: { planId: params.id }, orderBy: { order: 'asc' },
+      where: { planId: id }, orderBy: { order: 'asc' },
     })
     for (let i = 0; i < remaining.length; i++) {
       if (remaining[i].order !== i + 1) {
