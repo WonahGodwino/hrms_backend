@@ -126,6 +126,12 @@ export async function GET(request: NextRequest) {
       where.status = status
     }
 
+    // Filter by job's archived status (1 = archived, 0 = not archived)
+    const archived = searchParams.get('archived')
+    if (archived !== undefined && archived !== '') {
+      where.archived = archived === '1' ? 1 : 0
+    }
+
     if (search) {
       where.OR = [
         { title: { contains: search, mode: 'insensitive' } },

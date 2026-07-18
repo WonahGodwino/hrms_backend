@@ -16,11 +16,11 @@ export async function POST(request: NextRequest) {
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
-    const companyId = user.companyId
-    if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
     const actor = user.userId || user.email || 'system'
 
     const body = await request.json()
+    const companyId = body.companyId || user.companyId
+    if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
     const { offerIntro, offerLegal, candidates } = body
 
     if (!offerIntro || !offerLegal || !Array.isArray(candidates) || candidates.length === 0)

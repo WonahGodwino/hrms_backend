@@ -80,12 +80,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const res = await loadForUser(id, user)
     if (res.error) return withCors(ApiResponse.error(res.error.message, res.error.status), origin)
 
-    const creatorIsAdminOrHr =
-      res.meeting.createdBy === user.userId && ['ADMIN', 'HR'].includes(user.role)
-    const privilegedInterviewOwner =
-      PRIVILEGED.includes(user.role) && !!res.meeting.candidateAssessmentId
-    if (!creatorIsAdminOrHr && !privilegedInterviewOwner) {
-      return withCors(ApiResponse.error('Only the ADMIN/HR creator can update this meeting', 403), origin)
+    if (!res.canManage) {
+      return withCors(ApiResponse.error('You do not have permission to update this meeting', 403), origin)
     }
 
     const data: any = {}
