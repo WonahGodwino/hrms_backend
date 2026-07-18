@@ -56,6 +56,7 @@ const MODULE_ROUTE_MAP: Record<string, string> = {
 // Paths that are always public regardless of prefix match.
 const PUBLIC_PATHS = [
   '/api/recruitment/jobs/public',
+  '/api/recruitment/offers/public',
 ]
 
 function resolveModuleKey(pathname: string): string | null {

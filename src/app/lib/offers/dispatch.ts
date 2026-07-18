@@ -74,7 +74,12 @@ export async function dispatchOfferLetter(
   const deadlineText = deadline.toLocaleDateString('en-GB', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   })
-  const responseToken = signOfferResponseToken(letter.offer.id, letter.candidate?.id || '')
+  // Token lives as long as the offer's response window (so the candidate can
+  // come back during the full acceptance period), with a minimum of 7 days.
+  const msLeft = deadline.getTime() - Date.now()
+  const daysLeft = Math.max(7, Math.ceil(msLeft / (24 * 60 * 60 * 1000)))
+  const tokenExpiry = `${daysLeft}d`
+  const responseToken = signOfferResponseToken(letter.offer.id, letter.candidate?.id || '', tokenExpiry)
   const responseLink = `${FRONTEND_URL}/offer/respond?token=${encodeURIComponent(responseToken)}`
 
   const introMessage = typeof opts.message === 'string' && opts.message.trim()
