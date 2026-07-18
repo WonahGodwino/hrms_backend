@@ -1,5 +1,5 @@
-// GET/PUT /api/admin/settings/offer-letter
-// Reads/updates the company-level employer & legal details that populate the
+// GET/PUT/DELETE /api/admin/settings/offer-letter
+// Reads/updates/deletes the company-level employer & legal details that populate the
 // offer letter (seconded company, HR representative, governing law, etc.).
 import { NextRequest } from 'next/server'
 import { requireRole } from '@/app/lib/auth'
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
 
     const company = await (prisma as any).company.findUnique({
       where: { id: companyId },
-      select: { id: true, companyName: true, rcNumber: true, offerResponseDays: true, ...Object.fromEntries(OFFER_FIELDS.map((f) => [f, true])) },
+      select: { id: true, companyName: true, rcNumber: true, offerResponseDays: true, updatedAt: true, ...Object.fromEntries(OFFER_FIELDS.map((f) => [f, true])) },
     })
     if (!company) return withCors(ApiResponse.error('Company not found', 404), origin)
 
@@ -103,9 +103,32 @@ export async function PUT(request: NextRequest) {
     const updated = await (prisma as any).company.update({
       where: { id: companyId },
       data,
-      select: { id: true, companyName: true, rcNumber: true, offerResponseDays: true, ...Object.fromEntries(OFFER_FIELDS.map((f) => [f, true])) },
+      select: { id: true, companyName: true, rcNumber: true, offerResponseDays: true, updatedAt: true, ...Object.fromEntries(OFFER_FIELDS.map((f) => [f, true])) },
     })
 
     return withCors(ApiResponse.success(updated, 'Offer letter settings updated'), origin)
+  } catch (error) { return mapErr(error, origin) }
+}
+
+export async function DELETE(request: NextRequest) {
+  const origin = request.headers.get('origin')
+  try {
+    const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
+    const user = requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR']) as AuthUser
+    const requested = new URL(request.url).searchParams.get('companyId')
+    const accessible = await getAccessibleCompanyIds(user)
+    const companyId = pickTargetCompanyId(user, accessible, requested)
+
+    const cleared: Record<string, null> = {}
+    for (const f of OFFER_FIELDS) cleared[f] = null
+    cleared.signatureImage = null
+    cleared.offerResponseDays = null
+
+    await (prisma as any).company.update({
+      where: { id: companyId },
+      data: cleared,
+    })
+
+    return withCors(ApiResponse.success(null, 'Offer letter settings cleared'), origin)
   } catch (error) { return mapErr(error, origin) }
 }
