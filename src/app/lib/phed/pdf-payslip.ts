@@ -45,7 +45,6 @@ export interface PayslipData {
   mealSubsidy:           number
   utilityAllowance:      number
   leaveAllowance:        number
-  shiftAllowance:        number
   domesticAllowance:     number
   hazardAllowance:       number
   electricityAllowance:  number
@@ -177,7 +176,6 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
       ['Meal Subsidy',            data.mealSubsidy,            false],
       ['Utility Allowance',       data.utilityAllowance,       false],
       ['Leave Allowance',         data.leaveAllowance,         false],
-      ['Shift Allowance',         data.shiftAllowance,         false],
       ['Domestic Allowance',      data.domesticAllowance,      false],
       ['Hazard Allowance',        data.hazardAllowance,        false],
       ['Electricity Allowance',   data.electricityAllowance,   false],

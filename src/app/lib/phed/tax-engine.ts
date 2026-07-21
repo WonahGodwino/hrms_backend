@@ -49,12 +49,16 @@ export function computeAnnualPAYE(annualChargeableIncome: number): number {
 /**
  * Full tax derivation for one staff member.
  *
- * @param monthlyGross         Total monthly gross (before any deductions)
+ * PAYE is levied on total monthly earnings except overtime, arrears, and
+ * reimbursements. Pension (8%/10%) still uses only Basic + Housing + Transport.
+ *
+ * @param monthlyTaxableGross  Monthly gross subject to PAYE — every earning
+ *                             component except overtime, arrears, and reimbursements.
  * @param monthlyPensionable   Basic + Housing + Transport (pensionable emoluments)
  * @param lifeAssuranceAmount  Annual life assurance premium (0 if staff has none)
  */
 export function deriveTaxData(
-  monthlyGross: number,
+  monthlyTaxableGross: number,
   monthlyPensionable: number,
   lifeAssuranceAmount: number = 0
 ): {
@@ -75,7 +79,7 @@ export function deriveTaxData(
   // NHF computed separately in payroll-processor (needs basicSalary directly)
   const nhfMonthly = 0
 
-  const annualGrossIncome      = round2(monthlyGross * 12)
+  const annualGrossIncome      = round2(monthlyTaxableGross * 12)
   const annualPensionDeduction = round2(pensionEmployee * 12)
   const rentRelief             = RENT_RELIEF
   const lifeAssurance          = round2(Math.max(0, lifeAssuranceAmount))

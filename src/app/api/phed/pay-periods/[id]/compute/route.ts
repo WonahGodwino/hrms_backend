@@ -10,10 +10,10 @@ import type { PhedPayrollInput, PhedSalaryComponents } from '@/app/lib/phed/type
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // POST /api/phed/pay-periods/:id/compute
-// Reads salary inputs already stored by upload-template, runs the full payroll
-// engine for every staff member, writes computed results back to phed_computed_payrolls,
+// Reads salary components from each staff's onboarding record (PhedStaff),
+// runs the full payroll engine, writes computed results to phed_computed_payrolls,
 // and advances the period to REVIEW.
-// Allowed from PROCESSING (normal flow) or REVIEW (re-compute).
+// Allowed from VALIDATION_CLOSED (normal flow) or REVIEW (re-compute).
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'compute')
@@ -28,21 +28,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (user.role !== 'SUPER_ADMIN' && user.companyId && period.companyId !== user.companyId)
       return withCors(ApiResponse.notFound('Pay period not found'), origin)
 
-    if (!['PROCESSING', 'REVIEW'].includes(period.status))
-      return withCors(ApiResponse.error('Period must be in PROCESSING or REVIEW status to compute', 400), origin)
+    if (!['VALIDATION_CLOSED', 'REVIEW'].includes(period.status))
+      return withCors(ApiResponse.error('Period must be in VALIDATION_CLOSED or REVIEW status to compute', 400), origin)
 
-    // ── Load stored salary inputs + all deduction references ──
-    const [storedPayrolls, allStaff, validations, overtimeEntries, periodAdvances] = await Promise.all([
-      // Salary inputs saved by upload-template
-      (prisma as any).phedComputedPayroll.findMany({
-        where: { payPeriodId: params.id },
-      }),
-      // Staff with union/cooperative/deduction memberships
+    // ── Load all active staff + per-period data ───────────────
+    const [allStaff, validations, overtimeEntries, periodAdvances] = await Promise.all([
       (prisma as any).phedStaff.findMany({
         where:   { companyId: period.companyId, isActive: true },
         include: {
           region:               true,
-          grade:                { select: { name: true, code: true } },
+          grade:                { select: { name: true, code: true, defaultBasicSalary: true } },
           unions:               { include: { union: true } },
           cooperatives:         { include: { cooperative: true } },
           deductionLiabilities: { include: { deductionLiability: true } },
@@ -53,56 +48,55 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       (prisma as any).phedStaffPeriodAdvance.findMany({ where: { payPeriodId: params.id } }),
     ])
 
-    if (storedPayrolls.length === 0)
-      return withCors(ApiResponse.error('No salary data found. Please upload the filled template first.', 400), origin)
+    if (allStaff.length === 0)
+      return withCors(ApiResponse.error('No active staff found for this company.', 400), origin)
 
-    // Build lookup maps
-    const salaryMap         = new Map<string, any>(storedPayrolls.map((p: any) => [p.staffId, p]))
-    const staffMap          = new Map<string, any>(allStaff.map((s: any) => [s.id, s]))
-    const validationMap     = new Map<string, string>(validations.map((v: any) => [v.staffId, v.status as string]))
+    const validationMap       = new Map<string, string>(validations.map((v: any) => [v.staffId, v.status as string]))
     const validationReasonMap = new Map<string, string | null>(validations.map((v: any) => [v.staffId, v.reason as string | null]))
-    const overtimeMap       = new Map<string, { hours: number; amount: number }>(
+    const overtimeMap         = new Map<string, { hours: number; amount: number }>(
       overtimeEntries.map((ot: any) => [ot.staffId, {
         hours:  Number(ot.overtimeHours  ?? 0),
         amount: Number(ot.computedAmount ?? 0),
       }])
     )
-    const advancesMap       = new Map<string, any>(periodAdvances.map((a: any) => [a.staffId, a]))
+    const advancesMap = new Map<string, any>(periodAdvances.map((a: any) => [a.staffId, a]))
 
     const results: any[] = []
 
-    for (const stored of storedPayrolls) {
-      const staff = staffMap.get(stored.staffId)
-      if (!staff) continue
-
+    for (const staff of allStaff) {
+      // Salary components come from the staff onboarding record.
+      // Grade default is used for basicSalary if the staff record doesn't override it.
       const salary: PhedSalaryComponents = {
-        basicSalary:            Number(stored.basicSalary ?? 0),
-        housingAllowance:       Number(stored.housingAllowance ?? 0),
-        transportAllowance:     Number(stored.transportAllowance ?? 0),
-        furnitureAllowance:     Number(stored.furnitureAllowance ?? 0),
-        mealSubsidy:            Number(stored.mealSubsidy ?? 0),
-        utilityAllowance:       Number(stored.utilityAllowance ?? 0),
-        leaveAllowance:         Number(stored.leaveAllowance ?? 0),
-        shiftAllowance:         Number(stored.shiftAllowance ?? 0),
-        domesticAllowance:      Number(stored.domesticAllowance ?? 0),
-        hazardAllowance:        Number(stored.hazardAllowance ?? 0),
-        electricityAllowance:   Number(stored.electricityAllowance ?? 0),
-        discoveryAllowance:     Number(stored.discoveryAllowance ?? 0),
-        carSubsidy:             Number(stored.carSubsidy ?? 0),
-        entertainmentAllowance: Number(stored.entertainmentAllowance ?? 0),
-        dataAllowance:          Number(stored.dataAllowance ?? 0),
-        nightAllowance:         Number(stored.nightAllowance ?? 0),
-        arrears:                Number(stored.arrears ?? 0),
-        otherAllowances:        Number(stored.otherAllowances ?? 0),
+        basicSalary:            Number(staff.basicSalary            ?? staff.grade?.defaultBasicSalary ?? 0),
+        housingAllowance:       Number(staff.housingAllowance       ?? 0),
+        transportAllowance:     Number(staff.transportAllowance     ?? 0),
+        furnitureAllowance:     Number(staff.furnitureAllowance     ?? 0),
+        mealSubsidy:            Number(staff.mealSubsidy            ?? 0),
+        utilityAllowance:       Number(staff.utilityAllowance       ?? 0),
+        leaveAllowance:         Number(staff.leaveAllowance         ?? 0),
+        domesticAllowance:      Number(staff.domesticAllowance      ?? 0),
+        hazardAllowance:        Number(staff.hazardAllowance        ?? 0),
+        electricityAllowance:   Number(staff.electricityAllowance   ?? 0),
+        discoveryAllowance:     Number(staff.discoveryAllowance     ?? 0),
+        carSubsidy:             Number(staff.carSubsidy             ?? 0),
+        entertainmentAllowance: Number(staff.entertainmentAllowance ?? 0),
+        dataAllowance:          Number(staff.dataAllowance          ?? 0),
+        nightAllowance:         Number(staff.nightAllowance         ?? 0),
+        arrears:                Number(staff.arrears                ?? 0),
+        otherAllowances:        Number(staff.otherAllowances        ?? 0),
       }
 
       const adv = advancesMap.get(staff.id)
 
-      // Cooperative and deduction-liability totals come from the uploaded template (HR-entered).
-      // Union deductions are auto-computed as gross × sum(union percentages) — never HR-entered.
-      const cooperativeDeductionTotal = Number(stored.cooperativeDeductions ?? 0)
-      const deductionLiabilityTotal   = Number(stored.deductionLiabilities  ?? 0)
-      // percentage stored as decimal fraction (e.g. 0.025 for 2.5%)
+      // Cooperative total = sum of all cooperative membership amounts for this staff
+      const cooperativeDeductionTotal = staff.cooperatives.reduce(
+        (sum: number, sc: any) => sum + Number(sc.totalAmount ?? 0), 0
+      )
+      // Deduction liability total = sum of all assigned deduction liability amounts
+      const deductionLiabilityTotal = staff.deductionLiabilities.reduce(
+        (sum: number, sd: any) => sum + Number(sd.amount ?? 0), 0
+      )
+      // Union deduction = gross × sum(union percentages); computed inside processOneStaff
       const unionDeductionTotal = staff.unions.reduce(
         (sum: number, su: any) => sum + Number(su.union.percentage ?? 0),
         0,
@@ -127,11 +121,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           const otEntry = overtimeMap.get(staff.id)
           if (!otEntry || otEntry.hours === 0) return 0
           if (otEntry.amount > 0) return otEntry.amount
-          // computedAmount not stored — derive from stored gross before OT
           const grossBeforeOT = r2(
             salary.basicSalary + salary.housingAllowance + salary.transportAllowance +
             salary.furnitureAllowance + salary.mealSubsidy + salary.utilityAllowance +
-            salary.leaveAllowance + salary.shiftAllowance + salary.domesticAllowance +
+            salary.leaveAllowance + salary.domesticAllowance +
             salary.hazardAllowance + salary.electricityAllowance + salary.discoveryAllowance +
             salary.carSubsidy + salary.entertainmentAllowance + salary.dataAllowance +
             salary.nightAllowance + salary.arrears + salary.otherAllowances
@@ -141,34 +134,59 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         unionDeductionTotal,
         cooperativeDeductionTotal,
         deductionLiabilityTotal,
-        voluntaryPension:         Number(stored.voluntaryPension ?? 0),
-        insurance:                Number(stored.insurance ?? 0),
-        cashAdvanced:             Number(adv?.cashAdvanced ?? stored.cashAdvanced ?? 0),
-        loan:                     Number(adv?.loan         ?? stored.loan         ?? 0),
-        domesticLoan:             Number(adv?.domesticLoan ?? stored.domesticLoan ?? 0),
-        validationStatus:         (validationMap.get(staff.id) as any) ?? 'PENDING',
-        withheldReason:           (validationReasonMap.get(staff.id) as string | undefined) ?? undefined,
-        bankName:                 staff.bankName      ?? '',
-        accountNumber:            staff.accountNumber ?? '',
-        accountName:              staff.accountName   ?? '',
-        pfaName:                  staff.pfaName       ?? '',
-        rsaPin:                   staff.rsaPin        ?? '',
-        pensionNumber:            staff.pensionNumber ?? undefined,
-        tin:                      staff.tin           ?? undefined,
+        voluntaryPension: Number(staff.voluntaryPension ?? 0),
+        insurance:        Number(staff.insurance        ?? 0),
+        // Period-specific advances (cashAdvanced/loan/domesticLoan) override staff-level defaults
+        cashAdvanced:     Number(adv?.cashAdvanced ?? staff.cashAdvanced ?? 0),
+        loan:             Number(adv?.loan         ?? staff.loan         ?? 0),
+        domesticLoan:     Number(adv?.domesticLoan ?? staff.domesticLoan ?? 0),
+        validationStatus:  (validationMap.get(staff.id) as any) ?? 'PENDING',
+        withheldReason:    (validationReasonMap.get(staff.id) as string | undefined) ?? undefined,
+        bankName:          staff.bankName      ?? '',
+        accountNumber:     staff.accountNumber ?? '',
+        accountName:       staff.accountName   ?? '',
+        pfaName:           staff.pfaName       ?? '',
+        rsaPin:            staff.rsaPin        ?? '',
+        pensionNumber:     staff.pensionNumber ?? undefined,
+        tin:               staff.tin           ?? undefined,
+        nhfNumber:         staff.nhfNumber     ?? undefined,
       }
 
       results.push({ result: processOneStaff(input), staff })
     }
 
-    // ── Persist full computed results + write OT amount back ──
+    // ── Persist computed results (upsert — no prior template upload required) ──
     await Promise.all([
       ...results.map(({ result: r }) =>
-        (prisma as any).phedComputedPayroll.update({
-          where: { payPeriodId_staffId: { payPeriodId: params.id, staffId: r.staffId } },
-          data:  fullPayrollFields(r),
+        (prisma as any).phedComputedPayroll.upsert({
+          where:  { payPeriodId_staffId: { payPeriodId: params.id, staffId: r.staffId } },
+          create: {
+            payPeriodId: params.id,
+            staffId:     r.staffId,
+            companyId:   period.companyId,
+            staffName:   r.staffName,
+            staffEmail:  r.staffEmail,
+            staffIdCode: r.staffIdCode,
+            category:    r.category,
+            gradeName:   r.gradeName,
+            department:  r.department,
+            unit:        r.unit,
+            regionName:  r.regionName,
+            ...fullPayrollFields(r),
+          },
+          update: {
+            staffName:   r.staffName,
+            staffEmail:  r.staffEmail,
+            staffIdCode: r.staffIdCode,
+            category:    r.category,
+            gradeName:   r.gradeName,
+            department:  r.department,
+            unit:        r.unit,
+            regionName:  r.regionName,
+            ...fullPayrollFields(r),
+          },
         })
       ),
-      // Write computed overtime amounts back to phedOvertimeEntry so GET /overtime reflects them
       ...results
         .filter(({ result: r }) => r.overtimeEarnings > 0)
         .map(({ result: r }) =>
@@ -179,7 +197,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         ),
     ])
 
-    // ── Advance to REVIEW ──────────────────────────────────────
+    // ── Advance to REVIEW ─────────────────────────────────────
     const updatedPeriod = await (prisma as any).phedPayPeriod.update({
       where: { id: params.id },
       data:  { status: 'REVIEW' },
@@ -207,6 +225,23 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
 function fullPayrollFields(r: any) {
   return {
+    basicSalary:            r.basicSalary,
+    housingAllowance:       r.housingAllowance,
+    transportAllowance:     r.transportAllowance,
+    furnitureAllowance:     r.furnitureAllowance,
+    mealSubsidy:            r.mealSubsidy,
+    utilityAllowance:       r.utilityAllowance,
+    leaveAllowance:         r.leaveAllowance,
+    domesticAllowance:      r.domesticAllowance,
+    hazardAllowance:        r.hazardAllowance,
+    electricityAllowance:   r.electricityAllowance,
+    discoveryAllowance:     r.discoveryAllowance,
+    carSubsidy:             r.carSubsidy,
+    entertainmentAllowance: r.entertainmentAllowance,
+    dataAllowance:          r.dataAllowance,
+    nightAllowance:         r.nightAllowance,
+    arrears:                r.arrears,
+    otherAllowances:        r.otherAllowances,
     grossSalary:            r.grossSalary,
     overtimeEarnings:       r.overtimeEarnings,
     pensionEmployee:        r.pensionEmployee,
@@ -240,6 +275,7 @@ function fullPayrollFields(r: any) {
     rsaPin:                 r.rsaPin,
     pensionNumber:          r.pensionNumber ?? null,
     tin:                    r.tin           ?? null,
+    nhfNumber:              r.nhfNumber     ?? null,
   }
 }
 

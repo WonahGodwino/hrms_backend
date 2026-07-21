@@ -46,7 +46,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     const VALID_ALLOWANCE_TYPES = [
       'HOUSING', 'TRANSPORT', 'FURNITURE', 'MEAL_SUBSIDY', 'UTILITY',
-      'LEAVE', 'SHIFT', 'DOMESTIC', 'HAZARD', 'ELECTRICITY', 'DISCOVERY',
+      'LEAVE', 'DOMESTIC', 'HAZARD', 'ELECTRICITY', 'DISCOVERY',
       'CAR_SUBSIDY', 'ENTERTAINMENT', 'DATA', 'NIGHT', 'ARREARS', 'OTHER',
     ]
     for (const t of allowances) {

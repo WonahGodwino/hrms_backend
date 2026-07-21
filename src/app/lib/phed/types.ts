@@ -21,7 +21,6 @@ export type PhedAllowanceType =
   | 'MEAL_SUBSIDY'
   | 'UTILITY'
   | 'LEAVE'
-  | 'SHIFT'
   | 'OTHER'
 export type PhedValueType = 'FIXED' | 'PERCENTAGE'
 
@@ -36,7 +35,6 @@ export interface PhedSalaryComponents {
   mealSubsidy:           number
   utilityAllowance:      number
   leaveAllowance:        number
-  shiftAllowance:        number
   domesticAllowance:     number
   hazardAllowance:       number
   electricityAllowance:  number
@@ -86,6 +84,7 @@ export interface PhedPayrollInput {
   rsaPin: string
   pensionNumber?: string
   tin?: string
+  nhfNumber?: string
 }
 
 // -------------------------------------------------------
@@ -110,7 +109,6 @@ export interface PhedPayrollResult {
   mealSubsidy:            number
   utilityAllowance:       number
   leaveAllowance:         number
-  shiftAllowance:         number
   domesticAllowance:      number
   hazardAllowance:        number
   electricityAllowance:   number
@@ -163,6 +161,7 @@ export interface PhedPayrollResult {
   rsaPin: string
   pensionNumber?: string
   tin?: string
+  nhfNumber?: string
 }
 
 // -------------------------------------------------------
@@ -253,10 +252,14 @@ export interface StaffCsvRow {
   firstName: string
   lastName: string
   staffId: string
+  resumptionDate?: string
   email: string
   phone?: string
+  jobTitle?: string
   category: string
   gradeCode?: string
+  level?: string
+  callCenter?: string
   department?: string
   unit?: string
   region?: string
@@ -269,10 +272,32 @@ export interface StaffCsvRow {
   pfaName?: string
   pensionNumber?: string
   tin?: string
+  nhfNumber?: string
   basicSalary?: string
   annualRent?: string
   hasLifeAssurance?: string      // 'YES'/'TRUE'/'1' → true
   lifeAssuranceAmount?: string
+  housingAllowance?: string
+  transportAllowance?: string
+  furnitureAllowance?: string
+  domesticAllowance?: string
+  mealSubsidy?: string
+  hazardAllowance?: string
+  leaveAllowance?: string
+  electricityAllowance?: string
+  utilityAllowance?: string
+  discoveryAllowance?: string
+  carSubsidy?: string
+  entertainmentAllowance?: string
+  dataAllowance?: string
+  nightAllowance?: string
+  otherAllowances?: string
+  arrears?: string
+  voluntaryPension?: string
+  insurance?: string
+  cashAdvanced?: string
+  loan?: string
+  domesticLoan?: string
 }
 
 export interface ValidationCsvRow {
@@ -320,7 +345,6 @@ export interface PayrollTemplateRow {
   mealSubsidy:           number
   utilityAllowance:      number
   leaveAllowance:        number
-  shiftAllowance:        number
   domesticAllowance:     number
   hazardAllowance:       number
   electricityAllowance:  number
@@ -358,7 +382,6 @@ export interface ParsedTemplateRow {
   mealSubsidy:           number
   utilityAllowance:      number
   leaveAllowance:        number
-  shiftAllowance:        number
   domesticAllowance:     number
   hazardAllowance:       number
   electricityAllowance:  number

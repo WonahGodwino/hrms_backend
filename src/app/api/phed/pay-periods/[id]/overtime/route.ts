@@ -29,7 +29,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
           staffId: true,
           basicSalary: true, housingAllowance: true, transportAllowance: true,
           furnitureAllowance: true, mealSubsidy: true, utilityAllowance: true,
-          leaveAllowance: true, shiftAllowance: true, domesticAllowance: true,
+          leaveAllowance: true, domesticAllowance: true,
           hazardAllowance: true, electricityAllowance: true, discoveryAllowance: true,
           carSubsidy: true, entertainmentAllowance: true, dataAllowance: true,
           nightAllowance: true, arrears: true, otherAllowances: true,
@@ -51,7 +51,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
           const grossBeforeOT =
             n('basicSalary') + n('housingAllowance') + n('transportAllowance') +
             n('furnitureAllowance') + n('mealSubsidy') + n('utilityAllowance') +
-            n('leaveAllowance') + n('shiftAllowance') + n('domesticAllowance') +
+            n('leaveAllowance') + n('domesticAllowance') +
             n('hazardAllowance') + n('electricityAllowance') + n('discoveryAllowance') +
             n('carSubsidy') + n('entertainmentAllowance') + n('dataAllowance') +
             n('nightAllowance') + n('arrears') + n('otherAllowances')

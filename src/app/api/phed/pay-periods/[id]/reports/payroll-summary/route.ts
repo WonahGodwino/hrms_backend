@@ -130,7 +130,6 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         mealSubsidy:             n(r.mealSubsidy),
         utilityAllowance:        n(r.utilityAllowance),
         leaveAllowance:          n(r.leaveAllowance),
-        shiftAllowance:          n(r.shiftAllowance),
         domesticAllowance:       n(r.domesticAllowance),
         hazardAllowance:         n(r.hazardAllowance),
         electricityAllowance:    n(r.electricityAllowance),

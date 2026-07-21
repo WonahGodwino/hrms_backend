@@ -35,7 +35,6 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
     mealSubsidy,
     utilityAllowance,
     leaveAllowance,
-    shiftAllowance,
     domesticAllowance,
     hazardAllowance,
     electricityAllowance,
@@ -49,7 +48,10 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
   } = salary
 
   // ── Earnings ──────────────────────────────────────────────
-  const grossBeforeOT = r2(
+  // Initial Gross Pay: the agreed package HR distributes across basic + these
+  // "core" allowances (see staff template). Discretionary/Car/Entertainment/Data/
+  // Night allowances and Arrears are add-ons layered on top to form the gross below.
+  const initialGrossPay = r2(
     basicSalary +
     housingAllowance +
     transportAllowance +
@@ -57,17 +59,19 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
     mealSubsidy +
     utilityAllowance +
     leaveAllowance +
-    shiftAllowance +
     domesticAllowance +
     hazardAllowance +
     electricityAllowance +
+    otherAllowances
+  )
+  const grossBeforeOT = r2(
+    initialGrossPay +
     discoveryAllowance +
     carSubsidy +
     entertainmentAllowance +
     dataAllowance +
     nightAllowance +
-    arrears +
-    otherAllowances
+    arrears
   )
 
   // Overtime amount was pre-computed at hours-upload time and stored; use it directly.
@@ -75,10 +79,14 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
   const grossSalary      = r2(grossBeforeOT + overtimeEarnings)
 
   // ── Statutory Deductions ──────────────────────────────────
-  const pensionable = r2(basicSalary + housingAllowance + transportAllowance)
+  // PAYE is levied on everything except overtime and arrears (and, once
+  // tracked as a distinct field, reimbursements). Pension stays on the
+  // narrower Basic + Housing + Transport base.
+  const taxableGross = r2(grossSalary - overtimeEarnings - arrears)
+  const pensionable  = r2(basicSalary + housingAllowance + transportAllowance)
 
   const annualLifeAssurance = lifeAssuranceAmount > 0 ? lifeAssuranceAmount : 0
-  const taxData = deriveTaxData(grossSalary, pensionable, annualLifeAssurance)
+  const taxData = deriveTaxData(taxableGross, pensionable, annualLifeAssurance)
   const nhf     = getNhfMonthly(basicSalary)
 
   // ── Variable Deductions ───────────────────────────────────
@@ -121,7 +129,6 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
     mealSubsidy,
     utilityAllowance,
     leaveAllowance,
-    shiftAllowance,
     domesticAllowance,
     hazardAllowance,
     electricityAllowance,
@@ -170,6 +177,7 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
     rsaPin:        input.rsaPin,
     pensionNumber: input.pensionNumber,
     tin:           input.tin,
+    nhfNumber:     input.nhfNumber,
   }
 }
 

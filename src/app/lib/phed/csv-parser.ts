@@ -78,8 +78,7 @@ export async function parseStaffCsv(
 ): Promise<{ rows: StaffCsvRow[]; errors: string[] }> {
   // Row 1 = column headers, Row 2 = notes/descriptions row (grey).
   // Skip 1 row after the header so the notes row is never treated as a staff record.
-  // The yellow sample row (row 3) is the user's responsibility to delete per the
-  // template instructions — if left in, "John Doe / PHED-001" will be imported.
+  // Row 3 onward is real data — the template ships with no sample row to delete.
   const raw    = await parseBuffer(buffer, fileExt, 1)
   const rows: StaffCsvRow[] = []
   const errors: string[]    = []
@@ -108,10 +107,14 @@ export async function parseStaffCsv(
       firstName,
       lastName,
       staffId,
+      resumptionDate: r['resumptiondate'] || r['resumption_date'] || r['resumptiondate'] || r['dateofresumption'] || undefined,
       email,
       phone:         r['phone']         || undefined,
+      jobTitle:      r['jobtitle']      || r['job_title'] || r['position'] || r['title'] || undefined,
       category:      r['category']      || 'REGULAR',
       gradeCode:     r['gradecode']      || r['grade']  || undefined,
+      level:         r['level']          || undefined,
+      callCenter:    r['callcenter']    || r['call_center'] || undefined,
       department:    r['department']    || r['dept']   || undefined,
       unit:          r['unit']          || undefined,
       region:        r['region']        || undefined,
@@ -124,10 +127,32 @@ export async function parseStaffCsv(
       pfaName:       r['pfaname']             || r['pfa']     || undefined,
       pensionNumber: r['pensionnumber']       || r['pensionno'] || r['pension_number'] || undefined,
       tin:           r['tin']                 || r['taxid']   || r['taxidentificationnumber'] || undefined,
+      nhfNumber:     r['nhfnumber']           || r['nhfno']   || r['nhf_number']              || undefined,
       basicSalary:          r['basicsalary']         || r['basic']            || undefined,
       annualRent:           r['annualrent']          || r['rent']             || undefined,
       hasLifeAssurance:     r['haslifeassurance']    || r['lifeassurance']    || undefined,
       lifeAssuranceAmount:  r['lifeassuranceamount'] || r['lifeassurance_amount'] || undefined,
+      housingAllowance:      r['housingallowance']      || r['housing']            || undefined,
+      transportAllowance:    r['transportallowance']    || r['transport']          || undefined,
+      furnitureAllowance:    r['furnitureallowance']    || r['furniture']          || undefined,
+      domesticAllowance:     r['domesticallowance']     || r['domestic']           || undefined,
+      mealSubsidy:           r['mealsubsidy']           || r['meal']               || undefined,
+      hazardAllowance:       r['hazardallowance']       || r['hazard']             || undefined,
+      leaveAllowance:        r['leaveallowance']        || r['leavegrant'] || r['leave'] || undefined,
+      electricityAllowance:  r['electricityallowance']  || r['electricity']        || undefined,
+      utilityAllowance:      r['utilityallowance']      || r['utility']            || undefined,
+      discoveryAllowance:    r['discoveryallowance']    || r['discretionary'] || r['discretionaryallowance'] || undefined,
+      carSubsidy:            r['carsubsidy']            || r['car']                || undefined,
+      entertainmentAllowance:r['entertainmentallowance']|| r['entertainment']      || undefined,
+      dataAllowance:         r['dataallowance']         || r['data']               || undefined,
+      nightAllowance:        r['nightallowance']        || r['night']              || undefined,
+      otherAllowances:       r['otherallowances']       || r['other']              || undefined,
+      arrears:               r['arrears']                                          || undefined,
+      voluntaryPension:      r['voluntarypension']      || r['vp']                 || undefined,
+      insurance:             r['insurance']                                        || undefined,
+      cashAdvanced:          r['cashadvanced']          || r['cash']               || undefined,
+      loan:                  r['loan']                                             || undefined,
+      domesticLoan:          r['domesticloan']                                     || undefined,
     })
   })
 

@@ -7,7 +7,7 @@ import { prisma } from '@/app/lib/db'
 export const PHED_PAYROLL_AFFECTING_FIELDS = new Set([
   'category', 'gradeId', 'department', 'unit',
   'basicSalary', 'housingAllowance', 'transportAllowance', 'furnitureAllowance',
-  'mealSubsidy', 'utilityAllowance', 'leaveAllowance', 'shiftAllowance',
+  'mealSubsidy', 'utilityAllowance', 'leaveAllowance',
   'domesticAllowance', 'hazardAllowance', 'electricityAllowance', 'discoveryAllowance',
   'carSubsidy', 'entertainmentAllowance', 'dataAllowance', 'nightAllowance',
   'arrears', 'otherAllowances', 'annualRent', 'hasLifeAssurance', 'lifeAssuranceAmount',

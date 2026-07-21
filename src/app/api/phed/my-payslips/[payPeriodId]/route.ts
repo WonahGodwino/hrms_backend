@@ -91,7 +91,6 @@ export async function GET(
       mealSubsidy:            n(payroll.mealSubsidy),
       utilityAllowance:       n(payroll.utilityAllowance),
       leaveAllowance:         n(payroll.leaveAllowance),
-      shiftAllowance:         n(payroll.shiftAllowance),
       domesticAllowance:      n(payroll.domesticAllowance),
       hazardAllowance:        n(payroll.hazardAllowance),
       electricityAllowance:   n(payroll.electricityAllowance),

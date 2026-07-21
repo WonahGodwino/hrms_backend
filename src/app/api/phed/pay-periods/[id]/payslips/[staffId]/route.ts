@@ -93,7 +93,6 @@ function buildPayslipData(
     mealSubsidy:            n(p.mealSubsidy),
     utilityAllowance:       n(p.utilityAllowance),
     leaveAllowance:         n(p.leaveAllowance),
-    shiftAllowance:         n(p.shiftAllowance),
     domesticAllowance:      n(p.domesticAllowance),
     hazardAllowance:        n(p.hazardAllowance),
     electricityAllowance:   n(p.electricityAllowance),

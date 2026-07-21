@@ -966,7 +966,6 @@ export const INDIV_ALLOWANCE_FIELDS: { key: string; header: string; excelWidth: 
   { key: 'mealSubsidy',            header: 'Meal Subsidy (₦)',  excelWidth: 16, pdfRatio: 0.95 },
   { key: 'utilityAllowance',       header: 'Utility (₦)',       excelWidth: 14, pdfRatio: 0.80 },
   { key: 'leaveAllowance',         header: 'Leave (₦)',         excelWidth: 14, pdfRatio: 0.80 },
-  { key: 'shiftAllowance',         header: 'Shift (₦)',         excelWidth: 14, pdfRatio: 0.80 },
   { key: 'domesticAllowance',      header: 'Domestic (₦)',      excelWidth: 14, pdfRatio: 0.80 },
   { key: 'hazardAllowance',        header: 'Hazard (₦)',        excelWidth: 14, pdfRatio: 0.80 },
   { key: 'electricityAllowance',   header: 'Electricity (₦)',   excelWidth: 16, pdfRatio: 0.95 },
@@ -1472,7 +1471,6 @@ export async function exportIndividualPayrollToExcel(
     ['Meal Subsidy',            data.mealSubsidy,            false],
     ['Utility Allowance',       data.utilityAllowance,       false],
     ['Leave Allowance',         data.leaveAllowance,         false],
-    ['Shift Allowance',         data.shiftAllowance,         false],
     ['Domestic Allowance',      data.domesticAllowance,      false],
     ['Hazard Allowance',        data.hazardAllowance,        false],
     ['Electricity Allowance',   data.electricityAllowance,   false],
@@ -1636,7 +1634,6 @@ export interface IADEmployee {
   mealSubsidy:             number
   utilityAllowance:        number
   leaveAllowance:          number
-  shiftAllowance:          number
   domesticAllowance:       number
   hazardAllowance:         number
   electricityAllowance:    number

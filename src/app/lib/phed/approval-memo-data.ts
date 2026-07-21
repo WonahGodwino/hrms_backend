@@ -95,7 +95,6 @@ export async function buildApprovalMemoSections(payPeriodId: string): Promise<Ap
     ['Meal Subsidy',              'mealSubsidy'],
     ['Utility Allowance',         'utilityAllowance'],
     ['Leave Grant',               'leaveAllowance'],
-    ['Shift Allowance',           'shiftAllowance'],
     ['Domestic Allowance',        'domesticAllowance'],
     ['Hazard Allowance',          'hazardAllowance'],
     ['Electricity Allowance',     'electricityAllowance'],

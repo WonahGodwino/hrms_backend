@@ -45,22 +45,26 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     const body = await req.json()
     const updatable = [
-      'firstName', 'lastName', 'email', 'phone', 'category', 'gradeId',
-      'department', 'unit', 'regionId', 'feederId', 'payPointId',
+      'firstName', 'lastName', 'email', 'phone', 'jobTitle', 'category', 'gradeId',
+      'level', 'callCenter', 'resumptionDate', 'department', 'unit', 'regionId', 'feederId', 'payPointId',
       'bankName', 'accountNumber', 'accountName', 'rsaPin', 'pfaName',
+      'pensionNumber', 'tin', 'nhfNumber',
       'annualRent', 'basicSalary', 'housingAllowance', 'transportAllowance',
       'furnitureAllowance', 'mealSubsidy', 'utilityAllowance', 'leaveAllowance',
-      'shiftAllowance', 'domesticAllowance', 'hazardAllowance', 'electricityAllowance',
+      'domesticAllowance', 'hazardAllowance', 'electricityAllowance',
       'discoveryAllowance', 'carSubsidy', 'entertainmentAllowance', 'dataAllowance',
-      'nightAllowance', 'arrears', 'otherAllowances', 'isActive',
-      'hasLifeAssurance', 'lifeAssuranceAmount',
+      'nightAllowance', 'arrears', 'otherAllowances',
+      'voluntaryPension', 'insurance', 'cashAdvanced', 'loan', 'domesticLoan',
+      'isActive', 'hasLifeAssurance', 'lifeAssuranceAmount',
     ]
     const numericFields = new Set([
       'annualRent', 'basicSalary', 'housingAllowance', 'transportAllowance',
       'furnitureAllowance', 'mealSubsidy', 'utilityAllowance', 'leaveAllowance',
-      'shiftAllowance', 'domesticAllowance', 'hazardAllowance', 'electricityAllowance',
+      'domesticAllowance', 'hazardAllowance', 'electricityAllowance',
       'discoveryAllowance', 'carSubsidy', 'entertainmentAllowance', 'dataAllowance',
-      'nightAllowance', 'arrears', 'otherAllowances', 'lifeAssuranceAmount',
+      'nightAllowance', 'arrears', 'otherAllowances',
+      'voluntaryPension', 'insurance', 'cashAdvanced', 'loan', 'domesticLoan',
+      'lifeAssuranceAmount',
     ])
     // Relation ID fields — empty string must become null, not be passed as-is
     const relationIdFields = new Set(['gradeId', 'regionId', 'feederId', 'payPointId'])

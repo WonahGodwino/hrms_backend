@@ -99,7 +99,6 @@ function buildPayslipHtml(p: any, periodName: string, n: (v: any) => number): st
     <tr><td>Meal Subsidy</td><td>${fmt(p.mealSubsidy)}</td></tr>
     <tr><td>Utility Allowance</td><td>${fmt(p.utilityAllowance)}</td></tr>
     <tr><td>Leave Allowance</td><td>${fmt(p.leaveAllowance)}</td></tr>
-    <tr><td>Shift Allowance</td><td>${fmt(p.shiftAllowance)}</td></tr>
     <tr><td>Other Allowances</td><td>${fmt(p.otherAllowances)}</td></tr>
     <tr><td>Overtime Earnings</td><td>${fmt(p.overtimeEarnings)}</td></tr>
     <tr class="total"><td>Gross Salary</td><td>${fmt(p.grossSalary)}</td></tr>

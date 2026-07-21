@@ -2068,7 +2068,7 @@ model PhedGrade {
 model PhedAllowanceTemplate {
   id            String    @id @default(cuid())
   gradeId       String
-  allowanceType String    // HOUSING | TRANSPORT | FURNITURE | MEAL_SUBSIDY | UTILITY | LEAVE | SHIFT | DOMESTIC | HAZARD | ELECTRICITY | DISCOVERY | CAR_SUBSIDY | ENTERTAINMENT | DATA | NIGHT | ARREARS | OTHER
+  allowanceType String    // HOUSING | TRANSPORT | FURNITURE | MEAL_SUBSIDY | UTILITY | LEAVE | DOMESTIC | HAZARD | ELECTRICITY | DISCOVERY | CAR_SUBSIDY | ENTERTAINMENT | DATA | NIGHT | ARREARS | OTHER
   valueType     String    // FIXED | PERCENTAGE
   value         Decimal   @db.Decimal(18, 4)
   createdAt     DateTime  @default(now())
@@ -2196,6 +2196,7 @@ model PhedStaff {
   pfaName            String?
   pensionNumber      String?                // Pension member enrollment / PIN from PFA
   tin                String?                // Tax Identification Number (FIRS)
+  nhfNumber          String?                // National Housing Fund membership number
 
   // Life assurance
   hasLifeAssurance   Boolean                @default(false)
@@ -2204,9 +2205,18 @@ model PhedStaff {
   // For rent relief calculation
   annualRent         Decimal?               @db.Decimal(18, 2)
 
+  // Staff profile extras
+  jobTitle           String?
+  level              String?
+  resumptionDate     DateTime?
+  callCenter         String?                // Call center / support desk the employee is assigned to
+
   // Voluntary deductions (monthly amounts)
   voluntaryPension   Decimal?               @db.Decimal(18, 2)
   insurance          Decimal?               @db.Decimal(18, 2)
+  cashAdvanced       Decimal?               @db.Decimal(18, 2)
+  loan               Decimal?               @db.Decimal(18, 2)
+  domesticLoan       Decimal?               @db.Decimal(18, 2)
 
   // Salary (overrides grade defaults when set)
   basicSalary        Decimal?               @db.Decimal(18, 2)
@@ -2216,7 +2226,6 @@ model PhedStaff {
   mealSubsidy        Decimal?               @db.Decimal(18, 2)
   utilityAllowance   Decimal?               @db.Decimal(18, 2)
   leaveAllowance     Decimal?               @db.Decimal(18, 2)
-  shiftAllowance         Decimal?               @db.Decimal(18, 2)
   domesticAllowance      Decimal?               @db.Decimal(18, 2)
   hazardAllowance        Decimal?               @db.Decimal(18, 2)
   electricityAllowance   Decimal?               @db.Decimal(18, 2)
@@ -2435,7 +2444,6 @@ model PhedComputedPayroll {
   mealSubsidy                 Decimal              @default(0) @db.Decimal(18, 2)
   utilityAllowance            Decimal              @default(0) @db.Decimal(18, 2)
   leaveAllowance              Decimal              @default(0) @db.Decimal(18, 2)
-  shiftAllowance              Decimal              @default(0) @db.Decimal(18, 2)
   domesticAllowance           Decimal              @default(0) @db.Decimal(18, 2)
   hazardAllowance             Decimal              @default(0) @db.Decimal(18, 2)
   electricityAllowance        Decimal              @default(0) @db.Decimal(18, 2)
@@ -2490,6 +2498,7 @@ model PhedComputedPayroll {
   rsaPin                      String?
   pensionNumber               String?
   tin                         String?
+  nhfNumber                   String?
 
   createdAt                   DateTime             @default(now())
   updatedAt                   DateTime             @updatedAt
