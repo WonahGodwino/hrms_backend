@@ -82,13 +82,14 @@ async function parseBuffer(
 export async function parseStaffCsv(
   buffer: Buffer,
   fileExt: string
-): Promise<{ rows: StaffCsvRow[]; errors: string[] }> {
+): Promise<{ rows: StaffCsvRow[]; errors: string[]; errorRows: Array<{ rowNum: number; raw: Record<string, string>; error: string }> }> {
   // Row 1 = column headers, Row 2 = notes/descriptions row (grey).
   // Skip 1 row after the header so the notes row is never treated as a staff record.
   // Row 3 onward is real data — the template ships with no sample row to delete.
   const raw    = await parseBuffer(buffer, fileExt, 1)
   const rows: StaffCsvRow[] = []
   const errors: string[]    = []
+  const errorRows: Array<{ rowNum: number; raw: Record<string, string>; error: string }> = []
 
   // Detect when column headers don't match the template at all.
   // If none of the expected keys are present, surface a clear error.
@@ -103,7 +104,7 @@ export async function parseStaffCsv(
       const availableKeys = Object.keys(firstRow).slice(0, 10).join(', ')
       console.error(`[parseStaffCsv] Column headers don't match template. Available keys (first 10): ${availableKeys}`)
       errors.push(`Column headers do not match the staff upload template. Found columns: ${availableKeys}${Object.keys(firstRow).length > 10 ? '...' : ''}. Please use the template downloaded from the system.`)
-      return { rows, errors }
+      return { rows, errors, errorRows }
     }
   }
 
@@ -121,15 +122,21 @@ export async function parseStaffCsv(
     }
 
     if (!firstName || !lastName) {
-      errors.push(`Row ${rowNum}: firstName and lastName are required`)
+      const err = `Row ${rowNum}: firstName and lastName are required`
+      errors.push(err)
+      errorRows.push({ rowNum, raw: r, error: err })
       return
     }
     if (!staffId) {
-      errors.push(`Row ${rowNum}: staffId / Employee ID is required`)
+      const err = `Row ${rowNum}: staffId / Employee ID is required`
+      errors.push(err)
+      errorRows.push({ rowNum, raw: r, error: err })
       return
     }
     if (!email) {
-      errors.push(`Row ${rowNum}: email is required`)
+      const err = `Row ${rowNum}: email is required`
+      errors.push(err)
+      errorRows.push({ rowNum, raw: r, error: err })
       return
     }
 
@@ -186,7 +193,7 @@ export async function parseStaffCsv(
     })
   })
 
-  return { rows, errors }
+  return { rows, errors, errorRows }
 }
 
 // ── Validation CSV ───────────────────────────────────────────

@@ -13,12 +13,13 @@ export class ApiResponse {
     )
   }
 
-  static error(message: string = 'Error', status: number = 400, errors?: any[]) {
+  static error(message: string = 'Error', status: number = 400, errors?: any[], extra?: Record<string, any>) {
     return NextResponse.json(
       {
         success: false,
         message,
-        errors: errors || []
+        errors: errors || [],
+        ...(extra || {}),
       },
       { status }
     )

@@ -32,16 +32,38 @@ export async function POST(req: NextRequest) {
       return withCors(ApiResponse.error('Only CSV or Excel files are supported', 400), origin)
 
     const buffer = Buffer.from(await file.arrayBuffer())
-    const { rows, errors: parseErrors } = await parseStaffCsv(buffer, ext)
+    const { rows, errors: parseErrors, errorRows } = await parseStaffCsv(buffer, ext)
+
+    // ── Generate error CSV when there are validation errors ──────
+    function buildErrorCsv(errRows: Array<{ rowNum: number; raw: Record<string, string>; error: string }>): string {
+      const cols = ['Row', 'Staff ID', 'First Name', 'Last Name', 'Email', 'Error']
+      const header = cols.join(',')
+      const body = errRows.map(er => {
+        const staffId = er.raw['staffid'] || er.raw['employeeid'] || er.raw['staff_id'] || ''
+        const firstName = er.raw['firstname'] || er.raw['first_name'] || ''
+        const lastName  = er.raw['lastname'] || er.raw['last_name'] || ''
+        const email     = er.raw['email'] || ''
+        const csvSafe = (v: string) => `"${v.replace(/"/g, '""')}"`
+        return [er.rowNum, csvSafe(staffId), csvSafe(firstName), csvSafe(lastName), csvSafe(email), csvSafe(er.error)].join(',')
+      }).join('\n')
+      return `${header}\n${body}`
+    }
+
+    const errorCsv = errorRows.length > 0 ? buildErrorCsv(errorRows) : null
 
     if (rows.length === 0) {
-      console.error(`[PHED upload] No valid rows. File: ${file.name} (${ext}), parseErrors: ${parseErrors.length}`, 
+      console.error(`[PHED upload] No valid rows. File: ${file.name} (${ext}), parseErrors: ${parseErrors.length}`,
         parseErrors.length > 0 ? parseErrors.slice(0, 5) : '(none)')
-      const detail = parseErrors.length > 0
-        ? ` — ${parseErrors.slice(0, 5).join('; ')}${parseErrors.length > 5 ? ` (+${parseErrors.length - 5} more)` : ''}`
-        : ' — file may be empty, contain only blank rows, or have column headers that do not match the template'
-      return withCors(ApiResponse.error(`No valid rows found in file${detail}`, 400), origin)
-    }
+
+      // Distinguish: parse errors vs truly empty/blank file
+      if (parseErrors.length > 0) {
+        const msg = parseErrors.length === 1
+          ? parseErrors[0]
+          : `${parseErrors.length} rows have errors — ${parseErrors.slice(0, 3).join('; ')}${parseErrors.length > 3 ? ` (+${parseErrors.length - 3} more)` : ''}`
+        return withCors(ApiResponse.error(msg, 400, undefined, errorCsv ? { errorCsv, errorFileName: `upload-errors-${file.name.replace(/\.(xlsx|xls|csv)$/i, '')}.csv` } : undefined), origin)
+      }
+
+      return withCors(ApiResponse.error('No valid rows found in file — the file may be empty or contain only blank rows. Please fill in at least one staff record.', 400), origin)
 
     // Load lookup tables and company name in parallel
     const [grades, regions, feeders, payPoints, company] = await Promise.all([
@@ -267,17 +289,34 @@ export async function POST(req: NextRequest) {
       },
     })
 
+    // Build combined error CSV from parse + processing errors
+    const allErrors = [...rowErrors]
+    const finalErrorCsv = allErrors.length > 0
+      ? `Row,Error\n${allErrors.map(e => {
+          const match = e.match(/^Row (\d+):?\s*(.*)$/)
+          const row = match ? match[1] : ''
+          const msg = match ? match[2].replace(/"/g, '""') : e.replace(/"/g, '""')
+          return `${row},"${msg}"`
+        }).join('\n')}`
+      : null
+
     if (successful === 0 && rows.length > 0)
-      return withCors(ApiResponse.error(`All ${rows.length} row(s) failed. Errors: ${rowErrors.slice(0, 3).join('; ')}`, 400), origin)
+      return withCors(ApiResponse.error(
+        `All ${rows.length} row(s) failed. Errors: ${rowErrors.slice(0, 3).join('; ')}`,
+        400, undefined,
+        finalErrorCsv ? { errorCsv: finalErrorCsv, errorFileName: `upload-errors-${file.name.replace(/\.(xlsx|xls|csv)$/i, '')}.csv` } : undefined
+      ), origin)
 
     const message = failed > 0
       ? `${successful} staff uploaded, ${failed} failed`
       : `${successful} staff uploaded successfully`
 
-    return withCors(
-      ApiResponse.success({ successful, failed, errors: rowErrors }, message),
-      origin
-    )
+    const respData: any = { successful, failed, errors: rowErrors }
+    if (finalErrorCsv) {
+      respData.errorCsv = finalErrorCsv
+      respData.errorFileName = `upload-errors-${file.name.replace(/\.(xlsx|xls|csv)$/i, '')}.csv`
+    }
+    return withCors(ApiResponse.success(respData, message), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 
