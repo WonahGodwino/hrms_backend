@@ -64,6 +64,7 @@ export async function POST(req: NextRequest) {
       }
 
       return withCors(ApiResponse.error('No valid rows found in file — the file may be empty or contain only blank rows. Please fill in at least one staff record.', 400), origin)
+    }
 
     // Load lookup tables and company name in parallel
     const [grades, regions, feeders, payPoints, company] = await Promise.all([
