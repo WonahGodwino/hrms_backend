@@ -17,8 +17,9 @@ export async function GET(request: NextRequest) {
     const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const { searchParams } = new URL(request.url)
-    const companyId = searchParams.get('companyId') || user.companyId
-    if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
+    // companyId from the global company selector — required for ADMIN/SUPER_ADMIN.
+    const companyId = searchParams.get('companyId')
+    if (!companyId) return withCors(ApiResponse.error('companyId query parameter is required — select a company from the global selector', 400), origin)
 
     const company = await prisma.company.findUnique({
       where: { id: companyId },
@@ -89,13 +90,19 @@ export async function GET(request: NextRequest) {
 
     // Row 6 — Sample data row
     const sample: Record<string, string> = {
-      candidateId: '',
+      country: 'Nigeria',
+      city: 'Lagos',
       candidateName: 'Alice Cooper',
+      position: 'Business Development',
+      mainDuties: 'Onboarding key merchants within assigned locality',
+      graduatedFrom: 'University of Lagos',
+      reasonsForQuit: 'Better Opportunity',
+      resumptionDate: '2026-08-01',
+      currentBasicSalary: '70000',
+      proposedBasicSalary: '100000',
+      proposedPerformanceBonus: '200000',
       email: 'alice@example.com',
-      jobId: 'JOB-001',
-      designationId: 'DES-001',
-      anticipatedStartDate: '2026-08-01',
-      offerExpirationDate: '2026-08-21',
+      requiresApproval: '',
     }
     const sampleRow = sheet.getRow(headerRowNumber + 1)
     columns.forEach((col, i) => {
@@ -106,7 +113,7 @@ export async function GET(request: NextRequest) {
     })
 
     // Column widths
-    const widths = [22, 24, 30, 18, 18, 16, 16]
+    const widths = [16, 16, 24, 24, 32, 30, 24, 16, 18, 18, 22, 30, 18]
     columns.forEach((_, i) => { sheet.getColumn(i + 1).width = widths[i] || 20 })
 
     // Instructions block below the data

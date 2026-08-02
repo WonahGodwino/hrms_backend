@@ -40,6 +40,9 @@ export async function GET(request: NextRequest) {
       companyId = queryCompanyId
     } else if (user.companyId) {
       companyId = user.companyId
+    } else if (userCompanyIds.length > 0) {
+      // Fallback: use the first assigned company when user.companyId is null
+      companyId = userCompanyIds[0]
     } else {
       return withCors(ApiResponse.error('No company assigned to this user', 400), origin)
     }
@@ -155,6 +158,9 @@ export async function POST(request: NextRequest) {
       companyId = bodyCompanyId
     } else if (user.companyId) {
       companyId = user.companyId
+    } else if (userCompanyIds.length > 0) {
+      // Fallback: use the first assigned company when user.companyId is null
+      companyId = userCompanyIds[0]
     } else {
       return withCors(ApiResponse.error('No company assigned to this user', 400), origin)
     }

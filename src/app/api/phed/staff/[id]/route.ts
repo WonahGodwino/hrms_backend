@@ -29,6 +29,14 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       },
     })
     if (!staff) return withCors(ApiResponse.notFound('Staff not found'), origin)
+
+    // Sanitise: null out join rows whose referenced parent was deleted
+    if (staff.unions) {
+      staff.unions = staff.unions.filter((su: any) => su.union != null)
+    }
+    if (staff.cooperatives) {
+      staff.cooperatives = staff.cooperatives.filter((sc: any) => sc.cooperative != null)
+    }
     if (user.role !== 'SUPER_ADMIN' && user.companyId && staff.companyId !== user.companyId)
       return withCors(ApiResponse.notFound('Staff not found'), origin)
     return withCors(ApiResponse.success(staff), origin)

@@ -32,7 +32,14 @@ async function parseBuffer(
 
   if (ext === 'csv') {
     const csvText = buffer.toString('utf-8')
-    const lines   = csvText.split(/\r?\n/).filter((l: string) => l.trim())
+    // Filter out truly blank lines AND lines that are only commas (empty CSV rows)
+    const lines   = csvText.split(/\r?\n/).filter((l: string) => {
+      const trimmed = l.trim()
+      if (!trimmed) return false
+      // Filter rows that contain only commas (e.g. ",,,,,")
+      if (trimmed.replace(/,/g, '').trim() === '') return false
+      return true
+    })
     if (lines.length < 2) return []
 
     const headers = lines[0].split(',').map((h: string) => h.trim())
@@ -89,6 +96,12 @@ export async function parseStaffCsv(
     const lastName  = r['lastname']  || r['last_name']  || r['lastname']  || ''
     const staffId   = r['staffid']   || r['employeeid'] || r['staff_id']  || ''
     const email     = r['email']     || ''
+
+    // Skip entirely blank/empty rows silently — do not treat as errors.
+    // A row is considered empty when ALL four required fields are blank.
+    if (!firstName && !lastName && !staffId && !email) {
+      return
+    }
 
     if (!firstName || !lastName) {
       errors.push(`Row ${rowNum}: firstName and lastName are required`)
@@ -173,6 +186,11 @@ export async function parseValidationCsv(
     const rowNum  = i + 2
     const staffId = r['staffid'] || r['employeeid'] || r['staff_id'] || ''
     const status  = (r['status'] || '').toUpperCase()
+
+    // Skip entirely blank/empty rows silently
+    if (!staffId && !status && !r['reason']) {
+      return
+    }
 
     if (!staffId) {
       errors.push(`Row ${rowNum}: staffId is required`)

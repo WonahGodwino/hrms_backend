@@ -46,6 +46,8 @@ export async function GET(req: NextRequest) {
         : {}),
     }
 
+    // ── Fetch staff with safe includes (avoid cascading failures from orphaned
+    //     union/cooperative join records) ─────────────────────────────────
     const [total, staff] = await Promise.all([
       (prisma as any).phedStaff.count({ where }),
       (prisma as any).phedStaff.findMany({
@@ -63,6 +65,17 @@ export async function GET(req: NextRequest) {
         take:  limit,
       }),
     ])
+
+    // Sanitise staff records: null out any union/cooperative join rows whose
+    // referenced parent was deleted (prevents JSON-serialisation crashes).
+    for (const s of staff) {
+      if (s.unions) {
+        s.unions = s.unions.filter((su: any) => su.union != null)
+      }
+      if (s.cooperatives) {
+        s.cooperatives = s.cooperatives.filter((sc: any) => sc.cooperative != null)
+      }
+    }
 
     return withCors(
       ApiResponse.success({ staff, total, page, limit, pages: Math.ceil(total / limit) }),

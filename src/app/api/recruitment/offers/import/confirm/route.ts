@@ -7,7 +7,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { parseOfferImportFile, EMAIL_RE } from '@/app/lib/offers/bulk-import-helpers'
+import { parseOfferImportFile, EMAIL_RE, parseApprovalFlag } from '@/app/lib/offers/bulk-import-helpers'
 import { splitName } from '@/app/lib/offers/ad-hoc-helpers'
 import { applyApprovalWorkflow } from '@/app/lib/offers/approval-workflow'
 
@@ -19,8 +19,9 @@ export async function POST(request: NextRequest) {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
     const { searchParams } = new URL(request.url)
-    const companyId = searchParams.get('companyId') || user.companyId
-    if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
+    // companyId from the global company selector — required for ADMIN/SUPER_ADMIN.
+    const companyId = searchParams.get('companyId')
+    if (!companyId) return withCors(ApiResponse.error('companyId query parameter is required — select a company from the global selector', 400), origin)
     const actor = user.userId || user.email || 'system'
 
     const formData = await request.formData()
@@ -52,45 +53,49 @@ export async function POST(request: NextRequest) {
 
     for (const row of rows) {
       // Re-run the same validation gate as /validate so errored rows are ignored.
-      if (!row.candidateName || !row.email || !EMAIL_RE.test(row.email) || !row.designationId) {
+      // Position maps to designationId/jobId as a fallback for the new template.
+      const effectiveDesignation = row.designationId || row.position || ''
+      if (!row.candidateName || !row.email || !EMAIL_RE.test(row.email) || !effectiveDesignation) {
         skipped++; continue
       }
       if (seenEmails.has(row.email)) { skipped++; continue }
       seenEmails.add(row.email)
 
       try {
-        // Resolve the designation by code or id (with its grade for pay lookup).
+        // Resolve the designation by code, id, or title (position may be a title).
         const designation = await (prisma as any).designation.findFirst({
           where: {
             companyId,
-            OR: [{ id: row.designationId }, { code: { equals: row.designationId, mode: 'insensitive' } }],
+            OR: [
+              { id: effectiveDesignation },
+              { code: { equals: effectiveDesignation, mode: 'insensitive' } },
+              { title: { equals: effectiveDesignation, mode: 'insensitive' } },
+            ],
           },
           include: { gradeLevel: { select: { id: true, name: true, basePay: true } } },
         })
-        if (!designation) { skipped++; errors.push({ email: row.email, reason: 'Unknown designation' }); continue }
+        if (!designation) { skipped++; errors.push({ email: row.email, reason: 'Unknown designation/position' }); continue }
 
-        // Resolve the job requisition when a Job ID (or title) is supplied. It
-        // lets us attach the offer to the right position and, if needed, create
-        // the application for a candidate who isn't in that job's pipeline yet.
+        // Resolve the job requisition. The position column may be a job title or
+        // a designation — try both. Job ID from legacy templates also works.
+        const effectiveJob = row.jobId || row.position || ''
         let job = null as any
-        if (row.jobId) {
+        if (effectiveJob) {
           job = await prisma.job.findFirst({
             where: {
               companyId, archived: 0,
-              OR: [{ id: row.jobId }, { title: { equals: row.jobId, mode: 'insensitive' } }],
+              OR: [
+                { id: effectiveJob },
+                { title: { equals: effectiveJob, mode: 'insensitive' } },
+              ],
             },
             select: { id: true },
           })
-          if (!job) {
-            skipped++
-            missingJobs.add(row.jobId)
-            errors.push({ email: row.email, reason: `Job "${row.jobId}" not found — create this job before uploading offers for it` })
-            continue
-          }
+          // If no job found by position/id, that's OK — the offer can still be
+          // attached to the designation without a specific job requisition.
         }
 
-        // Resolve the candidate: candidateId may be a Candidate id, an
-        // application id, or blank — otherwise fall back to matching by email.
+        // Resolve the candidate: match by email first, then by candidateId
         let candidate = null as any
         if (row.candidateId) {
           candidate = await prisma.candidate.findFirst({ where: { id: row.candidateId, companyId } })
@@ -105,10 +110,8 @@ export async function POST(request: NextRequest) {
         if (!candidate) {
           candidate = await prisma.candidate.findFirst({ where: { email: row.email, companyId } })
         }
-        // With a job to attach to, we can register a brand-new candidate from the
-        // sheet ("if not found in DB it will use the provided"). Without a job we
-        // can only offer to someone who already has an application.
-        if (!candidate && job) {
+        // Create a new candidate if not found (for external / already-hired candidates)
+        if (!candidate) {
           const { firstName, lastName } = splitName(row.candidateName)
           candidate = await prisma.candidate.create({
             data: { companyId, firstName, lastName, email: row.email, createdBy: actor },
@@ -116,7 +119,8 @@ export async function POST(request: NextRequest) {
         }
         if (!candidate) { skipped++; errors.push({ email: row.email, reason: 'No matching candidate/applicant' }); continue }
 
-        // Find (or, when a job is given, create) an application without an offer.
+        // Find or create an application. For the new template (already-hired
+        // candidates), we create a stub application if one doesn't exist.
         let application = await prisma.jobApplication.findFirst({
           where: {
             candidateId: candidate.id, companyId, offer: null,
@@ -124,24 +128,46 @@ export async function POST(request: NextRequest) {
           },
           orderBy: { createdAt: 'desc' },
         })
-        if (!application && job) {
-          // Guard against an existing application that already has an offer.
-          const existingForJob = await prisma.jobApplication.findUnique({
-            where: { jobId_candidateId: { jobId: job.id, candidateId: candidate.id } },
-            include: { offer: true },
-          })
-          if (existingForJob?.offer) { skipped++; errors.push({ email: row.email, reason: 'An offer already exists for this application' }); continue }
-          application = existingForJob ?? await prisma.jobApplication.create({
-            data: {
-              companyId, jobId: job.id, candidateId: candidate.id,
-              cvFilePath: 'bulk-offer-import', status: 'OFFERED', createdBy: actor,
-              metadata: { source: 'BULK_OFFER_IMPORT' },
-            },
-          })
+        if (!application) {
+          // If we have a job, check for existing application with offer
+          if (job) {
+            const existingForJob = await prisma.jobApplication.findUnique({
+              where: { jobId_candidateId: { jobId: job.id, candidateId: candidate.id } },
+              include: { offer: true },
+            })
+            if (existingForJob?.offer) { skipped++; errors.push({ email: row.email, reason: 'An offer already exists for this application' }); continue }
+            if (existingForJob) {
+              application = existingForJob
+            }
+          }
+          if (!application) {
+            application = await prisma.jobApplication.create({
+              data: {
+                companyId,
+                jobId: job?.id ?? 'direct-offer',
+                candidateId: candidate.id,
+                cvFilePath: 'bulk-offer-import',
+                status: 'OFFERED',
+                createdBy: actor,
+                metadata: { source: 'BULK_OFFER_IMPORT' },
+              },
+            })
+          }
         }
         if (!application) { skipped++; errors.push({ email: row.email, reason: 'No open application without an existing offer' }); continue }
 
-        const basePay = designation.basePay ?? designation.gradeLevel?.basePay ?? null
+        // Use proposed salary from template if provided, otherwise fall back to grade base pay
+        const proposedSalary = row.proposedBasicSalary ? parseFloat(row.proposedBasicSalary.replace(/[^0-9.]/g, '')) : NaN
+        const basePay = !isNaN(proposedSalary) && proposedSalary > 0
+          ? proposedSalary
+          : designation.basePay ?? designation.gradeLevel?.basePay ?? null
+
+        const startDate = row.resumptionDate || row.anticipatedStartDate
+
+        // Determine if this offer should pass through the approval workflow.
+        // Default for already-hired candidates: skip approval (APPROVED directly).
+        const needsApproval = parseApprovalFlag(row.requiresApproval)
+        const offerStatus = needsApproval ? 'PENDING_APPROVAL' : 'APPROVED'
 
         const offer = await prisma.offer.create({
           data: {
@@ -149,16 +175,26 @@ export async function POST(request: NextRequest) {
             applicationId: application.id,
             candidateId: candidate.id,
             jobId: application.jobId,
-            status: 'PENDING_APPROVAL',
+            status: offerStatus,
             salary: basePay != null ? basePay : undefined,
             gradeId: designation.gradeLevel?.id ?? null,
             gradeName: designation.gradeLevel?.name ?? null,
-            proposedStartDate: row.anticipatedStartDate ? new Date(row.anticipatedStartDate) : null,
+            proposedStartDate: startDate ? new Date(startDate) : null,
             createdBy: actor,
             metadata: {
               source: 'BULK_IMPORT',
               designationId: designation.id,
               designationCode: designation.code,
+              position: row.position || null,
+              country: row.country || null,
+              city: row.city || null,
+              mainDuties: row.mainDuties || null,
+              graduatedFrom: row.graduatedFrom || null,
+              reasonsForQuit: row.reasonsForQuit || null,
+              currentBasicSalary: row.currentBasicSalary || null,
+              proposedBasicSalary: row.proposedBasicSalary || null,
+              proposedPerformanceBonus: row.proposedPerformanceBonus || null,
+              requiresApproval: needsApproval,
               offerExpirationDate: row.offerExpirationDate,
               templateId: templateId || undefined,
               templateBody: templateBody || undefined,
@@ -171,7 +207,10 @@ export async function POST(request: NextRequest) {
           data: { status: 'OFFERED', updatedBy: actor },
         })
 
-        await applyApprovalWorkflow(offer.id, companyId)
+        // Only trigger the approval workflow when the user explicitly opted in.
+        if (needsApproval) {
+          await applyApprovalWorkflow(offer.id, companyId)
+        }
 
         created++
       } catch (rowErr: any) {

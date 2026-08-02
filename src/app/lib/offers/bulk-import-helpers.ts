@@ -5,22 +5,41 @@ import * as XLSX from 'xlsx'
 
 // Canonical column headers for the bulk-offer template. Order matters — it is
 // the order they appear in the generated spreadsheet.
+// Updated to match the new Offer Template for already-hired/external candidates.
 export const OFFER_IMPORT_COLUMNS = [
-  { key: 'candidateId', header: 'Candidate ID', note: 'Optional. Paste the applicant ID from the pipeline. If left blank we match by email.' },
-  { key: 'candidateName', header: 'Candidate Name', note: 'Full name of the candidate.' },
-  { key: 'email', header: 'Email Address', note: 'Candidate email — used to match an existing applicant.' },
-  { key: 'jobId', header: 'Job ID', note: 'The job requisition (position) this offer maps to. Used to attach the offer to the right job.' },
-  { key: 'designationId', header: 'Designation ID', note: 'The designation/job code the offer is for (e.g. DES-001) — sets grade & base pay.' },
-  { key: 'anticipatedStartDate', header: 'Start Date', note: 'Anticipated start date (YYYY-MM-DD or DD/MM/YYYY).' },
-  { key: 'offerExpirationDate', header: 'Expiration Date', note: 'Date the offer expires if unsigned (YYYY-MM-DD or DD/MM/YYYY).' },
+  { key: 'country', header: 'Country', note: 'Country of the candidate / work location.' },
+  { key: 'city', header: 'City', note: 'City of the candidate / work location.' },
+  { key: 'candidateName', header: 'Name', note: 'Full name of the candidate.' },
+  { key: 'position', header: 'Position', note: 'Job position / title for the offer.' },
+  { key: 'mainDuties', header: 'Main Duties', note: 'Brief description of the role\'s main duties.' },
+  { key: 'graduatedFrom', header: 'Graduated From', note: 'Educational institution the candidate graduated from.' },
+  { key: 'reasonsForQuit', header: 'Reasons for Quit', note: 'Reason for leaving previous employment (if applicable).' },
+  { key: 'resumptionDate', header: 'Resumption Date', note: 'Expected resumption / start date (YYYY-MM-DD or DD/MM/YYYY).' },
+  { key: 'currentBasicSalary', header: 'Current Basic Salary', note: 'Candidate\'s current basic salary (numeric).' },
+  { key: 'proposedBasicSalary', header: 'Proposed Basic Salary', note: 'Proposed basic salary for the offer (numeric).' },
+  { key: 'proposedPerformanceBonus', header: 'Proposed Performance Bonus', note: 'Proposed performance bonus amount (numeric).' },
+  { key: 'email', header: 'Email of Candidate', note: 'Candidate email address — used to match or create the candidate record.' },
+  { key: 'requiresApproval', header: 'Requires Approval', note: 'Enter Yes/True/1 if this offer must pass through the approval workflow before dispatch. Leave blank or enter No/False/0 to skip approval (default for already-hired candidates).' },
 ] as const
 
 export type OfferImportKey = (typeof OFFER_IMPORT_COLUMNS)[number]['key']
 
 export interface OfferImportRow {
-  candidateId: string
+  country: string
+  city: string
   candidateName: string
+  position: string
+  mainDuties: string
+  graduatedFrom: string
+  reasonsForQuit: string
+  resumptionDate: string | null
+  currentBasicSalary: string
+  proposedBasicSalary: string
+  proposedPerformanceBonus: string
   email: string
+  requiresApproval: string
+  // Legacy aliases for backward compatibility with routes
+  candidateId: string
   jobId: string
   designationId: string
   anticipatedStartDate: string | null
@@ -29,19 +48,42 @@ export interface OfferImportRow {
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+// Interprets a cell value as a boolean for the "Requires Approval" column.
+// Yes / true / 1 → true; anything else (including blank) → false.
+export function parseApprovalFlag(value: unknown): boolean {
+  if (value == null || value === '') return false
+  const s = String(value).trim().toLowerCase()
+  return s === 'yes' || s === 'true' || s === '1' || s === 'y'
+}
+
 // Maps a raw spreadsheet header cell to one of our canonical keys, tolerant of
-// the verbose headers in the original template ("Candidate ID(if not found...)").
-function headerToKey(raw: string): OfferImportKey | null {
+// the verbose headers in the original template and the new offer template format.
+function headerToKey(raw: string): string | null {
   const h = String(raw ?? '').trim().toLowerCase()
   if (!h) return null
+
+  // New template headers (checked first for specificity)
+  if (h.includes('country')) return 'country'
+  if (h.includes('city')) return 'city'
   if (h.includes('name')) return 'candidateName'
+  if (h.includes('position')) return 'position'
+  if (h.includes('duties') || h.includes('main duties')) return 'mainDuties'
+  if (h.includes('graduated') || h.includes('institution')) return 'graduatedFrom'
+  if (h.includes('reasons') || h.includes('quit') || h.includes('reason for')) return 'reasonsForQuit'
+  if (h.includes('resumption') || (h.includes('start') && h.includes('date'))) return 'resumptionDate'
+  if (h.includes('current') && h.includes('salary')) return 'currentBasicSalary'
+  if (h.includes('proposed') && h.includes('salary')) return 'proposedBasicSalary'
+  if (h.includes('performance') || h.includes('bonus')) return 'proposedPerformanceBonus'
   if (h.includes('email')) return 'email'
+  if (h.includes('approval') || h.includes('approve')) return 'requiresApproval'
+
+  // Legacy template headers (backward compatibility)
   if (h.includes('designation')) return 'designationId'
   if (h.includes('job')) return 'jobId'
-  if (h.includes('start')) return 'anticipatedStartDate'
   if (h.includes('expir')) return 'offerExpirationDate'
   if (h.includes('candidate') && h.includes('id')) return 'candidateId'
   if (h.includes('applicant')) return 'candidateId'
+
   return null
 }
 
@@ -107,7 +149,7 @@ export async function parseOfferImportFile(file: File): Promise<OfferImportRow[]
   if (headerIndex === -1) throw new Error('Could not find a valid header row (expected columns like Candidate Name, Email, Designation ID)')
 
   const headerRow = matrix[headerIndex] as any[]
-  const colMap: (OfferImportKey | null)[] = headerRow.map((h) => headerToKey(h))
+  const colMap: (string | null)[] = headerRow.map((h) => headerToKey(h))
 
   const rows: OfferImportRow[] = []
   for (let i = headerIndex + 1; i < matrix.length; i++) {
@@ -116,19 +158,30 @@ export async function parseOfferImportFile(file: File): Promise<OfferImportRow[]
     if (!cells || cells.every((c) => String(c ?? '').trim() === '')) continue
 
     const record: any = {
-      candidateId: '', candidateName: '', email: '', jobId: '', designationId: '',
+      country: '', city: '', candidateName: '', position: '', mainDuties: '',
+      graduatedFrom: '', reasonsForQuit: '', resumptionDate: null,
+      currentBasicSalary: '', proposedBasicSalary: '', proposedPerformanceBonus: '', email: '',
+      requiresApproval: '',
+      // Legacy aliases
+      candidateId: '', jobId: '', designationId: '',
       anticipatedStartDate: null, offerExpirationDate: null,
     }
     colMap.forEach((key, idx) => {
       if (!key) return
       const raw = cells[idx]
-      if (key === 'anticipatedStartDate' || key === 'offerExpirationDate') {
+      if (key === 'resumptionDate') {
         record[key] = parseImportDate(raw)
       } else {
         record[key] = String(raw ?? '').trim()
       }
     })
     record.email = record.email.toLowerCase()
+
+    // Populate legacy aliases for backward compatibility with routes
+    record.candidateName = record.candidateName || ''
+    record.jobId = record.position || record.jobId
+    record.designationId = record.position || record.designationId
+    record.anticipatedStartDate = record.resumptionDate || record.anticipatedStartDate
     rows.push(record as OfferImportRow)
   }
 
