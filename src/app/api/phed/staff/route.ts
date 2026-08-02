@@ -47,24 +47,85 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Fetch staff with safe includes (avoid cascading failures from orphaned
-    //     union/cooperative join records) ─────────────────────────────────
-    const [total, staff] = await Promise.all([
-      (prisma as any).phedStaff.count({ where }),
-      (prisma as any).phedStaff.findMany({
-        where,
-        include: {
-          grade:    true,
-          region:   true,
-          feeder:   true,
-          payPoint: true,
-          unions:   { include: { union: true } },
-          cooperatives: { include: { cooperative: true } },
-        },
-        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
-        skip:  (page - 1) * limit,
-        take:  limit,
-      }),
-    ])
+    //     union/cooperative join records).  The first attempt includes nested
+    //     relations; if Prisma throws because of broken referential integrity,
+    //     we fall back to a query without unions/cooperatives and attach them
+    //     separately. ─────────────────────────────────────────────────
+    let total: number
+    let staff: any[]
+
+    const baseQuery = {
+      where,
+      orderBy: [{ lastName: 'asc' as const }, { firstName: 'asc' as const }],
+      skip:  (page - 1) * limit,
+      take:  limit,
+    }
+
+    try {
+      ;[total, staff] = await Promise.all([
+        (prisma as any).phedStaff.count({ where }),
+        (prisma as any).phedStaff.findMany({
+          ...baseQuery,
+          include: {
+            grade:    true,
+            region:   true,
+            feeder:   true,
+            payPoint: true,
+            unions:   { include: { union: true } },
+            cooperatives: { include: { cooperative: true } },
+          },
+        }),
+      ])
+    } catch (_fullQueryError) {
+      // Fallback: query without union/cooperative nested includes, then
+      // attach them manually to avoid Prisma-level relation errors.
+      console.warn('[PHED staff] Full include query failed, falling back to safe query:', _fullQueryError)
+
+      ;[total, staff] = await Promise.all([
+        (prisma as any).phedStaff.count({ where }),
+        (prisma as any).phedStaff.findMany({
+          ...baseQuery,
+          include: {
+            grade:    true,
+            region:   true,
+            feeder:   true,
+            payPoint: true,
+            // unions + cooperatives fetched separately below
+          },
+        }),
+      ])
+
+      // Attach unions and cooperatives manually
+      const staffIds = staff.map((s: any) => s.id)
+      if (staffIds.length > 0) {
+        const [allUnions, allCooperatives] = await Promise.all([
+          (prisma as any).phedStaffUnion.findMany({
+            where: { staffId: { in: staffIds } },
+            include: { union: true },
+          }).catch(() => [] as any[]),
+          (prisma as any).phedStaffCooperative.findMany({
+            where: { staffId: { in: staffIds } },
+            include: { cooperative: true },
+          }).catch(() => [] as any[]),
+        ])
+
+        const unionMap    = new Map<string, any[]>()
+        const coopMap     = new Map<string, any[]>()
+        for (const u of allUnions) {
+          if (!unionMap.has(u.staffId)) unionMap.set(u.staffId, [])
+          unionMap.get(u.staffId)!.push(u)
+        }
+        for (const c of allCooperatives) {
+          if (!coopMap.has(c.staffId)) coopMap.set(c.staffId, [])
+          coopMap.get(c.staffId)!.push(c)
+        }
+
+        for (const s of staff) {
+          s.unions       = unionMap.get(s.id) || []
+          s.cooperatives = coopMap.get(s.id) || []
+        }
+      }
+    }
 
     // Sanitise staff records: null out any union/cooperative join rows whose
     // referenced parent was deleted (prevents JSON-serialisation crashes).

@@ -90,6 +90,23 @@ export async function parseStaffCsv(
   const rows: StaffCsvRow[] = []
   const errors: string[]    = []
 
+  // Detect when column headers don't match the template at all.
+  // If none of the expected keys are present, surface a clear error.
+  if (raw.length > 0) {
+    const firstRow = raw[0]
+    const hasStaffId = firstRow['staffid'] || firstRow['employeeid'] || firstRow['staff_id']
+    const hasFirstName = firstRow['firstname'] || firstRow['first_name']
+    const hasLastName  = firstRow['lastname'] || firstRow['last_name']
+    const hasEmail     = firstRow['email']
+
+    if (!hasStaffId && !hasFirstName && !hasLastName && !hasEmail) {
+      const availableKeys = Object.keys(firstRow).slice(0, 10).join(', ')
+      console.error(`[parseStaffCsv] Column headers don't match template. Available keys (first 10): ${availableKeys}`)
+      errors.push(`Column headers do not match the staff upload template. Found columns: ${availableKeys}${Object.keys(firstRow).length > 10 ? '...' : ''}. Please use the template downloaded from the system.`)
+      return { rows, errors }
+    }
+  }
+
   raw.forEach((r, i) => {
     const rowNum = i + 2 // 1-indexed + header row
     const firstName = r['firstname'] || r['first_name'] || r['firstname'] || ''

@@ -17,17 +17,48 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user  = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const staff = await (prisma as any).phedStaff.findUnique({
-      where: { id: params.id },
-      include: {
-        grade:    true,
-        region:   true,
-        feeder:   true,
-        payPoint: true,
-        unions:   { include: { union: true } },
-        cooperatives: { include: { cooperative: true } },
-      },
-    })
+    let staff: any
+
+    try {
+      staff = await (prisma as any).phedStaff.findUnique({
+        where: { id: params.id },
+        include: {
+          grade:    true,
+          region:   true,
+          feeder:   true,
+          payPoint: true,
+          unions:   { include: { union: true } },
+          cooperatives: { include: { cooperative: true } },
+        },
+      })
+    } catch (_fullQueryError) {
+      // Fallback: query without union/cooperative nested includes
+      console.warn('[PHED staff/:id] Full include query failed, falling back to safe query:', _fullQueryError)
+      staff = await (prisma as any).phedStaff.findUnique({
+        where: { id: params.id },
+        include: {
+          grade:    true,
+          region:   true,
+          feeder:   true,
+          payPoint: true,
+        },
+      })
+      if (staff) {
+        const [unions, cooperatives] = await Promise.all([
+          (prisma as any).phedStaffUnion.findMany({
+            where: { staffId: staff.id },
+            include: { union: true },
+          }).catch(() => []),
+          (prisma as any).phedStaffCooperative.findMany({
+            where: { staffId: staff.id },
+            include: { cooperative: true },
+          }).catch(() => []),
+        ])
+        staff.unions       = unions
+        staff.cooperatives = cooperatives
+      }
+    }
+
     if (!staff) return withCors(ApiResponse.notFound('Staff not found'), origin)
 
     // Sanitise: null out join rows whose referenced parent was deleted

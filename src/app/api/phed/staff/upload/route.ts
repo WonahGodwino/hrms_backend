@@ -34,8 +34,14 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(await file.arrayBuffer())
     const { rows, errors: parseErrors } = await parseStaffCsv(buffer, ext)
 
-    if (rows.length === 0)
-      return withCors(ApiResponse.error('No valid rows found in file', 400), origin)
+    if (rows.length === 0) {
+      console.error(`[PHED upload] No valid rows. File: ${file.name} (${ext}), parseErrors: ${parseErrors.length}`, 
+        parseErrors.length > 0 ? parseErrors.slice(0, 5) : '(none)')
+      const detail = parseErrors.length > 0
+        ? ` — ${parseErrors.slice(0, 5).join('; ')}${parseErrors.length > 5 ? ` (+${parseErrors.length - 5} more)` : ''}`
+        : ' — file may be empty, contain only blank rows, or have column headers that do not match the template'
+      return withCors(ApiResponse.error(`No valid rows found in file${detail}`, 400), origin)
+    }
 
     // Load lookup tables and company name in parallel
     const [grades, regions, feeders, payPoints, company] = await Promise.all([
