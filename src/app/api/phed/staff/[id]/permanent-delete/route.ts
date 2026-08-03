@@ -42,13 +42,13 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
         payPoint: { select: { name: true } },
         unions: { select: { assignedAt: true, union: { select: { name: true } } } },
         cooperatives: { select: { contributionAmount: true, loanAmount: true, totalAmount: true, assignedAt: true, cooperative: { select: { name: true } } } },
-        computedPayrolls: { orderBy: { createdAt: 'desc' }, take: 50, select: { payPeriodId: true, paymentStatus: true, totalGrossPay: true, totalNetPay: true, payeTax: true, pensionEmployee: true, createdAt: true } },
+        computedPayrolls: { orderBy: { createdAt: 'desc' }, take: 50, select: { payPeriodId: true, paymentStatus: true, grossSalary: true, netSalary: true, payeTax: true, pensionEmployee: true, createdAt: true } },
         periodAdvances: { select: { cashAdvanced: true, loan: true, domesticLoan: true } },
         validations: { select: { status: true, reason: true } },
         overtimeEntries: { select: { overtimeHours: true, computedAmount: true } },
-        changeLogs: { orderBy: { createdAt: 'desc' }, take: 50, select: { field: true, oldValue: true, newValue: true, createdAt: true } },
+        changeLogs: { orderBy: { changedAt: 'desc' }, take: 50, select: { field: true, oldValue: true, newValue: true, changedAt: true } },
         exitRecords: { select: { exitDate: true, reason: true, finalGrossPay: true, finalDeductions: true, finalNetPay: true, notes: true } },
-        deductionLiabilities: { select: { description: true, amount: true } },
+        deductionLiabilities: { select: { amount: true, deductionLiability: { select: { name: true } } } },
       },
     })
 
@@ -157,7 +157,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       lines.push('=== PAYROLL HISTORY (last 50) ===')
       lines.push('Period,Status,Gross Pay,Net Pay,PAYE Tax,Pension,Date')
       for (const cp of staff.computedPayrolls) {
-        lines.push(`${esc(cp.payPeriodId)},${esc(cp.paymentStatus)},${esc(cp.totalGrossPay)},${esc(cp.totalNetPay)},${esc(cp.payeTax)},${esc(cp.pensionEmployee)},${esc(cp.createdAt)}`)
+        lines.push(`${esc(cp.payPeriodId)},${esc(cp.paymentStatus)},${esc(cp.grossSalary)},${esc(cp.netSalary)},${esc(cp.payeTax)},${esc(cp.pensionEmployee)},${esc(cp.createdAt)}`)
       }
       lines.push('')
     }
