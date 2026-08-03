@@ -84,6 +84,7 @@ export async function POST(req: NextRequest) {
     let successful = 0
     let failed     = 0
     const rowErrors: string[] = [...parseErrors]
+    const rowErrorsWithData: Array<{ rowNum: number; staffId: string; firstName: string; lastName: string; email: string; error: string }> = []
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i]
@@ -272,7 +273,33 @@ export async function POST(req: NextRequest) {
         successful++
       } catch (err: any) {
         failed++
-        rowErrors.push(`Row ${i + 2}: ${err.message}`)
+        const rowNum = i + 2
+        // Distinguish: known validation errors vs database/internal errors
+        const msg = err?.message || ''
+        const isDbError = err?.code || msg.includes('prisma') || msg.includes('database') || msg.includes('connection')
+
+        let friendlyMsg: string
+        if (isDbError) {
+          console.error(`[PHED upload] DB error at row ${rowNum} (${r.staffId || 'unknown'}):`, err)
+          friendlyMsg = `Row ${rowNum}: Processing error — please try again or contact support`
+        } else if (msg.includes('Unique constraint') || msg.includes('already exists') || msg.includes('duplicate')) {
+          friendlyMsg = `Row ${rowNum}: Duplicate — staff ID or email already exists for this company`
+        } else if (msg.includes('foreign key') || msg.includes('not found')) {
+          const field = msg.includes('grade') ? 'grade code' : msg.includes('region') ? 'region' : msg.includes('feeder') ? 'feeder' : msg.includes('pay') ? 'pay point' : 'reference'
+          friendlyMsg = `Row ${rowNum}: Invalid ${field} — the selected value does not exist in the system`
+        } else {
+          friendlyMsg = `Row ${rowNum}: ${msg}`
+        }
+
+        rowErrors.push(friendlyMsg)
+        rowErrorsWithData.push({
+          rowNum,
+          staffId: r.staffId || '',
+          firstName: r.firstName || '',
+          lastName: r.lastName || '',
+          email: r.email || '',
+          error: friendlyMsg.replace(`Row ${rowNum}: `, ''),
+        })
       }
     }
 
@@ -290,15 +317,23 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    // Build combined error CSV from parse + processing errors
-    const allErrors = [...rowErrors]
-    const finalErrorCsv = allErrors.length > 0
-      ? `Row,Error\n${allErrors.map(e => {
-          const match = e.match(/^Row (\d+):?\s*(.*)$/)
-          const row = match ? match[1] : ''
-          const msg = match ? match[2].replace(/"/g, '""') : e.replace(/"/g, '""')
-          return `${row},"${msg}"`
-        }).join('\n')}`
+    // Build combined error CSV from parse + processing errors with full row details
+    const allErrorDetails = [
+      ...errorRows.map(er => ({
+        rowNum: er.rowNum,
+        staffId: er.raw['staffid'] || er.raw['employeeid'] || er.raw['staff_id'] || '',
+        firstName: er.raw['firstname'] || er.raw['first_name'] || '',
+        lastName: er.raw['lastname'] || er.raw['last_name'] || '',
+        email: er.raw['email'] || '',
+        error: er.error.replace(/^Row \d+: /, ''),
+      })),
+      ...rowErrorsWithData,
+    ]
+    const csvSafe = (v: string) => `"${String(v).replace(/"/g, '""')}"`
+    const finalErrorCsv = allErrorDetails.length > 0
+      ? `Row,Staff ID,First Name,Last Name,Email,Error\n${allErrorDetails.map(e =>
+          [e.rowNum, csvSafe(e.staffId), csvSafe(e.firstName), csvSafe(e.lastName), csvSafe(e.email), csvSafe(e.error)].join(',')
+        ).join('\n')}`
       : null
 
     if (successful === 0 && rows.length > 0)

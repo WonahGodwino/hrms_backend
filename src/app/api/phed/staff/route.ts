@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
 
     const baseQuery = {
       where,
-      orderBy: [{ lastName: 'asc' as const }, { firstName: 'asc' as const }],
+      orderBy: { createdAt: 'desc' as const },
       skip:  (page - 1) * limit,
       take:  limit,
     }
