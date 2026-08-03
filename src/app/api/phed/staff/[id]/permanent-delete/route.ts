@@ -19,19 +19,36 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     // ── Fetch full staff record with all relations ──────────
+    // Use explicit select to avoid P2022 on columns not yet in production
     const staff = await (prisma as any).phedStaff.findUnique({
       where: { id: params.id },
-      include: {
-        grade: true, region: true, feeder: true, payPoint: true,
-        unions: { include: { union: true } },
-        cooperatives: { include: { cooperative: true } },
-        computedPayrolls: { orderBy: { createdAt: 'desc' }, take: 50 },
-        periodAdvances: true,
-        validations: true,
-        overtimeEntries: true,
-        changeLogs: { orderBy: { createdAt: 'desc' }, take: 50 },
-        exitRecords: true,
-        deductionLiabilities: true,
+      select: {
+        id: true, companyId: true, staffId: true, firstName: true, lastName: true,
+        email: true, phone: true, category: true, department: true, unit: true,
+        bankName: true, accountNumber: true, accountName: true,
+        rsaPin: true, pfaName: true, tin: true, pensionNumber: true,
+        basicSalary: true, housingAllowance: true, transportAllowance: true,
+        furnitureAllowance: true, mealSubsidy: true, utilityAllowance: true,
+        leaveAllowance: true, otherAllowances: true,
+        domesticAllowance: true, hazardAllowance: true, electricityAllowance: true,
+        discoveryAllowance: true, carSubsidy: true, entertainmentAllowance: true,
+        dataAllowance: true, nightAllowance: true, arrears: true,
+        annualRent: true, hasLifeAssurance: true, lifeAssuranceAmount: true,
+        voluntaryPension: true, insurance: true,
+        isActive: true, createdBy: true, createdAt: true, updatedAt: true,
+        grade: { select: { code: true, name: true } },
+        region: { select: { name: true } },
+        feeder: { select: { name: true } },
+        payPoint: { select: { name: true } },
+        unions: { select: { assignedAt: true, union: { select: { name: true } } } },
+        cooperatives: { select: { contributionAmount: true, loanAmount: true, totalAmount: true, assignedAt: true, cooperative: { select: { name: true } } } },
+        computedPayrolls: { orderBy: { createdAt: 'desc' }, take: 50, select: { payPeriodId: true, paymentStatus: true, totalGrossPay: true, totalNetPay: true, payeTax: true, pensionEmployee: true, createdAt: true } },
+        periodAdvances: { select: { cashAdvanced: true, loan: true, domesticLoan: true } },
+        validations: { select: { status: true, reason: true } },
+        overtimeEntries: { select: { overtimeHours: true, computedAmount: true } },
+        changeLogs: { orderBy: { createdAt: 'desc' }, take: 50, select: { field: true, oldValue: true, newValue: true, createdAt: true } },
+        exitRecords: { select: { exitDate: true, reason: true, finalGrossPay: true, finalDeductions: true, finalNetPay: true, notes: true } },
+        deductionLiabilities: { select: { description: true, amount: true } },
       },
     })
 

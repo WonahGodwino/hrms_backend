@@ -13,10 +13,36 @@ function normalizeHeader(h: string): string {
   return h.trim().toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
+// Extract a plain string from any ExcelJS cell value (handles rich text, hyperlinks, formulas, dates)
+function cellToString(value: any): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number') return String(value)
+  if (value instanceof Date) return value.toISOString().split('T')[0]
+  // Rich text: { richText: [{ text: '...' }, ...] }
+  if (value.richText && Array.isArray(value.richText)) {
+    return value.richText.map((rt: any) => rt.text || '').join('').trim()
+  }
+  // Hyperlink: { text: '...', hyperlink: '...' }
+  if (value.text && typeof value.text === 'string') {
+    return value.text.trim()
+  }
+  // Formula result: { formula: '...', result: '...' }
+  if (value.result !== undefined) {
+    return cellToString(value.result)
+  }
+  // Fallback
+  try {
+    return String(value).trim()
+  } catch {
+    return ''
+  }
+}
+
 function rowToMap(headers: string[], row: (string | number | null | undefined)[]): Record<string, string> {
   const map: Record<string, string> = {}
   headers.forEach((h, i) => {
-    map[normalizeHeader(h)] = String(row[i] ?? '').trim()
+    map[normalizeHeader(h)] = cellToString(row[i])
   })
   return map
 }
@@ -63,7 +89,7 @@ async function parseBuffer(
     const cells  = values.slice(1) // ExcelJS row.values[0] is undefined
 
     if (rowNum === 1) {
-      headers = cells.map(c => String(c ?? '').trim())
+      headers = cells.map(c => cellToString(c))
       return
     }
 
