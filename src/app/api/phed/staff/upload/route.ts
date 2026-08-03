@@ -274,19 +274,18 @@ export async function POST(req: NextRequest) {
       } catch (err: any) {
         failed++
         const rowNum = i + 2
-        // Distinguish: known validation errors vs database/internal errors
         const msg = err?.message || ''
-        const isDbError = err?.code || msg.includes('prisma') || msg.includes('database') || msg.includes('connection')
 
+        // Check known/user-friendly errors FIRST, then fall back to generic
         let friendlyMsg: string
-        if (isDbError) {
-          console.error(`[PHED upload] DB error at row ${rowNum} (${r.staffId || 'unknown'}):`, err)
-          friendlyMsg = `Row ${rowNum}: Processing error — please try again or contact support`
-        } else if (msg.includes('Unique constraint') || msg.includes('already exists') || msg.includes('duplicate')) {
+        if (msg.includes('Unique constraint') || msg.includes('already exists') || msg.includes('duplicate')) {
           friendlyMsg = `Row ${rowNum}: Duplicate — staff ID or email already exists for this company`
         } else if (msg.includes('foreign key') || msg.includes('not found')) {
           const field = msg.includes('grade') ? 'grade code' : msg.includes('region') ? 'region' : msg.includes('feeder') ? 'feeder' : msg.includes('pay') ? 'pay point' : 'reference'
           friendlyMsg = `Row ${rowNum}: Invalid ${field} — the selected value does not exist in the system`
+        } else if (err?.code || msg.includes('prisma') || msg.includes('database') || msg.includes('connection')) {
+          console.error(`[PHED upload] DB error at row ${rowNum} (${r.staffId || 'unknown'}):`, err)
+          friendlyMsg = `Row ${rowNum}: Upload failed - please retry or contact support`
         } else {
           friendlyMsg = `Row ${rowNum}: ${msg}`
         }
