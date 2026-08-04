@@ -18,8 +18,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    // ── Fetch full staff record with all relations ──────────
-    // Use explicit select to avoid P2022 on columns not yet in production
+    // ── Fetch staff base record (no relations to avoid missing-table errors) ──
     const staff = await (prisma as any).phedStaff.findUnique({
       where: { id: params.id },
       select: {
@@ -36,22 +35,36 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
         annualRent: true, hasLifeAssurance: true, lifeAssuranceAmount: true,
         voluntaryPension: true, insurance: true,
         isActive: true, createdBy: true, createdAt: true, updatedAt: true,
-        grade: { select: { code: true, name: true } },
-        region: { select: { name: true } },
-        feeder: { select: { name: true } },
-        payPoint: { select: { name: true } },
-        unions: { select: { assignedAt: true, union: { select: { name: true } } } },
-        cooperatives: { select: { contributionAmount: true, loanAmount: true, totalAmount: true, assignedAt: true, cooperative: { select: { name: true } } } },
-        computedPayrolls: { orderBy: { createdAt: 'desc' }, take: 50, select: { payPeriodId: true, paymentStatus: true, grossSalary: true, netSalary: true, monthlyPAYE: true, pensionEmployee: true, createdAt: true } },
-        periodAdvances: { select: { cashAdvanced: true, loan: true, domesticLoan: true } },
-        validations: { select: { status: true, reason: true } },
-        overtimeEntries: { select: { overtimeHours: true, computedAmount: true } },
-        exitRecords: { select: { exitDate: true, reason: true, finalGrossPay: true, finalDeductions: true, finalNetPay: true, notes: true } },
-        deductionLiabilities: { select: { amount: true, deductionLiability: { select: { name: true } } } },
       },
     })
 
     if (!staff) return withCors(ApiResponse.notFound('Staff not found'), origin)
+
+    // ── Fetch relations individually (each wrapped in try-catch for missing tables) ──
+    const safeGet = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
+      try { return await fn() } catch { return fallback }
+    }
+
+    const [grade, region, feeder, payPoint, unions, cooperatives, payrolls, advances, validations, overtimes, deductionLiabs] = await Promise.all([
+      safeGet(() => (prisma as any).phedGrade.findUnique({ where: { id: staff.gradeId }, select: { code: true, name: true } }), null),
+      safeGet(() => (prisma as any).phedRegion.findUnique({ where: { id: staff.regionId }, select: { name: true } }), null),
+      safeGet(() => (prisma as any).phedFeeder.findUnique({ where: { id: staff.feederId }, select: { name: true } }), null),
+      safeGet(() => (prisma as any).phedPayPoint.findUnique({ where: { id: staff.payPointId }, select: { name: true } }), null),
+      safeGet(() => (prisma as any).phedStaffUnion.findMany({ where: { staffId: params.id }, select: { assignedAt: true, union: { select: { name: true } } } }), []),
+      safeGet(() => (prisma as any).phedStaffCooperative.findMany({ where: { staffId: params.id }, select: { contributionAmount: true, loanAmount: true, totalAmount: true, assignedAt: true, cooperative: { select: { name: true } } } }), []),
+      safeGet(() => (prisma as any).phedComputedPayroll.findMany({ where: { staffId: params.id }, orderBy: { createdAt: 'desc' }, take: 50, select: { payPeriodId: true, paymentStatus: true, grossSalary: true, netSalary: true, monthlyPAYE: true, pensionEmployee: true, createdAt: true } }), []),
+      safeGet(() => (prisma as any).phedStaffPeriodAdvance.findMany({ where: { staffId: params.id }, select: { cashAdvanced: true, loan: true, domesticLoan: true } }), []),
+      safeGet(() => (prisma as any).phedValidation.findMany({ where: { staffId: params.id }, select: { status: true, reason: true } }), []),
+      safeGet(() => (prisma as any).phedOvertimeEntry.findMany({ where: { staffId: params.id }, select: { overtimeHours: true, computedAmount: true } }), []),
+      safeGet(() => (prisma as any).phedStaffDeductionLiability.findMany({ where: { staffId: params.id }, select: { amount: true, deductionLiability: { select: { name: true } } } }), []),
+    ])
+
+    // Attach relations to staff object
+    staff.grade = grade; staff.region = region; staff.feeder = feeder; staff.payPoint = payPoint
+    staff.unions = unions; staff.cooperatives = cooperatives
+    staff.computedPayrolls = payrolls; staff.periodAdvances = advances
+    staff.validations = validations; staff.overtimeEntries = overtimes
+    staff.deductionLiabilities = deductionLiabs
 
     // ── Fetch login account ─────────────────────────────────
     const staffAccount = await prisma.staffRecord.findFirst({
@@ -161,16 +174,6 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       lines.push('')
     }
 
-    // Section 7: Exit records
-    if (staff.exitRecords?.length > 0) {
-      lines.push('=== EXIT RECORDS ===')
-      lines.push('Exit Date,Reason,Final Gross,Final Deductions,Final Net,Notes')
-      for (const ex of staff.exitRecords) {
-        lines.push(`${esc(ex.exitDate)},${esc(ex.reason)},${esc(ex.finalGrossPay)},${esc(ex.finalDeductions)},${esc(ex.finalNetPay)},${esc(ex.notes)}`)
-      }
-      lines.push('')
-    }
-
     // Section 8: Login account
     if (staffAccount) {
       lines.push('=== LOGIN ACCOUNT ===')
@@ -197,7 +200,6 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     await (prisma as any).phedStaffPeriodAdvance.deleteMany({ where: { staffId: params.id } }).catch(() => {})
     await (prisma as any).phedStaffDeductionLiability.deleteMany({ where: { staffId: params.id } }).catch(() => {})
     await (prisma as any).phedComputedPayroll.deleteMany({ where: { staffId: params.id } }).catch(() => {})
-    await (prisma as any).phedStaffExit.deleteMany({ where: { staffId: params.id } }).catch(() => {})
 
     // Delete login account
     await prisma.staffRecord.deleteMany({
