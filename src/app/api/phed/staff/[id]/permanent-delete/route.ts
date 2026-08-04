@@ -46,7 +46,6 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
         periodAdvances: { select: { cashAdvanced: true, loan: true, domesticLoan: true } },
         validations: { select: { status: true, reason: true } },
         overtimeEntries: { select: { overtimeHours: true, computedAmount: true } },
-        changeLogs: { orderBy: { changedAt: 'desc' }, take: 50, select: { field: true, oldValue: true, newValue: true, changedAt: true } },
         exitRecords: { select: { exitDate: true, reason: true, finalGrossPay: true, finalDeductions: true, finalNetPay: true, notes: true } },
         deductionLiabilities: { select: { amount: true, deductionLiability: { select: { name: true } } } },
       },
@@ -198,7 +197,6 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     await (prisma as any).phedStaffPeriodAdvance.deleteMany({ where: { staffId: params.id } }).catch(() => {})
     await (prisma as any).phedStaffDeductionLiability.deleteMany({ where: { staffId: params.id } }).catch(() => {})
     await (prisma as any).phedComputedPayroll.deleteMany({ where: { staffId: params.id } }).catch(() => {})
-    await (prisma as any).phedChangeLog.deleteMany({ where: { staffId: params.id } }).catch(() => {})
     await (prisma as any).phedStaffExit.deleteMany({ where: { staffId: params.id } }).catch(() => {})
 
     // Delete login account
