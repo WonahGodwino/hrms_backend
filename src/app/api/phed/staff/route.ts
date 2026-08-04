@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 
     const where: any = {
       companyId,
-      ...(includeInactive ? {} : { isActive: true }),
+      isActive: includeInactive ? false : true,
       ...(category ? { category } : {}),
       ...(search
         ? {
@@ -46,6 +46,8 @@ export async function GET(req: NextRequest) {
           }
         : {}),
     }
+
+    console.log(`[PHED staff] includeInactive=${includeInactive}, isActive filter=${where.isActive}`)
 
     // ── Fetch staff with safe includes (avoid cascading failures from orphaned
     //     union/cooperative join records).  The first attempt includes nested
