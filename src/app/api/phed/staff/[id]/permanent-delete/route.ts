@@ -42,7 +42,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
         payPoint: { select: { name: true } },
         unions: { select: { assignedAt: true, union: { select: { name: true } } } },
         cooperatives: { select: { contributionAmount: true, loanAmount: true, totalAmount: true, assignedAt: true, cooperative: { select: { name: true } } } },
-        computedPayrolls: { orderBy: { createdAt: 'desc' }, take: 50, select: { payPeriodId: true, paymentStatus: true, grossSalary: true, netSalary: true, payeTax: true, pensionEmployee: true, createdAt: true } },
+        computedPayrolls: { orderBy: { createdAt: 'desc' }, take: 50, select: { payPeriodId: true, paymentStatus: true, grossSalary: true, netSalary: true, monthlyPAYE: true, pensionEmployee: true, createdAt: true } },
         periodAdvances: { select: { cashAdvanced: true, loan: true, domesticLoan: true } },
         validations: { select: { status: true, reason: true } },
         overtimeEntries: { select: { overtimeHours: true, computedAmount: true } },
@@ -157,7 +157,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       lines.push('=== PAYROLL HISTORY (last 50) ===')
       lines.push('Period,Status,Gross Pay,Net Pay,PAYE Tax,Pension,Date')
       for (const cp of staff.computedPayrolls) {
-        lines.push(`${esc(cp.payPeriodId)},${esc(cp.paymentStatus)},${esc(cp.grossSalary)},${esc(cp.netSalary)},${esc(cp.payeTax)},${esc(cp.pensionEmployee)},${esc(cp.createdAt)}`)
+        lines.push(`${esc(cp.payPeriodId)},${esc(cp.paymentStatus)},${esc(cp.grossSalary)},${esc(cp.netSalary)},${esc(cp.monthlyPAYE)},${esc(cp.pensionEmployee)},${esc(cp.createdAt)}`)
       }
       lines.push('')
     }
