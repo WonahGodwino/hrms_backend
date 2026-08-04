@@ -306,3 +306,28 @@ This is an automated message from ${companyName}. Please do not reply.
   })
 }
 
+export async function sendPhedAccessRoleChangeEmail(options: {
+  to: string
+  recipientName: string
+  companyName: string
+  title: string
+  message: string
+  deepLink: string
+}): Promise<{ success: boolean; error?: string }> {
+  const { to, recipientName, companyName, title, message, deepLink } = options
+  const html = `
+    <p>Dear <strong>${recipientName}</strong>,</p>
+    <p><strong>${title}</strong></p>
+    <p>${message}</p>
+    <p><a href="${deepLink}">Review PHED role assignments</a></p>
+    <p>This is an automated message from ${companyName} via 24/7HR.</p>
+  `
+  return sendEmail({
+    to,
+    subject: `${companyName}: ${title}`,
+    html,
+    text: `Dear ${recipientName},\n\n${title}\n\n${message}\n\nReview assignments: ${deepLink}`,
+    from: `${companyName} HR <${FROM_EMAIL}>`,
+  })
+}
+

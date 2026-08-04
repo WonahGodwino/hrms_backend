@@ -7,10 +7,77 @@ export interface PhedAuthUser extends AuthUser {
   phedAccessRole: PhedAccessRole
 }
 
+export interface PhedRoleManagementUser extends AuthUser {
+  phedAccessRole: PhedAccessRole | null
+  position: string | null
+}
+
 // PHED approval/access roles (Module 12 & 13) are deliberately independent
 // of StaffRecord.role — a holder may be global STAFF. The real gate here is
 // the PhedStaffAccessRole lookup, so every global role is let through.
-const ANY_GLOBAL_ROLE = ['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER', 'STAFF']
+const ANY_GLOBAL_ROLE = ['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER', 'STAFF', 'CEO', 'MD', 'MD_CEO']
+
+export const PHED_ACCESS_ROLES: PhedAccessRole[] = [
+  'MANAGER_COMP_BENEFITS',
+  'HEAD_INTERNAL_AUDIT',
+  'CHIEF_PEOPLE_OFFICER',
+  'CHIEF_FINANCE_OFFICER',
+  'MD_CEO',
+  'TREASURY_TEAM',
+  'FINANCIAL_REPORTING_TEAM',
+  'TAX_TEAM',
+]
+
+export function hasCeoMdTitle(positionOrRole?: string | null): boolean {
+  return /\b(ceo|chief executive officer|md|managing director)\b/i.test(positionOrRole ?? '')
+}
+
+// Role governance is distinct from payroll approval. HR/Admin can maintain
+// assignments; a CEO/MD may do the same from their staff title or PHED role.
+// Neither permission grants an approval stage without an assignment.
+export async function requirePhedRoleManagementAccess(
+  token: string | null,
+): Promise<PhedRoleManagementUser> {
+  const user = await requireModuleAccess(token, 'PHED', ANY_GLOBAL_ROLE)
+  const [grant, staff] = await Promise.all([
+    getPhedAccessRole(user.userId),
+    prisma.staffRecord.findUnique({ where: { id: user.userId }, select: { position: true, role: true } }),
+  ])
+
+  const isGlobalManager = ['HR', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)
+  const isCeoMd = grant === 'MD_CEO' || hasCeoMdTitle(staff?.position) || hasCeoMdTitle(staff?.role) || hasCeoMdTitle(user.role)
+  if (!isGlobalManager && !isCeoMd) {
+    throw new Error('Insufficient permissions. Required: HR, ADMIN, SUPER_ADMIN, or CEO/MD.')
+  }
+
+  return { ...user, phedAccessRole: grant, position: staff?.position ?? null }
+}
+
+// The global company selector is advisory. Every role-management API call
+// independently verifies the selected company before reading or changing data.
+// HR/Admin scope comes from user_companies; CEO/MD users are limited to their
+// own StaffRecord company unless they are also a SUPER_ADMIN.
+export async function canManagePhedRolesForCompany(
+  user: PhedRoleManagementUser,
+  companyId: string,
+): Promise<boolean> {
+  if (user.role === 'SUPER_ADMIN') return true
+
+  if (user.role === 'HR' || user.role === 'ADMIN') {
+    const allowedRoles = user.role === 'HR' ? ['HR', 'ALL'] : ['ADMIN', 'ALL']
+    const assignment = await prisma.userCompany.findFirst({
+      where: { userId: user.userId, companyId, role: { in: allowedRoles } },
+      select: { id: true },
+    })
+    return Boolean(assignment)
+  }
+
+  const staff = await prisma.staffRecord.findUnique({
+    where: { id: user.userId },
+    select: { companyId: true },
+  })
+  return staff?.companyId === companyId
+}
 
 // Always a fresh DB read — never trust a JWT-embedded value, since a PHED
 // role can be reseeded/changed without the holder re-logging in.

@@ -79,7 +79,7 @@ export async function forwardApprovalStage(
         comment: comment || null,
       },
     })
-    return tx.phedApprovalMemo.update({
+    const updatedMemo = await tx.phedApprovalMemo.update({
       where: { id: memo.id },
       data: {
         currentStage: isFinal ? myStage.stage : myStage.stage + 1,
@@ -87,6 +87,15 @@ export async function forwardApprovalStage(
         stageEnteredAt: new Date(),
       },
     })
+
+    if (isFinal) {
+      await tx.phedPayPeriod.update({
+        where: { id: memo.payPeriodId },
+        data: { status: 'APPROVED', approvedBy: user.userId, approvedAt: new Date() },
+      })
+    }
+
+    return updatedMemo
   })
 
   notifyAfterForward(updated, name).catch(err => console.error('PHED approval notification failed:', err))

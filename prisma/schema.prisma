@@ -157,6 +157,7 @@ model Company {
   phedPeriodAdvances     PhedStaffPeriodAdvance[]
   phedStaffAccessRoles   PhedStaffAccessRole[]
   phedApprovalMemos      PhedApprovalMemo[]
+    phedAccessRoleChanges  PhedAccessRoleChange[]
   phedRoleAccessGrants   PhedRoleAccessGrant[]
   phedChangeLogs         PhedChangeLog[]
   phedStaffExits         PhedStaffExit[]
@@ -397,6 +398,7 @@ model StaffRecord {
 
   // PHED Approval Workflow / Access Matrix (Module 12 & 13) — independent of `role` above
   phedAccessRole      PhedStaffAccessRole?
+    phedAccessRoleChanges PhedAccessRoleChange[] @relation("PhedAccessRoleChangeTarget")
   offboardings                    Offboarding[]       @relation("StaffOffboardings")
   reviewedOffboardings            Offboarding[]       @relation("OffboardingReviewer")
 
@@ -2545,6 +2547,36 @@ model PhedStaffAccessRole {
   @@index([companyId, accessRole])
   @@map("phed_staff_access_roles")
 }
+
+  // Immutable governance ledger for PHED workflow/page-role assignments.
+  // The assignment row holds current access; this ledger records every grant,
+  // change, and revocation with an accountable actor and a required reason.
+  enum PhedAccessRoleChangeAction {
+    ASSIGNED
+    CHANGED
+    REVOKED
+  }
+
+  model PhedAccessRoleChange {
+    id                String                     @id @default(cuid())
+    companyId         String
+    staffRecordId     String
+    action            PhedAccessRoleChangeAction
+    previousRole      PhedAccessRole?
+    newRole           PhedAccessRole?
+    reason            String
+    changedById       String
+    changedByName     String
+    changedByRole     String
+    createdAt         DateTime                   @default(now())
+
+    company     Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+    staffRecord StaffRecord @relation("PhedAccessRoleChangeTarget", fields: [staffRecordId], references: [id], onDelete: Restrict)
+
+    @@index([companyId, createdAt])
+    @@index([staffRecordId, createdAt])
+    @@map("phed_access_role_changes")
+  }
 
 // Module 12 — Payroll Approval Workflow.
 // Stage order/role mapping is fixed in application code (PHED_APPROVAL_STAGES),
