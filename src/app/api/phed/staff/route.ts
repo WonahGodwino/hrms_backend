@@ -47,13 +47,6 @@ export async function GET(req: NextRequest) {
         : {}),
     }
 
-    console.log(`[PHED staff] includeInactive=${includeInactive}, isActive filter=${where.isActive}`)
-
-    // ── Fetch staff with safe includes (avoid cascading failures from orphaned
-    //     union/cooperative join records).  The first attempt includes nested
-    //     relations; if Prisma throws because of broken referential integrity,
-    //     we fall back to a query without unions/cooperatives and attach them
-    //     separately. ─────────────────────────────────────────────────
     let total: number
     let staff: any[]
 
@@ -80,71 +73,34 @@ export async function GET(req: NextRequest) {
         }),
       ])
     } catch (_fullQueryError) {
-      // Fallback: query without union/cooperative nested includes, then
-      // attach them manually to avoid Prisma-level relation errors.
       console.warn('[PHED staff] Full include query failed, falling back to safe query:', _fullQueryError)
-
       ;[total, staff] = await Promise.all([
         (prisma as any).phedStaff.count({ where }),
         (prisma as any).phedStaff.findMany({
           ...baseQuery,
-          include: {
-            grade:    true,
-            region:   true,
-            feeder:   true,
-            payPoint: true,
-            // unions + cooperatives fetched separately below
-          },
+          include: { grade: true, region: true, feeder: true, payPoint: true },
         }),
       ])
-
-      // Attach unions and cooperatives manually
       const staffIds = staff.map((s: any) => s.id)
       if (staffIds.length > 0) {
         const [allUnions, allCooperatives] = await Promise.all([
-          (prisma as any).phedStaffUnion.findMany({
-            where: { staffId: { in: staffIds } },
-            include: { union: true },
-          }).catch(() => [] as any[]),
-          (prisma as any).phedStaffCooperative.findMany({
-            where: { staffId: { in: staffIds } },
-            include: { cooperative: true },
-          }).catch(() => [] as any[]),
+          (prisma as any).phedStaffUnion.findMany({ where: { staffId: { in: staffIds } }, include: { union: true } }).catch(() => []),
+          (prisma as any).phedStaffCooperative.findMany({ where: { staffId: { in: staffIds } }, include: { cooperative: true } }).catch(() => []),
         ])
-
-        const unionMap    = new Map<string, any[]>()
-        const coopMap     = new Map<string, any[]>()
-        for (const u of allUnions) {
-          if (!unionMap.has(u.staffId)) unionMap.set(u.staffId, [])
-          unionMap.get(u.staffId)!.push(u)
-        }
-        for (const c of allCooperatives) {
-          if (!coopMap.has(c.staffId)) coopMap.set(c.staffId, [])
-          coopMap.get(c.staffId)!.push(c)
-        }
-
-        for (const s of staff) {
-          s.unions       = unionMap.get(s.id) || []
-          s.cooperatives = coopMap.get(s.id) || []
-        }
+        const unionMap = new Map<string, any[]>()
+        const coopMap  = new Map<string, any[]>()
+        for (const u of allUnions) { if (!unionMap.has(u.staffId)) unionMap.set(u.staffId, []); unionMap.get(u.staffId)!.push(u) }
+        for (const c of allCooperatives) { if (!coopMap.has(c.staffId)) coopMap.set(c.staffId, []); coopMap.get(c.staffId)!.push(c) }
+        for (const s of staff) { s.unions = unionMap.get(s.id) || []; s.cooperatives = coopMap.get(s.id) || [] }
       }
     }
 
-    // Sanitise staff records: null out any union/cooperative join rows whose
-    // referenced parent was deleted (prevents JSON-serialisation crashes).
     for (const s of staff) {
-      if (s.unions) {
-        s.unions = s.unions.filter((su: any) => su.union != null)
-      }
-      if (s.cooperatives) {
-        s.cooperatives = s.cooperatives.filter((sc: any) => sc.cooperative != null)
-      }
+      if (s.unions) s.unions = s.unions.filter((su: any) => su.union != null)
+      if (s.cooperatives) s.cooperatives = s.cooperatives.filter((sc: any) => sc.cooperative != null)
     }
 
-    return withCors(
-      ApiResponse.success({ staff, total, page, limit, pages: Math.ceil(total / limit) }),
-      origin
-    )
+    return withCors(ApiResponse.success({ staff, total, page, limit, pages: Math.ceil(total / limit) }), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 

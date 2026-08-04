@@ -296,7 +296,6 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
           cell.alignment = rgt
           cell.numFmt    = numFmt
         }
-        cell.protection = { locked: true }
       })
     })
 
@@ -316,14 +315,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       if (i >= identityCols.length) cell.numFmt = numFmt
     })
 
-    // Fully protect sheet — nothing is editable
-    sheet.protect('phed-review', {
-      selectLockedCells:   true,
-      selectUnlockedCells: false,
-      formatCells:         false,
-      insertRows:          false,
-      deleteRows:          false,
-    })
+    // No sheet protection — cells remain editable
 
     sheet.views = [{ state: 'frozen', xSplit: identityCols.length, ySplit: 2, activeCell: 'F3' }]
 
