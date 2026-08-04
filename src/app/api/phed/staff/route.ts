@@ -11,7 +11,7 @@ import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-// GET /api/phed/staff?companyId=xxx&category=REGULAR&search=&page=1&limit=50
+// GET /api/phed/staff?companyId=xxx&category=REGULAR&search=&page=1&limit=50&includeInactive=true
 export async function GET(req: NextRequest) {
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
@@ -20,18 +20,19 @@ export async function GET(req: NextRequest) {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const p         = new URL(req.url).searchParams
-    const companyId = p.get('companyId')
-    const category  = p.get('category')
-    const search    = p.get('search') || ''
-    const page      = Math.max(1, Number(p.get('page') || 1))
-    const limit     = Math.min(100, Math.max(1, Number(p.get('limit') || 50)))
+    const p              = new URL(req.url).searchParams
+    const companyId      = p.get('companyId')
+    const category       = p.get('category')
+    const search         = p.get('search') || ''
+    const page           = Math.max(1, Number(p.get('page') || 1))
+    const limit          = Math.min(100, Math.max(1, Number(p.get('limit') || 50)))
+    const includeInactive = p.get('includeInactive') === 'true'
 
     if (!companyId) return withCors(ApiResponse.error('companyId is required', 400), origin)
 
     const where: any = {
       companyId,
-      isActive: true,
+      ...(includeInactive ? {} : { isActive: true }),
       ...(category ? { category } : {}),
       ...(search
         ? {
