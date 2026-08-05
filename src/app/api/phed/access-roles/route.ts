@@ -5,6 +5,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { canManagePhedRolesForCompany, PHED_ACCESS_ROLES, requirePhedRoleManagementAccess } from '@/app/lib/phed/access-role'
 import { notifyPhedAccessRoleChange } from '@/app/lib/phed/access-role-notifications'
+import { seedDefaultPhedRoleAccessGrants } from '@/app/lib/phed/page-access'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -95,6 +96,8 @@ export async function POST(req: NextRequest) {
       prisma.staffRecord.findUnique({ where: { id: user.userId }, select: { firstName: true, lastName: true } }),
     ])
     if (!target) return withCors(ApiResponse.notFound('Active staff member not found in this company'), origin)
+
+    await seedDefaultPhedRoleAccessGrants(companyId)
 
     const actorName = actor ? `${actor.firstName} ${actor.lastName}` : 'Unknown'
     const result = await prisma.$transaction(async tx => {
