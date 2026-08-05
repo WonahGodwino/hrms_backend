@@ -37,23 +37,30 @@ export async function GET(req: NextRequest) {
       return withCors(ApiResponse.forbidden('You are not assigned to manage PHED roles for this company'), origin)
     }
 
-    const [assignments, history] = await Promise.all([
-      prisma.phedStaffAccessRole.findMany({
-        where: { companyId },
-        include: {
-          staffRecord: {
-            select: { id: true, staffId: true, firstName: true, lastName: true, email: true, position: true, department: true, isActive: true },
-          },
+    const assignments = await prisma.phedStaffAccessRole.findMany({
+      where: { companyId },
+      include: {
+        staffRecord: {
+          select: { id: true, staffId: true, firstName: true, lastName: true, email: true, position: true, department: true, isActive: true },
         },
-        orderBy: [{ accessRole: 'asc' }, { createdAt: 'asc' }],
-      }),
-      prisma.phedAccessRoleChange.findMany({
+      },
+      orderBy: [{ accessRole: 'asc' }, { createdAt: 'asc' }],
+    })
+
+    // Audit history depends on the phed_access_role_changes table (migration
+    // 20260804000001).  Return an empty list when the table has not yet been
+    // provisioned — the page still loads with role definitions and assignments.
+    let history: any[] = []
+    try {
+      history = await prisma.phedAccessRoleChange.findMany({
         where: { companyId },
         include: { staffRecord: { select: { firstName: true, lastName: true, staffId: true } } },
         orderBy: { createdAt: 'desc' },
         take: 100,
-      }),
-    ])
+      })
+    } catch {
+      // Table not yet present — the migration hasn't been applied.
+    }
 
     return withCors(ApiResponse.success({
       roles: PHED_ACCESS_ROLES.map(value => ({ value, label: ROLE_LABELS[value] })),
