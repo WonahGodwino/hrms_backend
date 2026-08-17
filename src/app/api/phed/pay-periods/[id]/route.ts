@@ -52,3 +52,43 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 
+// PATCH /api/phed/pay-periods/:id — edit a DRAFT period's year/month.
+// A period's identity can only change before any data is attached to it.
+export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  const origin = req.headers.get('origin')
+  const rl = phedRateLimit(req, 'write')
+  if (rl) return withCors(rl, origin)
+  try {
+    const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
+    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+
+    const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
+    if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
+    if (period.status !== 'DRAFT')
+      return withCors(ApiResponse.error('Only DRAFT pay periods can be edited', 400), origin)
+
+    const body = await req.json().catch(() => ({}))
+    const y = Number(body?.year ?? period.year)
+    const m = Number(body?.month ?? period.month)
+    if (!Number.isInteger(y) || !Number.isInteger(m) || m < 1 || m > 12)
+      return withCors(ApiResponse.error('year and month (1–12) are required', 400), origin)
+
+    const existing = await (prisma as any).phedPayPeriod.findFirst({
+      where: { companyId: period.companyId, year: y, month: m, id: { not: params.id } },
+      select: { id: true },
+    })
+    if (existing)
+      return withCors(ApiResponse.error('A pay period already exists for this month', 409), origin)
+
+    const monthNames = ['January','February','March','April','May','June',
+      'July','August','September','October','November','December']
+    const periodName = `${monthNames[m - 1]} ${y}`
+
+    const updated = await (prisma as any).phedPayPeriod.update({
+      where: { id: params.id },
+      data: { year: y, month: m, periodName },
+    })
+    return withCors(ApiResponse.success(updated, 'Pay period updated'), origin)
+  } catch (e) { return withCors(handleApiError(e), origin) }
+}
+

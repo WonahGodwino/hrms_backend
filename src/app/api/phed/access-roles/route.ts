@@ -47,8 +47,8 @@ export async function GET(req: NextRequest) {
       orderBy: [{ accessRole: 'asc' }, { createdAt: 'asc' }],
     })
 
-    // Audit history depends on the phed_access_role_changes table (migration
-    // 20260804000001).  Return an empty list when the table has not yet been
+    // Audit history depends on the phed_access_role_changes table
+    // Return an empty list when the table has not yet been
     // provisioned — the page still loads with role definitions and assignments.
     let history: any[] = []
     try {

@@ -7,6 +7,7 @@
 
 import ExcelJS   from 'exceljs'
 import PDFDocument from 'pdfkit'
+import { NextResponse } from 'next/server'
 
 // ── Column definition ─────────────────────────────────────────
 export interface ReportColDef {
@@ -250,7 +251,11 @@ export function exportReportToPdf(
     }
 
     // ── Totals block ──────────────────────────────────────────
-    const numericCols = cols.filter(c => c.type === 'currency' || c.type === 'number' || c.type === 'integer')
+    // Exclude the leading S/N integer column (index 0) from totals, matching
+    // the Excel export which labels that cell "TOTAL" instead of summing it.
+    const numericCols = cols.filter((c, ci) =>
+      c.type === 'currency' || c.type === 'number' || (c.type === 'integer' && ci > 0)
+    )
     const totalsH     = numericCols.length > 0
       ? HEADLINE_H + Math.ceil(numericCols.length / 2) * KV_H + GAP_H
       : 0
@@ -391,6 +396,96 @@ export const COST_CENTRE_COLS: ReportColDef[] = [
   { header: 'Total PAYE (₦)',  key: 'totalPAYE',     excelWidth: 18, pdfRatio: 1.30, type: 'currency' },
   { header: 'Total Pension (₦)',key: 'totalPension', excelWidth: 18, pdfRatio: 1.30, type: 'currency' },
 ]
+
+export const UNION_COOP_COLS: ReportColDef[] = [
+  { header: 'S/N',          key: 'sn',          excelWidth: 6,  pdfRatio: 0.40, type: 'integer'  },
+  { header: 'Type',         key: 'type',        excelWidth: 14, pdfRatio: 1.00, type: 'text'     },
+  { header: 'Name',         key: 'name',        excelWidth: 36, pdfRatio: 2.40, type: 'text'     },
+  { header: 'Amount (₦)',   key: 'amount',      excelWidth: 18, pdfRatio: 1.30, type: 'currency' },
+]
+
+export const LIABILITIES_COLS: ReportColDef[] = [
+  { header: 'S/N',          key: 'sn',          excelWidth: 6,  pdfRatio: 0.40, type: 'integer'  },
+  { header: 'Liability',    key: 'name',        excelWidth: 44, pdfRatio: 2.60, type: 'text'     },
+  { header: 'Amount (₦)',   key: 'amount',      excelWidth: 18, pdfRatio: 1.30, type: 'currency' },
+]
+
+export const IAD_SUMMARY_COLS: ReportColDef[] = [
+  { header: 'Category',        key: 'label',      excelWidth: 28, pdfRatio: 1.80, type: 'text'     },
+  { header: 'Gross (₦)',       key: 'gross',      excelWidth: 18, pdfRatio: 1.30, type: 'currency' },
+  { header: 'Deduction (₦)',   key: 'deduction',  excelWidth: 18, pdfRatio: 1.30, type: 'currency' },
+  { header: 'Net Pay (₦)',     key: 'netPay',     excelWidth: 18, pdfRatio: 1.30, type: 'currency' },
+]
+
+export const IAD_CHANGES_COLS: ReportColDef[] = [
+  { header: 'S/N',         key: 'sn',           excelWidth: 6,  pdfRatio: 0.40, type: 'integer'  },
+  { header: 'Staff',       key: 'staffName',    excelWidth: 22, pdfRatio: 1.50, type: 'text'     },
+  { header: 'Staff ID',    key: 'staffIdCode',  excelWidth: 16, pdfRatio: 1.10, type: 'text'     },
+  { header: 'Field',       key: 'field',        excelWidth: 20, pdfRatio: 1.30, type: 'text'     },
+  { header: 'Old Value',   key: 'oldValue',     excelWidth: 18, pdfRatio: 1.20, type: 'text'     },
+  { header: 'New Value',   key: 'newValue',     excelWidth: 18, pdfRatio: 1.20, type: 'text'     },
+  { header: 'Changed By',  key: 'changedBy',    excelWidth: 20, pdfRatio: 1.30, type: 'text'     },
+  { header: 'Changed At',  key: 'changedAt',    excelWidth: 18, pdfRatio: 1.20, type: 'text'     },
+]
+
+export const IAD_EXITED_COLS: ReportColDef[] = [
+  { header: 'S/N',               key: 'sn',              excelWidth: 6,  pdfRatio: 0.40, type: 'integer'  },
+  { header: 'Staff',             key: 'staffName',       excelWidth: 22, pdfRatio: 1.50, type: 'text'     },
+  { header: 'Staff ID',          key: 'staffIdCode',     excelWidth: 16, pdfRatio: 1.10, type: 'text'     },
+  { header: 'Department',        key: 'department',      excelWidth: 18, pdfRatio: 1.20, type: 'text'     },
+  { header: 'Exit Date',         key: 'exitDate',        excelWidth: 14, pdfRatio: 1.00, type: 'text'     },
+  { header: 'Reason',            key: 'reason',          excelWidth: 18, pdfRatio: 1.20, type: 'text'     },
+  { header: 'Final Gross (₦)',   key: 'finalGrossPay',   excelWidth: 16, pdfRatio: 1.10, type: 'currency' },
+  { header: 'Final Deductions (₦)', key: 'finalDeductions', excelWidth: 16, pdfRatio: 1.10, type: 'currency' },
+  { header: 'Final Net (₦)',     key: 'finalNetPay',     excelWidth: 16, pdfRatio: 1.10, type: 'currency' },
+]
+
+export const IAD_NEW_HIRED_COLS: ReportColDef[] = [
+  { header: 'S/N',               key: 'sn',                 excelWidth: 6,  pdfRatio: 0.40, type: 'integer'  },
+  { header: 'Staff',             key: 'staffName',          excelWidth: 22, pdfRatio: 1.50, type: 'text'     },
+  { header: 'Staff ID',          key: 'staffIdCode',        excelWidth: 16, pdfRatio: 1.10, type: 'text'     },
+  { header: 'Department',        key: 'department',         excelWidth: 18, pdfRatio: 1.20, type: 'text'     },
+  { header: 'Category',          key: 'category',           excelWidth: 14, pdfRatio: 1.00, type: 'text'     },
+  { header: 'Grade',             key: 'gradeName',          excelWidth: 16, pdfRatio: 1.10, type: 'text'     },
+  { header: 'Starting Basic (₦)',key: 'startingBasicSalary', excelWidth: 18, pdfRatio: 1.30, type: 'currency' },
+  { header: 'Hire Date',         key: 'hireDate',           excelWidth: 14, pdfRatio: 1.00, type: 'text'     },
+]
+
+// Generic dispatcher for JSON-first reports that also export to Excel/PDF,
+// matching the client templates + the "Include PDF format" requirement.
+export async function exportReportResponse(
+  format:      string,
+  title:       string,
+  periodName:  string,
+  cols:        ReportColDef[],
+  rows:        Record<string, any>[],
+  companyName: string,
+  origin:      string | null,
+  fileBase:    string,
+): Promise<NextResponse | null> {
+  if (format !== 'xlsx' && format !== 'pdf') return null
+  const safeName = periodName.replace(/\s+/g, '-')
+  if (format === 'xlsx') {
+    const buf = await exportReportToExcel(title, periodName, cols, rows, companyName)
+    return new NextResponse(buf as any, {
+      status: 200,
+      headers: {
+        'Content-Type':        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="${fileBase}-${safeName}.xlsx"`,
+        'Access-Control-Allow-Origin': origin ?? '*',
+      },
+    })
+  }
+  const buf = await exportReportToPdf(title, periodName, cols, rows, companyName)
+  return new NextResponse(buf as any, {
+    status: 200,
+    headers: {
+      'Content-Type':        'application/pdf',
+      'Content-Disposition': `attachment; filename="${fileBase}-${safeName}.pdf"`,
+      'Access-Control-Allow-Origin': origin ?? '*',
+    },
+  })
+}
 
 // =============================================================
 // PAYROLL SUMMARY – dedicated table-based export

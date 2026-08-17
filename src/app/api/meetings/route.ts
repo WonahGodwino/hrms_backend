@@ -162,6 +162,7 @@ export async function GET(req: NextRequest) {
       createdBy: m.createdBy,
       candidateAssessmentId: m.candidateAssessmentId,
       recordingUrl: m.recordingUrl || null,
+      recordingStatus: m.recordingStatus || null,
       lobbyEnabled: !!m.lobbyEnabled,
       recurrence: m.recurrence || null,
       participantCount: m.participants.length,

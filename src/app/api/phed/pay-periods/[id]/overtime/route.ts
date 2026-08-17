@@ -50,7 +50,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
           const n = (f: string) => Number(sl[f] ?? 0)
           const grossBeforeOT =
             n('basicSalary') + n('housingAllowance') + n('transportAllowance') +
-            n('furnitureAllowance') + n('mealSubsidy') + n('utilityAllowance') +
+            n('furnitureAllowance') + n('mealSubsidy') +
             n('leaveAllowance') + n('domesticAllowance') +
             n('hazardAllowance') + n('electricityAllowance') + n('discoveryAllowance') +
             n('carSubsidy') + n('entertainmentAllowance') + n('dataAllowance') +
@@ -79,6 +79,57 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 
     const { count } = await (prisma as any).phedOvertimeEntry.deleteMany({ where: { payPeriodId: params.id } })
     return withCors(ApiResponse.success({ deleted: count }, 'Overtime entries cleared'), origin)
+  } catch (e) { return withCors(handleApiError(e), origin) }
+}
+
+// PATCH /api/phed/pay-periods/:id/overtime — edit overtime hours for one or
+// more entries after upload. Body: { entryId, overtimeHours } or
+// { updates: [{ entryId, overtimeHours }] }. computedAmount is cleared so the
+// next Compute re-derives the amount from the new hours.
+export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  const origin = req.headers.get('origin')
+  const rl = phedRateLimit(req, 'write')
+  if (rl) return withCors(rl, origin)
+  try {
+    const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
+    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+
+    const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
+    if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
+    if (['APPROVED', 'PAID'].includes(period.status))
+      return withCors(ApiResponse.error('Cannot edit overtime for approved/paid periods', 400), origin)
+
+    const body = await req.json().catch(() => ({}))
+    const updates = Array.isArray(body?.updates) ? body.updates : (body?.entryId ? [body] : [])
+    if (updates.length === 0)
+      return withCors(ApiResponse.error('entryId and overtimeHours are required', 400), origin)
+
+    let updated = 0
+    const failed: string[] = []
+
+    for (const u of updates) {
+      const entryId = typeof u?.entryId === 'string' ? u.entryId : ''
+      const hours = Number(u?.overtimeHours)
+      if (!entryId || !Number.isFinite(hours) || hours < 0) {
+        failed.push('Invalid overtime entry'); continue
+      }
+
+      const entry = await (prisma as any).phedOvertimeEntry.findFirst({
+        where: { id: entryId, payPeriodId: params.id },
+      })
+      if (!entry) { failed.push('Overtime entry not found for this period'); continue }
+
+      await (prisma as any).phedOvertimeEntry.update({
+        where: { id: entryId },
+        data: { overtimeHours: hours, computedAmount: null },
+      })
+      updated++
+    }
+
+    return withCors(
+      ApiResponse.success({ updated, failed }, updated > 0 ? 'Overtime hours updated' : 'No overtime entries updated'),
+      origin,
+    )
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 

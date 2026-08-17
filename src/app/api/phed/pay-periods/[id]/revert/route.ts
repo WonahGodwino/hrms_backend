@@ -13,10 +13,12 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 // Revert map (current → previous):
 //   VALIDATION_OPEN   → DRAFT
 //   VALIDATION_CLOSED → VALIDATION_OPEN
-//   TEMPLATE_ISSUED   → VALIDATION_CLOSED
-//   PROCESSING        → TEMPLATE_ISSUED
-//   REVIEW            → PROCESSING
+//   REVIEW            → VALIDATION_CLOSED
 //   APPROVED          → REVIEW
+//
+// TEMPLATE_ISSUED and PROCESSING are legacy statuses from the removed
+// template flow; both collapse to VALIDATION_CLOSED so a stuck period can
+// be recomputed.
 //
 // Blocked at DRAFT (already first step) and PAID (terminal).
 // Blocked at any step if an active approval memo exists (status not RETURNED_FOR_CORRECTION).
@@ -40,8 +42,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       VALIDATION_OPEN:   { prevStatus: 'DRAFT',             clearFields: { validationOpenAt: null } },
       VALIDATION_CLOSED: { prevStatus: 'VALIDATION_OPEN',   clearFields: { validationCloseAt: null } },
       TEMPLATE_ISSUED:   { prevStatus: 'VALIDATION_CLOSED', clearFields: {} },
-      PROCESSING:        { prevStatus: 'TEMPLATE_ISSUED',   clearFields: {} },
-      REVIEW:            { prevStatus: 'PROCESSING',        clearFields: {} },
+      PROCESSING:        { prevStatus: 'VALIDATION_CLOSED', clearFields: {} },
+      REVIEW:            { prevStatus: 'VALIDATION_CLOSED', clearFields: {} },
       APPROVED:          { prevStatus: 'REVIEW',            clearFields: { approvedBy: null, approvedAt: null } },
     }
 

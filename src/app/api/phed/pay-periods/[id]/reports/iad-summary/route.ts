@@ -5,6 +5,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
 import { buildApprovalMemoSections } from '@/app/lib/phed/approval-memo-data'
+import { exportReportResponse, IAD_SUMMARY_COLS } from '@/app/lib/phed/report-export'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const period = await prisma.phedPayPeriod.findUnique({
       where: { id: params.id },
-      select: { id: true, companyId: true },
+      select: { id: true, companyId: true, company: { select: { companyName: true } } },
     })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && period.companyId !== user.companyId) {
@@ -31,12 +32,15 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const sections = await buildApprovalMemoSections(period.id)
 
-    return withCors(
-      ApiResponse.success({
-        periodName: sections.periodName,
-        sectionA: sections.sectionA,
-      }),
-      origin,
-    )
+    const format = new URL(req.url).searchParams.get('format') ?? 'json'
+    if (format === 'json')
+      return withCors(ApiResponse.success({ periodName: sections.periodName, sectionA: sections.sectionA }), origin)
+
+    const rows = (sections.sectionA ?? []).map((s: any) => ({
+      label: s.label, gross: Number(s.gross) || 0, deduction: Number(s.deduction) || 0, netPay: Number(s.netPay) || 0,
+    }))
+    const exp = await exportReportResponse(format, 'IAD Summary', sections.periodName, IAD_SUMMARY_COLS, rows, period.company?.companyName ?? '', origin, 'iad-summary')
+    if (exp) return exp
+    return withCors(ApiResponse.error('Invalid format. Use json, xlsx, or pdf', 400), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }

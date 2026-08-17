@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     if (typeof companyId !== 'string' || typeof name !== 'string' || typeof code !== 'string')
       return withCors(ApiResponse.error('Invalid field types', 400), origin)
 
-    const VALID_CATEGORIES = ['REGULAR', 'CONTRACT', 'PENSIONER', 'CASUAL']
+    const VALID_CATEGORIES = ['REGULAR', 'CONTRACT', 'NYSC_IT']
     if (!VALID_CATEGORIES.includes(category))
       return withCors(ApiResponse.error(`category must be one of: ${VALID_CATEGORIES.join(', ')}`, 400), origin)
 

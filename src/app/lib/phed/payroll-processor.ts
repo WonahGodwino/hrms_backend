@@ -48,16 +48,17 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
   } = salary
 
   // ── Earnings ──────────────────────────────────────────────
-  // Initial Gross Pay: the agreed package HR distributes across basic + these
-  // "core" allowances (see staff template). Discretionary/Car/Entertainment/Data/
-  // Night allowances and Arrears are add-ons layered on top to form the gross below.
+  // Initial Gross Pay (FE guide §3): the agreed package HR spreads across
+  // Basic + Housing + Transport + Furniture + Domestic + Meal Subsidy +
+  // Hazard + Leave Grant + Electricity + Other Allowances. Utility is tracked
+  // as a separate field but is NOT part of Initial Gross or the add-on layer
+  // (the staff template has no Utility column), so it is excluded from gross.
   const initialGrossPay = r2(
     basicSalary +
     housingAllowance +
     transportAllowance +
     furnitureAllowance +
     mealSubsidy +
-    utilityAllowance +
     leaveAllowance +
     domesticAllowance +
     hazardAllowance +

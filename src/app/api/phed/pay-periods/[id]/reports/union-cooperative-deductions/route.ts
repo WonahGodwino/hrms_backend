@@ -5,6 +5,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
 import { buildFinancePayrollSummary } from '@/app/lib/phed/reports'
+import { exportReportResponse, UNION_COOP_COLS } from '@/app/lib/phed/report-export'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const period = await prisma.phedPayPeriod.findUnique({
       where: { id: params.id },
-      select: { id: true, companyId: true, periodName: true, month: true, year: true },
+      select: { id: true, companyId: true, periodName: true, month: true, year: true, company: { select: { companyName: true } } },
     })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && period.companyId !== user.companyId) {
@@ -58,6 +59,16 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const cooperatives = allCoops.map(c => ({ name: c.name, amount: Number(totalRow?.[`c_${c.id}`] ?? 0) }))
     const total = [...unions, ...cooperatives].reduce((s, r) => s + r.amount, 0)
 
-    return withCors(ApiResponse.success({ periodName: period.periodName, unions, cooperatives, total }), origin)
+    const format = new URL(req.url).searchParams.get('format') ?? 'json'
+    if (format === 'json')
+      return withCors(ApiResponse.success({ periodName: period.periodName, unions, cooperatives, total }), origin)
+
+    const rows = [
+      ...unions.map((u, i) => ({ sn: i + 1, type: 'Union', name: u.name, amount: u.amount })),
+      ...cooperatives.map((c, i) => ({ sn: unions.length + i + 1, type: 'Cooperative', name: c.name, amount: c.amount })),
+    ]
+    const exp = await exportReportResponse(format, 'Unions & Cooperatives Deductions', period.periodName, UNION_COOP_COLS, rows, period.company?.companyName ?? '', origin, 'unions-cooperatives')
+    if (exp) return exp
+    return withCors(ApiResponse.error('Invalid format. Use json, xlsx, or pdf', 400), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }

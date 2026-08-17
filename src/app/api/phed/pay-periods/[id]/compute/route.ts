@@ -37,7 +37,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         where:   { companyId: period.companyId, isActive: true },
         include: {
           region:               true,
-          grade:                { select: { name: true, code: true, defaultBasicSalary: true } },
+          grade:                { select: { name: true, code: true, defaultBasicSalary: true, allowanceTemplates: true } },
           unions:               { include: { union: true } },
           cooperatives:         { include: { cooperative: true } },
           deductionLiabilities: { include: { deductionLiability: true } },
@@ -86,6 +86,17 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         otherAllowances:        Number(staff.otherAllowances        ?? 0),
       }
 
+      // Grade allowance templates fill any blank staff-level allowance.
+      // A staff-level value always wins (FE guide §2); the template only
+      // supplies a default where the staff record carries no amount.
+      for (const tpl of staff.grade?.allowanceTemplates ?? []) {
+        const field = GRADE_ALLOWANCE_FIELD_MAP[tpl.allowanceType]
+        if (!field || Number(salary[field]) !== 0) continue
+        salary[field] = tpl.valueType === 'PERCENTAGE'
+          ? r2(Number(salary.basicSalary) * Number(tpl.value) / 100)
+          : Number(tpl.value)
+      }
+
       const adv = advancesMap.get(staff.id)
 
       // Cooperative total = sum of all cooperative membership amounts for this staff
@@ -123,7 +134,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           if (otEntry.amount > 0) return otEntry.amount
           const grossBeforeOT = r2(
             salary.basicSalary + salary.housingAllowance + salary.transportAllowance +
-            salary.furnitureAllowance + salary.mealSubsidy + salary.utilityAllowance +
+            salary.furnitureAllowance + salary.mealSubsidy +
             salary.leaveAllowance + salary.domesticAllowance +
             salary.hazardAllowance + salary.electricityAllowance + salary.discoveryAllowance +
             salary.carSubsidy + salary.entertainmentAllowance + salary.dataAllowance +
@@ -280,3 +291,23 @@ function fullPayrollFields(r: any) {
 }
 
 function r2(v: number): number { return Math.round(v * 100) / 100 }
+
+// Maps PhedAllowanceTemplate.allowanceType to the salary component it feeds.
+const GRADE_ALLOWANCE_FIELD_MAP: Record<string, keyof PhedSalaryComponents> = {
+  HOUSING: 'housingAllowance',
+  TRANSPORT: 'transportAllowance',
+  FURNITURE: 'furnitureAllowance',
+  MEAL_SUBSIDY: 'mealSubsidy',
+  UTILITY: 'utilityAllowance',
+  LEAVE: 'leaveAllowance',
+  DOMESTIC: 'domesticAllowance',
+  HAZARD: 'hazardAllowance',
+  ELECTRICITY: 'electricityAllowance',
+  DISCOVERY: 'discoveryAllowance',
+  CAR_SUBSIDY: 'carSubsidy',
+  ENTERTAINMENT: 'entertainmentAllowance',
+  DATA: 'dataAllowance',
+  NIGHT: 'nightAllowance',
+  ARREARS: 'arrears',
+  OTHER: 'otherAllowances',
+}

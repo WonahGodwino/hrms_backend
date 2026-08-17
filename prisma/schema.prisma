@@ -642,6 +642,12 @@ model Meeting {
   // Optional link back to the recruitment interview this meeting serves.
   candidateAssessmentId String?   @unique
   recordingUrl          String?
+  // S3 object key the recording is (or will be) uploaded to — the source of
+  // truth for generating signed playback URLs on demand (see provider.ts).
+  recordingKey          String?
+  // null (never recorded) | RECORDING | PROCESSING | READY | FAILED — set
+  // authoritatively by the LiveKit egress webhook, not by the start/stop call.
+  recordingStatus       String?
   recordingRequested    Boolean   @default(false)
   recordingEgressId     String?
   lobbyEnabled          Boolean   @default(false)

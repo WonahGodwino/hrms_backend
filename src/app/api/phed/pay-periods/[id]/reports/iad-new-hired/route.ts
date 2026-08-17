@@ -4,6 +4,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
+import { exportReportResponse, IAD_NEW_HIRED_COLS } from '@/app/lib/phed/report-export'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const period = await prisma.phedPayPeriod.findUnique({
       where: { id: params.id },
-      select: { companyId: true, year: true, month: true },
+      select: { companyId: true, periodName: true, year: true, month: true, company: { select: { companyName: true } } },
     })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && period.companyId !== user.companyId) {
@@ -77,6 +78,16 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       }),
     )
 
-    return withCors(ApiResponse.success(rows), origin)
+    const format = new URL(req.url).searchParams.get('format') ?? 'json'
+    if (format === 'json') return withCors(ApiResponse.success(rows), origin)
+
+    const exportRows = rows.map((r: any, idx: number) => ({
+      ...r,
+      sn: idx + 1,
+      hireDate: r.hireDate ? new Date(r.hireDate).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' }) : '',
+    }))
+    const exp = await exportReportResponse(format, 'IAD New Hired', period.periodName ?? 'Unknown', IAD_NEW_HIRED_COLS, exportRows, period.company?.companyName ?? '', origin, 'iad-new-hired')
+    if (exp) return exp
+    return withCors(ApiResponse.error('Invalid format. Use json, xlsx, or pdf', 400), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }

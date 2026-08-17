@@ -61,7 +61,16 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     allCols.forEach((c, i) => { const cell = hdr.getCell(i + 1); cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: groupFill[c.group] } }; cell.font = boldW; cell.alignment = ctr; cell.border = bdr; cell.protection = { locked: false } })
     computedPayrolls.forEach((cp: any, idx: number) => {
       const staff: any = staffMap.get(cp.staffId); const adv: any = advancesMap.get(cp.staffId); const aci = Number(cp.annualChargeableIncome ?? 0); const bands = computeTaxBandBreakdown(aci)
-      const grossSalary = Number(cp.grossSalary ?? 0); const otEarnings = Number(cp.overtimeEarnings ?? 0); const initialGross = r2(grossSalary - otEarnings)
+      const grossSalary = Number(cp.grossSalary ?? 0); const otEarnings = Number(cp.overtimeEarnings ?? 0)
+      // Initial Gross Pay (FE guide §3) = Basic + the nine core allowances.
+      // It must NOT include the add-on columns or overtime, and Utility is not
+      // part of the split at all.
+      const initialGross = r2(
+        Number(cp.basicSalary ?? 0) + Number(cp.housingAllowance ?? 0) + Number(cp.transportAllowance ?? 0) +
+        Number(cp.furnitureAllowance ?? 0) + Number(cp.domesticAllowance ?? 0) + Number(cp.mealSubsidy ?? 0) +
+        Number(cp.hazardAllowance ?? 0) + Number(cp.leaveAllowance ?? 0) + Number(cp.electricityAllowance ?? 0) +
+        Number(cp.otherAllowances ?? 0)
+      )
       const unionAmounts = unions.map((u: any) => { const m = staff?.unions?.find((su: any) => su.unionId === u.id); return m ? r2(grossSalary * Number(u.percentage ?? 0)) : 0 })
       const coopAmounts = cooperatives.map((c: any) => { const m = staff?.cooperatives?.find((sc: any) => sc.cooperativeId === c.id); return m ? Number(m.totalAmount ?? 0) : 0 })
       const dedAmounts = deductionLiabilities.map((d: any) => { const a = staff?.deductionLiabilities?.find((sd: any) => sd.deductionLiabilityId === d.id); return a && a.deductionLiability?.isActive ? Number(a.amount ?? 0) : 0 })

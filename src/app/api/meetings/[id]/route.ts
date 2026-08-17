@@ -60,6 +60,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       durationMins: m.durationMins,
       createdBy: m.createdBy,
       candidateAssessmentId: m.candidateAssessmentId,
+      recordingUrl: m.recordingUrl || null,
+      recordingStatus: m.recordingStatus || null,
       wsUrl: getMeetingProvider().wsUrl || null,
       participants: m.participants.map((p: any) => ({
         id: p.id, staffId: p.staffId, externalName: p.externalName,

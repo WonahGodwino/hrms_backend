@@ -7,11 +7,11 @@ import type { TaxBand } from './types'
 // Progressive bands (annual chargeable income)
 const TAX_BANDS: TaxBand[] = [
   { from: 0,          to: 800_000,    rate: 0.00 },
-  { from: 800_001,    to: 3_000_000,  rate: 0.15 },
-  { from: 3_000_001,  to: 12_000_000, rate: 0.18 },
-  { from: 12_000_001, to: 25_000_000, rate: 0.21 },
-  { from: 25_000_001, to: 50_000_000, rate: 0.23 },
-  { from: 50_000_001, to: Infinity,   rate: 0.25 },
+  { from: 800_000,    to: 3_000_000,  rate: 0.15 },
+  { from: 3_000_000,  to: 12_000_000, rate: 0.18 },
+  { from: 12_000_000, to: 25_000_000, rate: 0.21 },
+  { from: 25_000_000, to: 50_000_000, rate: 0.23 },
+  { from: 50_000_000, to: Infinity,   rate: 0.25 },
 ]
 
 const RENT_RELIEF            = 500_000   // Fixed ₦500,000 for all staff (NTA 2025)

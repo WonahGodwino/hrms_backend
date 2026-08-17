@@ -4,6 +4,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
+import { exportReportResponse, IAD_EXITED_COLS } from '@/app/lib/phed/report-export'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const period = await prisma.phedPayPeriod.findUnique({
       where: { id: params.id },
-      select: { companyId: true, year: true, month: true },
+      select: { companyId: true, periodName: true, year: true, month: true, company: { select: { companyName: true } } },
     })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && period.companyId !== user.companyId) {
@@ -37,22 +38,29 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       orderBy: { exitDate: 'desc' },
     })
 
-    return withCors(
-      ApiResponse.success(
-        exits.map(e => ({
-          staffName: `${e.staff.firstName} ${e.staff.lastName}`,
-          staffIdCode: e.staff.staffId,
-          department: e.staff.department,
-          exitDate: e.exitDate,
-          reason: e.reason,
-          finalGrossPay: e.finalGrossPay,
-          finalDeductions: e.finalDeductions,
-          finalNetPay: e.finalNetPay,
-          notes: e.notes,
-          recordedBy: e.recordedByName,
-        })),
-      ),
-      origin,
-    )
+    const items = exits.map(e => ({
+      staffName: `${e.staff.firstName} ${e.staff.lastName}`,
+      staffIdCode: e.staff.staffId,
+      department: e.staff.department,
+      exitDate: e.exitDate,
+      reason: e.reason,
+      finalGrossPay: e.finalGrossPay,
+      finalDeductions: e.finalDeductions,
+      finalNetPay: e.finalNetPay,
+      notes: e.notes,
+      recordedBy: e.recordedByName,
+    }))
+
+    const format = new URL(req.url).searchParams.get('format') ?? 'json'
+    if (format === 'json') return withCors(ApiResponse.success(items), origin)
+
+    const rows = items.map((i, idx) => ({
+      ...i,
+      sn: idx + 1,
+      exitDate: i.exitDate ? new Date(i.exitDate).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' }) : '',
+    }))
+    const exp = await exportReportResponse(format, 'IAD Exited Staff', period.periodName ?? 'Unknown', IAD_EXITED_COLS, rows, period.company?.companyName ?? '', origin, 'iad-exited')
+    if (exp) return exp
+    return withCors(ApiResponse.error('Invalid format. Use json, xlsx, or pdf', 400), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }

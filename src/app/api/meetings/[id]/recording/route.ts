@@ -42,6 +42,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const m = res.meeting
     return withCors(ApiResponse.success({
       recording: !!m.recordingRequested,
+      recordingStatus: m.recordingStatus || null,
       recordingUrl: m.recordingUrl || null,
       canRecord: getMeetingProvider().canRecord(),
     }, 'Recording state'), origin)
@@ -69,18 +70,36 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const handle = await provider.startRecording(meeting.roomName, meeting.id)
       await (prisma as any).meeting.update({
         where: { id: meeting.id },
-        data: { recordingRequested: true, recordingEgressId: handle.egressId || null, recordingUrl: handle.url || meeting.recordingUrl || null },
+        data: {
+          recordingRequested: true,
+          recordingEgressId: handle.egressId || null,
+          recordingKey: handle.filePath,
+          recordingStatus: 'RECORDING',
+          recordingUrl: handle.url || meeting.recordingUrl || null,
+        },
       })
       return withCors(ApiResponse.success({ recording: true, recordingUrl: handle.url || null }, 'Recording started'), origin)
     }
 
     if (action === 'stop') {
+      // Keep recordingEgressId — the egress_ended webhook still needs it to
+      // find this meeting once the file finishes uploading; it only gets
+      // resolved to READY/FAILED there, not here.
       if (meeting.recordingEgressId) await provider.stopRecording(meeting.recordingEgressId)
       await (prisma as any).meeting.update({
         where: { id: meeting.id },
-        data: { recordingRequested: false, recordingEgressId: null },
+        data: { recordingRequested: false, recordingStatus: 'PROCESSING' },
       })
       return withCors(ApiResponse.success({ recording: false, recordingUrl: meeting.recordingUrl || null }, 'Recording stopped'), origin)
+    }
+
+    if (action === 'download') {
+      if (meeting.recordingStatus !== 'READY' || !meeting.recordingKey) {
+        return withCors(ApiResponse.error('No completed recording is available yet', 404), origin)
+      }
+      const url = await provider.getRecordingDownloadUrl(meeting.recordingKey)
+      if (!url) return withCors(ApiResponse.error('Recording storage is not configured', 501), origin)
+      return withCors(ApiResponse.success({ url }, 'Signed recording URL issued'), origin)
     }
 
     return withCors(ApiResponse.error('Unknown recording action', 400), origin)

@@ -70,10 +70,10 @@ export async function notifyAfterForward(memo: PhedApprovalMemo, fromActorName: 
       accessRole: 'TREASURY_TEAM',
       memoId: memo.id,
       notificationType: NOTIFICATION_TYPES.PHED_APPROVAL_FINAL,
-      title: 'Payroll Approved — Ready for Disbursement',
-      message: `The payroll approval memo has received final approval from the MD/CEO and is ready for disbursement.`,
-      emailHeading: 'Payroll approved — ready for disbursement',
-      emailBody: `The Payroll Approval Memo has completed the full five-stage review and received final approval. The Bank Schedule, payslips, and statutory schedules are now available.`,
+      title: 'Approval memo finalised — period approval still required',
+      message: `The payroll approval memo received final approval from the MD/CEO. The Bank Schedule is now available to Treasury; an HR/Admin user must still approve the pay period itself to unlock payslips.`,
+      emailHeading: 'Approval memo finalised — period approval pending',
+      emailBody: `The Payroll Approval Memo has completed the full five-stage review and received final approval. The Bank Schedule is now available to Treasury. An HR/Admin user must still approve the pay period itself to unlock payslip emails and move it to Paid.`,
     })
     return
   }

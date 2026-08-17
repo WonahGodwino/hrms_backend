@@ -17,7 +17,11 @@ import {
   EncodedFileType,
   S3Upload,
   TrackType,
+  WebhookReceiver,
+  WebhookEvent,
 } from 'livekit-server-sdk'
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 export interface JoinTokenOptions {
   roomName: string
@@ -39,6 +43,8 @@ export interface ParticipantSummary {
 export interface RecordingHandle {
   egressId: string
   url: string | null
+  /** S3 object key — source of truth for signed playback URLs (see getRecordingDownloadUrl). */
+  filePath: string
 }
 
 export interface MeetingProvider {
@@ -65,6 +71,8 @@ export interface MeetingProvider {
   canRecord(): boolean
   startRecording(roomName: string, meetingId: string): Promise<RecordingHandle>
   stopRecording(egressId: string): Promise<void>
+  /** Short-lived signed GET URL for a private-bucket recording, or null if not configured. */
+  getRecordingDownloadUrl(key: string, ttlSeconds?: number): Promise<string | null>
 }
 
 class LiveKitProvider implements MeetingProvider {
@@ -215,7 +223,7 @@ class LiveKitProvider implements MeetingProvider {
     )
     const publicBase = (process.env.LIVEKIT_S3_PUBLIC_URL || '').replace(/\/$/, '')
     const url = publicBase ? `${publicBase}/${filepath}` : null
-    return { egressId: info?.egressId || info?.egress_id || '', url }
+    return { egressId: info?.egressId || info?.egress_id || '', url, filePath: filepath }
   }
 
   async stopRecording(egressId: string): Promise<void> {
@@ -224,6 +232,44 @@ class LiveKitProvider implements MeetingProvider {
     catch (e: any) {
       if (!/not found|already|complete/i.test(e?.message || '')) throw e
     }
+  }
+
+  private _s3: S3Client | null = null
+  private s3(): S3Client {
+    const endpoint = process.env.LIVEKIT_S3_ENDPOINT || undefined
+    if (!this._s3) {
+      this._s3 = new S3Client({
+        region: process.env.LIVEKIT_S3_REGION!,
+        credentials: {
+          accessKeyId: process.env.LIVEKIT_S3_ACCESS_KEY!,
+          secretAccessKey: process.env.LIVEKIT_S3_SECRET!,
+        },
+        ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
+      })
+    }
+    return this._s3
+  }
+
+  async getRecordingDownloadUrl(key: string, ttlSeconds = 300): Promise<string | null> {
+    if (!this.canRecord() || !key) return null
+    const cmd = new GetObjectCommand({ Bucket: process.env.LIVEKIT_S3_BUCKET!, Key: key })
+    return getSignedUrl(this.s3(), cmd, { expiresIn: ttlSeconds })
+  }
+}
+
+// Verifies a LiveKit webhook request (signed with our own API key/secret) and
+// returns the parsed event, or null if the signature/body doesn't check out.
+// `authHeader` is the request's raw `Authorization` header; `body` MUST be the
+// unparsed raw request text (signature covers the exact bytes sent).
+export async function verifyLiveKitWebhook(body: string, authHeader: string | null): Promise<WebhookEvent | null> {
+  const apiKey = process.env.LIVEKIT_API_KEY || ''
+  const apiSecret = process.env.LIVEKIT_API_SECRET || ''
+  if (!apiKey || !apiSecret || !authHeader) return null
+  try {
+    const receiver = new WebhookReceiver(apiKey, apiSecret)
+    return await receiver.receive(body, authHeader)
+  } catch {
+    return null
   }
 }
 

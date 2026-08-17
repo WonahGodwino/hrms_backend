@@ -35,6 +35,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     await (prisma as any).meeting.update({ where: { id }, data: { status: 'ENDED' } })
+    // Stop any in-progress recording first — deleting the room doesn't
+    // guarantee the egress job gets closed out. Keep recordingEgressId: the
+    // egress_ended webhook still needs it to resolve this meeting to READY/FAILED.
+    if (meeting.recordingEgressId && meeting.recordingRequested) {
+      await getMeetingProvider().stopRecording(meeting.recordingEgressId).catch(() => {})
+      await (prisma as any).meeting.update({
+        where: { id }, data: { recordingRequested: false, recordingStatus: 'PROCESSING' },
+      }).catch(() => {})
+    }
     await getMeetingProvider().endRoom(meeting.roomName).catch(() => {})
 
     return withCors(ApiResponse.success({ id, status: 'ENDED' }, 'Meeting ended'), origin)

@@ -4,6 +4,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
+import { exportReportResponse, IAD_CHANGES_COLS } from '@/app/lib/phed/report-export'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const period = await prisma.phedPayPeriod.findUnique({
       where: { id: params.id },
-      select: { id: true, companyId: true, year: true, month: true, createdAt: true, approvedAt: true },
+      select: { id: true, companyId: true, periodName: true, year: true, month: true, createdAt: true, approvedAt: true, company: { select: { companyName: true } } },
     })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && period.companyId !== user.companyId) {
@@ -49,19 +50,28 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       orderBy: { changedAt: 'desc' },
     })
 
-    return withCors(
-      ApiResponse.success(
-        changes.map(c => ({
-          staffName: `${c.staff.firstName} ${c.staff.lastName}`,
-          staffIdCode: c.staff.staffId,
-          field: c.field,
-          oldValue: c.oldValue,
-          newValue: c.newValue,
-          changedBy: c.changedByName,
-          changedAt: c.changedAt,
-        })),
-      ),
-      origin,
-    )
+    const items = changes.map(c => ({
+      staffName: `${c.staff.firstName} ${c.staff.lastName}`,
+      staffIdCode: c.staff.staffId,
+      field: c.field,
+      oldValue: c.oldValue,
+      newValue: c.newValue,
+      changedBy: c.changedByName,
+      changedAt: c.changedAt,
+    }))
+
+    const format = new URL(req.url).searchParams.get('format') ?? 'json'
+    if (format === 'json') return withCors(ApiResponse.success(items), origin)
+
+    const rows = items.map((i, idx) => ({
+      ...i,
+      sn: idx + 1,
+      oldValue: i.oldValue ?? '',
+      newValue: i.newValue ?? '',
+      changedAt: i.changedAt ? new Date(i.changedAt).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' }) : '',
+    }))
+    const exp = await exportReportResponse(format, 'IAD Changes', period.periodName ?? 'Unknown', IAD_CHANGES_COLS, rows, period.company?.companyName ?? '', origin, 'iad-changes')
+    if (exp) return exp
+    return withCors(ApiResponse.error('Invalid format. Use json, xlsx, or pdf', 400), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
