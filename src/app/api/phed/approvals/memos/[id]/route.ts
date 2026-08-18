@@ -30,6 +30,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       return withCors(ApiResponse.notFound('Approval memo not found'), origin)
     }
 
+    const isIad = user.phedAccessRole === 'HEAD_INTERNAL_AUDIT'
     const sections = await buildApprovalMemoSections(memo.payPeriodId)
     const currentStageDef = getStageDef(memo.currentStage)
 
@@ -54,11 +55,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         payPeriod: memo.payPeriod,
         sections: {
           subject: sections.subject,
-          sectionA: sections.sectionA,
-          sectionEarnings: sections.sectionEarnings,
-          sectionB: sections.sectionB,
-          totalNetPay: sections.totalNetPay,
-          approvalSentence: sections.approvalSentence,
+          sectionA: isIad ? [] : sections.sectionA,
+          sectionEarnings: isIad ? [] : sections.sectionEarnings,
+          sectionB: isIad ? [] : sections.sectionB,
+          totalNetPay: isIad ? 0 : sections.totalNetPay,
+          approvalSentence: isIad ? '' : sections.approvalSentence,
         },
         stamps,
         iadConcurrenceStamp, // CFO-specific pinned callout (PRD 12.6 item 39)
