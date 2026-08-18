@@ -28,8 +28,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (user.role !== 'SUPER_ADMIN' && user.companyId && period.companyId !== user.companyId)
       return withCors(ApiResponse.notFound('Pay period not found'), origin)
 
-    if (!['VALIDATION_CLOSED', 'REVIEW'].includes(period.status))
-      return withCors(ApiResponse.error('Period must be in VALIDATION_CLOSED or REVIEW status to compute', 400), origin)
+    if (!['VALIDATION_CLOSED', 'REVIEW', 'APPROVED'].includes(period.status))
+      return withCors(ApiResponse.error('Period must be in VALIDATION_CLOSED, REVIEW or APPROVED status to compute', 400), origin)
 
     // ── Load all active staff + per-period data ───────────────
     const [allStaff, validations, overtimeEntries, periodAdvances] = await Promise.all([
