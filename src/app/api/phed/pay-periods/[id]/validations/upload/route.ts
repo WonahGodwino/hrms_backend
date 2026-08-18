@@ -19,8 +19,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
-    if (!['VALIDATION_OPEN', 'VALIDATION_CLOSED'].includes(period.status))
-      return withCors(ApiResponse.error('Validation uploads only allowed during validation phase', 400), origin)
+    if (period.status === 'PAID')
+      return withCors(ApiResponse.error('Validation uploads are locked once the period is paid', 400), origin)
 
     const formData = await req.formData()
     const file     = formData.get('file') as File | null

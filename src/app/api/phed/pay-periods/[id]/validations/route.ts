@@ -40,8 +40,8 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
-    if (!['VALIDATION_OPEN', 'VALIDATION_CLOSED'].includes(period.status))
-      return withCors(ApiResponse.error('Validation updates are only allowed during validation phase', 400), origin)
+    if (period.status === 'PAID')
+      return withCors(ApiResponse.error('Validation edits are locked once the period is paid', 400), origin)
 
     const { updates } = await req.json()
     if (!Array.isArray(updates))
@@ -72,6 +72,31 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     }
 
     return withCors(ApiResponse.success({ updated, errors }, 'Validations updated'), origin)
+  } catch (e) { return withCors(handleApiError(e), origin) }
+}
+
+// DELETE — remove a single staff validation entry (validation phase only)
+export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+  const origin = req.headers.get('origin')
+  const rl = phedRateLimit(req, 'write')
+  if (rl) return withCors(rl, origin)
+  try {
+    const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
+    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+
+    const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
+    if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
+    if (period.status === 'PAID')
+      return withCors(ApiResponse.error('Validation edits are locked once the period is paid', 400), origin)
+
+    const staffId = new URL(req.url).searchParams.get('staffId')
+    if (!staffId) return withCors(ApiResponse.error('staffId is required', 400), origin)
+
+    await (prisma as any).phedValidation.deleteMany({
+      where: { payPeriodId: params.id, staffId },
+    })
+
+    return withCors(ApiResponse.success({ staffId }, 'Validation deleted'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 
