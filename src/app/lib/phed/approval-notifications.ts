@@ -20,6 +20,7 @@ async function notifyRoleHolders(params: {
   message: string
   emailHeading: string
   emailBody: string
+  tone?: 'info' | 'warning'
 }) {
   const [recipients, memo, company] = await Promise.all([
     prisma.phedStaffAccessRole.findMany({
@@ -37,8 +38,17 @@ async function notifyRoleHolders(params: {
   const periodName = memo?.payPeriod.periodName ?? ''
   const deepLink = `${FRONTEND_URL}/phed/approvals/memos/${params.memoId}`
 
+  console.log(
+    `[PHED NOTIFY] role=${params.accessRole} memo=${params.memoId} period="${periodName}" holders=${recipients.length}`,
+  )
+  if (recipients.length === 0) {
+    console.warn(`[PHED NOTIFY] No holders found for role ${params.accessRole} in company ${params.companyId} — nobody will be notified.`)
+  }
+
   await Promise.all(
     recipients.map(async ({ staffRecord: staff }) => {
+      const name = `${staff.firstName} ${staff.lastName}`.trim() || staff.email || staff.id
+
       await createNotification(
         staff.id,
         params.notificationType,
@@ -46,24 +56,34 @@ async function notifyRoleHolders(params: {
         params.message,
         { memoId: params.memoId, deepLink },
         params.companyId,
-      ).catch(err => console.error('PHED approval notification failed:', err))
+      ).catch(err => console.error('[PHED NOTIFY] in-app notification failed:', err))
 
+      if (!staff.email) {
+        console.warn(`[PHED NOTIFY] Skipping email for ${name} — no email address on record.`)
+        return
+      }
+
+      console.log(`[PHED NOTIFY] Sending email to ${name} <${staff.email}> — "${params.emailHeading}"`)
       await sendPhedApprovalNotificationEmail({
         to: staff.email,
-        recipientName: `${staff.firstName} ${staff.lastName}`,
+        recipientName: name,
         companyName,
         periodName,
         subjectLine: params.title,
         heading: params.emailHeading,
         bodyText: params.emailBody,
         deepLink,
-      }).catch(err => console.error('PHED approval email failed:', err))
+        tone: params.tone,
+      }).catch(err => console.error('[PHED NOTIFY] email send failed:', err))
     }),
   )
 }
 
 // Called after a forward action (recommend/approve/finalapprove) commits.
 export async function notifyAfterForward(memo: PhedApprovalMemo, fromActorName: string): Promise<void> {
+  console.log(
+    `[PHED NOTIFY] forward memo=${memo.id} stage=${memo.currentStage} status=${memo.status} attempt=${memo.attemptNumber} actor="${fromActorName}"`,
+  )
   if (memo.status === 'APPROVED') {
     await notifyRoleHolders({
       companyId: memo.companyId,
@@ -81,20 +101,34 @@ export async function notifyAfterForward(memo: PhedApprovalMemo, fromActorName: 
   const nextStage = getStageDef(memo.currentStage)
   if (!nextStage) return
 
+  const isResubmission = memo.attemptNumber > 1
+
   await notifyRoleHolders({
     companyId: memo.companyId,
     accessRole: nextStage.role,
     memoId: memo.id,
     notificationType: NOTIFICATION_TYPES.PHED_APPROVAL_ACTION_NEEDED,
-    title: 'A payroll approval memo awaits your review',
-    message: `${fromActorName} forwarded a payroll approval memo to your desk.`,
-    emailHeading: 'A payroll approval memo is awaiting your review',
-    emailBody: `${fromActorName} has forwarded this Payroll Approval Memo to your desk (${nextStage.label}). Please review and take action.`,
+    title: isResubmission
+      ? 'A corrected payroll memo has been re-submitted for your approval'
+      : 'A payroll approval memo awaits your review',
+    message: isResubmission
+      ? `${fromActorName} re-submitted a corrected payroll approval memo to your desk.`
+      : `${fromActorName} forwarded a payroll approval memo to your desk.`,
+    emailHeading: isResubmission
+      ? 'Re-submission — please review and approve again'
+      : 'A payroll approval memo is awaiting your review',
+    emailBody: isResubmission
+      ? `${fromActorName} has re-submitted the Payroll Approval Memo after corrections were made. Please review the updated figures and approve again to continue the approval cycle.`
+      : `${fromActorName} has forwarded this Payroll Approval Memo to your desk (${nextStage.label}). Please review and take action.`,
+    tone: isResubmission ? 'warning' : 'info',
   })
 }
 
 // Called after a flag action commits — always returns to Stage 1.
 export async function notifyAfterFlag(memo: PhedApprovalMemo, flaggedByActorName: string, comment: string): Promise<void> {
+  console.log(
+    `[PHED NOTIFY] flag memo=${memo.id} flaggedBy="${flaggedByActorName}" attempt=${memo.attemptNumber}`,
+  )
   const stage1 = getStageDef(1)
   if (!stage1) return
 
@@ -107,5 +141,6 @@ export async function notifyAfterFlag(memo: PhedApprovalMemo, flaggedByActorName
     message: `${flaggedByActorName} flagged the payroll approval memo back to your desk: "${comment}"`,
     emailHeading: 'A payroll approval memo was flagged back for correction',
     emailBody: `${flaggedByActorName} flagged this Payroll Approval Memo back for correction. Their comment: "${comment}". Please correct the figures and resubmit.`,
+    tone: 'warning',
   })
 }

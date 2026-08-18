@@ -203,8 +203,15 @@ export async function sendPhedApprovalNotificationEmail(options: {
   heading:       string
   bodyText:      string
   deepLink:      string
+  tone?:         'info' | 'warning'
 }): Promise<{ success: boolean; error?: string }> {
   const { to, recipientName, companyName, periodName, subjectLine, heading, bodyText, deepLink } = options
+  const isWarning = options.tone === 'warning'
+  const headerBg  = isWarning ? '#9a3412' : BRAND_BLUE
+  const headerSub = isWarning ? '#fed7aa' : '#b8cbe0'
+  const accent    = isWarning ? '#c2410c' : BRAND_MID
+  const chipBg    = isWarning ? '#fff7ed' : ACCENT_BLUE
+  const buttonBg  = isWarning ? '#ea580c' : BRAND_BLUE
 
   const html = `
 <!DOCTYPE html>
@@ -214,59 +221,61 @@ export async function sendPhedApprovalNotificationEmail(options: {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${subjectLine}</title>
 </head>
-<body style="margin:0;padding:0;background-color:#f0f4f8;font-family:Arial,Helvetica,sans-serif;">
+<body style="margin:0;padding:0;background-color:#f4f6fa;font-family:'Segoe UI',Arial,Helvetica,sans-serif;">
 
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f4f8;padding:32px 0;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f6fa;padding:40px 0;">
     <tr>
       <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(17,24,39,0.08);">
 
           <tr>
-            <td style="background-color:${BRAND_BLUE};padding:32px 40px;text-align:center;">
-              <p style="margin:0;color:#c8d8eb;font-size:13px;letter-spacing:1px;text-transform:uppercase;">24/7HR Platform — Payroll Approvals</p>
-              <h1 style="margin:8px 0 0;color:#ffffff;font-size:22px;font-weight:700;">${companyName}</h1>
+            <td style="background-color:${headerBg};padding:36px 48px 32px;">
+              <p style="margin:0;color:${headerSub};font-size:12px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;">24/7HR · Payroll Approval Workflow</p>
+              <h1 style="margin:10px 0 0;color:#ffffff;font-size:24px;font-weight:700;line-height:1.3;">${companyName}</h1>
             </td>
           </tr>
 
           <tr>
-            <td style="padding:36px 40px 0;">
-              <p style="margin:0;font-size:16px;color:#1f2937;">Dear <strong>${recipientName}</strong>,</p>
-              <p style="margin:16px 0 0;font-size:16px;font-weight:700;color:${BRAND_BLUE};">${heading}</p>
-              <p style="margin:12px 0 0;font-size:15px;color:#374151;line-height:1.7;">${bodyText}</p>
+            <td style="padding:36px 48px 8px;">
+              <p style="margin:0;font-size:15px;color:#374151;">Dear <strong>${recipientName}</strong>,</p>
+              <p style="margin:18px 0 0;font-size:18px;font-weight:700;color:${accent};">${heading}</p>
+              <p style="margin:12px 0 0;font-size:15px;color:#4b5563;line-height:1.75;">${bodyText}</p>
             </td>
           </tr>
 
           <tr>
-            <td style="padding:24px 40px 0;">
-              <table width="100%" cellpadding="0" cellspacing="0" style="background-color:${ACCENT_BLUE};border-left:4px solid ${BRAND_BLUE};border-radius:4px;padding:16px 20px;">
+            <td style="padding:24px 48px 0;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color:${chipBg};border-left:4px solid ${accent};border-radius:6px;">
                 <tr>
-                  <td style="font-size:13px;color:#6b7280;">Pay Period</td>
-                  <td style="font-size:13px;color:#111827;font-weight:600;text-align:right;">${periodName}</td>
+                  <td style="padding:16px 20px;">
+                    <p style="margin:0;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Pay Period</p>
+                    <p style="margin:4px 0 0;font-size:16px;font-weight:600;color:#111827;">${periodName}</p>
+                  </td>
                 </tr>
               </table>
             </td>
           </tr>
 
           <tr>
-            <td style="padding:32px 40px;text-align:center;">
-              <a href="${deepLink}" style="display:inline-block;background-color:${BRAND_BLUE};color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 40px;border-radius:6px;letter-spacing:0.3px;">
-                Open Memo
+            <td style="padding:32px 48px;text-align:center;">
+              <a href="${deepLink}" style="display:inline-block;background-color:${buttonBg};color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 44px;border-radius:8px;">
+                Review Memo
               </a>
-              <p style="margin:16px 0 0;font-size:12px;color:#9ca3af;">
-                Or copy this link into your browser:<br>
-                <a href="${deepLink}" style="color:${BRAND_MID};">${deepLink}</a>
+              <p style="margin:18px 0 0;font-size:12px;color:#9ca3af;line-height:1.7;">
+                If the button doesn't work, copy this link into your browser:<br>
+                <a href="${deepLink}" style="color:${accent};word-break:break-all;">${deepLink}</a>
               </p>
             </td>
           </tr>
 
           <tr>
-            <td style="padding:0 40px;">
+            <td style="padding:0 48px;">
               <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;">
             </td>
           </tr>
 
           <tr>
-            <td style="padding:24px 40px;text-align:center;">
+            <td style="padding:24px 48px 32px;text-align:center;">
               <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.7;">
                 This is an automated message from <strong>${companyName}</strong> via the 24/7HR Platform.<br>
                 Please do not reply to this email.
@@ -292,9 +301,9 @@ ${bodyText}
 
 Pay Period: ${periodName}
 
-Open the memo here: ${deepLink}
+Review the memo here: ${deepLink}
 
-This is an automated message from ${companyName}. Please do not reply.
+This is an automated message from ${companyName} via the 24/7HR Platform. Please do not reply.
 `.trim()
 
   return sendEmail({
