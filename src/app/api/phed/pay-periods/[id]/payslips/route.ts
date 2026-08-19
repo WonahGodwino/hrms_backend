@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { requireRole } from '@/app/lib/auth'
-import { requirePhedReadAccess } from '@/app/lib/phed/access-role'
+import { verifyCompanyAccess } from '@/app/lib/access-control'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
@@ -16,10 +16,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requirePhedReadAccess(token)
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+
+    const body = await req.json().catch(() => ({}))
+    const companyId = body.companyId || user.companyId
+    if (!companyId) return withCors(ApiResponse.error('companyId is required', 400), origin)
+
+    const allowed = await verifyCompanyAccess(user, companyId)
+    if (!allowed) return withCors(ApiResponse.forbidden('You do not have access to this company'), origin)
 
     const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
+    if (period.companyId !== companyId)
+      return withCors(ApiResponse.notFound('Pay period not found'), origin)
     if (!['APPROVED', 'PAID'].includes(period.status))
       return withCors(ApiResponse.error('Payslips can only be sent for APPROVED or PAID periods', 400), origin)
 
@@ -35,19 +44,28 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     let sent    = 0
     let failed  = 0
+    let skipped = 0
     const errors: string[] = []
 
     for (const payroll of payrolls) {
-      if (!payroll.staffEmail) continue
+      if (!payroll.staffEmail) {
+        skipped++
+        continue
+      }
       try {
         const html = buildPayslipHtml(payroll, period.periodName, n)
-        await sendEmail({
+        const res = await sendEmail({
           to:      payroll.staffEmail,
           subject: `Your Payslip – ${period.periodName}`,
           html,
           text:    `Your payslip for ${period.periodName} is ready. Please view in HTML.`,
         })
-        sent++
+        if (res.success) {
+          sent++
+        } else {
+          failed++
+          errors.push(`${payroll.staffName}: ${res.error || 'email send failed'}`)
+        }
       } catch (err: any) {
         failed++
         errors.push(`${payroll.staffName}: ${err.message}`)
@@ -62,7 +80,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       })
     }
 
-    return withCors(ApiResponse.success({ sent, failed, errors }, `${sent} payslips sent`), origin)
+    return withCors(ApiResponse.success({ sent, failed, skipped, errors }, `${sent} payslips sent`), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 

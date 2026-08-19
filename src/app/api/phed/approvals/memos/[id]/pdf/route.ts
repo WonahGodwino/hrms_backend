@@ -29,6 +29,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     if (user.role !== 'SUPER_ADMIN' && memo.companyId !== user.companyId) {
       return withCors(ApiResponse.notFound('Approval memo not found'), origin)
     }
+    if (user.phedAccessRole === 'HEAD_INTERNAL_AUDIT' && !['HR', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
+      return withCors(ApiResponse.error('The approval memo PDF is not available for the Head, Internal Audit role. Review the Internal Audit report instead.', 403), origin)
+    }
 
     const sections = await buildApprovalMemoSections(memo.payPeriodId)
 

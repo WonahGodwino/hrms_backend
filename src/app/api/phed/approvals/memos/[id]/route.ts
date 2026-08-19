@@ -30,7 +30,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       return withCors(ApiResponse.notFound('Approval memo not found'), origin)
     }
 
-    const isIad = user.phedAccessRole === 'HEAD_INTERNAL_AUDIT'
+    const isIad = user.phedAccessRole === 'HEAD_INTERNAL_AUDIT' && !['HR', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)
     const sections = await buildApprovalMemoSections(memo.payPeriodId)
     const currentStageDef = getStageDef(memo.currentStage)
 
