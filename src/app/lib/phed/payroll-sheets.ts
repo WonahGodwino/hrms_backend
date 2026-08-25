@@ -24,6 +24,8 @@ export interface PeriodLabels {
   monthShort: string  // Feb
   yy: string          // 26
   monthYear: string   // February 2026
+  month: number       // 2
+  year: number        // 2026
   apostrophe: string  // Feb'26
   dot: string         // Feb.26
   space: string       // Feb 26
@@ -38,6 +40,7 @@ export function periodLabels(month: number, year: number): PeriodLabels {
   return {
     monthName: m, monthShort: s, yy,
     monthYear: `${m} ${year}`,
+    month, year,
     apostrophe: `${s}'${yy}`,
     dot: `${s}.${yy}`,
     space: `${s} ${yy}`,
@@ -540,38 +543,150 @@ function sumAggs(aggs: CategoryAgg[]): CategoryAgg {
   return z
 }
 
-export function buildSummaryWorkbook(labels: PeriodLabels, payrolls: Payroll[], stateMap: Map<string, string> = new Map()): CostCentreSheet[] {
-  const regular = categoryAgg(payrolls, 'REGULAR', 'Regular Staff')
-  const contract = categoryAgg(payrolls, 'CONTRACT', 'Contract Staff')
-  const nysc = categoryAgg(payrolls, 'NYSC_IT', 'NYSC & IT')
-  const total = sumAggs([regular, contract, nysc])
+// ── Summary workbook data (reference-exact: Payroll Summary + Memo Summary + Breakdown of PAYE) ──
+export interface SummaryAggRow {
+  label: string
+  headCount: number
+  grossPay: number
+  pensionEmployer: number
+  nsitf: number
+  itf: number
+  totalPayrollCost: number
+  netPay: number
+  pensionRemittance: number
+  nhf: number
+  paye: number
+  insurance: number
+  loan: number
+  nuee: number
+  ssaeac: number
+  phZonalThrift: number
+  nsmpcsuyo: number
+  nemscoopcal: number
+  nemscoopuyo: number
+  dedLiabilities: number
+  nepascoopcal: number
+  nepascoopiko: number
+  nepascoopphc: number
+  nepascoopuyo: number
+  ielCredit: number
+  phedStaffCoop: number
+}
 
-  const summarySheet = sheet(`${labels.monthYear} Payroll Summary`, SUMMARY_COLS, [regular, contract, nysc, total])
+export interface SummaryWorkbookData {
+  labels: PeriodLabels
+  rows: SummaryAggRow[]            // Regular, Contract, NYSC & IT, Total
+  previousRows: SummaryAggRow[] | null
+  stateRows: { state: string; regular: number; contract: number }[]
+}
 
-  const memoSheet = sheet('Memo Summary', [
-    { key: 'item', header: 'Description', type: 'text', width: 40 },
-    { key: 'amount', header: 'Amount', type: 'currency', width: 20 },
-  ], [
-    { item: 'A. Total Payroll Cost', amount: null },
-    { item: '  Regular Staff', amount: regular.totalPayrollCost },
-    { item: '  Contract Staff', amount: contract.totalPayrollCost },
-    { item: '  NYSC/Internship', amount: nysc.grossPay },
-    { item: '  Total', amount: r2(regular.totalPayrollCost + contract.totalPayrollCost + nysc.grossPay) },
-    { item: 'B. Deductions and Remittances', amount: null },
-    { item: '  Pension Remittance', amount: total.pensionRemittance },
-    { item: '  NSITF', amount: total.nsitf },
-    { item: '  ITF', amount: total.itf },
-    { item: '  NHF', amount: total.nhf },
-    { item: '  PAYE', amount: total.paye },
-    { item: '  Insurance', amount: total.insurance },
-    { item: '  Loan', amount: total.loan },
-    { item: '  Liabilities to PHED', amount: total.liabilities },
-    { item: 'C. Employee’s Net Pay', amount: total.netPay },
-  ])
+function zeroSummary(label: string): SummaryAggRow {
+  return {
+    label, headCount: 0, grossPay: 0, pensionEmployer: 0, nsitf: 0, itf: 0,
+    totalPayrollCost: 0, netPay: 0, pensionRemittance: 0, nhf: 0, paye: 0,
+    insurance: 0, loan: 0, nuee: 0, ssaeac: 0, phZonalThrift: 0, nsmpcsuyo: 0,
+    nemscoopcal: 0, nemscoopuyo: 0, dedLiabilities: 0, nepascoopcal: 0,
+    nepascoopiko: 0, nepascoopphc: 0, nepascoopuyo: 0, ielCredit: 0, phedStaffCoop: 0,
+  }
+}
+
+function summaryAgg(payrolls: Payroll[], ctx: RegisterCtx, label: string): SummaryAggRow {
+  const z = zeroSummary(label)
+  for (const p of payrolls) {
+    const statutory = p.category !== 'NYSC_IT'
+    const gross = toNum(p.grossSalary)
+    const coops = ctx.coopMap?.get(p.staffId) ?? {}
+    const coopAmt = (name: string) => {
+      for (const k of Object.keys(coops)) if (k.toLowerCase().includes(name)) return coops[k]
+      return 0
+    }
+    z.headCount++
+    z.grossPay = r2(z.grossPay + gross)
+    z.pensionEmployer = r2(z.pensionEmployer + (statutory ? toNum(p.pensionEmployer) : 0))
+    z.nsitf = r2(z.nsitf + (statutory ? r2(gross * 0.01) : 0))
+    z.itf = r2(z.itf + (statutory ? r2(gross * 0.01) : 0))
+    z.totalPayrollCost = r2(z.totalPayrollCost + gross + (statutory ? toNum(p.pensionEmployer) + r2(gross * 0.01) + r2(gross * 0.01) : 0))
+    z.netPay = r2(z.netPay + toNum(p.netSalary))
+    z.pensionRemittance = r2(z.pensionRemittance + toNum(p.pensionEmployee) + toNum(p.pensionEmployer))
+    z.nhf = r2(z.nhf + toNum(p.nhf))
+    z.paye = r2(z.paye + toNum(p.monthlyPAYE))
+    z.insurance = r2(z.insurance + toNum(p.insurance))
+    z.loan = r2(z.loan + toNum(p.loan) + toNum(p.domesticLoan))
+    z.nuee = r2(z.nuee + (ctx.unionMap?.get(p.staffId) ?? 0))
+    z.ssaeac = r2(z.ssaeac + (ctx.ssaeacMap?.get(p.staffId) ?? 0))
+    z.phZonalThrift = r2(z.phZonalThrift + coopAmt('zonal thrift'))
+    z.nsmpcsuyo = r2(z.nsmpcsuyo + coopAmt('nsmpcsuyo'))
+    z.nemscoopcal = r2(z.nemscoopcal + coopAmt('nemscoopcal'))
+    z.nemscoopuyo = r2(z.nemscoopuyo + coopAmt('nemscoopuyo'))
+    z.dedLiabilities = r2(z.dedLiabilities + toNum(p.deductionLiabilities))
+    z.nepascoopcal = r2(z.nepascoopcal + coopAmt('nepascoopcal'))
+    z.nepascoopiko = r2(z.nepascoopiko + coopAmt('nepascoopiko'))
+    z.nepascoopphc = r2(z.nepascoopphc + coopAmt('nepascoopphc'))
+    z.nepascoopuyo = r2(z.nepascoopuyo + coopAmt('nepascoopuyo'))
+    z.ielCredit = r2(z.ielCredit + coopAmt('iel'))
+    z.phedStaffCoop = r2(z.phedStaffCoop + coopAmt('phed staff'))
+  }
+  return z
+}
+
+function sumSummaryAggs(aggs: SummaryAggRow[]): SummaryAggRow {
+  const z = zeroSummary('Total')
+  for (const a of aggs) {
+    z.headCount += a.headCount
+    z.grossPay = r2(z.grossPay + a.grossPay)
+    z.pensionEmployer = r2(z.pensionEmployer + a.pensionEmployer)
+    z.nsitf = r2(z.nsitf + a.nsitf)
+    z.itf = r2(z.itf + a.itf)
+    z.totalPayrollCost = r2(z.totalPayrollCost + a.totalPayrollCost)
+    z.netPay = r2(z.netPay + a.netPay)
+    z.pensionRemittance = r2(z.pensionRemittance + a.pensionRemittance)
+    z.nhf = r2(z.nhf + a.nhf)
+    z.paye = r2(z.paye + a.paye)
+    z.insurance = r2(z.insurance + a.insurance)
+    z.loan = r2(z.loan + a.loan)
+    z.nuee = r2(z.nuee + a.nuee)
+    z.ssaeac = r2(z.ssaeac + a.ssaeac)
+    z.phZonalThrift = r2(z.phZonalThrift + a.phZonalThrift)
+    z.nsmpcsuyo = r2(z.nsmpcsuyo + a.nsmpcsuyo)
+    z.nemscoopcal = r2(z.nemscoopcal + a.nemscoopcal)
+    z.nemscoopuyo = r2(z.nemscoopuyo + a.nemscoopuyo)
+    z.dedLiabilities = r2(z.dedLiabilities + a.dedLiabilities)
+    z.nepascoopcal = r2(z.nepascoopcal + a.nepascoopcal)
+    z.nepascoopiko = r2(z.nepascoopiko + a.nepascoopiko)
+    z.nepascoopphc = r2(z.nepascoopphc + a.nepascoopphc)
+    z.nepascoopuyo = r2(z.nepascoopuyo + a.nepascoopuyo)
+    z.ielCredit = r2(z.ielCredit + a.ielCredit)
+    z.phedStaffCoop = r2(z.phedStaffCoop + a.phedStaffCoop)
+  }
+  return z
+}
+
+export function buildSummaryData(
+  labels: PeriodLabels,
+  payrolls: Payroll[],
+  previousPayrolls: Payroll[],
+  ctx: RegisterCtx = {},
+): SummaryWorkbookData {
+  const rows = [
+    summaryAgg(payrolls.filter(r => r.category === 'REGULAR'), ctx, 'Regular Staff'),
+    summaryAgg(payrolls.filter(r => r.category === 'CONTRACT'), ctx, 'Contract Staff'),
+    summaryAgg(payrolls.filter(r => r.category === 'NYSC_IT'), ctx, 'NYSC & IT'),
+  ]
+  rows.push(sumSummaryAggs(rows))
+
+  let previousRows: SummaryAggRow[] | null = null
+  if (previousPayrolls.length) {
+    previousRows = [
+      summaryAgg(previousPayrolls.filter(r => r.category === 'REGULAR'), ctx, 'Regular Staff'),
+      summaryAgg(previousPayrolls.filter(r => r.category === 'CONTRACT'), ctx, 'Contract Staff'),
+      summaryAgg(previousPayrolls.filter(r => r.category === 'NYSC_IT'), ctx, 'NYSC & IT'),
+    ]
+    previousRows.push(sumSummaryAggs(previousRows))
+  }
 
   const states = ['Akwa Ibom', 'Bayelsa', 'Cross River', 'Rivers']
   const stateRows = states.map(s => {
-    const inState = payrolls.filter(r => (stateMap.get(r.staffId) ?? '').toLowerCase().includes(s.toLowerCase()))
+    const inState = payrolls.filter(r => (ctx.stateMap?.get(r.staffId) ?? '').toLowerCase().includes(s.toLowerCase()))
     return {
       state: `${s} State`,
       regular: r2(inState.filter(r => r.category === 'REGULAR').reduce((sum, r) => sum + toNum(r.monthlyPAYE), 0)),
@@ -579,16 +694,7 @@ export function buildSummaryWorkbook(labels: PeriodLabels, payrolls: Payroll[], 
     }
   })
 
-  const breakdownSheet = sheet('Breakdown of PAYE', [
-    { key: 'state', header: 'State', type: 'text', width: 22 },
-    { key: 'regular', header: 'Regular Staff', type: 'currency', width: 16 },
-    { key: 'contract', header: 'Contract Staff', type: 'currency', width: 16 },
-  ], [
-    ...stateRows,
-    { state: 'Total', regular: regular.paye, contract: contract.paye },
-  ])
-
-  return [summarySheet, memoSheet, breakdownSheet]
+  return { labels, rows, previousRows, stateRows }
 }
 
 // ── "Internal Audit" workbook ──

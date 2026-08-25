@@ -57,6 +57,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     // ── Category summary (backward-compat + Sheet 1) ──────────
     const summary = buildPayrollSummary(currentPayrolls, period.periodName, period.month, period.year)
 
+    // Worksheet name prefix, e.g. "Feb 2026" (client template sheet names)
+    const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    const sheetPrefix = `${MONTH_ABBR[(period.month - 1) % 12]} ${period.year}`
+
     // ── Determine new-hire status (no payroll in any prior period) ──
     const prevPeriods = await (prisma as any).phedPayPeriod.findMany({
       where:  { companyId: period.companyId, id: { not: params.id } },
@@ -123,6 +127,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         staffIdCode:             r.staffIdCode ?? '',
         staffName:               r.staffName   ?? '',
         gradeName:               r.gradeName   ?? '',
+        category:                r.category    ?? '',
+        regionName:              r.regionName  ?? '',
+        basicSalary:             n(r.basicSalary),
         grossSalary:             gross,
         housingAllowance:        n(r.housingAllowance),
         transportAllowance:      n(r.transportAllowance),
@@ -138,10 +145,17 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         entertainmentAllowance:  n(r.entertainmentAllowance),
         dataAllowance:           n(r.dataAllowance),
         nightAllowance:          n(r.nightAllowance),
+        overtimeEarnings:        n(r.overtimeEarnings),
         arrears:                 n(r.arrears),
         otherAllowances:         n(r.otherAllowances),
         lifeAssuranceAmount:     n(r.lifeAssuranceAmount),
+        nhf:                     n(r.nhf),
         pensionEmployee:         n(r.pensionEmployee),
+        voluntaryPension:        n(r.voluntaryPension),
+        insurance:               n(r.insurance),
+        cashAdvanced:            n(r.cashAdvanced),
+        loan:                    n(r.loan),
+        domesticLoan:            n(r.domesticLoan),
         monthlyPAYE:             n(r.monthlyPAYE),
         totalDeductions:         n(r.totalDeductions),
         netSalary:               n(r.netSalary),
@@ -207,6 +221,39 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const previousSummary = immediatePrevPeriod
       ? buildPayrollSummary(prevSummaryPayrolls, immediatePrevPeriod.periodName, immediatePrevPeriod.month, immediatePrevPeriod.year)
       : null
+
+    // Validate sheet — side-by-side employee comparison (current vs previous).
+    const categoryLabel = (c: any) =>
+      c === 'REGULAR' ? 'Regular' : c === 'CONTRACT' ? 'Contract' : c === 'NYSC_IT' ? 'NYSC & IT' : String(c ?? '')
+    const toValidateRow = (r: any) => {
+      const gross   = n(r.grossSalary)
+      const erobrea = 0 // additive variable; 0 until the business sources it
+      return {
+        staffIdCode:     r.staffIdCode ?? '',
+        staffName:       r.staffName   ?? '',
+        status:          categoryLabel(r.category),
+        payPoint:        r.gradeName   ?? '',
+        initialGrossPay: r2(n(r.basicSalary)),
+        grossPay:        r2(gross),
+        erobrea,
+        total:           r2(gross + erobrea),
+      }
+    }
+    const validateCurrent  = currentPayrolls.map(toValidateRow)
+    const validatePrevious = prevSummaryPayrolls.map(toValidateRow)
+
+    // Changes sheet — staff present in both periods whose gross or net pay changed.
+    const prevPayrollByStaff = new Map<string, any>(
+      prevSummaryPayrolls.map((r: any) => [r.staffId, r] as [string, any])
+    )
+    const changedStaff = currentPayrolls
+      .filter((r: any) => {
+        const prev = prevPayrollByStaff.get(r.staffId)
+        if (!prev) return false
+        return n(r.grossSalary) !== n(prev.grossSalary) || n(r.netSalary) !== n(prev.netSalary)
+      })
+      .map(toIAD)
+
     const varianceRows = previousSummary
       ? summary.rows.map((c: any) => {
           const p = previousSummary.rows.find((r: any) => r.label === c.label)
@@ -221,6 +268,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const iadData: IADSummaryInput = {
       periodName:      period.periodName,
+      sheetPrefix,
+      month:           period.month,
+      year:            period.year,
+      previousMonth:   immediatePrevPeriod?.month ?? null,
+      previousYear:    immediatePrevPeriod?.year  ?? null,
       summary,
       previousSummary,
       varianceRows,
@@ -228,6 +280,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       newlyHiredContract,
       exitedRegular,
       exitedContract,
+      changedStaff,
+      validateCurrent,
+      validatePrevious,
       unions:       allUnions.map((u: any) => ({ id: u.id, name: u.name })),
       cooperatives: allCoops.map((c: any) => ({ id: c.id, name: c.name })),
       deductions:   allDeductions.map((d: any) => ({ id: d.id, name: d.name })),

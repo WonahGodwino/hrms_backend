@@ -4,17 +4,18 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedReadAccess } from '@/app/lib/phed/access-role'
-import { exportWorkbook } from '@/app/lib/phed/report-export'
+import { exportWorkbook, exportSummaryWorkbookExcel } from '@/app/lib/phed/report-export'
 import {
   periodLabels,
   buildRegularWorkbook,
   buildContractWorkbook,
   buildIndividualWorkbook,
-  buildSummaryWorkbook,
+  buildSummaryData,
   buildIadWorkbook,
   buildUnionCoopMaps,
   fetchStateOfResidenceMap,
   type RegisterCtx,
+  type SummaryWorkbookData,
 } from '@/app/lib/phed/payroll-sheets'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
@@ -89,7 +90,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const labels = periodLabels(period.month, period.year)
 
-    let sheets
+    let sheets: any = null
+    let summaryData: SummaryWorkbookData | null = null
     if (scope === 'regular') {
       sheets = buildRegularWorkbook(labels, payrolls, ctx)
     } else if (scope === 'contract') {
@@ -99,7 +101,18 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     } else if (scope === 'individual') {
       sheets = buildIndividualWorkbook(payrolls, ctx)
     } else if (scope === 'summary') {
-      sheets = buildSummaryWorkbook(labels, payrolls, ctx.stateMap ?? new Map())
+      const prevPeriod = await prisma.phedPayPeriod.findFirst({
+        where: {
+          companyId: period.companyId,
+          OR: [{ year: { lt: period.year } }, { year: period.year, month: { lt: period.month } }],
+        },
+        orderBy: [{ year: 'desc' }, { month: 'desc' }],
+        select: { id: true },
+      })
+      const prevPayrolls = prevPeriod
+        ? await (prisma as any).phedComputedPayroll.findMany({ where: { payPeriodId: prevPeriod.id } })
+        : []
+      summaryData = buildSummaryData(labels, payrolls, prevPayrolls, ctx)
     } else if (scope === 'iad') {
       const prevPeriod = await prisma.phedPayPeriod.findFirst({
         where: {
@@ -117,11 +130,16 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       return withCors(ApiResponse.error('Invalid scope. Use regular, contract, individual, summary, or iad', 400), origin)
     }
 
-    if (format === 'json') return withCors(ApiResponse.success({ periodName: period.periodName, sheets }), origin)
+    if (format === 'json') {
+      if (summaryData) return withCors(ApiResponse.success({ periodName: period.periodName, summary: summaryData }), origin)
+      return withCors(ApiResponse.success({ periodName: period.periodName, sheets }), origin)
+    }
 
     const companyName = period.company?.companyName ?? ''
     const safeName    = period.periodName.replace(/\s+/g, '-')
-    const buf = await exportWorkbook(sheets, companyName)
+    const buf = summaryData
+      ? await exportSummaryWorkbookExcel(summaryData, companyName)
+      : await exportWorkbook(sheets, companyName)
     return new NextResponse(buf as any, {
       status: 200,
       headers: {

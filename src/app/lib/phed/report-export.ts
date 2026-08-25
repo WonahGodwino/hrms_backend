@@ -9,6 +9,7 @@ import ExcelJS   from 'exceljs'
 import PDFDocument from 'pdfkit'
 import { NextResponse } from 'next/server'
 import type { CostCentreSheet } from './types'
+import type { SummaryWorkbookData } from './payroll-sheets'
 
 // ── Column definition ─────────────────────────────────────────
 export interface ReportColDef {
@@ -444,8 +445,158 @@ export async function exportWorkbook(
 }
 
 // =============================================================
+// PAYROLL SUMMARY — reference-exact workbook
+//   Sheet 1: <Month Year> Payroll Summary (cost + remittances
+//            side-by-side, TOTAL / previous / variance rows)
+//   Sheet 2: Memo Summary (A/B/C with cross-sheet formulas)
+//   Sheet 3: Breakdown of PAYE (by state)
+// =============================================================
+export async function exportSummaryWorkbookExcel(
+  data:        SummaryWorkbookData,
+  companyName: string = '',
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook()
+  wb.creator = '24/7HR – PHED Module'
+
+  const mainName = `${data.labels.monthYear} Payroll Summary`
+  const prevYear  = data.labels.month === 1 ? data.labels.year - 1 : data.labels.year
+  const prevMonth = data.labels.month === 1 ? 12 : data.labels.month - 1
+
+  const costHeaders = ['Payroll', 'No. of Employee', 'Gross Pay', "Employer's Pension Contribution", 'NSITF', 'ITF', 'Total Payroll Cost']
+  const remitHeaders = ['Net Pay', 'Bank', 'Total Pension Remittance', 'NSITF', 'ITF', 'NHF', 'PAYE', 'Insurance', 'Loan',
+    'NUEE Check-Off Dues', 'SSAEAC Check-Dues', 'PH Zonal Thrift', 'NSMPCSUYO', 'NEMSCOOPCAL', 'NEMSCOOPUYO',
+    'DED/LIABILITIES', 'NEPASCOOPCAL', 'NEPASCOOPIKO', 'NEPASCOOPPHC', 'NEPASCOOPUYO', 'IEL CICS', 'PHEDStaff Cooperative']
+  const costKeys = ['label', 'headCount', 'grossPay', 'pensionEmployer', 'nsitf', 'itf', 'totalPayrollCost']
+  const remitKeys = ['netPay', '', 'pensionRemittance', 'nsitf', 'itf', 'nhf', 'paye', 'insurance', 'loan',
+    'nuee', 'ssaeac', 'phZonalThrift', 'nsmpcsuyo', 'nemscoopcal', 'nemscoopuyo', 'dedLiabilities',
+    'nepascoopcal', 'nepascoopiko', 'nepascoopphc', 'nepascoopuyo', 'ielCredit', 'phedStaffCoop']
+  const headers = [...costHeaders, ...remitHeaders]
+  const keys    = [...costKeys, ...remitKeys]
+  const nCols   = headers.length        // 29 → columns B..AD
+  const colOf   = (i: number) => colLetter(i + 2)  // B = col 2
+
+  const fill = (ws: ExcelJS.Worksheet, r: number, c: number, value: any, opts: { fill?: string; bold?: boolean; color?: string; numFmt?: string; align?: 'left' | 'right' | 'center' } = {}) => {
+    const cell = ws.getCell(r, c)
+    cell.value = value
+    if (opts.fill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: opts.fill } }
+    if (opts.bold || opts.color) cell.font = { bold: opts.bold ?? false, size: 9, color: { argb: opts.color ?? 'FF1f2937' } }
+    if (opts.numFmt) cell.numFmt = opts.numFmt
+    cell.alignment = { horizontal: opts.align ?? 'right', vertical: 'middle', wrapText: true }
+  }
+
+  // ── Sheet 1: Payroll Summary ─────────────────────────────────
+  const ws = wb.addWorksheet(mainName)
+  headers.forEach((_, i) => { ws.getColumn(i + 2).width = i < 7 ? 18 : 16 })
+  ws.getColumn(2).width = 22
+
+  ws.mergeCells(2, 2, 2, 2 + nCols - 1)
+  fill(ws, 2, 2, `Summary of ${data.labels.monthYear} Payroll Cost`, { fill: `FF${BRAND_BLUE}`, bold: true, color: 'FFFFFFFF', align: 'center' })
+  ws.getRow(2).height = 26
+
+  ws.mergeCells(3, 2, 3, 8)
+  fill(ws, 3, 2, 'PAYROLL COST', { fill: `FF${BRAND_MID}`, bold: true, color: 'FFFFFFFF', align: 'center' })
+  ws.mergeCells(3, 9, 3, 2 + nCols - 1)
+  fill(ws, 3, 9, 'REMITTANCES', { fill: `FF${BRAND_MID}`, bold: true, color: 'FFFFFFFF', align: 'center' })
+  ws.getRow(3).height = 20
+
+  headers.forEach((h, i) => fill(ws, 4, i + 2, h, { fill: `FF${BRAND_MID}`, bold: true, color: 'FFFFFFFF', align: i === 0 ? 'left' : 'right' }))
+  ws.getRow(4).height = 30
+
+  const writeAggRow = (r: number, agg: any) => {
+    keys.forEach((k, i) => {
+      if (i === 0) { fill(ws, r, i + 2, agg.label, { align: 'left' }); return }
+      if (k === '') { fill(ws, r, i + 2, '', {}); return }
+      fill(ws, r, i + 2, agg[k], { numFmt: k === 'headCount' ? '#,##0' : '#,##0.00' })
+    })
+  }
+
+  const cats = data.rows.filter(x => x.label !== 'Total')
+  cats.forEach((agg, i) => { writeAggRow(6 + i, agg); ws.getRow(6 + i).height = 18 })
+
+  // R10: TOTAL row (period date + live SUM formulas across the block)
+  fill(ws, 10, 2, new Date(Date.UTC(data.labels.year, data.labels.month - 1, 1)), { numFmt: 'mmmm yyyy', bold: true, color: `FF${BRAND_BLUE}`, align: 'left' })
+  for (let i = 1; i < nCols; i++) {
+    const L = colOf(i)
+    fill(ws, 10, i + 2, { formula: `SUM(${L}6:${L}9)` }, { numFmt: i === 1 ? '#,##0' : '#,##0.00', bold: true, color: `FF${BRAND_BLUE}` })
+  }
+  fill(ws, 10, 32, { formula: 'SUM(R10:AD10)' }, { numFmt: '#,##0.00', bold: true, color: `FF${BRAND_BLUE}` })
+  ws.getRow(10).height = 20
+
+  // R12: previous month TOTAL row
+  const prevTotal = data.previousRows?.[3]
+  fill(ws, 12, 2, new Date(Date.UTC(prevYear, prevMonth - 1, 1)), { numFmt: 'mmmm yyyy', bold: true, color: `FF${BRAND_BLUE}`, align: 'left' })
+  for (let i = 1; i < nCols; i++) {
+    const k = keys[i]
+    if (k === '') { fill(ws, 12, i + 2, '', {}); continue }
+    fill(ws, 12, i + 2, prevTotal ? (prevTotal as any)[k] : 0, { numFmt: k === 'headCount' ? '#,##0' : '#,##0.00', bold: true, color: `FF${BRAND_BLUE}` })
+  }
+  ws.getRow(12).height = 20
+
+  // R14: Variance row
+  fill(ws, 14, 2, 'Variance', { fill: `FF${ACCENT_BLUE}`, bold: true, color: `FF${BRAND_BLUE}`, align: 'left' })
+  for (let i = 1; i < nCols; i++) {
+    const L = colOf(i)
+    fill(ws, 14, i + 2, { formula: `${L}10-${L}12` }, { fill: `FF${ACCENT_BLUE}`, numFmt: i === 1 ? '#,##0' : '#,##0.00', bold: true, color: `FF${BRAND_BLUE}` })
+  }
+  ws.getRow(14).height = 18
+
+  // ── Sheet 2: Memo Summary ────────────────────────────────────
+  const memo = wb.addWorksheet('Memo Summary')
+  memo.getColumn(2).width = 40
+  memo.getColumn(3).width = 18
+  memo.getColumn(4).width = 15
+  memo.getColumn(5).width = 16
+
+  const ref = (cell: string) => `'${mainName}'!${cell}`
+  const mMoney = (r: number, c: number, v: any) => { const cell = memo.getCell(r, c); cell.value = v; cell.numFmt = '#,##0.00'; }
+  const mText = (r: number, c: number, v: string, bold = false) => { const cell = memo.getCell(r, c); cell.value = v; cell.font = bold ? { bold: true, size: 10 } : { size: 10 }; }
+
+  mText(2, 2, 'A.   Total Payroll Cost', true)
+  mText(3, 2, 'Type of employment', true); mText(3, 3, 'Gross', true); mText(3, 4, 'Deduction', true); mText(3, 5, 'Net Pay', true)
+  mText(4, 2, 'Regular Staff'); mMoney(4, 3, { formula: ref('H6') }); mMoney(4, 4, { formula: 'C4-E4' }); mMoney(4, 5, { formula: ref('I6') })
+  mText(5, 2, 'Contract Staff'); mMoney(5, 3, { formula: ref('H7') }); mMoney(5, 4, { formula: 'C5-E5' }); mMoney(5, 5, { formula: ref('I7') })
+  mText(6, 2, 'NYSC/Internship'); mMoney(6, 3, { formula: ref('D8') }); mMoney(6, 5, { formula: ref('I8') })
+  mText(7, 2, 'Total', true); mMoney(7, 3, { formula: 'SUM(C4:C6)' }); mMoney(7, 4, { formula: 'SUM(D4:D6)' }); mMoney(7, 5, { formula: 'SUM(E4:E6)' })
+  mText(9, 2, 'Less:'); mMoney(9, 4, { formula: 'D7-C25' })
+  mText(10, 2, 'B.   Deductions and Remittances', true); mMoney(10, 5, { formula: 'C28-E7' })
+  mText(11, 2, 'Deductible Items', true); mText(11, 3, 'Amount', true)
+  const items: [string, string][] = [
+    ['Pension Remittance', 'K10'], ['NSITF', 'L10'], ['ITF', 'M10'], ['NHF', 'N10'], ['PAYE', 'O10'],
+    ['NUEE Check-Off Dues', 'R10'], ['SSAEAC Check-Dues', 'S10'], ['PH Zonal Thrift (Cooperatives)', 'T10'],
+    ['NEPASCOOPUYO (Cooperatives)', 'AB10'], ['IEL (Cooperatives)', 'AC10'], ['PHEDStaff Cooperative', 'AD10'],
+    ['Liabilities to PHED', 'X10'], ['Insurance', 'P10'],
+  ]
+  items.forEach(([label, col], i) => { mText(12 + i, 2, label); mMoney(12 + i, 3, { formula: ref(col) }) })
+  mText(25, 2, '\u00a0Total', true); mMoney(25, 3, { formula: 'SUM(C12:C24)' })
+  mText(27, 2, 'C.   Employee’s Net Pay ', true)
+  mText(28, 2, 'Total Net Pay ', true); mMoney(28, 3, { formula: 'C7-C25' })
+  mMoney(30, 3, { formula: ref('I10') })
+
+  // ── Sheet 3: Breakdown of PAYE ────────────────────────────────
+  const paye = wb.addWorksheet('Breakdown of PAYE')
+  paye.getColumn(1).width = 22
+  paye.getColumn(2).width = 16
+  paye.getColumn(3).width = 16
+  const pHead = (r: number, c: number, v: string) => { const cell = paye.getCell(r, c); cell.value = v; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${BRAND_BLUE}` } }; cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 }; }
+  const pNum = (r: number, c: number, v: any) => { const cell = paye.getCell(r, c); cell.value = v; cell.numFmt = '#,##0.00'; }
+  pHead(2, 1, 'State'); pHead(2, 2, 'Regular Staff'); pHead(2, 3, 'Contract Staff')
+  data.stateRows.forEach((s, i) => {
+    paye.getCell(3 + i, 1).value = s.state
+    pNum(3 + i, 2, s.regular)
+    pNum(3 + i, 3, s.contract)
+  })
+  paye.getCell(7, 1).value = 'Total'
+  paye.getCell(7, 1).font = { bold: true, size: 10 }
+  pNum(7, 2, { formula: 'SUM(B3:B6)' })
+  pNum(7, 3, { formula: 'SUM(C3:C6)' })
+
+  return (await wb.xlsx.writeBuffer()) as unknown as Buffer
+}
+
+// =============================================================
 // COST CENTRE — 3-SHEET EXPORT (Excel + PDF)
 // =============================================================
+
 export async function exportCostCentreExcel(
   title:       string,
   periodName:  string,
@@ -1940,6 +2091,9 @@ export interface IADEmployee {
   staffIdCode:             string
   staffName:               string
   gradeName:               string
+  category:                string
+  regionName:              string
+  basicSalary:             number
   grossSalary:             number
   housingAllowance:        number
   transportAllowance:      number
@@ -1955,10 +2109,17 @@ export interface IADEmployee {
   entertainmentAllowance:  number
   dataAllowance:           number
   nightAllowance:          number
+  overtimeEarnings:        number
   arrears:                 number
   otherAllowances:         number
   lifeAssuranceAmount:     number
+  nhf:                     number
   pensionEmployee:         number
+  voluntaryPension:        number
+  insurance:               number
+  cashAdvanced:            number
+  loan:                    number
+  domesticLoan:            number
   monthlyPAYE:             number
   totalDeductions:         number
   netSalary:               number
@@ -1971,175 +2132,565 @@ export interface IADEmployee {
   [key: string]: number | string   // dynamic u_xxx, c_xxx, d_xxx keys
 }
 
+export interface ValidateEmployeeRow {
+  staffIdCode:     string
+  staffName:       string
+  status:          string   // category label (Regular / Contract / NYSC & IT)
+  payPoint:        string   // grade / pay point
+  initialGrossPay: number
+  grossPay:        number
+  erobrea:         number
+  total:           number
+}
+
 export interface IADSummaryInput {
   periodName:         string
+  sheetPrefix:        string                  // e.g. "Feb 2026" — prefixes worksheet names
+  month:              number
+  year:               number
+  previousMonth:      number | null
+  previousYear:       number | null
   summary:            PayrollSummaryReport   // first sheet — category breakdown
-  previousSummary:    PayrollSummaryReport | null  // Sheet 5: Changes
-  varianceRows:       VarianceSummaryRow[] | null   // Sheet 5: Changes
+  previousSummary:    PayrollSummaryReport | null  // Changes sheet
+  varianceRows:       VarianceSummaryRow[] | null
   newlyHiredRegular:  IADEmployee[]
   newlyHiredContract: IADEmployee[]
   exitedRegular:      IADEmployee[]
-  exitedContract:     IADEmployee[]          // Sheet 6: Exited Contract
+  exitedContract:     IADEmployee[]
+  changedStaff:       IADEmployee[]           // Changes sheet — staff whose pay changed vs previous period
+  validateCurrent:    ValidateEmployeeRow[]   // Validate sheet — current side
+  validatePrevious:   ValidateEmployeeRow[]   // Validate sheet — previous side
   unions:       { id: string; name: string }[]
   cooperatives: { id: string; name: string }[]
   deductions:   { id: string; name: string }[]
 }
 
-function writeIADSheet(
-  wb:          ExcelJS.Workbook,
-  sheetName:   string,
-  employees:   IADEmployee[],
-  input:       IADSummaryInput,
-  companyName: string,
+// ── Column helpers for the client's Internal Audit register sheets ──
+type RegisterCol = { header: string; key?: string; width?: number; text?: boolean }
+
+const rMoney = (header: string, key?: string, width = 15): RegisterCol => ({ header, key, width })
+const rText  = (header: string, key?: string, width = 16): RegisterCol => ({ header, key, width, text: true })
+
+function colLetter(n: number): string {
+  let s = '', x = n
+  while (x > 0) { const r = (x - 1) % 26; s = String.fromCharCode(65 + r) + s; x = Math.floor((x - 1) / 26) }
+  return s
+}
+
+function findEntityId(entities: { id: string; name: string }[], ...keywords: string[]): string | null {
+  for (const kw of keywords) {
+    const k = kw.toLowerCase()
+    const hit = entities.find(e => e.name.toLowerCase().includes(k))
+    if (hit) return hit.id
+  }
+  return null
+}
+
+// Dynamic deduction block shared by the Regular register sheets — unions,
+// cooperatives and deduction liabilities in the order they appear in the
+// client template (check-off dues, thrift, coops, then named liabilities).
+function buildDynamicDeductionCols(input: IADSummaryInput): RegisterCol[] {
+  const cols: RegisterCol[] = []
+  for (const u of input.unions)     cols.push(rMoney(`${u.name}`, `u_${u.id}`, 18))
+  for (const c of input.cooperatives) cols.push(rMoney(`${c.name}`, `c_${c.id}`, 18))
+  for (const d of input.deductions) cols.push(rMoney(`${d.name}`, `d_${d.id}`, 18))
+  return cols
+}
+
+const TAX_BAND_COLS: RegisterCol[] = [
+  rMoney('₦800,000 @ 0%'),
+  rMoney('Next ₦2,200,000 @ 15%'),
+  rMoney('Next ₦9,000,000 @ 18%'),
+  rMoney('Next ₦13,000,000 @ 21%'),
+  rMoney('Next ₦25,000,000 @ 23%'),
+  rMoney('Above ₦50,000,000 @ 25%'),
+]
+
+// Suffix shared by the two Regular register sheets (after the deduction block)
+function regularSuffixCols(): RegisterCol[] {
+  return [
+    rMoney('Total Deduction', 'totalDeductions', 16),
+    rMoney('Net Pay', 'netSalary', 16),
+    rMoney("Employer's Pension Contribution", 'pensionEmployer', 20),
+    rMoney('Salary Cost', 'salaryCost', 16),
+    rMoney('Rent Relief', 'annualRentRelief', 15),
+    rMoney('Total allowable deduction', 'totalAllowableDeduction', 20),
+    rMoney('Total taxable income', 'annualChargeableIncome', 18),
+    ...TAX_BAND_COLS,
+    rMoney('PAYE', 'annualPAYE', 15),
+    rMoney('Total Gross Pay', 'grossSalary', 16),
+    rMoney('Total Net Pay', 'netSalary', 16),
+  ]
+}
+
+function buildNewHiredCols(input: IADSummaryInput): RegisterCol[] {
+  return [
+    rText('Employee ID', 'staffIdCode', 16),
+    rText('Contract Staff ID / Entry Date ', undefined, 20),
+    rText('Name', 'staffName', 26),
+    rText('Approved Role', undefined, 20),
+    rText('Pay Point', undefined, 14),
+    rText('Grade', 'gradeName', 16),
+    rText('Level', undefined, 10),
+    rMoney('Initial Gross Pay', 'basicSalary', 16),
+    rMoney('Basic', 'basicSalary', 14),
+    rMoney('Housing Allow', 'housingAllowance', 14),
+    rMoney('Transport Allow', 'transportAllowance', 14),
+    rMoney('Furniture', 'furnitureAllowance', 13),
+    rMoney('Domestic', 'domesticAllowance', 13),
+    rMoney('Meal', 'mealSubsidy', 12),
+    rMoney('Hazard', 'hazardAllowance', 12),
+    rMoney('Electricity', 'electricityAllowance', 13),
+    rMoney('Other Allowances', 'otherAllowances', 14),
+    rMoney('Discretionary Allowances', undefined, 18),
+    rMoney('Car Subsidy', 'carSubsidy', 13),
+    rMoney('Entertainment', 'entertainmentAllowance', 14),
+    rMoney('Data Allowance', 'dataAllowance', 14),
+    rMoney('Night Allowance', 'nightAllowance', 14),
+    rMoney('Overtime', 'overtimeEarnings', 13),
+    rMoney('Arrears', 'arrears', 12),
+    rMoney('Gross Pay', 'grossSalary', 15),
+    rMoney('Reimbursement', undefined, 15),
+    rMoney('Life Assurance', 'lifeAssuranceAmount', 15),
+    rMoney('NHF', 'nhf', 12),
+    rMoney("Employee's Pension Contribution", 'pensionEmployee', 20),
+    rMoney('Voluntary Pension', 'voluntaryPension', 16),
+    rMoney('Insurance', 'insurance', 13),
+    rMoney('PAYE', 'monthlyPAYE', 13),
+    rMoney('Cash Advanced', 'cashAdvanced', 14),
+    rMoney('Loan', 'loan', 12),
+    rMoney('Domestic Loan', 'domesticLoan', 14),
+    ...buildDynamicDeductionCols(input),
+    ...regularSuffixCols(),
+  ]
+}
+
+function buildExitedRegularCols(input: IADSummaryInput): RegisterCol[] {
+  return [
+    rText('Employee ID', 'staffIdCode', 16),
+    rText('Contract Staff ID / Entry Date ', undefined, 20),
+    rText('Name', 'staffName', 26),
+    rText('Approved Role', undefined, 20),
+    rText('Pay Point', undefined, 14),
+    rText('Grade', 'gradeName', 16),
+    rText('Level', undefined, 10),
+    rMoney('Initial Gross Pay', 'basicSalary', 16),
+    rMoney('Basic', 'basicSalary', 14),
+    rMoney('Housing Allow', 'housingAllowance', 14),
+    rMoney('Transport Allow', 'transportAllowance', 14),
+    rMoney('Furniture', 'furnitureAllowance', 13),
+    rMoney('Domestic', 'domesticAllowance', 13),
+    rMoney('Meal', 'mealSubsidy', 12),
+    rMoney('Hazard', 'hazardAllowance', 12),
+    rMoney('Electricity', 'electricityAllowance', 13),
+    rMoney('COLA', undefined, 12),
+    rMoney('COLA -August 2024', undefined, 15),
+    rMoney('2026 Salary Increase', undefined, 16),
+    rMoney('Discretionary Allowances', undefined, 18),
+    rMoney('Car Subsidy', 'carSubsidy', 13),
+    rMoney('Entertainment', 'entertainmentAllowance', 14),
+    rMoney('Night Allowance', 'nightAllowance', 14),
+    rMoney('Overtime', 'overtimeEarnings', 13),
+    rMoney('Arrears', 'arrears', 12),
+    rMoney('Gross Pay', 'grossSalary', 15),
+    rMoney('Reimbursement', undefined, 15),
+    rMoney('NHF', 'nhf', 12),
+    rMoney("Employee's Pension Contribution", 'pensionEmployee', 20),
+    rMoney('Voluntary Pension', 'voluntaryPension', 16),
+    rMoney('Life Assurance', 'lifeAssuranceAmount', 15),
+    rMoney('PAYE', 'monthlyPAYE', 13),
+    rMoney('Cash Advanced', 'cashAdvanced', 14),
+    rMoney('Loan', 'loan', 12),
+    rMoney('Domestic Loan', 'domesticLoan', 14),
+    ...buildDynamicDeductionCols(input),
+    ...regularSuffixCols(),
+  ]
+}
+
+function buildExitedContractCols(input: IADSummaryInput): RegisterCol[] {
+  const uNuee     = findEntityId(input.unions, 'nuee')
+  const uSsaeac   = findEntityId(input.unions, 'ssaeac')
+  const cNepas    = findEntityId(input.cooperatives, 'nepascoop')
+  const cStaff    = findEntityId(input.cooperatives, 'staff coop', 'phed staff')
+  const dThrift   = findEntityId(input.deductions, 'thrift') ?? findEntityId(input.cooperatives, 'thrift')
+
+  return [
+    rText(' Employee ID ', 'staffIdCode', 16),
+    rText('S/N', '__sn__', 8),
+    rText(' Name ', 'staffName', 26),
+    rText('Pay Point', undefined, 14),
+    rText('Grade', 'gradeName', 16),
+    rText('Level', undefined, 10),
+    rText('Approved Role', undefined, 20),
+    rText('Approved Feeder', undefined, 16),
+    rText('Approved Region ', 'regionName', 18),
+    rText('Contract Start Date', undefined, 16),
+    rText('Contract End Date', undefined, 16),
+    rMoney('Initial Gross Pay', 'basicSalary', 16),
+    rMoney(' Basic ', 'basicSalary', 14),
+    rMoney(' Housing Allowance ', 'housingAllowance', 16),
+    rMoney(' Transport Allowance ', 'transportAllowance', 16),
+    rMoney(' Furniture ', 'furnitureAllowance', 14),
+    rMoney(' Meal ', 'mealSubsidy', 12),
+    rMoney(' Hazard ', 'hazardAllowance', 12),
+    rMoney(' Electricity ', 'electricityAllowance', 14),
+    rMoney('COLA', undefined, 12),
+    rMoney('COLA-August  2024', undefined, 16),
+    rMoney('Arrears', 'arrears', 12),
+    rMoney('Overtime', 'overtimeEarnings', 13),
+    rMoney(' Gross Pay ', 'grossSalary', 15),
+    rMoney('Reimbursement', undefined, 15),
+    rMoney('NHF', 'nhf', 12),
+    rMoney("Employee's Pension Contribution", 'pensionEmployee', 20),
+    rMoney('NEPASCOOP UYO', cNepas ? `c_${cNepas}` : undefined, 16),
+    rMoney('PHED Staff  Cooperative', cStaff ? `c_${cStaff}` : undefined, 18),
+    rMoney('PH Thrift', dThrift ? `d_${dThrift}` : undefined, 13),
+    rMoney('NUEE Check-off Dues', uNuee ? `u_${uNuee}` : undefined, 18),
+    rMoney('SSAEAC Check-off Dues', uSsaeac ? `u_${uSsaeac}` : undefined, 18),
+    rMoney(' PAYE ', 'monthlyPAYE', 13),
+    rMoney('Deduction / Liability', undefined, 18),
+    rMoney(' Total Deduction ', 'totalDeductions', 16),
+    rMoney(' Net Pay ', 'netSalary', 14),
+    rMoney("Employer's Pension Contribution", 'pensionEmployer', 20),
+    rMoney(' Salary Cost ', 'salaryCost', 16),
+    rMoney('Rent Relief', 'annualRentRelief', 15),
+    rMoney('Total allowable deduction', 'totalAllowableDeduction', 20),
+    rMoney('Total taxable income', 'annualChargeableIncome', 18),
+    ...TAX_BAND_COLS,
+    rMoney('PAYE', 'annualPAYE', 15),
+    rMoney('EROBREA', undefined, 13),
+    rMoney('TOTAL GROSS PAY (GROSS PAY+ EROBREA)', 'grossSalary', 22),
+    rMoney('TOTAL NET PAY (NET PAY+ EROBREA)', 'netSalary', 22),
+  ]
+}
+
+function buildChangesCols(input: IADSummaryInput): RegisterCol[] {
+  return [
+    rText('Employee ID', 'staffIdCode', 16),
+    rText('Contract Staff ID / Entry Date ', undefined, 20),
+    rText('Name', 'staffName', 26),
+    rText('Approved Role', undefined, 20),
+    rText('Pay Point', undefined, 14),
+    rText('Grade', 'gradeName', 16),
+    rText('Level', undefined, 10),
+    rMoney('Initial Gross Pay', 'basicSalary', 16),
+    rMoney('Basic', 'basicSalary', 14),
+    rMoney('Housing Allow', 'housingAllowance', 14),
+    rMoney('Transport Allow', 'transportAllowance', 14),
+    rMoney('Furniture', 'furnitureAllowance', 13),
+    rMoney('Domestic', 'domesticAllowance', 13),
+    rMoney('Meal', 'mealSubsidy', 12),
+    rMoney('Hazard', 'hazardAllowance', 12),
+    rMoney('Electricity', 'electricityAllowance', 13),
+    rMoney('COLA', undefined, 12),
+    rMoney('COLA -August 2024', undefined, 15),
+    rMoney('2026 Salary Increase', undefined, 16),
+    rMoney('Discretionary Allowances', undefined, 18),
+    rMoney('Car Subsidy', 'carSubsidy', 13),
+    rMoney('Entertainment', 'entertainmentAllowance', 14),
+    rMoney('Night Allowance', 'nightAllowance', 14),
+    rMoney('Overtime', 'overtimeEarnings', 13),
+    rMoney('Arrears', 'arrears', 12),
+    rMoney('Gross Pay', 'grossSalary', 15),
+    rMoney('Reimbustment Allowance', undefined, 18),
+    rMoney('NHF', 'nhf', 12),
+    rMoney("Employee's Pension Contribution", 'pensionEmployee', 20),
+    rMoney('Voluntary Pension', 'voluntaryPension', 16),
+    rMoney('PAYE', 'monthlyPAYE', 13),
+    rMoney('Insurance', 'insurance', 13),
+    rMoney('Cash Advanced', 'cashAdvanced', 14),
+    rMoney('Loan', 'loan', 12),
+    rMoney('Domestic Loan', 'domesticLoan', 14),
+    ...buildDynamicDeductionCols(input),
+    rMoney('Total Deduction', 'totalDeductions', 16),
+    rMoney('Net Pay', 'netSalary', 16),
+    rMoney("Employer's Pension Contribution", 'pensionEmployer', 20),
+    rMoney('Salary Cost', 'salaryCost', 16),
+    rMoney('Rent Relief', 'annualRentRelief', 15),
+    rMoney('Total allowable deduction', 'totalAllowableDeduction', 20),
+    rMoney('Total taxable income', 'annualChargeableIncome', 18),
+    ...TAX_BAND_COLS,
+    rMoney('PAYE', 'annualPAYE', 15),
+    rMoney('Total Gross Pay (Gross Pay + EROBREA)', 'grossSalary', 22),
+    rMoney('Total Net Pay (Net Pay + EROBREA)', 'netSalary', 22),
+  ]
+}
+
+// Writes a register sheet exactly like the client template: header row on
+// row 1, data from row 2, and a TOTAL row of live SUM formulas.
+function writeRegisterSheet(
+  wb:        ExcelJS.Workbook,
+  sheetName: string,
+  employees: IADEmployee[],
+  cols:      RegisterCol[],
 ): void {
   const ws = wb.addWorksheet(sheetName)
 
-  // Allowance columns: only those with a non-zero value for at least one employee in this sheet
-  const allowanceCols = INDIV_ALLOWANCE_FIELDS
-    .filter(f => employees.some(e => (Number(e[f.key]) || 0) !== 0))
-    .map(f => ({ header: f.header, key: f.key, excelWidth: f.excelWidth }))
+  cols.forEach((c, i) => { if (c.width) ws.getColumn(i + 1).width = c.width })
 
-  const hasLifeAssurance = employees.some(e => (Number(e.lifeAssuranceAmount) || 0) > 0)
-
-  const unionCols  = input.unions.map(u => ({ header: `${u.name} Union (₦)`, key: `u_${u.id}`, excelWidth: 22 }))
-  const coopCols   = input.cooperatives.map(c => ({ header: `${c.name} Coop (₦)`, key: `c_${c.id}`, excelWidth: 22 }))
-  const deductCols = input.deductions.map(d => ({ header: `${d.name} (₦)`, key: `d_${d.id}`, excelWidth: 22 }))
-
-  type Col = { header: string; key: string; excelWidth: number; isText?: boolean }
-  const cols: Col[] = [
-    { header: 'Employee ID',                    key: 'staffIdCode',              excelWidth: 16, isText: true },
-    { header: 'Full Name',                      key: 'staffName',                excelWidth: 26, isText: true },
-    { header: 'Grade',                          key: 'gradeName',                excelWidth: 16, isText: true },
-    { header: 'Gross Pay (₦)',                  key: 'grossSalary',              excelWidth: 18 },
-    ...allowanceCols,
-    ...(hasLifeAssurance ? [{ header: 'Life Assurance (₦)', key: 'lifeAssuranceAmount', excelWidth: 20 }] : []),
-    { header: 'Pension EE (₦)',                 key: 'pensionEmployee',          excelWidth: 18 },
-    { header: 'PAYE (₦)',                       key: 'monthlyPAYE',              excelWidth: 16 },
-    ...unionCols,
-    ...coopCols,
-    ...deductCols,
-    { header: 'Total Deductions (₦)',           key: 'totalDeductions',          excelWidth: 20 },
-    { header: 'Net Pay (₦)',                    key: 'netSalary',                excelWidth: 18 },
-    { header: 'Pension ER (₦)',                 key: 'pensionEmployer',          excelWidth: 18 },
-    { header: 'Salary Cost (₦)',                key: 'salaryCost',               excelWidth: 18 },
-    { header: 'Rent Relief (₦)',                key: 'annualRentRelief',         excelWidth: 18 },
-    { header: 'Total Allowable Deduction (₦)',  key: 'totalAllowableDeduction',  excelWidth: 26 },
-    { header: 'Total Taxable Income (₦)',       key: 'annualChargeableIncome',   excelWidth: 24 },
-    { header: 'Annual PAYE (₦)',                key: 'annualPAYE',               excelWidth: 18 },
-  ]
-
-  ws.columns = cols.map(c => ({ key: c.key, width: c.excelWidth }))
-
-  // ── Title ──────────────────────────────────────────────────
-  ws.mergeCells(1, 1, 1, cols.length)
-  const titleCell    = ws.getCell(1, 1)
-  titleCell.value    = `${input.periodName.toUpperCase()} — IAD SUMMARY REPORT (${sheetName.toUpperCase()})`
-  titleCell.font     = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } }
-  titleCell.fill     = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${BRAND_BLUE}` } }
-  titleCell.alignment = { horizontal: 'center', vertical: 'middle' }
-  ws.getRow(1).height = 28
-
-  let hdrRow = 2
-  if (companyName) {
-    ws.mergeCells(2, 1, 2, cols.length)
-    const cc    = ws.getCell(2, 1)
-    cc.value    = companyName
-    cc.font     = { italic: true, size: 9, color: { argb: 'FF374151' } }
-    cc.fill     = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${ACCENT_BLUE}` } }
-    cc.alignment = { horizontal: 'center', vertical: 'middle' }
-    ws.getRow(2).height = 16
-    hdrRow = 3
-  }
-
-  // ── Column headers ─────────────────────────────────────────
-  const hr = ws.getRow(hdrRow)
+  // ── Row 1: column headers ───────────────────────────────────
+  const hdr = ws.getRow(1)
   cols.forEach((c, i) => {
-    const cell    = hr.getCell(i + 1)
-    cell.value    = c.header
-    cell.fill     = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${BRAND_BLUE}` } }
-    cell.font     = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 }
-    cell.alignment = { horizontal: c.isText ? 'left' : 'right', vertical: 'middle', wrapText: true }
-    cell.border   = { bottom: { style: 'thin', color: { argb: 'FFAAAAAA' } } }
+    const cell = hdr.getCell(i + 1)
+    cell.value = c.header
+    cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${BRAND_BLUE}` } }
+    cell.font  = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 }
+    cell.alignment = { horizontal: c.text ? 'left' : 'right', vertical: 'middle', wrapText: true }
+    cell.border = { bottom: { style: 'thin', color: { argb: 'FFAAAAAA' } } }
   })
-  hr.height = 32
+  hdr.height = 34
 
-  // ── Data rows ─────────────────────────────────────────────
-  const dataStart = hdrRow + 1
+  const firstDataRow = 2
+  const lastDataRow  = firstDataRow + employees.length - 1
+
+  // ── Data rows ───────────────────────────────────────────────
   employees.forEach((emp, ri) => {
-    const dr     = ws.getRow(dataStart + ri)
+    const dr = ws.getRow(firstDataRow + ri)
     const isEven = ri % 2 === 1
     cols.forEach((c, ci) => {
-      const cell  = dr.getCell(ci + 1)
-      const val   = emp[c.key]
-      cell.value  = val ?? (c.isText ? '' : 0)
-      cell.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: isEven ? `FF${GREY_ROW}` : 'FFFFFFFF' } }
-      cell.font   = { size: 9, color: { argb: 'FF1f2937' } }
-      cell.alignment = { horizontal: c.isText ? 'left' : 'right', vertical: 'middle' }
-      if (!c.isText) cell.numFmt = '#,##0.00'
+      const cell = dr.getCell(ci + 1)
+      const val = c.key === '__sn__' ? ri + 1 : c.key ? (emp[c.key] ?? (c.text ? '' : 0)) : (c.text ? '' : 0)
+      cell.value = val
+      cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: isEven ? `FF${GREY_ROW}` : 'FFFFFFFF' } }
+      cell.font  = { size: 9, color: { argb: 'FF1f2937' } }
+      cell.alignment = { horizontal: c.text ? 'left' : 'right', vertical: 'middle' }
+      if (!c.text) cell.numFmt = '#,##0.00'
     })
     dr.height = 18
   })
 
-  // ── Totals row ─────────────────────────────────────────────
-  const tr = ws.getRow(dataStart + employees.length)
+  // ── TOTAL row (live SUM formulas, matching the template) ────
+  const tr = ws.getRow(lastDataRow + 1)
   cols.forEach((c, ci) => {
     const cell = tr.getCell(ci + 1)
     cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${ACCENT_BLUE}` } }
     cell.border = { top: { style: 'medium', color: { argb: `FF${BRAND_BLUE}` } } }
     cell.font  = { bold: true, size: 9, color: { argb: `FF${BRAND_BLUE}` } }
-    if (ci === 0) {
-      cell.value = 'TOTAL'
-      cell.alignment = { horizontal: 'left', vertical: 'middle' }
-    } else if (!c.isText) {
-      cell.value = employees.reduce((s, e) => s + (Number(e[c.key]) || 0), 0)
+    if (!c.text) {
+      const L = colLetter(ci + 1)
+      cell.value = { formula: `SUM(${L}${firstDataRow}:${L}${lastDataRow})` }
       cell.numFmt = '#,##0.00'
       cell.alignment = { horizontal: 'right', vertical: 'middle' }
     } else {
       cell.value = ''
+      cell.alignment = { horizontal: 'left', vertical: 'middle' }
     }
   })
   tr.height = 22
 }
 
+// "Changes" register sheet — staff whose pay changed between the previous and
+// current period, listed with their full current-period payroll detail.
 function writeChangesSheet(
+  wb:         ExcelJS.Workbook,
+  sheetName:  string,
+  employees:  IADEmployee[],
+  input:      IADSummaryInput,
+): void {
+  writeRegisterSheet(wb, sheetName, employees, buildChangesCols(input))
+}
+
+// Validate sheet — side-by-side current vs previous employee comparison,
+// replicating the client template with live formulas:
+//   Total     = EROBREA + Gross Pay
+//   Total_Jan = EROBREA + Gross Pay (previous side)
+//   Total_Feb = VLOOKUP of the current Total by Employee ID
+//   Vari      = Total_Feb - Total_Jan
+function writeValidateSheet(
   wb:          ExcelJS.Workbook,
   data:        IADSummaryInput,
   companyName: string,
 ): void {
-  const ws = wb.addWorksheet('Changes')
-  ws.columns = SUMMARY_COL_WIDTHS.map(w => ({ width: w }))
+  const ws = wb.addWorksheet('Validate')
 
-  let r = 1
+  const current  = data.validateCurrent
+  const previous = data.validatePrevious
+  const rows     = Math.max(current.length, previous.length)
 
-  if (data.previousSummary) {
-    r = writeSummarySection(ws, r, data.previousSummary, companyName, 'PREVIOUS MONTH')
-    r += 1
-    r = writeSummarySection(ws, r, data.summary, companyName, 'CURRENT MONTH')
-    r += 1
-    if (data.varianceRows) {
-      r = writeVarianceSection(ws, r, data.varianceRows)
-    }
-  } else {
-    r = writeSummarySection(ws, r, data.summary, companyName, 'CURRENT MONTH (No Previous Period)')
-    r += 1
-    ws.mergeCells(r, 1, r, SUMMARY_NCOLS)
-    const noteCell    = ws.getCell(r, 1)
-    noteCell.value    = 'No previous pay period found. Changes comparison requires at least two pay periods.'
-    noteCell.font     = { italic: true, size: 9, color: { argb: 'FF9CA3AF' } }
-    noteCell.alignment = { horizontal: 'center', vertical: 'middle' }
-    ws.getRow(r).height = 18
-    r++
+  const widths = [10, 16, 26, 14, 16, 16, 12, 16, 2, 16, 26, 16, 16, 16, 12, 16, 16, 16]
+  widths.forEach((w, i) => { ws.getColumn(i + 1).width = w })
+
+  const monthName = (s: string) => s.replace(/\s+\d{4}\s*$/, '')
+
+  const label = (r: number, c1: number, c2: number, text: string, fill: string, color: string, bold = false, italic = false, size = 9) => {
+    ws.mergeCells(r, c1, r, c2)
+    const cell = ws.getCell(r, c1)
+    cell.value = text
+    cell.font  = { bold, italic, size, color: { argb: color } }
+    cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } }
+    cell.alignment = { horizontal: 'center', vertical: 'middle' }
+    return cell
   }
 
-  r += 1
-  ws.mergeCells(r, 1, r, SUMMARY_NCOLS)
-  const footer    = ws.getCell(r, 1)
-  footer.value    = companyName
+  // Row 1: side labels (B1:G1 and J1:O1 merged, per template)
+  label(1, 2, 7, monthName(data.summary.periodName).toUpperCase(), `FF${BRAND_MID}`, 'FFFFFFFF', true, false, 10)
+  label(1, 10, 15, monthName(data.previousSummary?.periodName ?? 'Previous Period').toUpperCase(), `FF${BRAND_MID}`, 'FFFFFFFF', true, false, 10)
+  ws.getRow(1).height = 22
+
+  // Row 2: column headers
+  const leftHeaders  = ['Employee ID', 'Name', 'Status', 'Initial Gross Pay', 'Gross Pay', 'EROBREA', 'Total']
+  const rightHeaders = ['Employee ID', 'Name', 'Pay Point', 'Initial Gross Pay', 'Gross Pay', 'EROBREA', 'Total_Jan', 'Total_Feb', 'Vari']
+  const hdr = ws.getRow(2)
+  leftHeaders.forEach((h, i) => {
+    const cell = hdr.getCell(2 + i)
+    cell.value = h
+    cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${BRAND_BLUE}` } }
+    cell.font  = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } }
+    cell.alignment = { horizontal: i <= 2 ? 'left' : 'right', vertical: 'middle', wrapText: true }
+  })
+  rightHeaders.forEach((h, i) => {
+    const cell = hdr.getCell(10 + i)
+    cell.value = h
+    cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${BRAND_BLUE}` } }
+    cell.font  = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } }
+    cell.alignment = { horizontal: i <= 2 ? 'left' : 'right', vertical: 'middle', wrapText: true }
+  })
+  hdr.height = 30
+
+  const style = (r: number, c: number, fill: string, bold = false) => {
+    const cell = ws.getCell(r, c)
+    cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } }
+    cell.font  = { size: 9, bold, color: { argb: 'FF1f2937' } }
+    return cell
+  }
+  const text = (r: number, c: number, v: string, fill: string, bold = false) => {
+    const cell = style(r, c, fill, bold)
+    cell.value = v
+    cell.alignment = { horizontal: 'left', vertical: 'middle' }
+  }
+  const num = (r: number, c: number, v: number, fill: string, bold = false) => {
+    const cell = style(r, c, fill, bold)
+    cell.value = v
+    cell.numFmt = '#,##0.00'
+    cell.alignment = { horizontal: 'right', vertical: 'middle' }
+  }
+  const formula = (r: number, c: number, f: string, fill: string, bold = false) => {
+    const cell = style(r, c, fill, bold)
+    cell.value = { formula: f }
+    cell.numFmt = '#,##0.00'
+    cell.alignment = { horizontal: 'right', vertical: 'middle' }
+  }
+
+  for (let i = 0; i < rows; i++) {
+    const r  = 3 + i
+    const bg = i % 2 === 0 ? 'FFFFFFFF' : `FF${GREY_ROW}`
+    const cur = current[i]
+    const prv = previous[i]
+
+    if (cur) {
+      text(r, 2, cur.staffIdCode, bg)
+      text(r, 3, cur.staffName, bg)
+      text(r, 4, cur.status, bg)
+      num(r, 5, cur.initialGrossPay, bg)
+      num(r, 6, cur.grossPay, bg)
+      num(r, 7, cur.erobrea, bg)
+      formula(r, 8, `G${r}+F${r}`, bg, true)                       // Total = EROBREA + Gross
+    }
+
+    if (prv) {
+      text(r, 10, prv.staffIdCode, bg)
+      text(r, 11, prv.staffName, bg)
+      text(r, 12, prv.payPoint, bg)
+      num(r, 13, prv.initialGrossPay, bg)
+      num(r, 14, prv.grossPay, bg)
+      num(r, 15, prv.erobrea, bg)
+      formula(r, 16, `O${r}+N${r}`, bg, true)                      // Total_Jan
+      formula(r, 17, `IFERROR(VLOOKUP(J${r},B:H,7,0),"")`, bg)     // Total_Feb (lookup)
+      formula(r, 18, `Q${r}-P${r}`, bg, true)                      // Vari
+    }
+    ws.getRow(r).height = 18
+  }
+
+  // Footer
+  label(rows + 4, 1, 18, companyName
     ? `This document is generated by ${companyName}, it is confidential and intended for authorized use only.`
-    : 'This document is confidential and intended for authorized use only.'
-  footer.font     = { italic: true, size: 8, color: { argb: 'FF9CA3AF' } }
-  footer.alignment = { horizontal: 'center', vertical: 'middle' }
-  ws.getRow(r).height = 16
+    : 'This document is confidential and intended for authorized use only.', 'FFFFFFFF', 'FF9CA3AF', false, true, 8)
+
+  ws.views = [{ state: 'frozen', ySplit: 2 }]
+}
+
+// Summary sheet block — title + headers + 3 category rows + TOTAL row,
+// laid out exactly like the client template (columns B–H, A/I unused).
+function writeSummaryBlock(
+  ws:       ExcelJS.Worksheet,
+  startRow: number,
+  report:   PayrollSummaryReport,
+  month:    number,
+  year:     number,
+): number {
+  let r = startRow
+
+  // Title (merged B:H)
+  ws.mergeCells(r, 2, r, 8)
+  const t = ws.getCell(r, 2)
+  t.value = `${report.periodName.toUpperCase()} PAYROLL SUMMARY`
+  t.font  = { bold: true, size: 13, color: { argb: 'FFFFFFFF' } }
+  t.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${BRAND_BLUE}` } }
+  t.alignment = { horizontal: 'center', vertical: 'middle' }
+  ws.getRow(r).height = 28
+  r++
+
+  // Header row (B–H)
+  const headers = ['Payroll', 'No. of Employee', 'Gross Pay', "Employer's Pension Contribution", 'NSITF', 'ITF', 'Total Payroll Cost']
+  const hr = ws.getRow(r)
+  headers.forEach((h, i) => {
+    const cell = hr.getCell(2 + i)
+    cell.value = h
+    cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${BRAND_MID}` } }
+    cell.font  = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 }
+    cell.alignment = { horizontal: i === 0 ? 'left' : 'right', vertical: 'middle', wrapText: true }
+  })
+  hr.height = 24
+  r++
+
+  // Blank row
+  r++
+
+  const catStart = r
+  for (const row of report.rows.filter(x => x.label !== 'TOTAL')) {
+    const dr = ws.getRow(r)
+    dr.getCell(2).value = row.label
+    dr.getCell(2).font  = { size: 10, color: { argb: 'FF1f2937' } }
+    dr.getCell(3).value = row.headCount
+    dr.getCell(3).numFmt = '#,##0'
+    dr.getCell(4).value = row.grossPay
+    dr.getCell(5).value = row.employerPension ?? null
+    dr.getCell(6).value = row.nsitf ?? null
+    dr.getCell(7).value = row.itf ?? null
+    dr.getCell(8).value = { formula: `SUM(D${r}:G${r})` }
+    for (let c = 4; c <= 8; c++) dr.getCell(c).numFmt = '#,##0.00'
+    dr.height = 18
+    r++
+  }
+  const catEnd = r - 1
+
+  // Blank row
+  r++
+
+  // TOTAL row (period first-of-month date in B, SUM formulas across the block)
+  const totalRow = r
+  const dt = ws.getCell(totalRow, 2)
+  dt.value = new Date(Date.UTC(year, month - 1, 1))
+  dt.numFmt = 'mmmm yyyy'
+  dt.font = { bold: true, size: 10, color: { argb: `FF${BRAND_BLUE}` } }
+  dt.alignment = { horizontal: 'left', vertical: 'middle' }
+  ws.getCell(totalRow, 3).value = { formula: `SUM(C${catStart}:C${catEnd + 1})` }
+  ws.getCell(totalRow, 3).numFmt = '#,##0'
+  ws.getCell(totalRow, 4).value = { formula: `SUM(D${catStart}:D${catEnd + 1})` }
+  ws.getCell(totalRow, 5).value = { formula: `SUM(E${catStart}:E${catEnd + 1})` }
+  ws.getCell(totalRow, 6).value = { formula: `SUM(F${catStart}:F${catEnd + 1})` }
+  ws.getCell(totalRow, 7).value = { formula: `SUM(G${catStart}:G${catEnd + 1})` }
+  ws.getCell(totalRow, 8).value = { formula: `SUM(H${catStart}:H${catEnd + 1})` }
+  for (let c = 3; c <= 8; c++) {
+    const cell = ws.getCell(totalRow, c)
+    if (c > 3) cell.numFmt = '#,##0.00'
+    cell.font = { bold: true, size: 10, color: { argb: `FF${BRAND_BLUE}` } }
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${ACCENT_BLUE}` } }
+    cell.alignment = { horizontal: 'right', vertical: 'middle' }
+  }
+  ws.getRow(totalRow).height = 20
+
+  return totalRow
 }
 
 export async function exportIADSummaryToExcel(
@@ -2149,30 +2700,45 @@ export async function exportIADSummaryToExcel(
   const wb = new ExcelJS.Workbook()
   wb.creator = '24/7HR – PHED Module'
 
-  // Sheet 1: existing category summary (Regular / Contract / NYSC)
-  const summaryWs = wb.addWorksheet('IAD Summary Report')
-  summaryWs.columns = SUMMARY_COL_WIDTHS.map(w => ({ width: w }))
-  let nextRow = writeSummarySection(summaryWs, 1, data.summary, companyName, 'IAD SUMMARY REPORT')
-  nextRow += 1
-  summaryWs.mergeCells(nextRow, 1, nextRow, SUMMARY_NCOLS)
-  const footer    = summaryWs.getCell(nextRow, 1)
-  footer.value    = companyName
-    ? `This document is generated by ${companyName}, it is confidential and intended for authorized use only.`
-    : 'This document is confidential and intended for authorized use only.'
-  footer.font     = { italic: true, size: 8, color: { argb: 'FF9CA3AF' } }
-  footer.alignment = { horizontal: 'center', vertical: 'middle' }
-  summaryWs.getRow(nextRow).height = 16
+  const pfx = data.sheetPrefix
 
-  // Sheets 2–4: IAD classification sheets
-  writeIADSheet(wb, 'Newly Hired (Regular)',  data.newlyHiredRegular,  data, companyName)
-  writeIADSheet(wb, 'Newly Hired (Contract)', data.newlyHiredContract, data, companyName)
-  writeIADSheet(wb, 'Exited (Regular)',       data.exitedRegular,      data, companyName)
+  // Sheet 1: Summary — current month block, previous month block, variance
+  const summaryWs = wb.addWorksheet(`${pfx} Summary`)
+  ;[15, 17, 16, 20, 18, 17, 18].forEach((w, i) => { summaryWs.getColumn(2 + i).width = w })
+  writeSummaryBlock(summaryWs, 1, data.summary, data.month, data.year)
 
-  // Sheet 5: Changes (previous vs current period payroll comparison)
-  writeChangesSheet(wb, data, companyName)
+  if (data.previousSummary && data.previousMonth != null && data.previousYear != null) {
+    writeSummaryBlock(summaryWs, 11, data.previousSummary, data.previousMonth, data.previousYear)
 
-  // Sheet 6: Exited Contract (CONTRACT and NYSC_IT exited staff)
-  writeIADSheet(wb, 'Exited Contract', data.exitedContract, data, companyName)
+    // Variance row (row 20): =Current − Previous
+    const vr = 20
+    summaryWs.getCell(vr, 2).value = 'VARIANCE'
+    summaryWs.getCell(vr, 2).font  = { bold: true, size: 10, color: { argb: `FF${BRAND_BLUE}` } }
+    summaryWs.getCell(vr, 2).fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${ACCENT_BLUE}` } }
+    summaryWs.getCell(vr, 2).alignment = { horizontal: 'left', vertical: 'middle' }
+    for (let c = 3; c <= 8; c++) {
+      const L = colLetter(c)
+      const cell = summaryWs.getCell(vr, c)
+      cell.value = { formula: `${L}8-${L}18` }
+      cell.numFmt = c === 3 ? '#,##0' : '#,##0.00'
+      cell.font = { bold: true, size: 10, color: { argb: `FF${BRAND_BLUE}` } }
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${ACCENT_BLUE}` } }
+      cell.alignment = { horizontal: 'right', vertical: 'middle' }
+    }
+  }
+
+  // Sheet 2: Changes (staff whose pay changed vs previous period)
+  writeChangesSheet(wb, `${pfx} Changes`, data.changedStaff, data)
+
+  // Sheet 3: New Hired (regular + contract merged, per client template)
+  writeRegisterSheet(wb, `${pfx} New Hired_Reg`, [...data.newlyHiredRegular, ...data.newlyHiredContract], buildNewHiredCols(data))
+
+  // Sheets 4–5: Exited
+  writeRegisterSheet(wb, `${pfx} Exited_Regular`,  data.exitedRegular,  buildExitedRegularCols(data))
+  writeRegisterSheet(wb, `${pfx} Exited_Contract`, data.exitedContract, buildExitedContractCols(data))
+
+  // Sheet 6: Validate — side-by-side current vs previous employee comparison
+  writeValidateSheet(wb, data, companyName)
 
   return (await wb.xlsx.writeBuffer()) as unknown as Buffer
 }
@@ -2348,6 +2914,8 @@ export function exportIADSummaryToPdf(
     y = drawIADSection('Newly Hired — Contract Staff', data.newlyHiredContract, y)
     y += 12
     y = drawIADSection('Exited — Regular Staff', data.exitedRegular, y)
+    y += 12
+    y = drawIADSection('Exited — Contract Staff', data.exitedContract, y)
 
     // Footer
     const footerText = companyName
@@ -2514,212 +3082,6 @@ function writeFinanceRemittanceSection(
   })
 
   return r
-}
-
-export async function exportFinanceSummaryToExcel(
-  report:      FinancePayrollSummaryReport,
-  companyName: string = '',
-): Promise<Buffer> {
-  const wb = new ExcelJS.Workbook()
-  wb.creator = '24/7HR – PHED Module'
-  const ws = wb.addWorksheet('Finance Payroll Summary')
-
-  // Compute total columns (max of cost cols vs remittance cols)
-  const dynCount   = report.unions.length + report.cooperatives.length + report.deductions.length
-  const remCols    = 6 + dynCount
-  const costCols   = 8
-  const totalCols  = Math.max(costCols, remCols)
-
-  // Set column widths (cost section drives first 8 cols; remittance sets its own widths)
-  const costWidths = [20, 16, 18, 18, 14, 14, 22, 18]
-  costWidths.forEach((w, i) => { ws.getColumn(i + 1).width = w })
-
-  let r = 1
-
-  // Title
-  ws.mergeCells(r, 1, r, totalCols)
-  const titleCell    = ws.getCell(r, 1)
-  titleCell.value    = `${report.periodName} FINANCE PAYROLL SUMMARY`
-  titleCell.font     = { bold: true, size: 13, color: { argb: 'FFFFFFFF' } }
-  titleCell.fill     = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${BRAND_BLUE}` } }
-  titleCell.alignment = { horizontal: 'center', vertical: 'middle' }
-  ws.getRow(r).height = 28
-  r++
-
-  if (companyName) {
-    ws.mergeCells(r, 1, r, totalCols)
-    const cn    = ws.getCell(r, 1)
-    cn.value    = companyName
-    cn.font     = { italic: true, size: 9, color: { argb: 'FF374151' } }
-    cn.fill     = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${ACCENT_BLUE}` } }
-    cn.alignment = { horizontal: 'center', vertical: 'middle' }
-    ws.getRow(r).height = 18
-    r++
-  }
-
-  ws.getRow(r).height = 6; r++  // gap
-
-  r = writeFinanceCostSection(ws, r, report, companyName, totalCols)
-  ws.getRow(r).height = 8; r++  // gap
-  r = writeFinanceRemittanceSection(ws, r, report, 1)
-
-  // Footer
-  ws.mergeCells(r, 1, r, totalCols)
-  const footer    = ws.getCell(r, 1)
-  footer.value    = companyName
-    ? `This document is generated by ${companyName}, it is confidential and intended for authorized use only.`
-    : 'This document is confidential and intended for authorized use only.'
-  footer.font     = { italic: true, size: 8, color: { argb: 'FF9CA3AF' } }
-  footer.alignment = { horizontal: 'center', vertical: 'middle' }
-  ws.getRow(r).height = 16
-
-  return (await wb.xlsx.writeBuffer()) as unknown as Buffer
-}
-
-export function exportFinanceSummaryToPdf(
-  report:      FinancePayrollSummaryReport,
-  companyName: string = '',
-): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const ML = 36, MR = 36, MT = 36
-    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: ML, autoFirstPage: true, bufferPages: true })
-    const chunks: Buffer[] = []
-    doc.on('data',  (c: Buffer) => chunks.push(c))
-    doc.on('end',   ()          => resolve(Buffer.concat(chunks)))
-    doc.on('error', reject)
-
-    const pageW   = doc.page.width
-    const usableW = pageW - ML - MR
-    const footerY = doc.page.height - 28
-
-    const dynamicCols = [
-      ...report.unions.map(u => ({ header: `${u.name} Union`, key: `u_${u.id}` })),
-      ...report.cooperatives.map(c => ({ header: `${c.name} Coop`, key: `c_${c.id}` })),
-      ...report.deductions.map(d => ({ header: d.name, key: `d_${d.id}` })),
-    ]
-
-    let y = MT
-
-    // ── Title ─────────────────────────────────────────────────
-    doc.rect(ML, y, usableW, 26).fill(`#${BRAND_BLUE}`)
-    doc.fillColor('#ffffff').fontSize(12).font('Helvetica-Bold')
-       .text(`${report.periodName.toUpperCase()} FINANCE PAYROLL SUMMARY`, ML, y + 8, { width: usableW, align: 'center', lineBreak: false })
-    y += 26
-    if (companyName) {
-      doc.rect(ML, y, usableW, 14).fill(`#${ACCENT_BLUE}`)
-      doc.fillColor('#374151').fontSize(7).font('Helvetica')
-         .text(companyName, ML, y + 3, { width: usableW, align: 'center', lineBreak: false })
-      y += 14
-    }
-    y += 6
-
-    // ── PAYROLL COST section ──────────────────────────────────
-    const costColW = [usableW * 0.18, usableW * 0.09, usableW * 0.13, usableW * 0.13, usableW * 0.09, usableW * 0.09, usableW * 0.16, usableW * 0.13]
-    const costHdrs = ['Payroll', 'No. of Employees', 'Gross Pay (₦)', 'Pension ER (₦)', 'NSITF (₦)', 'ITF (₦)', 'Total Payroll Cost (₦)', 'Net Pay (₦)']
-
-    doc.rect(ML, y, usableW, 20).fill(`#${BRAND_BLUE}`)
-    doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold')
-       .text('PAYROLL COST', ML + 6, y + 6, { width: usableW - 12, lineBreak: false })
-    y += 20
-
-    // Header row
-    doc.rect(ML, y, usableW, 18).fill(`#${BRAND_MID}`)
-    let x = ML
-    costHdrs.forEach((h, i) => {
-      doc.fillColor('#ffffff').fontSize(7.5).font('Helvetica-Bold')
-         .text(h, x + 2, y + 4, { width: costColW[i] - 4, align: i === 0 ? 'left' : 'right', lineBreak: false })
-      x += costColW[i]
-    })
-    y += 18
-
-    // Category rows
-    report.payrollCost.forEach((row, ri) => {
-      const isTotal = row.label === 'TOTAL'
-      const bg      = isTotal ? `#${ACCENT_BLUE}` : (ri % 2 === 0 ? '#ffffff' : '#f9fafb')
-      doc.rect(ML, y, usableW, 16).fill(bg)
-      x = ML
-      const vals = [row.label, row.headCount.toLocaleString('en-NG'), fmtNum(row.grossPay), fmtNum(row.pensionEmployer), fmtNum(row.nsitf), fmtNum(row.itf), fmtNum(row.totalPayrollCost), fmtNum(row.netPay)]
-      vals.forEach((v, i) => {
-        doc.fillColor(isTotal ? `#${BRAND_BLUE}` : '#1f2937')
-           .fontSize(8).font(isTotal ? 'Helvetica-Bold' : 'Helvetica')
-           .text(String(v), x + 2, y + 3, { width: costColW[i] - 4, align: i === 0 ? 'left' : 'right', lineBreak: false })
-        x += costColW[i]
-      })
-      y += 16
-    })
-
-    y += 10
-
-    // ── REMITTANCE section ────────────────────────────────────
-    if (y + 60 > footerY) { doc.addPage(); y = MT }
-
-    // Dynamic columns share 35% of width; fixed cols take 65%
-    const fixedRemW   = usableW * 0.65
-    const dynRemW     = usableW * 0.35
-    const remFixedW   = [fixedRemW * 0.22, fixedRemW * 0.17, fixedRemW * 0.17, fixedRemW * 0.15, fixedRemW * 0.15, fixedRemW * 0.14]
-    const remFixedHdrs = ['Bank', 'Total Pension (₦)', 'Remittance (₦)', 'NSITF (₦)', 'ITF (₦)', 'NHF (₦)']
-    const remFixedKeys = ['bankName', 'totalPension', 'remittance', 'nsitf', 'itf', 'nhf']
-    const dynW         = dynamicCols.length > 0 ? dynRemW / dynamicCols.length : 0
-
-    doc.rect(ML, y, usableW, 20).fill(`#${FINANCE_TEAL}`)
-    doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold')
-       .text('REMITTANCE', ML + 6, y + 6, { width: usableW - 12, lineBreak: false })
-    y += 20
-
-    // Remittance header row
-    doc.rect(ML, y, usableW, 18).fill(`#${FINANCE_TEAL}`)
-    x = ML
-    remFixedHdrs.forEach((h, i) => {
-      doc.fillColor('#ffffff').fontSize(7).font('Helvetica-Bold')
-         .text(h, x + 2, y + 4, { width: remFixedW[i] - 4, align: i === 0 ? 'left' : 'right', lineBreak: false })
-      x += remFixedW[i]
-    })
-    dynamicCols.forEach(c => {
-      doc.fillColor('#ffffff').fontSize(7).font('Helvetica-Bold')
-         .text(c.header, x + 2, y + 4, { width: dynW - 4, align: 'right', lineBreak: false })
-      x += dynW
-    })
-    y += 18
-
-    // Remittance data rows
-    report.remittance.forEach((row, ri) => {
-      if (y + 16 > footerY) { doc.addPage(); y = MT }
-      const isTotal = row.bankName === 'TOTAL'
-      const bg      = isTotal ? `#${FINANCE_TEAL_LIGHT}` : (ri % 2 === 0 ? '#ffffff' : '#f9fafb')
-      doc.rect(ML, y, usableW, 16).fill(bg)
-      x = ML
-      remFixedKeys.forEach((k, i) => {
-        const v   = (row as any)[k]
-        const txt = i === 0 ? String(v ?? '') : fmtNum(Number(v) || 0)
-        doc.fillColor(isTotal ? `#${FINANCE_TEAL}` : '#1f2937')
-           .fontSize(7.5).font(isTotal ? 'Helvetica-Bold' : 'Helvetica')
-           .text(txt, x + 2, y + 3, { width: remFixedW[i] - 4, align: i === 0 ? 'left' : 'right', lineBreak: false })
-        x += remFixedW[i]
-      })
-      dynamicCols.forEach(c => {
-        const v = (row as any)[c.key]
-        doc.fillColor(isTotal ? `#${FINANCE_TEAL}` : '#1f2937')
-           .fontSize(7.5).font(isTotal ? 'Helvetica-Bold' : 'Helvetica')
-           .text(fmtNum(Number(v) || 0), x + 2, y + 3, { width: dynW - 4, align: 'right', lineBreak: false })
-        x += dynW
-      })
-      y += 16
-    })
-
-    // Footer on last page
-    const { start, count } = doc.bufferedPageRange()
-    doc.switchToPage(start + count - 1)
-    const footerText = companyName
-      ? `This document is generated by ${companyName}, it is confidential and intended for authorized use only.`
-      : 'This document is confidential and intended for authorized use only.'
-    doc.strokeColor('#d1d5db').lineWidth(0.5)
-       .moveTo(ML, doc.page.height - 22).lineTo(ML + usableW, doc.page.height - 22).stroke()
-    doc.fillColor('#9ca3af').fontSize(7).font('Helvetica')
-       .text(footerText, ML, doc.page.height - 18, { width: usableW, align: 'center', lineBreak: false })
-
-    doc.flushPages()
-    doc.end()
-  })
 }
 
 // ── Finance Aggregate ─────────────────────────────────────────
