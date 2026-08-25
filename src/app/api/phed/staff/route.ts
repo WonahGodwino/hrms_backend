@@ -8,6 +8,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { sendPhedWelcomeEmail } from '@/app/lib/phed/email'
 import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/helpers'
+import { normalizeState } from '@/app/lib/phed/csv-parser'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -125,6 +126,7 @@ export async function POST(req: NextRequest) {
       carSubsidy, entertainmentAllowance, dataAllowance, nightAllowance, arrears,
       otherAllowances, hasLifeAssurance, lifeAssuranceAmount,
       voluntaryPension, insurance, cashAdvanced, loan, domesticLoan,
+      stateOfResidence,
     } = body
 
     if (!companyId || !staffId || !firstName || !lastName || !email)
@@ -132,6 +134,13 @@ export async function POST(req: NextRequest) {
 
     if (hasLifeAssurance && (!lifeAssuranceAmount || Number(lifeAssuranceAmount) <= 0))
       return withCors(ApiResponse.error('lifeAssuranceAmount is required and must be greater than 0 when hasLifeAssurance is true', 400), origin)
+
+    // Validate State of Residence before any write.
+    const normalizedState = stateOfResidence && String(stateOfResidence).trim()
+      ? normalizeState(stateOfResidence)
+      : null
+    if (stateOfResidence && String(stateOfResidence).trim() && !normalizedState)
+      return withCors(ApiResponse.error('Invalid State of Residence — use Akwa Ibom, Bayelsa, Cross River or Rivers', 400), origin)
 
     // HR/ADMIN can only create staff in their own company; SUPER_ADMIN can use any companyId
     if (user.role !== 'SUPER_ADMIN' && user.companyId && user.companyId !== companyId)
@@ -171,7 +180,7 @@ export async function POST(req: NextRequest) {
 
     // ── Atomic: create phedStaff + upsert staffRecord ─────
     // Both writes are in a transaction — if either fails nothing is persisted.
-    const [staff] = await prisma.$transaction([
+    const [staff, staffRecord] = await prisma.$transaction([
       (prisma as any).phedStaff.create({
         data: {
           companyId, staffId, firstName, lastName,
@@ -252,6 +261,24 @@ export async function POST(req: NextRequest) {
         } as any,
       }),
     ])
+
+    // ── Sync State of Residence to the tax profile (dual-entry path) ──
+    // Store on EmployeeTaxProfile so PAYE/state reports share one source of truth
+    // with the Tax Profiles page and the staff bulk-upload template.
+    if (normalizedState) {
+      await prisma.employeeTaxProfile.upsert({
+        where: { staffId: staffRecord.id },
+        create: {
+          staffId: staffRecord.id,
+          companyId,
+          stateOfResidence: normalizedState,
+          tinVerified: false,
+        },
+        update: {
+          stateOfResidence: normalizedState,
+        },
+      })
+    }
 
     // Welcome notification (same as regular staff onboarding)
     const staffAccountId = await prisma.staffRecord.findUnique({

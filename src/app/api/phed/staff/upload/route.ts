@@ -6,7 +6,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
-import { parseStaffCsv } from '@/app/lib/phed/csv-parser'
+import { parseStaffCsv, normalizeState } from '@/app/lib/phed/csv-parser'
 import { sendPhedWelcomeEmail } from '@/app/lib/phed/email'
 import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/helpers'
 
@@ -100,6 +100,20 @@ export async function POST(req: NextRequest) {
           rowErrors.push(`Row ${i + 2}: lifeAssuranceAmount must be greater than 0 when hasLifeAssurance is YES`)
           failed++
           continue
+        }
+
+        // Validate State of Residence early (before any write) so an invalid state
+        // never leaves the staff record and tax profile out of sync.
+        let normalizedState: string | null = null
+        if (r.stateOfResidence && r.stateOfResidence.trim()) {
+          normalizedState = normalizeState(r.stateOfResidence)
+          if (!normalizedState) {
+            const err = `Row ${i + 2}: invalid State of Residence "${r.stateOfResidence}" — use Akwa Ibom, Bayelsa, Cross River or Rivers`
+            rowErrors.push(err)
+            rowErrorsWithData.push({ rowNum: i + 2, staffId: r.staffId, firstName: r.firstName, lastName: r.lastName, email: r.email, error: err.replace(`Row ${i + 2}: `, '') })
+            failed++
+            continue
+          }
         }
 
         // ── Upsert PHED staff record ─────────────────────────
@@ -219,13 +233,15 @@ export async function POST(req: NextRequest) {
           select: { id: true, password: true },
         })
 
+        let staffRecordId: string | null = existingAccount?.id ?? null
+
         if (existingAccount) {
           // Account already exists — do not touch the password or requirePasswordChange flag.
           // Re-uploading staff data (e.g. to update department) must not force existing users
           // to change their password again.
         } else {
           // New account — create with temporary credentials
-          await prisma.staffRecord.create({
+          const newAccount = await prisma.staffRecord.create({
             data: {
               staffId:               r.staffId,
               email:                 cleanEmail,
@@ -242,22 +258,17 @@ export async function POST(req: NextRequest) {
               createdBy: user.userId,
             } as any,
           })
+          staffRecordId = newAccount.id
 
           // Welcome notification (same as regular staff onboarding)
-          const newAccount = await prisma.staffRecord.findUnique({
-            where: { staffId_companyId: { staffId: r.staffId, companyId } },
-            select: { id: true },
-          })
-          if (newAccount) {
-            createNotification(
-              newAccount.id,
-              NOTIFICATION_TYPES.WELCOME_STAFF,
-              `Welcome to ${companyName}`,
-              `Hi ${r.firstName} ${r.lastName}, welcome to ${companyName}. We are glad to have you with us.`,
-              { source: 'PHED_STAFF_BULK_UPLOAD', companyName, staffId: r.staffId },
-              companyId
-            ).catch(err => console.error(`PHED welcome notification failed for ${cleanEmail}:`, err))
-          }
+          createNotification(
+            newAccount.id,
+            NOTIFICATION_TYPES.WELCOME_STAFF,
+            `Welcome to ${companyName}`,
+            `Hi ${r.firstName} ${r.lastName}, welcome to ${companyName}. We are glad to have you with us.`,
+            { source: 'PHED_STAFF_BULK_UPLOAD', companyName, staffId: r.staffId },
+            companyId
+          ).catch(err => console.error(`PHED welcome notification failed for ${cleanEmail}:`, err))
 
           // Send welcome email in background (don't let email failure break the upload)
           sendPhedWelcomeEmail({
@@ -268,6 +279,24 @@ export async function POST(req: NextRequest) {
             password:    plainPassword,
             companyName,
           }).catch(err => console.error(`PHED welcome email failed for ${cleanEmail}:`, err))
+        }
+
+        // ── Sync State of Residence to the tax profile (dual-entry path) ──
+        // The staff template can carry the state; store it on EmployeeTaxProfile so
+        // PAYE/state reports read the same single source of truth as the Tax Profiles page.
+        if (normalizedState && staffRecordId) {
+          await prisma.employeeTaxProfile.upsert({
+            where: { staffId: staffRecordId },
+            create: {
+              staffId: staffRecordId,
+              companyId,
+              stateOfResidence: normalizedState,
+              tinVerified: false,
+            },
+            update: {
+              stateOfResidence: normalizedState,
+            },
+          })
         }
 
         successful++

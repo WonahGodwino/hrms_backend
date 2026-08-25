@@ -83,6 +83,7 @@ export async function GET(req: NextRequest) {
       { header: 'PFA Name',          key: 'pfaName',        width: 22, required: false, note: 'Pension Fund Administrator name e.g. Stanbic IBTC Pension' },
       { header: 'TIN',               key: 'tin',            width: 18, required: false, note: 'Tax Identification Number (FIRS) — 10 digits' },
       { header: 'NHF Number',        key: 'nhfNumber',      width: 18, required: false, note: 'National Housing Fund membership number' },
+      { header: 'State of Residence', key: 'stateOfResidence', width: 20, required: false, note: 'Select from dropdown — Akwa Ibom, Bayelsa, Cross River or Rivers (tax residency for PAYE state breakdown)' },
       { header: 'Call Center',       key: 'callCenter',     width: 18, required: false, note: 'Call center / support desk the employee is assigned to (optional)' },
       // ── Salary (formula then components) ──────────────────────
       { header: 'Initial Gross Pay', key: '__initialGross', width: 22, required: false, note: 'Auto-calculated: Basic Salary + Housing, Transport, Furniture, Domestic, Meal Subsidy, Hazard, Leave Grant, Electricity and Other Allowances. Read-only — spread the employee\'s agreed gross across these so they sum to it exactly, not more.' },
@@ -166,6 +167,7 @@ export async function GET(req: NextRequest) {
     // ── Data-validation dropdowns ───────────────────────────────
     const catCol  = colOf('category')
     const hasLACol = colOf('hasLifeAssurance')
+    const stateCol = colOf('stateOfResidence')
     for (let r = 3; r <= 1002; r++) {
       ws.getCell(`${catCol}${r}`).dataValidation = {
         type: 'list', allowBlank: true, formulae: ['"REGULAR,CONTRACT,NYSC/IT"'],
@@ -174,6 +176,10 @@ export async function GET(req: NextRequest) {
       ws.getCell(`${hasLACol}${r}`).dataValidation = {
         type: 'list', allowBlank: true, formulae: ['"YES,NO"'],
         showErrorMessage: true, errorTitle: 'Invalid Value', error: 'Please select YES or NO',
+      }
+      ws.getCell(`${stateCol}${r}`).dataValidation = {
+        type: 'list', allowBlank: true, formulae: ['"Akwa Ibom,Bayelsa,Cross River,Rivers"'],
+        showErrorMessage: true, errorTitle: 'Invalid State of Residence', error: 'Please select Akwa Ibom, Bayelsa, Cross River or Rivers',
       }
     }
 
@@ -350,6 +356,7 @@ export async function GET(req: NextRequest) {
       ['RSA PIN / PFA',          'Required for pension schedule. Format: PEN + 12 digits.'],
       ['TIN',                    'Tax Identification Number from FIRS. 10 digits, no dashes.'],
       ['NHF Number',             'National Housing Fund membership number, used for the NHF report.'],
+      ['State of Residence',     'Tax residency state used for the PAYE schedule and the Breakdown of PAYE by State. Select one of Akwa Ibom, Bayelsa, Cross River or Rivers. You can also set or update it later via the Tax Profiles page (bulk upload) or the individual staff form — the most recent update wins.'],
       ['Call Center',            'Call center or support desk the employee is assigned to. Optional, free text.'],
       ['Pension Number',         'Pension member enrollment number from the PFA. Not required in the template but can be entered via the individual staff form.'],
       ['Duplicate handling',     'Re-uploading a row with the same Staff ID updates the existing record (upsert). No duplicate is created.'],

@@ -8,6 +8,7 @@
 import ExcelJS   from 'exceljs'
 import PDFDocument from 'pdfkit'
 import { NextResponse } from 'next/server'
+import type { CostCentreSheet } from './types'
 
 // ── Column definition ─────────────────────────────────────────
 export interface ReportColDef {
@@ -359,6 +360,7 @@ export const PENSION_COLS: ReportColDef[] = [
   { header: 'RSA PIN',          key: 'rsaPin',           excelWidth: 18, pdfRatio: 1.10, type: 'text'     },
   { header: 'Pension No.',      key: 'pensionNumber',    excelWidth: 18, pdfRatio: 1.10, type: 'text'     },
   { header: 'Employee (₦)',     key: 'pensionEmployee',  excelWidth: 16, pdfRatio: 1.10, type: 'currency' },
+  { header: 'Voluntary (₦)',    key: 'voluntaryPension', excelWidth: 16, pdfRatio: 1.10, type: 'currency' },
   { header: 'Employer (₦)',     key: 'pensionEmployer',  excelWidth: 16, pdfRatio: 1.10, type: 'currency' },
   { header: 'Total Pension (₦)',key: 'totalPension',     excelWidth: 18, pdfRatio: 1.20, type: 'currency' },
   { header: 'Gross Salary (₦)', key: 'grossSalary',      excelWidth: 18, pdfRatio: 1.20, type: 'currency' },
@@ -386,16 +388,229 @@ export const STATUTORY_COLS: ReportColDef[] = [
   { header: 'Department',      key: 'department',    excelWidth: 22, pdfRatio: 1.50, type: 'text'     },
 ]
 
-export const COST_CENTRE_COLS: ReportColDef[] = [
-  { header: 'Region',          key: 'region',        excelWidth: 22, pdfRatio: 1.50, type: 'text'     },
-  { header: 'Department',      key: 'department',    excelWidth: 22, pdfRatio: 1.50, type: 'text'     },
-  { header: 'Unit',            key: 'unit',          excelWidth: 22, pdfRatio: 1.50, type: 'text'     },
-  { header: 'Head Count',      key: 'headCount',     excelWidth: 12, pdfRatio: 0.80, type: 'integer'  },
-  { header: 'Total Gross (₦)', key: 'totalGross',    excelWidth: 18, pdfRatio: 1.30, type: 'currency' },
-  { header: 'Total Net (₦)',   key: 'totalNet',      excelWidth: 18, pdfRatio: 1.30, type: 'currency' },
-  { header: 'Total PAYE (₦)',  key: 'totalPAYE',     excelWidth: 18, pdfRatio: 1.30, type: 'currency' },
-  { header: 'Total Pension (₦)',key: 'totalPension', excelWidth: 18, pdfRatio: 1.30, type: 'currency' },
-]
+// =============================================================
+// MULTI-SHEET WORKBOOK EXPORT (shared by all bundled payroll reports)
+// Reference sheets put the column header on row 1 and data from row 2.
+// =============================================================
+export async function exportWorkbook(
+  sheets:      CostCentreSheet[],
+  companyName: string = '',
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook()
+  wb.creator = '24/7HR – PHED Module'
+
+  for (const sheet of sheets) {
+    const cols = sheet.columns
+    const ws = wb.addWorksheet(sheet.name.substring(0, 31))
+    ws.columns = cols.map(c => ({ key: c.key, width: c.width ?? 16 }))
+
+    // Row 1: headers
+    const hdrRow = ws.getRow(1)
+    cols.forEach((c, i) => {
+      const cell = hdrRow.getCell(i + 1)
+      cell.value = c.header
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${BRAND_BLUE}` } }
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 }
+      cell.alignment = { horizontal: c.type === 'text' ? 'left' : 'right', vertical: 'middle' }
+    })
+    hdrRow.height = 20
+
+    // Data rows (subtotal / total rows highlighted)
+    const firstTextKey = cols.find(c => c.type === 'text')?.key
+    sheet.rows.forEach((row, ri) => {
+      const dataRow = ws.getRow(ri + 2)
+      const label = String(row[firstTextKey ?? ''] ?? '')
+      const isSubtotal = !label || /(total|grand)/i.test(label)
+      cols.forEach((c, ci) => {
+        const cell = dataRow.getCell(ci + 1)
+        cell.value = row[c.key] ?? (c.type === 'text' ? '' : 0)
+        if (isSubtotal) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${ACCENT_BLUE}` } }
+          cell.font = { bold: true, size: 9, color: { argb: `FF${BRAND_BLUE}` } }
+        } else {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ri % 2 === 1 ? `FF${GREY_ROW}` : 'FFFFFFFF' } }
+          cell.font = { size: 9, color: { argb: 'FF1f2937' } }
+        }
+        cell.alignment = { horizontal: c.type === 'text' ? 'left' : 'right', vertical: 'middle' }
+        if (c.type === 'currency' || c.type === 'number') cell.numFmt = '#,##0.00'
+      })
+      dataRow.height = 18
+    })
+
+    ws.views = [{ state: 'frozen', ySplit: 1 }]
+  }
+
+  return (await wb.xlsx.writeBuffer()) as unknown as Buffer
+}
+
+// =============================================================
+// COST CENTRE — 3-SHEET EXPORT (Excel + PDF)
+// =============================================================
+export async function exportCostCentreExcel(
+  title:       string,
+  periodName:  string,
+  sheets:      CostCentreSheet[],
+  companyName: string = ''
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook()
+  wb.creator = '24/7HR – PHED Module'
+
+  const genDate = new Date().toLocaleDateString('en-NG', { day: '2-digit', month: 'long', year: 'numeric' })
+
+  for (const sheet of sheets) {
+    const cols = sheet.columns
+    const ws = wb.addWorksheet(sheet.name.substring(0, 31))
+    ws.columns = cols.map(c => ({ key: c.key, width: c.width ?? 16 }))
+
+    // Row 1: sheet title
+    ws.mergeCells(1, 1, 1, cols.length)
+    const titleCell = ws.getCell('A1')
+    titleCell.value = `${title} — ${sheet.name}`
+    titleCell.font = { bold: true, size: 13, color: { argb: 'FFFFFFFF' } }
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${BRAND_BLUE}` } }
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' }
+    ws.getRow(1).height = 26
+
+    // Row 2: meta
+    ws.mergeCells(2, 1, 2, cols.length)
+    const metaCell = ws.getCell('A2')
+    metaCell.value = `Pay Period: ${periodName}   |   Generated: ${genDate}`
+    metaCell.font = { italic: true, size: 9, color: { argb: 'FF374151' } }
+    metaCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${ACCENT_BLUE}` } }
+    metaCell.alignment = { horizontal: 'center', vertical: 'middle' }
+    ws.getRow(2).height = 18
+
+    // Row 3: headers
+    const hdrRow = ws.getRow(3)
+    cols.forEach((c, i) => {
+      const cell = hdrRow.getCell(i + 1)
+      cell.value = c.header
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${BRAND_BLUE}` } }
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 }
+      cell.alignment = { horizontal: c.type === 'text' ? 'left' : 'right', vertical: 'middle' }
+    })
+    hdrRow.height = 20
+
+    // Data rows (subtotal / grand-total rows are highlighted)
+    const firstTextKey = cols.find(c => c.type === 'text')?.key
+    sheet.rows.forEach((row, ri) => {
+      const dataRow = ws.getRow(ri + 4)
+      const label = String(row[firstTextKey ?? ''] ?? '')
+      const isSubtotal = !label || /(total|grand)/i.test(label)
+      cols.forEach((c, ci) => {
+        const cell = dataRow.getCell(ci + 1)
+        cell.value = row[c.key] ?? (c.type === 'text' ? '' : 0)
+        if (isSubtotal) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${ACCENT_BLUE}` } }
+          cell.font = { bold: true, size: 9, color: { argb: `FF${BRAND_BLUE}` } }
+        } else {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ri % 2 === 1 ? `FF${GREY_ROW}` : 'FFFFFFFF' } }
+          cell.font = { size: 9, color: { argb: 'FF1f2937' } }
+        }
+        cell.alignment = { horizontal: c.type === 'text' ? 'left' : 'right', vertical: 'middle' }
+        if (c.type === 'currency' || c.type === 'number') cell.numFmt = '#,##0.00'
+      })
+      dataRow.height = 18
+    })
+
+    ws.views = [{ state: 'frozen', ySplit: 3 }]
+  }
+
+  return (await wb.xlsx.writeBuffer()) as unknown as Buffer
+}
+
+export function exportCostCentrePdf(
+  title:       string,
+  periodName:  string,
+  sheets:      CostCentreSheet[],
+  companyName: string = ''
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const ML = 28, MR = 28, MT = 28
+    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: ML, autoFirstPage: true })
+    const chunks: Buffer[] = []
+    doc.on('data',  (c: Buffer) => chunks.push(c))
+    doc.on('end',   ()          => resolve(Buffer.concat(chunks)))
+    doc.on('error', reject)
+
+    const usableW  = doc.page.width - ML - MR
+    const FOOTER_H = 16
+    const footerY  = doc.page.height - PDF_MB - FOOTER_H
+    let y = MT
+
+    const fmtVal = (type: string, raw: any): string => {
+      if (raw == null || raw === '') return '—'
+      if (type === 'currency' || type === 'number')
+        return Number(raw).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      return String(raw)
+    }
+
+    const drawPageHeader = (): number => {
+      doc.rect(ML, MT, usableW, 24).fill(`#${BRAND_BLUE}`)
+      doc.fillColor('#ffffff').fontSize(11).font('Helvetica-Bold')
+         .text(title, ML, MT + 7, { width: usableW, align: 'center', lineBreak: false })
+      return MT + 30
+    }
+
+    const footerText = companyName
+      ? `This document is generated by ${companyName}, it is confidential and intended for authorized use only.`
+      : 'This document is confidential and intended for authorized use only.'
+    const drawFooter = () => {
+      doc.strokeColor('#d1d5db').lineWidth(0.5).moveTo(ML, footerY).lineTo(ML + usableW, footerY).stroke()
+      doc.fillColor('#9ca3af').fontSize(7).font('Helvetica').text(footerText, ML, footerY + 4, { width: usableW, align: 'center', lineBreak: false })
+    }
+
+    const colWidths = (cols: CostCentreSheet['columns']) => {
+      const weights = cols.map(c => (c.type === 'text' ? 2.0 : 1.15))
+      const total = weights.reduce((s, w) => s + w, 0)
+      return weights.map(w => (w / total) * usableW)
+    }
+
+    const drawSheetTitle = (name: string) => {
+      if (y + 22 > footerY - 4) { drawFooter(); doc.addPage(); y = drawPageHeader() }
+      doc.rect(ML, y, usableW, 20).fill(`#${BRAND_MID}`)
+      doc.fillColor('#ffffff').fontSize(10).font('Helvetica-Bold').text(name, ML + 6, y + 5, { lineBreak: false })
+      y += 24
+    }
+
+    for (const sheet of sheets) {
+      const cols  = sheet.columns
+      const widths = colWidths(cols)
+      const firstTextKey = cols.find(c => c.type === 'text')?.key
+
+      drawSheetTitle(sheet.name)
+
+      // header row
+      let x = ML
+      doc.rect(ML, y, usableW, 16).fill(`#${BRAND_BLUE}`)
+      cols.forEach((c, i) => {
+        doc.fillColor('#ffffff').fontSize(6.5).font('Helvetica-Bold')
+           .text(c.header, x + 2, y + 4, { width: widths[i] - 4, lineBreak: false, align: c.type === 'text' ? 'left' : 'right' })
+        x += widths[i]
+      })
+      y += 16
+
+      // data rows
+      for (const row of sheet.rows) {
+        if (y + 14 > footerY - 4) { drawFooter(); doc.addPage(); y = drawPageHeader(); drawSheetTitle(sheet.name) }
+        const label = String(row[firstTextKey ?? ''] ?? '')
+        const isSubtotal = !label || /(total|grand)/i.test(label)
+        if (isSubtotal) doc.rect(ML, y, usableW, 14).fill(`#${ACCENT_BLUE}`)
+        x = ML
+        cols.forEach((c, i) => {
+          doc.fillColor('#111827').fontSize(6.5).font(isSubtotal ? 'Helvetica-Bold' : 'Helvetica')
+             .text(fmtVal(c.type, row[c.key]), x + 2, y + 3, { width: widths[i] - 4, lineBreak: false, align: c.type === 'text' ? 'left' : 'right' })
+          x += widths[i]
+        })
+        y += 14
+      }
+      y += 6
+    }
+
+    drawFooter()
+    doc.end()
+  })
+}
 
 export const UNION_COOP_COLS: ReportColDef[] = [
   { header: 'S/N',          key: 'sn',          excelWidth: 6,  pdfRatio: 0.40, type: 'integer'  },
@@ -411,10 +626,13 @@ export const LIABILITIES_COLS: ReportColDef[] = [
 ]
 
 export const IAD_SUMMARY_COLS: ReportColDef[] = [
-  { header: 'Category',        key: 'label',      excelWidth: 28, pdfRatio: 1.80, type: 'text'     },
-  { header: 'Gross (₦)',       key: 'gross',      excelWidth: 18, pdfRatio: 1.30, type: 'currency' },
-  { header: 'Deduction (₦)',   key: 'deduction',  excelWidth: 18, pdfRatio: 1.30, type: 'currency' },
-  { header: 'Net Pay (₦)',     key: 'netPay',     excelWidth: 18, pdfRatio: 1.30, type: 'currency' },
+  { header: 'Category',               key: 'label',            excelWidth: 28, pdfRatio: 1.80, type: 'text'     },
+  { header: 'Head Count',             key: 'headCount',        excelWidth: 12, pdfRatio: 0.90, type: 'integer'  },
+  { header: 'Gross Pay (₦)',          key: 'grossPay',         excelWidth: 18, pdfRatio: 1.30, type: 'currency' },
+  { header: "Employer's Pension (₦)", key: 'employerPension',  excelWidth: 20, pdfRatio: 1.40, type: 'currency' },
+  { header: 'NSITF (₦)',              key: 'nsitf',            excelWidth: 14, pdfRatio: 1.00, type: 'currency' },
+  { header: 'ITF (₦)',                key: 'itf',              excelWidth: 14, pdfRatio: 1.00, type: 'currency' },
+  { header: 'Total Payroll Cost (₦)', key: 'totalPayrollCost', excelWidth: 20, pdfRatio: 1.40, type: 'currency' },
 ]
 
 export const IAD_CHANGES_COLS: ReportColDef[] = [

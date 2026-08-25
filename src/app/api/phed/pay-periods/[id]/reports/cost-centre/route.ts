@@ -5,7 +5,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
 import { buildCostCentreSummary } from '@/app/lib/phed/reports'
-import { exportReportToExcel, exportReportToPdf, COST_CENTRE_COLS } from '@/app/lib/phed/report-export'
+import { exportCostCentreExcel, exportCostCentrePdf } from '@/app/lib/phed/report-export'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -33,16 +33,25 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const payrolls = await (prisma as any).phedComputedPayroll.findMany({
       where: { payPeriodId: params.id },
     })
-    const data = buildCostCentreSummary(payrolls)
 
-    if (format === 'json') return withCors(ApiResponse.success(data), origin)
+    // Resolve feeder per staff (PhedStaff.feederId → PhedFeeder.name) since the
+    // payroll snapshot doesn't store the feeder.
+    const staff = await (prisma as any).phedStaff.findMany({
+      where: { companyId: period.companyId },
+      select: { id: true, feeder: { select: { name: true } } },
+    })
+    const feederMap = new Map<string, string>()
+    for (const s of staff) if (s.feeder?.name) feederMap.set(s.id, s.feeder.name)
 
     const periodName  = period.periodName
     const companyName = period.company?.companyName ?? ''
     const safeName    = periodName.replace(/\s+/g, '-')
+    const data = buildCostCentreSummary(periodName, payrolls, feederMap)
+
+    if (format === 'json') return withCors(ApiResponse.success(data), origin)
 
     if (format === 'xlsx') {
-      const buf = await exportReportToExcel('Cost Centre Summary', periodName, COST_CENTRE_COLS, data, companyName)
+      const buf = await exportCostCentreExcel('Cost Centre Summary', periodName, data.sheets, companyName)
       return new NextResponse(buf as any, {
         status: 200,
         headers: {
@@ -54,7 +63,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     }
 
     if (format === 'pdf') {
-      const buf = await exportReportToPdf('Cost Centre Summary', periodName, COST_CENTRE_COLS, data, companyName)
+      const buf = await exportCostCentrePdf('Cost Centre Summary', periodName, data.sheets, companyName)
       return new NextResponse(buf as any, {
         status: 200,
         headers: {

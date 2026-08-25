@@ -11,6 +11,7 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 
 const ROLE_LABELS: Record<string, string> = {
   MANAGER_COMP_BENEFITS: 'Manager, Compensation & Benefits',
+  TAX_AUDIT: 'Tax Audit',
   HEAD_INTERNAL_AUDIT: 'Head, Internal Audit',
   CHIEF_PEOPLE_OFFICER: 'Chief People Officer',
   CHIEF_FINANCE_OFFICER: 'Chief Finance Officer',
@@ -63,7 +64,12 @@ export async function GET(req: NextRequest) {
     }
 
     return withCors(ApiResponse.success({
-      roles: PHED_ACCESS_ROLES.map(value => ({ value, label: ROLE_LABELS[value] })),
+      // Manager, Compensation & Benefits is not assignable — the HR/ADMIN/
+      // SUPER_ADMIN who uploads the payroll for a pay period fills that
+      // first-approval desk for that period.
+      roles: PHED_ACCESS_ROLES
+        .filter(value => value !== 'MANAGER_COMP_BENEFITS')
+        .map(value => ({ value, label: ROLE_LABELS[value] })),
       assignments,
       history,
     }), origin)
@@ -90,6 +96,12 @@ export async function POST(req: NextRequest) {
     }
     if (!staffRecordId || !PHED_ACCESS_ROLES.includes(accessRole as any)) {
       return withCors(ApiResponse.error('A valid staff member and PHED access role are required', 400), origin)
+    }
+    if (accessRole === 'MANAGER_COMP_BENEFITS') {
+      return withCors(ApiResponse.error(
+        'Manager, Compensation & Benefits cannot be assigned — the HR/ADMIN/SUPER_ADMIN who uploads the payroll for a pay period acts as the first approver for that period.',
+        400,
+      ), origin)
     }
     if (!reason || reason.length > 1000) {
       return withCors(ApiResponse.error('A role-change reason between 1 and 1000 characters is required', 400), origin)

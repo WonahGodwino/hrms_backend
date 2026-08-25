@@ -15,6 +15,7 @@ export const PHED_ALL_PAGE_KEYS: PhedPageKey[] = [
 // the client's own matrix didn't list them.
 export const PHED_DEFAULT_ROLE_PAGE_KEYS: Record<PhedAccessRole, PhedPageKey[]> = {
   MANAGER_COMP_BENEFITS: PHED_ALL_PAGE_KEYS,
+  TAX_AUDIT: PHED_ALL_PAGE_KEYS,
   CHIEF_PEOPLE_OFFICER: PHED_ALL_PAGE_KEYS,
   CHIEF_FINANCE_OFFICER: PHED_ALL_PAGE_KEYS,
   MD_CEO: PHED_ALL_PAGE_KEYS,

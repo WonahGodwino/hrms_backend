@@ -173,7 +173,7 @@ export async function notifyAfterForward(memo: PhedApprovalMemo, fromActorName: 
       title: 'Approval memo finalised — period approval still required',
       message: `The payroll approval memo received final approval from the MD/CEO. The Bank Schedule is now available to Treasury; an HR/Admin user must still approve the pay period itself to unlock payslips.`,
       emailHeading: 'Approval memo finalised — period approval pending',
-      emailBody: `The Payroll Approval Memo has completed the full five-stage review and received final approval. The Bank Schedule is now available to Treasury. An HR/Admin user must still approve the pay period itself to unlock payslip emails and move it to Paid.`,
+      emailBody: `The Payroll Approval Memo has completed the full six-stage review and received final approval. The Bank Schedule is now available to Treasury. An HR/Admin user must still approve the pay period itself to unlock payslip emails and move it to Paid.`,
     })
     return
   }

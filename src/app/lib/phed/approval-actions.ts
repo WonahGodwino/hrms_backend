@@ -80,8 +80,8 @@ export async function forwardApprovalStage(
       },
     })
     // The memo reaching "Approved" does NOT approve the pay period — the two
-    // are independent records (FE guide §6.3). Stage 5 signing off only
-    // finalises the memo; an HR/Admin user still takes the quick-route action
+    // are independent records (FE guide §6.3). The final stage (MD/CEO) signing
+    // off only finalises the memo; an HR/Admin user still takes the quick-route action
     // on the period itself to move it into APPROVED and unlock payslips.
     const updatedMemo = await tx.phedApprovalMemo.update({
       where: { id: memo.id },

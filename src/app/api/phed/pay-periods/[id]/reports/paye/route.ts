@@ -5,7 +5,8 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
 import { buildPAYESchedule } from '@/app/lib/phed/reports'
-import { exportReportToExcel, exportReportToPdf, PAYE_COLS } from '@/app/lib/phed/report-export'
+import { exportReportToExcel, exportReportToPdf, exportWorkbook, PAYE_COLS } from '@/app/lib/phed/report-export'
+import { buildStatutorySheet, periodLabels, fetchStateOfResidenceMap } from '@/app/lib/phed/payroll-sheets'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const period = await prisma.phedPayPeriod.findUnique({
       where: { id: params.id },
-      select: { companyId: true, periodName: true, company: { select: { companyName: true } } },
+      select: { companyId: true, periodName: true, month: true, year: true, company: { select: { companyName: true } } },
     })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && period.companyId !== user.companyId) {
@@ -43,7 +44,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const safeName    = periodName.replace(/\s+/g, '-')
 
     if (format === 'xlsx') {
-      const buf = await exportReportToExcel('PAYE Tax Schedule', periodName, PAYE_COLS, data, companyName)
+      const stateMap = await fetchStateOfResidenceMap(prisma, period.companyId)
+      const sheet = buildStatutorySheet(`PAYE_${periodLabels(period.month, period.year).apostrophe}`, 'paye', payrolls, { stateMap })
+      const buf = await exportWorkbook([sheet], companyName)
       return new NextResponse(buf as any, {
         status: 200,
         headers: {

@@ -1,7 +1,9 @@
 import { PhedAccessRole, PhedApprovalMemoStatus, PhedApprovalStampAction } from '@prisma/client'
 
-// Module 12 — fixed five-stage chain. Stage order/role mapping must never be
+// Module 12 — fixed six-stage chain. Stage order/role mapping must never be
 // configurable per company (PRD 12.3) — it lives in code, not the database.
+// Stage 1 is performed by the HR/ADMIN/SUPER_ADMIN who uploaded the payroll
+// (acting as Manager, Compensation & Benefits) — not by an assigned role holder.
 export interface PhedApprovalStageDef {
   stage: number
   role: PhedAccessRole
@@ -17,11 +19,19 @@ export const PHED_APPROVAL_STAGES: PhedApprovalStageDef[] = [
     role: 'MANAGER_COMP_BENEFITS',
     label: 'Manager, Compensation & Benefits',
     action: 'SUBMITTED',
-    resultStatus: 'PENDING_REVIEW',
+    resultStatus: 'PENDING_TAX_AUDIT',
     stampLabel: 'Prepared By',
   },
   {
     stage: 2,
+    role: 'TAX_AUDIT',
+    label: 'Tax Audit',
+    action: 'TAX_AUDITED',
+    resultStatus: 'PENDING_REVIEW',
+    stampLabel: 'Tax Audit Approval By',
+  },
+  {
+    stage: 3,
     role: 'HEAD_INTERNAL_AUDIT',
     label: 'Head, Internal Audit',
     action: 'RECOMMENDED',
@@ -29,7 +39,7 @@ export const PHED_APPROVAL_STAGES: PhedApprovalStageDef[] = [
     stampLabel: 'Reviewed & Concurred By',
   },
   {
-    stage: 3,
+    stage: 4,
     role: 'CHIEF_PEOPLE_OFFICER',
     label: 'Chief People Officer',
     action: 'APPROVED',
@@ -37,7 +47,7 @@ export const PHED_APPROVAL_STAGES: PhedApprovalStageDef[] = [
     stampLabel: 'First-Level Executive Approval By',
   },
   {
-    stage: 4,
+    stage: 5,
     role: 'CHIEF_FINANCE_OFFICER',
     label: 'Chief Finance Officer',
     action: 'APPROVED',
@@ -45,7 +55,7 @@ export const PHED_APPROVAL_STAGES: PhedApprovalStageDef[] = [
     stampLabel: 'Second-Level Approval & Financial Endorsement By',
   },
   {
-    stage: 5,
+    stage: 6,
     role: 'MD_CEO',
     label: 'MD/CEO',
     action: 'FINAL_APPROVED',

@@ -1,11 +1,12 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
 import { buildFinancePayrollSummary } from '@/app/lib/phed/reports'
-import { exportReportResponse, UNION_COOP_COLS } from '@/app/lib/phed/report-export'
+import { exportReportResponse, exportWorkbook, UNION_COOP_COLS } from '@/app/lib/phed/report-export'
+import { buildUnionCoopSheet, buildUnionCoopMaps, periodLabels } from '@/app/lib/phed/payroll-sheets'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -63,11 +64,31 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     if (format === 'json')
       return withCors(ApiResponse.success({ periodName: period.periodName, unions, cooperatives, total }), origin)
 
+    if (format === 'xlsx') {
+      const uc = buildUnionCoopMaps(
+        allUnions.map(u => ({ id: u.id, name: u.name, percentage: Number(u.percentage) })),
+        allCoops.map(c => ({ id: c.id, name: c.name })),
+        staffUnions, staffCoops, payrolls,
+      )
+      const sheet = buildUnionCoopSheet(`Union_Coopera_${periodLabels(period.month, period.year).apostrophe}`, payrolls, {
+        unionMap: uc.unionMap, ssaeacMap: uc.ssaeacMap, coopMap: uc.coopMap,
+      })
+      const buf = await exportWorkbook([sheet], period.company?.companyName ?? '')
+      return new NextResponse(buf as any, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `attachment; filename="union-cooperative-${period.periodName.replace(/\s+/g, '-')}.xlsx"`,
+          'Access-Control-Allow-Origin': origin ?? '*',
+        },
+      })
+    }
+
     const rows = [
       ...unions.map((u, i) => ({ sn: i + 1, type: 'Union', name: u.name, amount: u.amount })),
       ...cooperatives.map((c, i) => ({ sn: unions.length + i + 1, type: 'Cooperative', name: c.name, amount: c.amount })),
     ]
-    const exp = await exportReportResponse(format, 'Unions & Cooperatives Deductions', period.periodName, UNION_COOP_COLS, rows, period.company?.companyName ?? '', origin, 'unions-cooperatives')
+    const exp = await exportReportResponse('pdf', 'Unions & Cooperatives Deductions', period.periodName, UNION_COOP_COLS, rows, period.company?.companyName ?? '', origin, 'unions-cooperatives')
     if (exp) return exp
     return withCors(ApiResponse.error('Invalid format. Use json, xlsx, or pdf', 400), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }

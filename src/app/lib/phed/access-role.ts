@@ -19,6 +19,7 @@ const ANY_GLOBAL_ROLE = ['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER', 'STAFF', 'CEO'
 
 export const PHED_ACCESS_ROLES: PhedAccessRole[] = [
   'MANAGER_COMP_BENEFITS',
+  'TAX_AUDIT',
   'HEAD_INTERNAL_AUDIT',
   'CHIEF_PEOPLE_OFFICER',
   'CHIEF_FINANCE_OFFICER',
@@ -106,9 +107,10 @@ export async function requirePhedAccessRole(
 }
 
 // The 5 roles that hold a desk in the Module 12 approval chain (excludes the
-// 3 page-access-only roles: Treasury, Financial Reporting, Tax).
+// 3 page-access-only roles: Treasury, Financial Reporting, Tax — and excludes
+// MANAGER_COMP_BENEFITS, whose Stage 1 desk is filled by the payroll uploader).
 export const PHED_APPROVAL_CHAIN_ROLES: PhedAccessRole[] = [
-  'MANAGER_COMP_BENEFITS',
+  'TAX_AUDIT',
   'HEAD_INTERNAL_AUDIT',
   'CHIEF_PEOPLE_OFFICER',
   'CHIEF_FINANCE_OFFICER',

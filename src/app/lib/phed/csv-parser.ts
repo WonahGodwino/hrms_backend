@@ -3,7 +3,7 @@
 // ============================================================
 
 import ExcelJS from 'exceljs'
-import type { StaffCsvRow, ValidationCsvRow, OvertimeCsvRow } from './types'
+import type { StaffCsvRow, ValidationCsvRow, OvertimeCsvRow, TaxProfileCsvRow } from './types'
 
 // ── Generic helpers ──────────────────────────────────────────
 
@@ -191,6 +191,7 @@ export async function parseStaffCsv(
       pensionNumber: r['pensionnumber']       || r['pensionno'] || r['pension_number'] || undefined,
       tin:           r['tin']                 || r['taxid']   || r['taxidentificationnumber'] || undefined,
       nhfNumber:     r['nhfnumber']           || r['nhfno']   || r['nhf_number']              || undefined,
+      stateOfResidence: r['stateofresidence'] || r['state']   || undefined,
       basicSalary:          r['basicsalary']         || r['basic']            || undefined,
       annualRent:           r['annualrent']          || r['rent']             || undefined,
       hasLifeAssurance:     r['haslifeassurance']    || r['lifeassurance']    || undefined,
@@ -222,8 +223,48 @@ export async function parseStaffCsv(
   return { rows, errors, errorRows }
 }
 
-// ── Validation CSV ───────────────────────────────────────────
+// ── Tax Profile CSV (state of residence) ─────────────────────
+// Columns: Staff ID, State of Residence, JTB TIN (optional).
+export const PHED_STATES = ['Akwa Ibom', 'Bayelsa', 'Cross River', 'Rivers']
 
+export function normalizeState(input: string): string | null {
+  const k = (input || '').toLowerCase().replace(/[^a-z]/g, '')
+  if (!k) return null
+  if (k === 'akwaibom' || k === 'akwaibomstate') return 'Akwa Ibom'
+  if (k === 'bayelsa' || k === 'bayelsastate') return 'Bayelsa'
+  if (k === 'crossriver' || k === 'crossriverstate') return 'Cross River'
+  if (k === 'rivers' || k === 'riversstate') return 'Rivers'
+  return null
+}
+
+export async function parseTaxProfileCsv(
+  buffer: Buffer,
+  fileExt: string
+): Promise<{ rows: TaxProfileCsvRow[]; errors: string[] }> {
+  const raw    = await parseBuffer(buffer, fileExt, 1) // skip the notes row
+  const rows: TaxProfileCsvRow[] = []
+  const errors: string[] = []
+
+  raw.forEach((r, i) => {
+    const rowNum = i + 2 // 1-indexed + header row
+    const staffId = r['staffid'] || r['employeeid'] || r['staff_id'] || ''
+    const state   = r['stateofresidence'] || r['state'] || ''
+
+    if (!staffId && !state) return // blank row — skip silently
+    if (!staffId) { errors.push(`Row ${rowNum}: Staff ID is required`); return }
+    if (!state)   { errors.push(`Row ${rowNum}: State of Residence is required`); return }
+
+    rows.push({
+      staffId: staffId.trim(),
+      stateOfResidence: state.trim(),
+      jtbTin: (r['jtbtin'] || r['tin'] || '').trim() || undefined,
+    })
+  })
+
+  return { rows, errors }
+}
+
+// ── Validation CSV ───────────────────────────────────────────
 export async function parseValidationCsv(
   buffer: Buffer,
   fileExt: string

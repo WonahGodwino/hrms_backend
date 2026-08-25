@@ -196,6 +196,7 @@ export interface PensionScheduleRow {
   rsaPin: string
   pensionNumber: string
   pensionEmployee: number
+  voluntaryPension: number
   pensionEmployer: number
   totalPension: number
   grossSalary: number
@@ -223,15 +224,32 @@ export interface StatutoryScheduleRow {
   department: string
 }
 
-export interface CostCentreRow {
-  region: string
-  department: string
-  unit: string
-  headCount: number
-  totalGross: number
-  totalNet: number
-  totalPAYE: number
-  totalPension: number
+export type LabourCategoryKey =
+  | 'sales'
+  | 'maintenance'
+  | 'customerService'
+  | 'operations'
+  | 'admin'
+  | 'billingCollection'
+  | 'contractStaff'
+  | 'itNysc'
+
+export interface CostCentreSheetColumn {
+  key: string
+  header: string
+  type: 'text' | 'currency' | 'integer' | 'number'
+  width?: number
+}
+
+export interface CostCentreSheet {
+  name: string
+  columns: CostCentreSheetColumn[]
+  rows: Record<string, any>[]
+}
+
+export interface CostCentreSummaryReport {
+  periodName: string
+  sheets: CostCentreSheet[]
 }
 
 export interface WithheldRow {
@@ -273,6 +291,7 @@ export interface StaffCsvRow {
   pensionNumber?: string
   tin?: string
   nhfNumber?: string
+  stateOfResidence?: string
   basicSalary?: string
   annualRent?: string
   hasLifeAssurance?: string      // 'YES'/'TRUE'/'1' → true
@@ -304,6 +323,12 @@ export interface ValidationCsvRow {
   staffId: string
   status: string  // YES | NO
   reason?: string
+}
+
+export interface TaxProfileCsvRow {
+  staffId: string
+  stateOfResidence: string
+  jtbTin?: string
 }
 
 export interface OvertimeCsvRow {

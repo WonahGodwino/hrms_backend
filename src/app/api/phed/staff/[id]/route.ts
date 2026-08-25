@@ -6,6 +6,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { logPayrollAffectingChanges, PHED_PAYROLL_AFFECTING_FIELDS } from '@/app/lib/phed/change-log'
+import { normalizeState } from '@/app/lib/phed/csv-parser'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -70,6 +71,18 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     }
     if (user.role !== 'SUPER_ADMIN' && user.companyId && staff.companyId !== user.companyId)
       return withCors(ApiResponse.notFound('Staff not found'), origin)
+
+    // Attach the tax state so the individual staff form can show/edit it.
+    // EmployeeTaxProfile is keyed to StaffRecord.id — match via staffId_companyId.
+    if (staff.staffId) {
+      const staffRecord = await prisma.staffRecord.findUnique({
+        where: { staffId_companyId: { staffId: staff.staffId, companyId: staff.companyId } },
+        select: { taxProfile: { select: { stateOfResidence: true, jtbTin: true } } },
+      }).catch(() => null)
+      staff.stateOfResidence = staffRecord?.taxProfile?.stateOfResidence ?? null
+      staff.jtbTin           = staffRecord?.taxProfile?.jtbTin ?? null
+    }
+
     return withCors(ApiResponse.success(staff), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
@@ -132,11 +145,17 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     // we can diff them against `data` for the IAD Changes tab (PRD 13.3).
     const existing = await (prisma as any).phedStaff.findUnique({
       where: { id: params.id },
-      select: { companyId: true, ...Object.fromEntries([...PHED_PAYROLL_AFFECTING_FIELDS].map(f => [f, true])) },
+      select: { companyId: true, staffId: true, ...Object.fromEntries([...PHED_PAYROLL_AFFECTING_FIELDS].map(f => [f, true])) },
     })
     if (!existing) return withCors(ApiResponse.notFound('Staff not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && user.companyId && existing.companyId !== user.companyId)
       return withCors(ApiResponse.notFound('Staff not found'), origin)
+
+    // Validate State of Residence before any write (dual-entry path).
+    const stateRaw = body.stateOfResidence !== undefined ? String(body.stateOfResidence || '').trim() : ''
+    const normalizedState = stateRaw ? normalizeState(stateRaw) : null
+    if (stateRaw && !normalizedState)
+      return withCors(ApiResponse.error('Invalid State of Residence — use Akwa Ibom, Bayelsa, Cross River or Rivers', 400), origin)
 
     const staff = await (prisma as any).phedStaff.update({
       where: { id: params.id },
@@ -153,6 +172,26 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       changedBy: user.userId,
       changedByName: actor ? `${actor.firstName} ${actor.lastName}` : 'Unknown',
     })
+
+    // Sync State of Residence to the tax profile (same source of truth as Tax Profiles).
+    if (normalizedState && existing.staffId) {
+      const staffRecord = await prisma.staffRecord.findUnique({
+        where: { staffId_companyId: { staffId: existing.staffId, companyId: existing.companyId } },
+        select: { id: true },
+      })
+      if (staffRecord) {
+        await prisma.employeeTaxProfile.upsert({
+          where: { staffId: staffRecord.id },
+          create: {
+            staffId: staffRecord.id,
+            companyId: existing.companyId,
+            stateOfResidence: normalizedState,
+            tinVerified: false,
+          },
+          update: { stateOfResidence: normalizedState },
+        })
+      }
+    }
 
     return withCors(ApiResponse.success(staff, 'Staff updated'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }

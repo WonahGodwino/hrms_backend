@@ -3,7 +3,8 @@ import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
-import { requirePhedAccessRole, requirePhedApprovalAccess } from '@/app/lib/phed/access-role'
+import { requireModuleAccess } from '@/app/lib/module-access'
+import { requirePhedApprovalAccess } from '@/app/lib/phed/access-role'
 import { buildApprovalMemoSections } from '@/app/lib/phed/approval-memo-data'
 import { PHED_APPROVAL_STAGES, getDisplayStatus } from '@/app/lib/phed/approval-stages'
 import { notifyAfterForward } from '@/app/lib/phed/approval-notifications'
@@ -63,7 +64,10 @@ export async function POST(req: NextRequest) {
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    const user = await requirePhedAccessRole(token, ['MANAGER_COMP_BENEFITS'])
+    // Stage 1 is performed by the HR/ADMIN/SUPER_ADMIN who uploaded the payroll
+    // for this pay period — acting as Manager, Compensation & Benefits — not by
+    // an externally assigned role holder.
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const body = await req.json()
     const { payPeriodId, comment } = body || {}
@@ -125,6 +129,6 @@ export async function POST(req: NextRequest) {
 
     notifyAfterForward(memo, actorName).catch(err => console.error('PHED approval notification failed:', err))
 
-    return withCors(ApiResponse.success(memo, 'Approval memo created and sent to Head, Internal Audit', 201), origin)
+    return withCors(ApiResponse.success(memo, 'Approval memo created and sent to Tax Audit', 201), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }

@@ -6,7 +6,8 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { buildWithheldReport } from '@/app/lib/phed/reports'
-import { exportReportToExcel, exportReportToPdf, WITHHELD_COLS } from '@/app/lib/phed/report-export'
+import { exportReportToExcel, exportReportToPdf, exportWorkbook, WITHHELD_COLS } from '@/app/lib/phed/report-export'
+import { buildWithheldSheet } from '@/app/lib/phed/payroll-sheets'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -42,14 +43,15 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const period = await (prisma as any).phedPayPeriod.findUnique({
       where: { id: params.id },
-      select: { periodName: true, company: { select: { companyName: true } } },
+      select: { periodName: true, month: true, year: true, company: { select: { companyName: true } } },
     })
     const periodName  = period?.periodName ?? 'Unknown'
     const companyName = period?.company?.companyName ?? ''
     const safeName    = periodName.replace(/\s+/g, '-')
 
     if (format === 'xlsx') {
-      const buf = await exportReportToExcel('Withheld Salaries', periodName, WITHHELD_COLS, data, companyName)
+      const sheet = buildWithheldSheet('Withheld Salaries', payrolls)
+      const buf = await exportWorkbook([sheet], companyName)
       return new NextResponse(buf as any, {
         status: 200,
         headers: {

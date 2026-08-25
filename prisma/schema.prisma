@@ -2529,11 +2529,12 @@ model PhedComputedPayroll {
 // ============================================================
 
 enum PhedAccessRole {
-  MANAGER_COMP_BENEFITS    // Stage 1 approver + full payroll page access
-  HEAD_INTERNAL_AUDIT      // Stage 2 approver + IAD Page only
-  CHIEF_PEOPLE_OFFICER     // Stage 3 approver + full payroll page access
-  CHIEF_FINANCE_OFFICER    // Stage 4 approver + full payroll page access
-  MD_CEO                   // Stage 5 approver + full payroll page access
+  MANAGER_COMP_BENEFITS    // Stage 1 label — filled by the payroll uploader (HR/ADMIN/SUPER_ADMIN); full page access
+  TAX_AUDIT                // Stage 2 approver + full payroll page access
+  HEAD_INTERNAL_AUDIT      // Stage 3 approver + IAD Page only
+  CHIEF_PEOPLE_OFFICER     // Stage 4 approver + full payroll page access
+  CHIEF_FINANCE_OFFICER    // Stage 5 approver + full payroll page access
+  MD_CEO                   // Stage 6 approver + full payroll page access
   TREASURY_TEAM            // no approval stage; scoped page access
   FINANCIAL_REPORTING_TEAM // no approval stage; Cost Centre Report only
   TAX_TEAM                 // no approval stage; PAYE Schedule only
@@ -2588,16 +2589,18 @@ model PhedStaffAccessRole {
 // Stage order/role mapping is fixed in application code (PHED_APPROVAL_STAGES),
 // never DB-configurable.
 enum PhedApprovalMemoStatus {
-  PENDING_REVIEW                // at Stage 2 (Head IAD)
-  PENDING_FIRST_LEVEL_APPROVAL  // at Stage 3 (CPO)
-  PENDING_SECOND_LEVEL_APPROVAL // at Stage 4 (CFO)
-  PENDING_FINAL_APPROVAL        // at Stage 5 (MD/CEO)
+  PENDING_TAX_AUDIT             // at Stage 2 (Tax Audit)
+  PENDING_REVIEW                // at Stage 3 (Head IAD)
+  PENDING_FIRST_LEVEL_APPROVAL  // at Stage 4 (CPO)
+  PENDING_SECOND_LEVEL_APPROVAL // at Stage 5 (CFO)
+  PENDING_FINAL_APPROVAL        // at Stage 6 (MD/CEO)
   APPROVED                      // terminal — ready for disbursement
   RETURNED_FOR_CORRECTION       // flagged back to Stage 1, awaiting resubmission
 }
 
 enum PhedApprovalStampAction {
   SUBMITTED
+  TAX_AUDITED
   RECOMMENDED
   APPROVED
   FINAL_APPROVED
