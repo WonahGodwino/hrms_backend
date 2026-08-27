@@ -1,8 +1,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
-
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { createNotification } from '@/app/lib/notifications/helpers'
@@ -11,95 +10,279 @@ export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
 }
 
-// POST /api/certifications/bulk/[action]
-// action: remind | expire-update | archive
-// Body: { companyId?, recordIds: string[] }
+// POST /api/certifications/bulk/:action
+// Actions: renew | assign | remind | verify | archive (and expire-update)
 export async function POST(req: NextRequest, { params }: { params: { action: string } }) {
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER'])
 
-    const VALID_ACTIONS = ['remind', 'expire-update', 'archive']
-    if (!VALID_ACTIONS.includes(params.action))
-      return withCors(ApiResponse.error(`Invalid action. Must be one of: ${VALID_ACTIONS.join(', ')}`, 400), origin)
+    const action = params.action.toLowerCase()
+    const VALID_ACTIONS = ['renew', 'assign', 'remind', 'verify', 'archive', 'expire-update']
 
-    const body = await req.json()
-    const { companyId, recordIds } = body
-    const cid = companyId ?? user.companyId
-    if (!cid) return withCors(ApiResponse.error('companyId is required', 400), origin)
-    if (user.companyId && cid !== user.companyId)
-      return withCors(ApiResponse.error('Access denied', 403), origin)
-    if (!Array.isArray(recordIds) || recordIds.length === 0)
-      return withCors(ApiResponse.error('recordIds array is required', 400), origin)
-    if (recordIds.length > 500)
-      return withCors(ApiResponse.error('Cannot process more than 500 records at once', 400), origin)
-
-    const records = await prisma.certificationRecord.findMany({
-      where: { id: { in: recordIds }, companyId: cid },
-      select: { id: true, employeeId: true, expiryDate: true, status: true },
-    })
-    if (records.length === 0)
-      return withCors(ApiResponse.error('No matching certification records found', 404), origin)
-
-    let processed = 0
-
-    if (params.action === 'remind') {
-      await Promise.all(
-        records.map(r =>
-          createNotification(
-            r.employeeId,
-            'CERTIFICATION_REMINDER',
-            'Certification Expiry Reminder',
-            `Your certification is expiring soon. Please renew it before ${r.expiryDate?.toLocaleDateString() ?? 'the due date'}.`,
-            { certificationRecordId: r.id },
-            cid,
-          ),
-        ),
+    if (!VALID_ACTIONS.includes(action)) {
+      return withCors(
+        ApiResponse.error(`Invalid action. Supported actions: ${VALID_ACTIONS.join(', ')}`, 400),
+        origin,
       )
-      processed = records.length
-
-      await prisma.trainingAuditLog.create({
-        data: {
-          companyId: cid,
-          actorId: user.userId,
-          action: 'BULK_REMIND',
-          entityType: 'certification_record',
-          entityId: recordIds[0],
-          metadata: { count: processed, recordIds },
-        },
-      })
     }
 
-    if (params.action === 'expire-update') {
-      const now = new Date()
-      await Promise.all(
-        records.map(r => {
+    const body = await req.json().catch(() => ({}))
+
+    const resolved = await resolveRequestCompanyId(user, body.companyId)
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+    const { companyId: cid } = resolved
+
+    // Extract selected IDs supporting certification_ids, ids, recordIds, and employeeIds
+    const rawIds = body.certification_ids ?? body.ids ?? body.recordIds ?? body.employeeIds ?? []
+    const selectedIds: string[] = Array.isArray(rawIds)
+      ? rawIds
+      : String(rawIds).split(',').map(s => s.trim()).filter(Boolean)
+
+    if (selectedIds.length === 0) {
+      return withCors(
+        ApiResponse.error('No target certification or employee IDs provided for bulk action', 400),
+        origin,
+      )
+    }
+
+    if (selectedIds.length > 500) {
+      return withCors(ApiResponse.error('Cannot process more than 500 records at once', 400), origin)
+    }
+
+    const errors: Array<{ id: string; message: string }> = []
+    let affectedCount = 0
+    const now = new Date()
+
+    // 1. ACTION: RENEW
+    if (action === 'renew') {
+      const records = await prisma.certificationRecord.findMany({
+        where: { id: { in: selectedIds }, companyId: cid },
+        select: { id: true, expiryDate: true, status: true, employeeId: true },
+      })
+
+      const foundMap = new Map(records.map(r => [r.id, r]))
+
+      for (const id of selectedIds) {
+        const record = foundMap.get(id)
+        if (!record) {
+          errors.push({ id, message: 'Certification record not found or access denied.' })
+          continue
+        }
+
+        try {
+          const baseDate = record.expiryDate && record.expiryDate > now ? record.expiryDate : now
+          const newExpiry = body.newExpiryDate
+            ? new Date(body.newExpiryDate)
+            : new Date(baseDate.getFullYear() + 1, baseDate.getMonth(), baseDate.getDate())
+
+          const daysToExpiry = Math.ceil((newExpiry.getTime() - now.getTime()) / 86_400_000)
+
+          await prisma.certificationRecord.update({
+            where: { id },
+            data: {
+              expiryDate: newExpiry,
+              issueDate: now,
+              status: 'Valid',
+              daysToExpiry,
+              updatedAt: now,
+            },
+          })
+          affectedCount++
+        } catch (err: any) {
+          errors.push({ id, message: err?.message || 'Failed to renew certification.' })
+        }
+      }
+    }
+
+    // 2. ACTION: ASSIGN (Bulk assign certification to employees)
+    else if (action === 'assign') {
+      const certTypeId = body.certificationTypeId ?? body.certificationId ?? body.typeId
+      if (!certTypeId) {
+        return withCors(ApiResponse.error('certificationTypeId is required for bulk assign action', 400), origin)
+      }
+
+      // Check certification type existence
+      const certType = await prisma.certificationType.findFirst({
+        where: { id: certTypeId, companyId: cid },
+      })
+
+      if (!certType) {
+        return withCors(ApiResponse.error('Specified certification type not found', 404), origin)
+      }
+
+      for (const empId of selectedIds) {
+        try {
+          const issueDate = body.issueDate ? new Date(body.issueDate) : now
+          const expiryDate = body.expiryDate ? new Date(body.expiryDate) : null
+
+          await prisma.certificationRecord.create({
+            data: {
+              companyId: cid,
+              employeeId: empId,
+              certificationTypeId: certTypeId,
+              certIdNumber: body.certIdNumber ?? null,
+              issueDate,
+              expiryDate,
+              status: 'Valid',
+              issuedBy: user.userId,
+            },
+          })
+          affectedCount++
+        } catch (err: any) {
+          errors.push({ id: empId, message: err?.message || 'Failed to assign certification to employee.' })
+        }
+      }
+    }
+
+    // 3. ACTION: REMIND
+    else if (action === 'remind') {
+      const records = await prisma.certificationRecord.findMany({
+        where: { id: { in: selectedIds }, companyId: cid },
+        include: { certificationType: { select: { name: true } } },
+      })
+
+      const foundMap = new Map(records.map(r => [r.id, r]))
+
+      for (const id of selectedIds) {
+        const record = foundMap.get(id)
+        if (!record) {
+          errors.push({ id, message: 'Certification record not found.' })
+          continue
+        }
+
+        try {
+          const certName = record.certificationType?.name ?? 'Certification'
+          const expiryStr = record.expiryDate ? record.expiryDate.toLocaleDateString() : 'due date'
+
+          await createNotification(
+            record.employeeId,
+            'CERTIFICATION_REMINDER',
+            `Certification Expiry Reminder: ${certName}`,
+            `Your ${certName} certification is due for renewal before ${expiryStr}. Please complete your renewal process.`,
+            { certificationRecordId: record.id },
+            cid,
+          )
+          affectedCount++
+        } catch (err: any) {
+          errors.push({ id, message: err?.message || 'Failed to send reminder notification.' })
+        }
+      }
+    }
+
+    // 4. ACTION: VERIFY
+    else if (action === 'verify') {
+      const records = await prisma.certificationRecord.findMany({
+        where: { id: { in: selectedIds }, companyId: cid },
+        select: { id: true },
+      })
+
+      const foundIds = new Set(records.map(r => r.id))
+
+      for (const id of selectedIds) {
+        if (!foundIds.has(id)) {
+          errors.push({ id, message: 'Certification record not found.' })
+          continue
+        }
+
+        try {
+          await prisma.certificationRecord.update({
+            where: { id },
+            data: { status: 'Valid', updatedAt: now },
+          })
+          affectedCount++
+        } catch (err: any) {
+          errors.push({ id, message: err?.message || 'Failed to verify certification.' })
+        }
+      }
+    }
+
+    // 5. ACTION: ARCHIVE (Soft Archive, NOT permanent deletion)
+    else if (action === 'archive') {
+      const records = await prisma.certificationRecord.findMany({
+        where: { id: { in: selectedIds }, companyId: cid },
+        select: { id: true },
+      })
+
+      const foundIds = new Set(records.map(r => r.id))
+
+      for (const id of selectedIds) {
+        if (!foundIds.has(id)) {
+          errors.push({ id, message: 'Certification record not found.' })
+          continue
+        }
+
+        try {
+          await prisma.certificationRecord.update({
+            where: { id },
+            data: { status: 'Archived', updatedAt: now },
+          })
+          affectedCount++
+        } catch (err: any) {
+          errors.push({ id, message: err?.message || 'Failed to archive certification record.' })
+        }
+      }
+    }
+
+    // 6. ACTION: EXPIRE-UPDATE (Recalculate expired / expiring soon status)
+    else if (action === 'expire-update') {
+      const records = await prisma.certificationRecord.findMany({
+        where: { id: { in: selectedIds }, companyId: cid },
+        select: { id: true, expiryDate: true, status: true },
+      })
+
+      for (const r of records) {
+        try {
           let status = r.status
+          let days: number | null = null
           if (r.expiryDate) {
-            const days = Math.ceil((r.expiryDate.getTime() - now.getTime()) / 86_400_000)
-            if (days < 0)       status = 'Expired'
+            days = Math.ceil((r.expiryDate.getTime() - now.getTime()) / 86_400_000)
+            if (days < 0)        status = 'Expired'
             else if (days <= 30) status = 'Expiring Soon'
             else                 status = 'Valid'
           }
-          return prisma.certificationRecord.update({
+          await prisma.certificationRecord.update({
             where: { id: r.id },
-            data: { status, daysToExpiry: r.expiryDate ? Math.ceil((r.expiryDate.getTime() - now.getTime()) / 86_400_000) : null },
+            data: { status, daysToExpiry: days },
           })
-        }),
-      )
-      processed = records.length
+          affectedCount++
+        } catch (err: any) {
+          errors.push({ id: r.id, message: err?.message || 'Failed to update record status.' })
+        }
+      }
     }
 
-    if (params.action === 'archive') {
-      await prisma.certificationRecord.updateMany({
-        where: { id: { in: recordIds }, companyId: cid },
-        data: { status: 'Expired' },
-      })
-      processed = records.length
-    }
+    // Write audit log for bulk action
+    await prisma.trainingAuditLog.create({
+      data: {
+        companyId: cid,
+        actorId: user.userId,
+        action: `BULK_${action.toUpperCase()}`,
+        entityType: 'certification_record',
+        entityId: selectedIds[0] ?? '',
+        metadata: {
+          processed: selectedIds.length,
+          affected: affectedCount,
+          failed: errors.length,
+          action,
+        },
+      },
+    })
 
-    return withCors(ApiResponse.success({ processed }, `Bulk ${params.action} completed for ${processed} record(s)`), origin)
+    const failedCount = errors.length
+    const totalProcessed = selectedIds.length
+
+    return withCors(
+      ApiResponse.success({
+        available: true,
+        processed: totalProcessed,
+        affected: affectedCount,
+        failed: failedCount,
+        errors,
+      }),
+      origin,
+    )
   } catch (e) {
     return withCors(handleApiError(e), origin)
   }

@@ -129,6 +129,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Publish: sending is the HR/Admin approval action, so these payslips
+    // become visible to staff as soon as the send is triggered — independent
+    // of whether the notification email below actually succeeds per-row.
+    await prisma.payslip.updateMany({
+      where: { id: { in: payslips.map((p) => p.id) }, companyId },
+      data: { draft: false },
+    })
+
     // FIX: Fetch payroll data separately for payslips that have payrollId
     const payrollIds = payslips
       .filter(p => p.payrollId)

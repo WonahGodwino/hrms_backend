@@ -440,6 +440,10 @@ export async function POST(request: NextRequest) {
             companyId: companyId!,
             createdBy: authUser.userId,
             isActive: true,
+            // Defaults tenure reporting to "date added to the system" for
+            // every new hire going forward — only staff that existed before
+            // this field was introduced need backfilling.
+            hireDate: new Date(),
           },
         })
 
@@ -553,6 +557,9 @@ export async function POST(request: NextRequest) {
         failed: results.failed,
         errors: results.errors,
         uploadedBy: authUser.userId,
+        status: 'COMPLETED',
+        startedAt: new Date(),
+        completedAt: new Date(),
       },
     })
 

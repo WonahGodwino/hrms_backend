@@ -3,6 +3,7 @@ import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -14,14 +15,18 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
+    const body = req.headers.get('content-length') !== '0' ? await req.json().catch(() => ({})) : {}
+
+    const resolved = await resolveRequestCompanyId(user, body.companyId ?? new URL(req.url).searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+
     const program = await prisma.trainingProgram.findFirst({
-      where: { id: params.id, companyId: user.companyId, deletedAt: null },
+      where: { id: params.id, companyId: resolved.companyId, deletedAt: null },
     })
     if (!program) return withCors(ApiResponse.error('Training program not found', 404), origin)
     if (program.status === 'ACTIVE')
       return withCors(ApiResponse.error('Program is already active', 409), origin)
 
-    const body = req.headers.get('content-length') !== '0' ? await req.json().catch(() => ({})) : {}
     const notifyEmployees = body.notify_employees ?? program.notifyEmployees
 
     const updated = await prisma.trainingProgram.update({

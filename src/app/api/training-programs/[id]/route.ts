@@ -3,6 +3,7 @@ import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -27,16 +28,22 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'TRAINING', ['STAFF', 'HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER'])
 
+    const { searchParams } = new URL(req.url)
+    const resolved = await resolveRequestCompanyId(user, searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+    const { companyId } = resolved
+
     const program = await prisma.trainingProgram.findFirst({
       where: {
-        companyId: user.companyId,
+        companyId,
         deletedAt: null,
         OR: [{ id: params.id }, { slug: params.id }],
       },
       include: {
         sessions:   { orderBy: { date: 'asc' } },
         materials:  { orderBy: { createdAt: 'asc' } },
-        assessment: {
+        assessments: {
+          where: { deletedAt: null },
           include: {
             questions: {
               select: { id: true, order: true, title: true, type: true, prompt: true, points: true, difficulty: true, tags: true },
@@ -44,12 +51,15 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
             },
             _count: { select: { attempts: true } },
           },
+          orderBy: { createdAt: 'desc' },
         },
         _count: { select: { participants: true, sessions: true } },
       },
     })
 
     if (!program) return withCors(ApiResponse.error('Training program not found', 404), origin)
+
+    const primaryAssessment = program.assessments[0] ?? null
 
     const [completedCount, inProgressCount] = await Promise.all([
       prisma.participantProgress.count({ where: { trainingProgramId: program.id, trainingStatus: 'COMPLETED' } }),
@@ -64,7 +74,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       completionRate:  program._count.participants > 0 ? Math.round((completedCount / program._count.participants) * 100) : 0,
     }
 
-    return withCors(ApiResponse.success({ ...program, stats }), origin)
+    return withCors(ApiResponse.success({ ...program, assessment: primaryAssessment, stats }), origin)
   } catch (e) {
     return withCors(handleApiError(e), origin)
   }
@@ -77,10 +87,13 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const program = await findProgram(params.id, user.companyId!)
+    const body = await req.json()
+    const resolved = await resolveRequestCompanyId(user, body.companyId ?? new URL(req.url).searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+
+    const program = await findProgram(params.id, resolved.companyId)
     if (!program) return withCors(ApiResponse.error('Training program not found', 404), origin)
 
-    const body = await req.json()
     const updated = await prisma.trainingProgram.update({
       where: { id: program.id },
       data: {
@@ -121,7 +134,10 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'TRAINING', ['ADMIN', 'SUPER_ADMIN'])
 
-    const program = await findProgram(params.id, user.companyId!)
+    const resolved = await resolveRequestCompanyId(user, new URL(req.url).searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+
+    const program = await findProgram(params.id, resolved.companyId)
     if (!program) return withCors(ApiResponse.error('Training program not found', 404), origin)
 
     await prisma.trainingProgram.update({ where: { id: program.id }, data: { deletedAt: new Date() } })

@@ -5,6 +5,14 @@ import { generateEnhancedPayslipPdf, type GeneratePayslipInput } from '../genera
 import type { ProcessingResult } from './types'
 import ExcelJS from 'exceljs'
 import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/helpers'
+import {
+  toNumberOrZero as num,
+  sanitizeTextValue as valueToString,
+  monthNameToNumber,
+  extractYearFromValue as getYearFromMonth,
+  getMonthNameFromNumber,
+  detectMaliciousMarkup,
+} from '../utils/valueParsing'
 
 function normalizeHeader(h: string): string {
   return h
@@ -27,36 +35,6 @@ function isMetaRowMarker(value: any): boolean {
   return normalized === 'instructions' || normalized === 'templatefields'
 }
 
-function num(v: any): number {
-  if (v === null || v === undefined || v === '') return 0
-  if (typeof v === 'number' && !isNaN(v)) return v
-  if (typeof v === 'object') {
-    if ('result' in v) return num((v as any).result)
-    if ('text' in v) return num((v as any).text)
-    if (Array.isArray((v as any).richText)) {
-      const richText = (v as any).richText.map((part: any) => part?.text || '').join('')
-      return num(richText)
-    }
-  }
-  const parsed = Number(v)
-  return Number.isFinite(parsed) ? parsed : 0
-}
-
-function valueToString(v: any): string {
-  if (v === null || v === undefined) return ''
-  if (typeof v === 'string') return v.trim()
-  if (typeof v === 'number' || typeof v === 'boolean') return String(v).trim()
-  if (v instanceof Date) return v.toISOString().split('T')[0]
-  if (typeof v === 'object') {
-    if ('result' in v) return valueToString((v as any).result)
-    if ('text' in v) return valueToString((v as any).text)
-    if (Array.isArray((v as any).richText)) {
-      return (v as any).richText.map((part: any) => part?.text || '').join('').trim()
-    }
-  }
-  return String(v).trim()
-}
-
 function normalizeWords(input: string): string[] {
   return input
     .toLowerCase()
@@ -64,60 +42,6 @@ function normalizeWords(input: string): string[] {
     .trim()
     .split(/\s+/)
     .filter(Boolean)
-}
-
-function monthNameToNumber(month: string): number {
-  if (!month) return new Date().getMonth() + 1
-  const normalized = month.toString().trim().toLowerCase()
-  const months = [
-    'january', 'february', 'march', 'april', 'may', 'june',
-    'july', 'august', 'september', 'october', 'november', 'december'
-  ]
-  const idx = months.indexOf(normalized)
-  if (idx >= 0) return idx + 1
-
-  const includedMonthIndex = months.findIndex((name) => normalized.includes(name))
-  if (includedMonthIndex >= 0) return includedMonthIndex + 1
-  
-  const asNumber = Number(normalized)
-  if (Number.isFinite(asNumber) && asNumber >= 1 && asNumber <= 12) {
-    return asNumber
-  }
-
-  try {
-    const date = new Date(month)
-    if (!isNaN(date.getTime())) {
-      return date.getMonth() + 1
-    }
-  } catch {}
-  
-  return new Date().getMonth() + 1
-}
-
-function getMonthNameFromNumber(monthNumber: number): string {
-  const months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
-  ]
-  return months[monthNumber - 1] || months[new Date().getMonth()]
-}
-
-function getYearFromMonth(monthInput: any): number {
-  if (typeof monthInput === 'string') {
-    const yearMatch = monthInput.match(/\b(20\d{2})\b/)
-    if (yearMatch) {
-      return parseInt(yearMatch[1], 10)
-    }
-    
-    try {
-      const date = new Date(monthInput)
-      if (!isNaN(date.getTime())) {
-        return date.getFullYear()
-      }
-    } catch {}
-  }
-  
-  return new Date().getFullYear()
 }
 
 function splitCsvLine(line: string): string[] {
@@ -490,6 +414,19 @@ export const processDynamicTemplate = {
       usedAttendanceFieldIds.add(String(daysInMonthField.id))
     }
     const daysWorkedField = strictDaysWorkedField || pickBestAttendanceField('daysWorked', usedAttendanceFieldIds)
+    const departmentField = getTemplateField(['department'])
+
+    // STAFF_DETAILS fields already surfaced elsewhere on the payslip (the
+    // Employee Information box pulls staffId/name/email/department from the
+    // matched StaffRecord, and daysInMonth/daysWorked/payPeriod from these
+    // heuristically-detected fields) — everything else in STAFF_DETAILS with
+    // showOnPayslip=true is otherwise silently dropped, so it's surfaced via
+    // additionalStaffDetails below instead.
+    const reservedStaffDetailFields = new Set(
+      [staffIdField, nameField, emailField, payPeriodField, daysInMonthField, daysWorkedField, departmentField]
+        .filter(Boolean)
+        .map((f) => f.systemField)
+    )
 
     for (let index = 0; index < data.length; index++) {
       const row = data[index]
@@ -508,8 +445,12 @@ export const processDynamicTemplate = {
         
         if (nameField) {
           rawName = valueToString(row[nameField.systemField])
+          const nameCheck = detectMaliciousMarkup(rawName)
+          if (nameCheck.isMalicious) {
+            throw new Error(`Malicious content detected in "${nameField.displayName}" (${nameCheck.reason}) — remove it and re-upload`)
+          }
         }
-        
+
         if (emailField) {
           rawEmail = valueToString(row[emailField.systemField])
         }
@@ -641,11 +582,16 @@ export const processDynamicTemplate = {
         // Store ALL template fields in customFields JSON, always include showOnPayslip fields
         const customFields: Record<string, any> = {}
         template.fields.forEach(field => {
-          let value = row[field.systemField]
-          if (value === undefined || value === null || value === '') {
-            // Default value for missing fields
-            if (field.dataType === 'Number') value = 0;
-            else value = '';
+          const rawValue = row[field.systemField]
+          let value: any
+          if (field.dataType === 'Number') {
+            value = num(rawValue)
+          } else {
+            value = valueToString(rawValue)
+            const check = detectMaliciousMarkup(value)
+            if (check.isMalicious) {
+              throw new Error(`Malicious content detected in "${field.displayName}" (${check.reason}) — remove it and re-upload`)
+            }
           }
           customFields[field.systemField] = {
             value,
@@ -680,9 +626,10 @@ export const processDynamicTemplate = {
         const earningsForPayslip: any[] = []
         const deductionsForPayslip: any[] = []
         const fixedValuesForPayslip: any[] = []
+        const additionalStaffDetails: { label: string; value: string }[] = []
 
         // Group fields by section for payslip
-        Object.values(customFields).forEach((field: any) => {
+        Object.entries(customFields).forEach(([systemField, field]: [string, any]) => {
           if (field.showOnPayslip) {
             const fieldSection = normalizeSection(field.section)
             const payslipItem = {
@@ -699,6 +646,13 @@ export const processDynamicTemplate = {
               fixedValuesForPayslip.push({ ...payslipItem, type: 'earnings', section: 'FIXED_VALUE' })
             } else if (fieldSection === 'DEDUCTIONS') {
               deductionsForPayslip.push({ ...payslipItem, type: 'deduction' })
+            } else if (fieldSection === 'STAFF_DETAILS' && !reservedStaffDetailFields.has(systemField)) {
+              // Custom identity/attendance fields (e.g. Gender, Employee ID)
+              // that aren't already shown via the Employee Information box.
+              additionalStaffDetails.push({
+                label: field.displayName,
+                value: field.dataType === 'Number' ? String(num(field.value)) : String(field.value || ''),
+              })
             }
           }
         })
@@ -721,7 +675,7 @@ export const processDynamicTemplate = {
             department: staffRecord.department || '',
             designation: staffRecord.position || '',
             position: staffRecord.position || '',
-            companyName: company?.companyName || '',
+            companyName: template.payslipCompanyName || company?.companyName || '',
             companyAddress: company?.address || '',
             companyPhone: company?.phone || '',
             companyLogo: company?.logo || '',
@@ -761,7 +715,7 @@ export const processDynamicTemplate = {
             proratedGrossPay: 0,
           },
           companyInfo: company ? {
-            name: company.companyName || '',
+            name: template.payslipCompanyName || company.companyName || '',
             address: company.address || '',
             phone: company.phone || '',
             email: company.email || '',
@@ -777,7 +731,11 @@ export const processDynamicTemplate = {
             totalDeductions: totalDeductions,
             netPay: netPay
           },
-          templateName: template.templateName
+          templateName: template.templateName,
+          additionalStaffDetails,
+          // WALLET/COMMERCIAL PAYMENT are BLUERIDGE-only concepts; Dynamic
+          // templates have no equivalent, so don't show a permanently-zero block.
+          showPaymentDetails: false,
         }
 
         const pdfResult = await generateEnhancedPayslipPdf(payslipInput)
@@ -791,7 +749,6 @@ export const processDynamicTemplate = {
         const fileDataForPrisma = Buffer.from(pdfBuffer)
 
         const payslipData = {
-          payrollId: payrollRecord.id,
           fileName: payslipFileName,
           fileData: fileDataForPrisma,
           fileType: 'application/pdf',
@@ -799,6 +756,11 @@ export const processDynamicTemplate = {
           grossPay: totalEarnings,
           netPay: netPay,
           filePath: `/database/payslips/${staffRecord.staffId}/${year}/${monthName}/${payslipFileName}`,
+          // Hidden from staff until sent/published (see sendEmails handling
+          // below and POST /api/payroll/send-selected-payslips). Recomputed
+          // on every write, including overwrite-existing corrections, so a
+          // re-upload that isn't emailed doesn't leave stale data visible.
+          draft: !sendEmails,
         }
 
         if (overwriteExisting) {
@@ -814,6 +776,10 @@ export const processDynamicTemplate = {
           if (existingPayslip) {
             isUpdate = true
             payslipId = existingPayslip.id
+            // payrollId is intentionally omitted here: the existing payslip
+            // for this staff/period already points at the payroll record for
+            // that same period (payrollRecord, updated in place above), so it
+            // never needs to change on an update.
             await prisma.payslip.update({
               where: { id: existingPayslip.id },
               data: { ...payslipData, updatedBy: user.userId, updatedAt: new Date() },
@@ -823,6 +789,7 @@ export const processDynamicTemplate = {
             const newPayslip = await prisma.payslip.create({
               data: {
                 ...payslipData,
+                payrollId: payrollRecord.id,
                 staffRecordId: staffRecord.id,
                 companyId: companyId,
                 month: monthName,
@@ -837,6 +804,7 @@ export const processDynamicTemplate = {
           const newPayslip = await prisma.payslip.create({
             data: {
               ...payslipData,
+              payrollId: payrollRecord.id,
               staffRecordId: staffRecord.id,
               companyId: companyId,
               month: monthName,

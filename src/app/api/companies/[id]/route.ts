@@ -105,6 +105,17 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       }
     }
 
+    if (body.status !== undefined) {
+      const allowedStatuses = ['Active', 'Inactive', 'Pending']
+      if (!allowedStatuses.includes(body.status)) {
+        return withCors(
+          ApiResponse.error(`status must be one of: ${allowedStatuses.join(', ')}`, 400),
+          origin,
+        )
+      }
+      data.status = body.status
+    }
+
     if (Object.keys(data).length === 1) {
       return withCors(ApiResponse.error('No editable fields were provided', 400), origin)
     }

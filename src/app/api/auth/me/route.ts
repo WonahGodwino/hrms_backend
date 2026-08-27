@@ -66,6 +66,8 @@ export async function GET(request: NextRequest) {
           position: staff.position,
           isActive: staff.isActive,
           staffId: staff.staffId,
+          phone: staff.phone,
+          createdAt: staff.createdAt,
         },
         company: staff.company
           ? {

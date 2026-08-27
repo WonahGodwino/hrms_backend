@@ -3,25 +3,30 @@ import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // POST /api/training-programs/:id/assignments
-// Body: { employee_ids: string[], due_date?: string, completion_window_days?: number, notify?: boolean }
+// Body: { employee_ids: string[], due_date?: string, completion_window_days?: number, notify?: boolean, companyId? }
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
+    const { employee_ids, due_date, completion_window_days, companyId } = await req.json()
+
+    const resolved = await resolveRequestCompanyId(user, companyId ?? new URL(req.url).searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+
     const program = await prisma.trainingProgram.findFirst({
-      where: { id: params.id, companyId: user.companyId, deletedAt: null },
+      where: { id: params.id, companyId: resolved.companyId, deletedAt: null },
     })
     if (!program) return withCors(ApiResponse.error('Training program not found', 404), origin)
 
-    const { employee_ids, due_date, completion_window_days } = await req.json()
     if (!Array.isArray(employee_ids) || employee_ids.length === 0)
       return withCors(ApiResponse.error('employee_ids array is required', 400), origin)
     if (employee_ids.length > 500)

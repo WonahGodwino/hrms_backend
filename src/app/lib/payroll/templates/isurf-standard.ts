@@ -6,6 +6,11 @@ import { generatePayslipPdf } from '@/app/lib/payroll/generatePayslipPdf'
 import type { ParsedPayrollRow } from '@/app/lib/payroll/types'
 import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/helpers'
 import { PAYROLL_TEMPLATES } from './types'
+import {
+  toNumberOrZero as num,
+  monthNameToNumber,
+  detectMaliciousMarkup,
+} from '../utils/valueParsing'
 
 function normalizeHeader(h: string) {
   return h
@@ -20,23 +25,6 @@ function getCell(row: any, header: string, canonicalMap: Record<string, string>)
   const normalized = normalizeHeader(header)
   const actualKey = canonicalMap[normalized] || header
   return row[actualKey]
-}
-
-function num(v: any) {
-  return v === null || v === undefined || v === '' ? 0 : Number(v) || 0
-}
-
-function monthNameToNumber(month: string): number {
-  if (!month) return 0
-  const normalized = month.toString().trim().toLowerCase()
-  const months = [
-    'january', 'february', 'march', 'april', 'may', 'june',
-    'july', 'august', 'september', 'october', 'november', 'december'
-  ]
-  const idx = months.indexOf(normalized)
-  if (idx >= 0) return idx + 1
-  const asNumber = Number(normalized)
-  return Number.isFinite(asNumber) ? asNumber : 0
 }
 
 function toPrismaBytes(data: Uint8Array): any {
@@ -210,7 +198,12 @@ export const processIsurfStandardTemplate = {
       try {
         rawName = getCell(row, 'Name', canonicalMap)?.toString().trim() || ''
         rawEmail = getCell(row, 'EMAIL', canonicalMap)?.toString().trim() || ''
-        
+
+        const nameCheck = detectMaliciousMarkup(rawName)
+        if (nameCheck.isMalicious) {
+          throw new Error(`Malicious content detected in "Name" (${nameCheck.reason}) — remove it and re-upload`)
+        }
+
         const missingCols = templateConfig.requiredColumns.filter((col) => {
           const v = getCell(row, col, canonicalMap)
           return v === undefined || v === null || v === ''
@@ -398,7 +391,6 @@ export const processIsurfStandardTemplate = {
         results.payslipsGenerated++
 
         const payslipData = {
-          payrollId: payrollRecord.id,
           fileName: payslipFileName,
           fileData: toPrismaBytes(pdfBuffer),
           fileType: 'application/pdf',
@@ -406,6 +398,11 @@ export const processIsurfStandardTemplate = {
           grossPay,
           netPay: netSalary,
           filePath: `/database/payslips/${staffRecord.staffId}/${year}/${monthName}/${payslipFileName}`,
+          // Hidden from staff until sent/published (see sendEmails handling
+          // below and POST /api/payroll/send-selected-payslips). Recomputed
+          // on every write, including overwrite-existing corrections, so a
+          // re-upload that isn't emailed doesn't leave stale data visible.
+          draft: !sendEmails,
         }
 
         if (overwriteExisting) {
@@ -421,6 +418,10 @@ export const processIsurfStandardTemplate = {
           if (existingPayslip) {
             isUpdate = true
             payslipId = existingPayslip.id
+            // payrollId is intentionally omitted here: the existing payslip
+            // for this staff/period already points at the payroll record for
+            // that same period (payrollRecord, updated in place above), so it
+            // never needs to change on an update.
             await prisma.payslip.update({
               where: { id: existingPayslip.id },
               data: { ...payslipData, updatedBy: user.userId, updatedAt: new Date() },
@@ -430,6 +431,7 @@ export const processIsurfStandardTemplate = {
             const newPayslip = await prisma.payslip.create({
               data: {
                 ...payslipData,
+                payrollId: payrollRecord.id,
                 staffRecordId: staffRecord.id,
                 companyId: companyId,
                 month: monthName,
@@ -444,6 +446,7 @@ export const processIsurfStandardTemplate = {
           const newPayslip = await prisma.payslip.create({
             data: {
               ...payslipData,
+              payrollId: payrollRecord.id,
               staffRecordId: staffRecord.id,
               companyId: companyId,
               month: monthName,

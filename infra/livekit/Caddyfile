@@ -1,0 +1,11 @@
+# Reverse proxy for the LiveKit signaling/WebSocket endpoint, with automatic
+# TLS (Let's Encrypt) — no certbot/manual renewal needed for this domain.
+#
+# Replace meet.REPLACE_WITH_YOUR_DOMAIN, point its DNS A record at this VPS,
+# then set LIVEKIT_URL=wss://meet.REPLACE_WITH_YOUR_DOMAIN in the backend's env.
+# (The separate TURN domain in livekit.yaml is NOT served here — LiveKit
+# terminates that one itself on its own port/cert, see livekit.yaml.)
+
+meet.REPLACE_WITH_YOUR_DOMAIN {
+	reverse_proxy 127.0.0.1:7880
+}

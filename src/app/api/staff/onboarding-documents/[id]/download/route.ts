@@ -35,7 +35,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         'Cache-Control': 'no-store',
       },
     })
-    const corsRes = withCors(res, origin)
+    const corsRes = await withCors(res, origin)
     corsRes.headers.set('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type')
     return corsRes
   } catch (error) { return withCors(handleApiError(error), origin) }

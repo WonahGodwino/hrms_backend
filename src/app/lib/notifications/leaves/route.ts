@@ -389,6 +389,55 @@ async function getUnreadCount(userId: string, companyId: string, role: string) {
   return await prisma.notification.count({ where })
 }
 
+// Same visibility rules as the GET handlers above, factored out so mutations
+// (mark-as-read, delete) authorize against everything a role can actually
+// see rather than just notifications addressed to their own userId — HR,
+// ADMIN, SUPER_ADMIN and MANAGER routinely see notifications belonging to
+// other staff, and restricting mutations to `userId: user.userId` silently
+// no-ops on all of those rows.
+async function getNotificationVisibilityWhere(userId: string, companyId: string, role: string): Promise<any> {
+  switch (role) {
+    case 'MANAGER': {
+      const managedStaffIds = await getManagedStaffIds(userId, companyId)
+      return {
+        OR: [
+          { userId },
+          { userId: { in: managedStaffIds }, type: { contains: 'LEAVE' } }
+        ]
+      }
+    }
+
+    case 'HR': {
+      const hrAdminIds = await getHRAdminStaffIds(companyId)
+      return {
+        OR: [
+          { userId: { in: hrAdminIds } },
+          {
+            type: {
+              in: [
+                'LEAVE_HR_APPROVAL_NEEDED',
+                'LEAVE_REQUEST_SUBMITTED',
+                'LEAVE_APPROVED',
+                'LEAVE_REJECTED',
+                'LEAVE_CANCELLED'
+              ]
+            }
+          }
+        ]
+      }
+    }
+
+    case 'ADMIN':
+    case 'SUPER_ADMIN':
+      // Admins can act on every notification in their company.
+      return {}
+
+    case 'STAFF':
+    default:
+      return { userId }
+  }
+}
+
 // ==================== API ENDPOINTS ====================
 
 // OPTIONS - CORS preflight
@@ -570,12 +619,14 @@ export async function POST(request: NextRequest) {
     }
     
     let updateResult
-    
+    const visibilityWhere = await getNotificationVisibilityWhere(user.userId, staff.companyId, user.role)
+
     if (markAll) {
-      // Mark all notifications as read for this user in this company
+      // Mark every notification this role can see as read, not just the
+      // ones addressed directly to this user (see getNotificationVisibilityWhere).
       updateResult = await prisma.notification.updateMany({
         where: {
-          userId: user.userId,
+          ...visibilityWhere,
           companyId: staff.companyId,
           read: false
         },
@@ -586,18 +637,18 @@ export async function POST(request: NextRequest) {
       })
     } else if (notificationIds && notificationIds.length > 0) {
       // Mark specific notifications as read
-      // First verify the notifications belong to the user
+      // First verify the notifications are visible to this user/role
       const notifications = await prisma.notification.findMany({
         where: {
           id: { in: notificationIds },
-          userId: user.userId,
+          ...visibilityWhere,
           companyId: staff.companyId
         },
         select: { id: true }
       })
-      
+
       const validNotificationIds = notifications.map(n => n.id)
-      
+
       if (validNotificationIds.length === 0) {
         const response = NextResponse.json(
           { success: false, message: 'No valid notifications found to mark as read' },
@@ -605,11 +656,11 @@ export async function POST(request: NextRequest) {
         )
         return withCors(response, origin)
       }
-      
+
       updateResult = await prisma.notification.updateMany({
         where: {
           id: { in: validNotificationIds },
-          userId: user.userId,
+          ...visibilityWhere,
           companyId: staff.companyId
         },
         data: {
@@ -822,22 +873,24 @@ export async function DELETE(request: NextRequest) {
     }
     
     let deleteResult
-    
+    const visibilityWhere = await getNotificationVisibilityWhere(user.userId, staff.companyId, user.role)
+
     if (deleteAllRead) {
-      // Delete all read notifications for this user
+      // Delete every read notification this role can see, not just the
+      // ones addressed directly to this user.
       deleteResult = await prisma.notification.deleteMany({
         where: {
-          userId: user.userId,
+          ...visibilityWhere,
           companyId: staff.companyId,
           read: true
         }
       })
     } else if (notificationId) {
-      // Delete specific notification (verify it belongs to user)
+      // Delete specific notification (verify it's visible to this user/role)
       const notification = await prisma.notification.findFirst({
         where: {
           id: notificationId,
-          userId: user.userId,
+          ...visibilityWhere,
           companyId: staff.companyId
         }
       })

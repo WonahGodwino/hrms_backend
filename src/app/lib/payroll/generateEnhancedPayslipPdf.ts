@@ -228,10 +228,19 @@ export interface GeneratePayslipInput {
 		netPay: number;
 	};
 	templateName?: string;
+	// Non-earnings/deduction STAFF_DETAILS fields (Dynamic templates) that are
+	// marked showOnPayslip but aren't already covered by the Employee
+	// Information box (e.g. a custom "Gender" or "Employee ID" field).
+	additionalStaffDetails?: { label: string; value: string }[];
+	// BLUERIDGE populates walletPayment/commercialPayment from real uploaded
+	// columns; Dynamic templates never do, so they opt out of this block
+	// entirely rather than showing a permanently-zero section. Defaults to
+	// true so existing callers (BLUERIDGE) are unaffected.
+	showPaymentDetails?: boolean;
 }
 
 export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): Promise<{ pdfBuffer: Uint8Array; fileName: string }> {
-	const { staff, payroll, companyInfo, earnings, deductions, summary, templateName } = input;
+	const { staff, payroll, companyInfo, earnings, deductions, summary, templateName, additionalStaffDetails, showPaymentDetails = true } = input;
 	const currencyCode = normalizeCurrencyCode(companyInfo?.baseCurrency || staff.baseCurrency || 'NGN');
 
 	console.log('PDF Generator - Generating payslip for:', {
@@ -319,7 +328,14 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 				}
 			};
 
-			doc.roundedRect(40, y, doc.page.width - 80, 140, 6).fill('#f3f6fb');
+			// Custom STAFF_DETAILS fields (from the template builder) render as
+			// extra rows inside this same box, directly under the rest of the
+			// staff details — the section a field is configured under on the
+			// template is the section it appears in on the payslip.
+			const extraStaffDetailRows = additionalStaffDetails?.length || 0;
+			const employeeInfoBoxHeight = 140 + extraStaffDetailRows * 17;
+
+			doc.roundedRect(40, y, doc.page.width - 80, employeeInfoBoxHeight, 6).fill('#f3f6fb');
 
 
 			if (templateName) {
@@ -348,7 +364,17 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 				.text(`Number of days worked: ${payroll.daysWorked || 0}`, rightColX, y + 47)
 				.text(`Pay Period: ${getMonthName(payroll.periodMonth)} ${payroll.periodYear}`, rightColX, y + 64);
 
-			y = y + 155;
+			// Custom staff-details fields continue in the left column, right
+			// under Email, still inside the same "EMPLOYEE INFORMATION" box.
+			if (additionalStaffDetails && additionalStaffDetails.length > 0) {
+				let staffDetailY = y + 115;
+				additionalStaffDetails.forEach((detail) => {
+					doc.fontSize(10).font(regularFont).fillColor('#000000').text(`${detail.label}: ${detail.value}`, 55, staffDetailY);
+					staffDetailY += 17;
+				});
+			}
+
+			y = y + employeeInfoBoxHeight + 15;
 
 			// ===== EARNINGS SECTION =====
 			doc.fontSize(14).font(boldFont).fillColor('#1e3a5f').text('EARNINGS', 40, y);
@@ -545,39 +571,41 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 				color: '#0b1f44',
 				currencyCode,
 			});
-			// Payment Details - Below Net Salary
-			y += 85;
+			// Payment Details - Below Net Salary (BLUERIDGE only; see showPaymentDetails doc comment)
+			if (showPaymentDetails) {
+				y += 85;
 
-			doc.fontSize(12).font(boldFont).fillColor('#1e3a5f').text('PAYMENT DETAILS', 40, y);
+				doc.fontSize(12).font(boldFont).fillColor('#1e3a5f').text('PAYMENT DETAILS', 40, y);
 
-			y += 20;
+				y += 20;
 
-			doc
-				.moveTo(40, y)
-				.lineTo(doc.page.width - 40, y)
-				.stroke('#1e3a5f');
+				doc
+					.moveTo(40, y)
+					.lineTo(doc.page.width - 40, y)
+					.stroke('#1e3a5f');
 
-			y += 15;
+				y += 15;
 
-			// Payment fields - ALL SHOWN
-			const paymentFields = [
-				{ displayName: 'WALLET PAYMENT', value: payroll.walletPayment ?? 0 },
-				{ displayName: 'COMMERCIAL PAYMENT', value: payroll.commercialPayment ?? 0 },
-			];
+				// Payment fields - ALL SHOWN
+				const paymentFields = [
+					{ displayName: 'WALLET PAYMENT', value: payroll.walletPayment ?? 0 },
+					{ displayName: 'COMMERCIAL PAYMENT', value: payroll.commercialPayment ?? 0 },
+				];
 
-			paymentFields.forEach((field) => {
-				ensureSpace(18);
-				doc.fontSize(10).font(regularFont).fillColor('#000000').text(field.displayName, 50, y);
-				drawCurrency(doc, field.value, doc.page.width - 180, y, {
-					width: 130,
-					align: 'right',
-					font: regularFont,
-					fontSize: 10,
-					color: '#000000',
-					currencyCode,
+				paymentFields.forEach((field) => {
+					ensureSpace(18);
+					doc.fontSize(10).font(regularFont).fillColor('#000000').text(field.displayName, 50, y);
+					drawCurrency(doc, field.value, doc.page.width - 180, y, {
+						width: 130,
+						align: 'right',
+						font: regularFont,
+						fontSize: 10,
+						color: '#000000',
+						currencyCode,
+					});
+					y += 18;
 				});
-				y += 18;
-			});
+			}
 
 			// ===== FOOTER SECTION =====
 			const footerY = doc.page.height - doc.page.margins.bottom - 35;

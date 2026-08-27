@@ -7,6 +7,7 @@ import { prisma } from '@/app/lib/db';
 import { ExtendedPayslipItem, StaffRecordInfo } from '@/app/lib/types/payslip';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 import { getPayslipDisplayFields, calculateTotals } from '@/app/lib/payroll/utils';
+import { parseMonthFromString } from '@/app/lib/payroll/utils/monthParser';
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
@@ -52,10 +53,13 @@ export async function GET(request: NextRequest) {
 		const maxAmount = searchParams.get('maxAmount');
 		const includeDetails = searchParams.get('includeDetails') === 'true'; // For detailed view
 
-		// Build where clause - always filter by staffRecordId
+		// Build where clause - always filter by staffRecordId. Draft payslips
+		// are hidden from staff until HR/Admin publishes them (sends the
+		// notification) — see POST /api/payroll/send-selected-payslips.
 		const whereClause: any = {
 			staffRecordId: user.userId,
 			companyId: companyId,
+			draft: false,
 		};
 
 		// Add year filter if provided
@@ -93,13 +97,14 @@ export async function GET(request: NextRequest) {
 			}
 		}
 
-		// Get total count for pagination
-		const totalCount = await prisma.payslip.count({
-			where: whereClause,
-		});
-
-		// Fetch payslips with related data for dynamic templates
-		const payslips = await prisma.payslip.findMany({
+		// `month` is stored as a name ("January".."December"), so a DB-level
+		// orderBy on it sorts alphabetically, not chronologically — and
+		// createdAt (when the record was generated) doesn't reliably track
+		// the pay period either (late/backfilled uploads). Fetch every
+		// matching payslip for this staff member (inherently a small set)
+		// and sort/paginate in app code so "most recent pay period first" is
+		// actually correct across pages, not just within one.
+		const allPayslips = await prisma.payslip.findMany({
 			where: whereClause,
 			include: {
 				payroll: {
@@ -124,10 +129,17 @@ export async function GET(request: NextRequest) {
 					}
 				}
 			},
-			orderBy: [{ year: 'desc' }, { month: 'desc' }, { createdAt: 'desc' }],
-			skip,
-			take: limit,
 		});
+
+		allPayslips.sort((a, b) => {
+			if (b.year !== a.year) return b.year - a.year;
+			const monthDiff = parseMonthFromString(b.month) - parseMonthFromString(a.month);
+			if (monthDiff !== 0) return monthDiff;
+			return b.createdAt.getTime() - a.createdAt.getTime();
+		});
+
+		const totalCount = allPayslips.length;
+		const payslips = allPayslips.slice(skip, skip + limit);
 
 		// Get staff info
 		const staffRecord = await prisma.staffRecord.findUnique({
@@ -243,26 +255,40 @@ export async function GET(request: NextRequest) {
 			return baseItem;
 		});
 
-		// Get summary statistics for the staff member
-		const summary = await prisma.payslip.aggregate({
-			where: {
-				staffRecordId: user.userId,
-				companyId: companyId,
-			},
-			_sum: {
-				grossPay: true,
-				netPay: true,
-			},
-			_count: true,
-			_min: {
-				year: true,
-				month: true,
-			},
-			_max: {
-				year: true,
-				month: true,
-			},
+		// Get summary statistics for the staff member. _min/_max on `month`
+		// would hit the same alphabetical-vs-chronological problem as above
+		// (and independently-computed _min/_max year+month aren't even
+		// guaranteed to come from the same payslip), so earliest/latest are
+		// derived by sorting in app code instead.
+		const [summary, allPeriods] = await Promise.all([
+			prisma.payslip.aggregate({
+				where: {
+					staffRecordId: user.userId,
+					companyId: companyId,
+					draft: false,
+				},
+				_sum: {
+					grossPay: true,
+					netPay: true,
+				},
+				_count: true,
+			}),
+			prisma.payslip.findMany({
+				where: {
+					staffRecordId: user.userId,
+					companyId: companyId,
+					draft: false,
+				},
+				select: { year: true, month: true },
+			}),
+		]);
+
+		allPeriods.sort((a, b) => {
+			if (b.year !== a.year) return b.year - a.year;
+			return parseMonthFromString(b.month) - parseMonthFromString(a.month);
 		});
+		const latestPeriod = allPeriods[0] ?? null;
+		const earliestPeriod = allPeriods[allPeriods.length - 1] ?? null;
 
 		const staffInfo: StaffRecordInfo = {
 			id: user.userId,
@@ -278,6 +304,7 @@ export async function GET(request: NextRequest) {
 			where: {
 				staffRecordId: user.userId,
 				companyId: companyId,
+				draft: false,
 			},
 			select: {
 				year: true,
@@ -297,11 +324,11 @@ export async function GET(request: NextRequest) {
 						totalPayslips: summary._count,
 						totalGrossPay: summary._sum.grossPay || 0,
 						totalNetPay: summary._sum.netPay || 0,
-						earliestPayslip: summary._min.year && summary._min.month 
-							? `${summary._min.month} ${summary._min.year}` 
+						earliestPayslip: earliestPeriod
+							? `${earliestPeriod.month} ${earliestPeriod.year}`
 							: null,
-						latestPayslip: summary._max.year && summary._max.month 
-							? `${summary._max.month} ${summary._max.year}` 
+						latestPayslip: latestPeriod
+							? `${latestPeriod.month} ${latestPeriod.year}`
 							: null,
 					},
 					availableYears: availableYears.map(y => y.year),

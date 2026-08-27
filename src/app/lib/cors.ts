@@ -29,6 +29,10 @@ export function getCorsHeaders(origin: string | null): Record<string, string> {
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept, X-Requested-With',
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Max-Age': '86400',
+    // Without this, the browser blocks JS from reading these headers on the
+    // response even though the body itself comes through fine — file-download
+    // routes rely on Content-Disposition to name the saved file correctly.
+    'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
     'Vary': 'Origin',
   }
 
@@ -39,22 +43,29 @@ export function getCorsHeaders(origin: string | null): Record<string, string> {
   return headers
 }
 
-export function withCors(response: NextResponse, origin: string | null) {
-  const corsResponse = new NextResponse(response.body, {
+export async function withCors(response: NextResponse, origin: string | null) {
+  // Re-wrapping via response.body (a ReadableStream) risks the stream not
+  // being fully drained/forwarded on every runtime path — reading it fully
+  // into memory first guarantees the wrapped response carries the exact
+  // same bytes, which matters for binary downloads (.docx/.xlsx) where a
+  // partial stream produces a file that looks fine in size but is silently
+  // truncated/corrupted.
+  const bodyBuffer = await response.arrayBuffer()
+  const corsResponse = new NextResponse(bodyBuffer, {
     status: response.status,
     statusText: response.statusText,
     headers: new Headers(),
   })
-  
+
   response.headers.forEach((value, key) => {
     corsResponse.headers.set(key, value)
   })
-  
+
   const corsHeaders = getCorsHeaders(origin)
   Object.entries(corsHeaders).forEach(([key, value]) => {
     corsResponse.headers.set(key, value)
   })
-  
+
   return corsResponse
 }
 

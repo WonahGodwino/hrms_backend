@@ -3,32 +3,36 @@ import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // PUT /api/attempts/:attemptId/submit
-// Body: { responses: [{question_id, selected_option_id?, selected_boolean?, time_spent_seconds?}], time_taken_seconds? }
+// Body: { responses: [{question_id, selected_option_id?, selected_boolean?, time_spent_seconds?}], time_taken_seconds?, companyId? }
 export async function PUT(req: NextRequest, { params }: { params: { attemptId: string } }) {
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'TRAINING', ['STAFF', 'HR', 'ADMIN', 'SUPER_ADMIN'])
 
+    const { responses, time_taken_seconds, companyId } = await req.json()
+    if (!Array.isArray(responses)) return withCors(ApiResponse.error('responses array is required', 400), origin)
+
+    const resolved = await resolveRequestCompanyId(user, companyId ?? new URL(req.url).searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+
     const attempt = await prisma.assessmentAttempt.findFirst({
       where: {
         id: params.attemptId,
-        companyId: user.companyId,
+        companyId: resolved.companyId,
         completedAt: null,
         ...(user.role === 'STAFF' ? { employeeId: user.userId } : {}),
       },
       include: { assessment: { include: { questions: true } } },
     })
     if (!attempt) return withCors(ApiResponse.error('Active attempt not found', 404), origin)
-
-    const { responses, time_taken_seconds } = await req.json()
-    if (!Array.isArray(responses)) return withCors(ApiResponse.error('responses array is required', 400), origin)
 
     const { assessment } = attempt
     let earned = 0

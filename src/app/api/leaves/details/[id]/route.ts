@@ -35,6 +35,7 @@ export async function GET(
 
     const leave = await prisma.leaveRequest.findUnique({
       where: { id },
+      omit: { attachmentData: true },
       include: {
         company: {
           select: {
@@ -189,6 +190,9 @@ export async function GET(
       contactPhone: leave.contactPhone,
       attachmentUrl: leave.attachmentUrl,
       fileName: leave.fileName,
+      hasAttachment: leave.hasAttachment,
+      attachmentMimeType: leave.attachmentMimeType,
+      attachmentSize: leave.attachmentSize,
       staffRecord: leave.staffRecord,
       leaveTypeDetails: leave.leaveType
     }

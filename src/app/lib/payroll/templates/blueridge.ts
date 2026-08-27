@@ -6,6 +6,13 @@ import { generateEnhancedPayslipPdf, type GeneratePayslipInput } from '../genera
 import type { ParsedPayrollRow } from '@/app/lib/payroll/types'
 import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/helpers'
 import { PAYROLL_TEMPLATES } from './types'
+import {
+  toNumberOrZero as num,
+  monthNameToNumber,
+  extractYearFromValue as getYearFromMonth,
+  getMonthNameFromNumber,
+  detectMaliciousMarkup,
+} from '../utils/valueParsing'
 
 function normalizeHeader(h: string) {
   return h
@@ -22,63 +29,6 @@ function getCell(row: any, header: string, canonicalMap: Record<string, string>)
   const normalized = normalizeHeader(header)
   const actualKey = canonicalMap[normalized] || header
   return row[actualKey]
-}
-
-function num(v: any): number {
-  if (v === null || v === undefined || v === '') return 0
-  const parsed = Number(v)
-  return Number.isFinite(parsed) ? parsed : 0
-}
-
-function monthNameToNumber(month: string): number {
-  if (!month) return new Date().getMonth() + 1
-  const normalized = month.toString().trim().toLowerCase()
-  const months = [
-    'january', 'february', 'march', 'april', 'may', 'june',
-    'july', 'august', 'september', 'october', 'november', 'december'
-  ]
-  const idx = months.indexOf(normalized)
-  if (idx >= 0) return idx + 1
-  
-  const asNumber = Number(normalized)
-  if (Number.isFinite(asNumber) && asNumber >= 1 && asNumber <= 12) {
-    return asNumber
-  }
-  
-  try {
-    const date = new Date(normalized)
-    if (!isNaN(date.getTime())) {
-      return date.getMonth() + 1
-    }
-  } catch {}
-  
-  return new Date().getMonth() + 1
-}
-
-function getMonthNameFromNumber(monthNumber: number): string {
-  const months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
-  ]
-  return months[monthNumber - 1] || months[new Date().getMonth()]
-}
-
-function getYearFromMonth(monthInput: any): number {
-  if (typeof monthInput === 'string') {
-    const yearMatch = monthInput.match(/\b(20\d{2})\b/)
-    if (yearMatch) {
-      return parseInt(yearMatch[1], 10)
-    }
-    
-    try {
-      const date = new Date(monthInput)
-      if (!isNaN(date.getTime())) {
-        return date.getFullYear()
-      }
-    } catch {}
-  }
-  
-  return new Date().getFullYear()
 }
 
 function toPrismaBytes(data: Uint8Array): Buffer {
@@ -237,7 +187,12 @@ export const processBlueridgeTemplate = {
         staffId = getCell(row, 'Staff ID', canonicalMap)?.toString().trim() || ''
         rawName = getCell(row, 'Name', canonicalMap)?.toString().trim() || ''
         rawEmail = getCell(row, 'Email', canonicalMap)?.toString().trim() || ''
-        
+
+        const nameCheck = detectMaliciousMarkup(rawName)
+        if (nameCheck.isMalicious) {
+          throw new Error(`Malicious content detected in "Name" (${nameCheck.reason}) — remove it and re-upload`)
+        }
+
         const missingCols = templateConfig.requiredColumns.filter((col) => {
           const v = getCell(row, col, canonicalMap)
           return v === undefined || v === null || v === ''
@@ -266,7 +221,12 @@ export const processBlueridgeTemplate = {
 
         // FIXED: Get position
         const position = getCell(row, 'Position verify (coe)', canonicalMap)?.toString().trim() || ''
-        
+
+        const positionCheck = detectMaliciousMarkup(position)
+        if (positionCheck.isMalicious) {
+          throw new Error(`Malicious content detected in "Position" (${positionCheck.reason}) — remove it and re-upload`)
+        }
+
         // FIXED: Try multiple ways to get working days - handle HTML tags properly
         let workingDaysRaw = getCell(row, 'Working Days', canonicalMap)
         if (workingDaysRaw === undefined || workingDaysRaw === null || workingDaysRaw === '') {
@@ -540,7 +500,6 @@ export const processBlueridgeTemplate = {
         const fileDataForPrisma = Buffer.from(pdfBuffer)
 
         const payslipData = {
-          payrollId: payrollRecord.id,
           fileName: payslipFileName,
           fileData: fileDataForPrisma,
           fileType: 'application/pdf',
@@ -548,6 +507,11 @@ export const processBlueridgeTemplate = {
           grossPay,
           netPay: netSalary,
           filePath: `/database/payslips/${staffRecord.staffId}/${year}/${monthName}/${payslipFileName}`,
+          // Hidden from staff until sent/published (see sendEmails handling
+          // below and POST /api/payroll/send-selected-payslips). Recomputed
+          // on every write, including overwrite-existing corrections, so a
+          // re-upload that isn't emailed doesn't leave stale data visible.
+          draft: !sendEmails,
         }
 
         if (overwriteExisting) {
@@ -563,6 +527,10 @@ export const processBlueridgeTemplate = {
           if (existingPayslip) {
             isUpdate = true
             payslipId = existingPayslip.id
+            // payrollId is intentionally omitted here: the existing payslip
+            // for this staff/period already points at the payroll record for
+            // that same period (payrollRecord, updated in place above), so it
+            // never needs to change on an update.
             await prisma.payslip.update({
               where: { id: existingPayslip.id },
               data: { ...payslipData, updatedBy: user.userId, updatedAt: new Date() },
@@ -572,6 +540,7 @@ export const processBlueridgeTemplate = {
             const newPayslip = await prisma.payslip.create({
               data: {
                 ...payslipData,
+                payrollId: payrollRecord.id,
                 staffRecordId: staffRecord.id,
                 companyId: companyId,
                 month: monthName,
@@ -586,6 +555,7 @@ export const processBlueridgeTemplate = {
           const newPayslip = await prisma.payslip.create({
             data: {
               ...payslipData,
+              payrollId: payrollRecord.id,
               staffRecordId: staffRecord.id,
               companyId: companyId,
               month: monthName,

@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -14,13 +15,12 @@ export async function GET(req: NextRequest) {
     const user = requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const { searchParams } = new URL(req.url)
-    const companyId = searchParams.get('companyId') ?? user.companyId
+    const resolvedCompany = await resolveRequestCompanyId(user, searchParams.get('companyId'))
+    if (isCompanyError(resolvedCompany)) return withCors(ApiResponse.error(resolvedCompany.error.message, resolvedCompany.error.status), origin)
+    const { companyId } = resolvedCompany
     const severity  = searchParams.get('severity')
     const status    = searchParams.get('status')
     const type      = searchParams.get('type')
-    if (!companyId) return withCors(ApiResponse.error('companyId is required', 400), origin)
-    if (user.companyId && companyId !== user.companyId)
-      return withCors(ApiResponse.error('Access denied', 403), origin)
 
     const where: any = { companyId }
     if (severity) where.severity = severity

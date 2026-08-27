@@ -1,0 +1,112 @@
+# Self-hosted media stack for the Meetings module (Caddy + LiveKit + Egress +
+# Redis), meant to run on the same Hostinger VPS as the backend, or a
+# neighboring one.
+#
+# host networking is used throughout because LiveKit needs a wide UDP port
+# range (rtc.port_range_start/end below) that's impractical to publish
+# port-by-port through Docker's NAT — host mode exposes it directly, and lets
+# Caddy/livekit/egress all reach each other over 127.0.0.1 with no extra
+# Docker networking to configure.
+#
+# ALTERNATIVE: for a more advanced setup that shares port 443 between HTTPS
+# and TURN/TLS (so TURN still works on networks that only allow port 443
+# outbound), run LiveKit's official generator instead of hand-editing these
+# files: docker run --rm -it -v $PWD:/output livekit/generate
+# This compose file instead gives TURN/TLS its own dedicated port (5349) +
+# certificate, which is simpler to reason about at the cost of that one edge case.
+#
+# Before `docker compose up -d`:
+#   1. Set meet.REPLACE_WITH_YOUR_DOMAIN in ./Caddyfile, point its DNS A record at this VPS.
+#   2. Fill in the API key/secret pair in livekit.yaml AND egress.yaml (must match).
+#   3. Set turn.domain in livekit.yaml to your real TURN subdomain, point its DNS
+#      A record at this VPS, and issue its cert: certbot certonly --standalone -d turn.<yourdomain>
+#   4. Open firewall ports listed at the bottom of this file.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: meet-caddy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  redis:
+    image: redis:7-alpine
+    container_name: meet-redis
+    restart: unless-stopped
+    network_mode: host
+    command: ["redis-server", "--port", "6390", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: meet-livekit
+    restart: unless-stopped
+    network_mode: host
+    command: ["--config", "/etc/livekit.yaml"]
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro   # for turn.cert_file/key_file in livekit.yaml
+    depends_on:
+      - redis
+
+  egress:
+    image: livekit/egress:latest
+    container_name: meet-egress
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - EGRESS_CONFIG_FILE=/etc/egress.yaml
+    volumes:
+      - ./egress.yaml:/etc/egress.yaml:ro
+      - egress-tmp:/tmp
+    # Room-composite egress renders the call in a headless Chrome tab — it
+    # needs a real shared-memory allocation and relaxed seccomp like any
+    # Chrome-in-Docker workload, or it crashes under load.
+    cap_add:
+      - SYS_ADMIN
+    shm_size: "2gb"
+    depends_on:
+      - redis
+      - livekit
+
+  # Optional: fully self-hosted S3-compatible object store for recordings, if
+  # you'd rather not use an external provider (Cloudflare R2 / Backblaze B2 /
+  # AWS S3). Skip this service entirely and point LIVEKIT_S3_* at an external
+  # provider instead if you'd prefer someone else responsible for durability
+  # and off-site backup of interview recordings.
+  minio:
+    image: minio/minio:latest
+    container_name: meet-minio
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      MINIO_ROOT_USER: REPLACE_WITH_ACCESS_KEY
+      MINIO_ROOT_PASSWORD: REPLACE_WITH_SECRET_KEY_MIN_8_CHARS
+    command: ["server", "/data", "--address", ":9000", "--console-address", ":9001"]
+    volumes:
+      - minio-data:/data
+
+volumes:
+  redis-data:
+  egress-tmp:
+  minio-data:
+  caddy-data:
+  caddy-config:
+
+# ---------------------------------------------------------------------------
+# Firewall ports to open on the VPS (adjust to your provider's firewall UI —
+# Hostinger VPS panel or ufw/iptables on the box itself):
+#   7880/tcp   - LiveKit signaling (only needs to be reachable from localhost/
+#                the reverse proxy, not the public internet, since it's proxied)
+#   7881/tcp   - LiveKit RTC over TCP (fallback when UDP is blocked)
+#   50000-60000/udp - LiveKit RTC media (the port_range in livekit.yaml)
+#   3478/udp   - embedded TURN/STUN
+#   5349/tcp   - TURN over TLS
+#   9000/tcp   - MinIO S3 API (only if using the minio service; keep this
+#                restricted to the backend server's IP, never the public internet)
+# ---------------------------------------------------------------------------

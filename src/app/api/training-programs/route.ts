@@ -3,6 +3,7 @@ import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -18,7 +19,9 @@ export async function GET(req: NextRequest) {
     const user = await requireModuleAccess(token, 'TRAINING', ['STAFF', 'HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER'])
 
     const { searchParams } = new URL(req.url)
-    const companyId     = searchParams.get('companyId') ?? user.companyId
+    const resolved = await resolveRequestCompanyId(user, searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+    const { companyId } = resolved
     const status        = searchParams.get('status')
     const category      = searchParams.get('category')
     const trainingType  = searchParams.get('training_type')
@@ -27,10 +30,6 @@ export async function GET(req: NextRequest) {
     const sort          = searchParams.get('sort') ?? 'createdAt'
     const page          = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
     const limit         = Math.min(100, parseInt(searchParams.get('limit') ?? '20'))
-
-    if (!companyId) return withCors(ApiResponse.error('companyId is required', 400), origin)
-    if (user.companyId && companyId !== user.companyId)
-      return withCors(ApiResponse.error('Access denied', 403), origin)
 
     const where: any = { companyId, deletedAt: null }
     if (status)       where.status       = status
@@ -46,7 +45,7 @@ export async function GET(req: NextRequest) {
       prisma.trainingProgram.findMany({
         where,
         include: {
-          assessment: { select: { id: true, name: true, type: true, status: true } },
+          assessments: { select: { id: true, name: true, type: true, status: true }, where: { deletedAt: null } },
           _count: { select: { participants: true, sessions: true } },
         },
         orderBy,
@@ -77,10 +76,9 @@ export async function POST(req: NextRequest) {
       notifyEmployees, status,
     } = body
 
-    const cid = companyId ?? user.companyId
-    if (!cid) return withCors(ApiResponse.error('companyId is required', 400), origin)
-    if (user.companyId && cid !== user.companyId)
-      return withCors(ApiResponse.error('Access denied', 403), origin)
+    const resolved = await resolveRequestCompanyId(user, companyId)
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+    const { companyId: cid } = resolved
     if (!programName || !category || !trainingType || !description || !trainer || !startDate || !endDate || !dueDate)
       return withCors(ApiResponse.error('programName, category, trainingType, description, trainer, startDate, endDate, dueDate are required', 422), origin)
 

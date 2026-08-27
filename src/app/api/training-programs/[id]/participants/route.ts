@@ -3,6 +3,7 @@ import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -16,6 +17,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER'])
 
     const { searchParams } = new URL(req.url)
+    const resolved = await resolveRequestCompanyId(user, searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+    const { companyId } = resolved
     const trainingStatus = searchParams.get('training_status')
     const certStatus     = searchParams.get('cert_status')
     const department     = searchParams.get('department')
@@ -24,12 +28,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const limit          = Math.min(100, parseInt(searchParams.get('limit') ?? '20'))
 
     const program = await prisma.trainingProgram.findFirst({
-      where: { id: params.id, companyId: user.companyId, deletedAt: null },
+      where: { id: params.id, companyId, deletedAt: null },
       select: { id: true, programName: true },
     })
     if (!program) return withCors(ApiResponse.error('Training program not found', 404), origin)
 
-    const where: any = { trainingProgramId: params.id, companyId: user.companyId }
+    const where: any = { trainingProgramId: params.id, companyId }
     if (trainingStatus) where.trainingStatus = trainingStatus
     if (certStatus)     where.certStatus     = certStatus
 

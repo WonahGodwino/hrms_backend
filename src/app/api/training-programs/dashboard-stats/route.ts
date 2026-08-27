@@ -3,6 +3,7 @@ import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -18,10 +19,9 @@ export async function GET(req: NextRequest) {
     const user = await requireModuleAccess(token, 'TRAINING', ['STAFF', 'HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER'])
 
     const { searchParams } = new URL(req.url)
-    const companyId = searchParams.get('companyId') ?? user.companyId
-    if (!companyId) return withCors(ApiResponse.error('companyId is required', 400), origin)
-    if (user.companyId && companyId !== user.companyId)
-      return withCors(ApiResponse.error('Access denied', 403), origin)
+    const resolved = await resolveRequestCompanyId(user, searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+    const { companyId } = resolved
 
     const now = new Date()
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 86_400_000)

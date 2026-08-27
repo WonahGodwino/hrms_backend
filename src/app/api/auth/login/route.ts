@@ -28,61 +28,43 @@ export async function POST(request: NextRequest) {
 
     const cleanEmail = email.toLowerCase().trim()
 
-    // Multi-company safe lookup
-    let staff = null
-
-    if (companyId) {
-      // If frontend passes companyId, we use it directly
-      staff = await prisma.staffRecord.findUnique({
-        where: {
-          email_companyId: {
+    // Multi-company safe lookup — only ever consider active accounts
+    const candidates = companyId
+      ? await prisma.staffRecord.findMany({
+          where: {
             email: cleanEmail,
             companyId: companyId.toString(),
+            isActive: true,
           },
-        },
-      })
-    } else {
-      // No companyId: find by email only
-      const matches = await prisma.staffRecord.findMany({
-        where: { email: cleanEmail },
-      })
+        })
+      : await prisma.staffRecord.findMany({
+          where: { email: cleanEmail, isActive: true },
+        })
 
-      if (matches.length === 0) {
-        // Email not found anywhere → generic invalid credentials
-        return withCors(ApiResponse.error('Invalid credentials', 401), origin)
+    if (candidates.length === 0) {
+      // No active account for this email (or email/company combo) → generic invalid credentials
+      return withCors(ApiResponse.error('Invalid credentials', 401), origin)
+    }
+
+    // Same email can exist across multiple companies. Try the password against
+    // each candidate and log in to whichever company it actually matches —
+    // only fall back to "Invalid credentials" once none of them match.
+    let staff = null
+    for (const candidate of candidates) {
+      if (!candidate.password) continue
+      if (await bcrypt.compare(password, candidate.password)) {
+        staff = candidate
+        break
       }
-
-      if (matches.length > 1) {
-        // Same email in multiple companies: do NOT reveal that
-        // Just treat it as invalid credentials
-        return withCors(ApiResponse.error('Invalid credentials', 401), origin)
-      }
-
-      staff = matches[0]
     }
 
     if (!staff) {
       return withCors(ApiResponse.error('Invalid credentials', 401), origin)
     }
 
-    if (!staff.isActive) {
-      return withCors(ApiResponse.error('Account is deactivated', 403), origin)
-    }
-
     // Enforce registration only for STAFF, not for SUPER_ADMIN / HR
     if (staff.role === 'STAFF' && !staff.isRegistered) {
       return withCors(ApiResponse.error('Complete registration before login', 403), origin)
-    }
-
-    // Guard nullable password (String? in schema)
-    if (!staff.password) {
-      // For safety, don’t leak that the account exists but has no password
-      return withCors(ApiResponse.error('Invalid credentials', 401), origin)
-    }
-
-    const ok = await bcrypt.compare(password, staff.password)
-    if (!ok) {
-      return withCors(ApiResponse.error('Invalid credentials', 401), origin)
     }
 
     // Fetch company, enabled modules, PHED access role, and any ACTIVE temporary

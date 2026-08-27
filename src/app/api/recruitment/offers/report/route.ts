@@ -168,7 +168,7 @@ export async function GET(request: NextRequest) {
         'Cache-Control': 'no-cache, no-store, must-revalidate',
       },
     })
-    const cors = withCors(res, origin)
+    const cors = await withCors(res, origin)
     cors.headers.set('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type')
     return cors
   } catch (error) {

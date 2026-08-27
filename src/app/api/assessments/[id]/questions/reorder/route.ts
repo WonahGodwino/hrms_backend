@@ -3,12 +3,13 @@ import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-// PATCH /api/assessments/:id/questions/reorder
+// PATCH /api/assessments/:id/questions/reorder?companyId=
 // Body: [{id: string, order: number}]
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const origin = req.headers.get('origin')
@@ -16,8 +17,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
+    const resolved = await resolveRequestCompanyId(user, new URL(req.url).searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+
     const assessment = await prisma.assessment.findFirst({
-      where: { id: params.id, companyId: user.companyId, deletedAt: null },
+      where: { id: params.id, companyId: resolved.companyId, deletedAt: null },
       select: { id: true },
     })
     if (!assessment) return withCors(ApiResponse.error('Assessment not found', 404), origin)

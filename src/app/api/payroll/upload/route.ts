@@ -9,8 +9,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import ExcelJS from 'exceljs'
-import { 
-  PAYROLL_TEMPLATES, 
+import {
   PayrollTemplateType,
   isFixedTemplate,
   isValidTemplateType,
@@ -19,7 +18,15 @@ import {
 import { processIsurfStandardTemplate } from '@/app/lib/payroll/templates/isurf-standard'
 import { processBlueridgeTemplate } from '@/app/lib/payroll/templates/blueridge'
 import { processDynamicTemplate } from '@/app/lib/payroll/templates/dynamic-processor'
-import { createPayrollUploadRecord } from '@/app/lib/payroll/templates/utils'
+import {
+  getActivePayrollUpload,
+  createPendingPayrollUpload,
+  completePayrollUploadRecord,
+  failPayrollUploadRecord,
+  validatePayrollCompanyAccess,
+} from '@/app/lib/payroll/templates/utils'
+import { neutralizeRowForSpreadsheet } from '@/app/lib/payroll/utils/valueParsing'
+import type { ProcessingResult } from '@/app/lib/payroll/templates/types'
 
 function getRelativePath(absolutePath: string): string {
   const projectRoot = process.cwd()
@@ -62,8 +69,14 @@ async function generateFailedRecordsFile(
     width: 25,
   }))
 
+  // Raw uploaded cell values are written verbatim into this brand-new
+  // spreadsheet for download. Neutralize any value that would be
+  // interpreted as a live formula (CSV/Excel "formula injection") when the
+  // report is opened, so re-exporting failed rows can never execute
+  // anything — this never changes the data used for actual payroll
+  // processing, only the copy written into this report.
   failedRecords.forEach((record) => {
-    failedWorksheet.addRow(record)
+    failedWorksheet.addRow(neutralizeRowForSpreadsheet(record))
   })
 
   // Style the header row
@@ -82,28 +95,6 @@ async function generateFailedRecordsFile(
   await writeFile(failedFilePath, Buffer.from(failedBuffer as any))
 
   return getRelativePath(failedFilePath)
-}
-
-async function validateCompanyAccess(
-  user: any,
-  companyId: string,
-  role: string
-): Promise<boolean> {
-  if (user.role === 'SUPER_ADMIN') return true
-
-  if (user.role === 'STAFF') {
-    return user.companyId === companyId
-  }
-
-  const userCompany = await (prisma as any).userCompany.findFirst({
-    where: {
-      userId: user.userId,
-      companyId: companyId,
-      role: { in: [role, 'ALL'] }
-    }
-  })
-
-  return !!userCompany
 }
 
 export async function OPTIONS(request: NextRequest) {
@@ -196,7 +187,7 @@ export async function POST(request: NextRequest) {
 
     // Validate user access to company
     const userRole = user.role === 'HR' ? 'HR' : user.role === 'ADMIN' ? 'ADMIN' : 'ALL'
-    const hasAccess = await validateCompanyAccess(user, companyIdParam, userRole)
+    const hasAccess = await validatePayrollCompanyAccess(user, companyIdParam, userRole)
     
     if (!hasAccess) {
       return withCors(
@@ -218,6 +209,18 @@ export async function POST(request: NextRequest) {
     if (!company) {
       return withCors(
         ApiResponse.error('Company not found or is archived', 404),
+        origin
+      )
+    }
+
+    // Only one payroll upload may be in flight per company at a time
+    const activeUpload = await getActivePayrollUpload(companyId)
+    if (activeUpload) {
+      return withCors(
+        ApiResponse.error(
+          'A payroll upload is already being processed for this company. Please wait for it to finish before uploading another file.',
+          409
+        ),
         origin
       )
     }
@@ -256,132 +259,54 @@ export async function POST(request: NextRequest) {
     await writeFile(originalFilePath, buffer)
     const relativeOriginalPath = getRelativePath(originalFilePath)
 
-    // Process file based on template type
-    let results
-    const startTime = Date.now()
-
-    try {
-      if (templateType === 'ISURF_STANDARD') {
-        console.log('[PAYROLL_UPLOAD] Processing ISURF_STANDARD template')
-        results = await processIsurfStandardTemplate.processFile(
-          buffer,
-          fileExtension || '',
-          companyId,
-          user,
-          sendEmails,
-          overwriteExisting
-        )
-      } 
-      else if (templateType === 'BLUERIDGE') {
-        console.log('[PAYROLL_UPLOAD] Processing BLUERIDGE template')
-        results = await processBlueridgeTemplate.processFile(
-          buffer,
-          fileExtension || '',
-          companyId,
-          user,
-          sendEmails,
-          overwriteExisting
-        )
-      } 
-      else if (templateType === 'DYNAMIC') {
-        console.log('[PAYROLL_UPLOAD] Processing DYNAMIC template')
-        results = await processDynamicTemplate.processFile(
-          buffer,
-          fileExtension || '',
-          companyId,
-          user,
-          sendEmails,
-          templateId || undefined,
-          overwriteExisting
-        )
-      } 
-      else {
-        throw new Error(`Unsupported template type: ${templateType}`)
-      }
-
-      const processingTime = Date.now() - startTime
-      console.log(`[PAYROLL_UPLOAD] Processing completed in ${processingTime}ms`, {
-        templateType,
-        successful: results.successful,
-        failed: results.failed,
-        payslipsGenerated: results.payslipsGenerated
-      })
-
-    } catch (processingError: any) {
-      console.error('[PAYROLL_UPLOAD] Processing error:', processingError)
-      return withCors(
-        ApiResponse.error(`Error processing file: ${processingError.message}`, 500),
-        origin
-      )
-    }
-
-    // Generate failed records file if needed
-    let processedFilePath: string | null = null
-    if (results.failedRecords.length > 0) {
-      processedFilePath = await generateFailedRecordsFile(results.failedRecords, payrollDir)
-    }
-
-    // Create upload record
-    const uploadRecord = await createPayrollUploadRecord(
+    // Create the upload record up front so there's an id to poll and to
+    // enforce the one-in-flight-per-company rule on the next request.
+    const uploadRecord = await createPendingPayrollUpload(
       companyId,
       file.name,
       relativeOriginalPath,
       templateType,
       sendEmails,
-      results,
       user.userId,
-      processedFilePath,
       templateId,
       overwriteExisting
     )
 
-    // Prepare response
-    const responseData = {
+    // Respond immediately; actual row-by-row processing (DB writes, PDF
+    // generation, emails) continues after the response is sent. This process
+    // is a long-running Node server (not a serverless function), so the
+    // event loop keeps running this work after the request completes.
+    processPayrollUploadInBackground({
       uploadId: uploadRecord.id,
-      templateType: templateType,
-      templateId: templateId,
-      templateName: templateType === 'DYNAMIC' && templateId 
-        ? (await prisma.payrollTemplate.findUnique({ where: { id: templateId } }))?.templateName 
-        : PAYROLL_TEMPLATES[templateType as keyof typeof PAYROLL_TEMPLATES]?.name,
-      sendEmails: sendEmails,
-      overwriteExisting: overwriteExisting,
-      summary: {
-        totalProcessed: results.successful + results.failed,
-        successful: results.successful,
-        failed: results.failed,
-        payslipsGenerated: results.payslipsGenerated,
-        payslipsUpdated: results.payslipsUpdated,
-        emailsSent: sendEmails ? results.emailsSent : 0,
-        emailAttempts: sendEmails ? results.emailAttempts : 0,
-        emailFailures: results.emailFailures.length,
-        processingTimeMs: Date.now() - startTime
-      },
-      failedRecordsCount: results.failedRecords.length,
-      downloadLinks: {
-        failedRecords: results.failedRecords.length > 0 
-          ? `/api/payroll/download-failed/${uploadRecord.id}`
-          : null,
-        original: `/api/payroll/download-original/${uploadRecord.id}`
-      },
-      filePaths: {
-        original: relativeOriginalPath,
-        processed: processedFilePath,
-      }
-    }
+      templateType,
+      templateId,
+      buffer,
+      fileExtension: fileExtension || '',
+      companyId,
+      user,
+      sendEmails,
+      overwriteExisting,
+      payrollDir,
+    }).catch((err) => {
+      console.error('[PAYROLL_UPLOAD] Unhandled background processing error:', err)
+    })
 
-    // Log completion
-    console.log('[PAYROLL_UPLOAD] Completed successfully', {
+    console.log('[PAYROLL_UPLOAD] Accepted, processing in background', {
       uploadId: uploadRecord.id,
       templateType,
       companyId,
       userId: user.userId,
-      summary: responseData.summary
     })
 
     return withCors(
       ApiResponse.success(
-        responseData,
-        'Payroll processing completed successfully'
+        {
+          uploadId: uploadRecord.id,
+          status: 'PROCESSING',
+          templateType,
+          templateId,
+        },
+        'Payroll file received and is being processed'
       ),
       origin
     )
@@ -390,4 +315,101 @@ export async function POST(request: NextRequest) {
     console.error('[PAYROLL_UPLOAD] Top-level error:', error)
     return withCors(handleApiError(error), origin)
   }
+}
+
+async function processPayrollUploadInBackground({
+  uploadId,
+  templateType,
+  templateId,
+  buffer,
+  fileExtension,
+  companyId,
+  user,
+  sendEmails,
+  overwriteExisting,
+  payrollDir,
+}: {
+  uploadId: string
+  templateType: PayrollTemplateType
+  templateId: string | null
+  buffer: Buffer
+  fileExtension: string
+  companyId: string
+  user: any
+  sendEmails: boolean
+  overwriteExisting: boolean
+  payrollDir: string
+}) {
+  const startTime = Date.now()
+  let results: ProcessingResult
+
+  try {
+    if (templateType === 'ISURF_STANDARD') {
+      console.log('[PAYROLL_UPLOAD] Processing ISURF_STANDARD template', { uploadId })
+      results = await processIsurfStandardTemplate.processFile(
+        buffer,
+        fileExtension,
+        companyId,
+        user,
+        sendEmails,
+        overwriteExisting
+      )
+    } else if (templateType === 'BLUERIDGE') {
+      console.log('[PAYROLL_UPLOAD] Processing BLUERIDGE template', { uploadId })
+      results = await processBlueridgeTemplate.processFile(
+        buffer,
+        fileExtension,
+        companyId,
+        user,
+        sendEmails,
+        overwriteExisting
+      )
+    } else if (templateType === 'DYNAMIC') {
+      console.log('[PAYROLL_UPLOAD] Processing DYNAMIC template', { uploadId })
+      results = await processDynamicTemplate.processFile(
+        buffer,
+        fileExtension,
+        companyId,
+        user,
+        sendEmails,
+        templateId || undefined,
+        overwriteExisting
+      )
+    } else {
+      throw new Error(`Unsupported template type: ${templateType}`)
+    }
+
+    const processingTime = Date.now() - startTime
+    console.log(`[PAYROLL_UPLOAD] Processing completed in ${processingTime}ms`, {
+      uploadId,
+      templateType,
+      successful: results.successful,
+      failed: results.failed,
+      payslipsGenerated: results.payslipsGenerated,
+    })
+  } catch (processingError: any) {
+    console.error('[PAYROLL_UPLOAD] Processing error:', { uploadId, error: processingError })
+    await failPayrollUploadRecord(uploadId, processingError.message || 'Unknown processing error')
+    return
+  }
+
+  let processedFilePath: string | null = null
+  if (results.failedRecords.length > 0) {
+    try {
+      processedFilePath = await generateFailedRecordsFile(results.failedRecords, payrollDir)
+    } catch (fileError) {
+      console.error('[PAYROLL_UPLOAD] Failed to generate failed-records report:', { uploadId, fileError })
+    }
+  }
+
+  await completePayrollUploadRecord(uploadId, results, sendEmails, processedFilePath)
+
+  console.log('[PAYROLL_UPLOAD] Completed successfully', {
+    uploadId,
+    templateType,
+    companyId,
+    userId: user.userId,
+    successful: results.successful,
+    failed: results.failed,
+  })
 }

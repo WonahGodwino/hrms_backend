@@ -101,7 +101,7 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    const corsResponse = withCors(excelResponse, origin)
+    const corsResponse = await withCors(excelResponse, origin)
     corsResponse.headers.set(
       'Access-Control-Expose-Headers',
       'Content-Disposition, Content-Type'

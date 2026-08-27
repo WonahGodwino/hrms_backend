@@ -63,6 +63,16 @@ export const PLATFORM_MODULES = [
     name:        'Staff Loans & Benefits',
     description: 'Loan applications, benefit requests, policy configuration, eligibility validation and staff financial dashboards',
   },
+  {
+    key:         'OFFER_LETTERS',
+    name:        'Offer Letters',
+    description: 'Upload a Word letter template and generate near-identical offer/promotion/renewal letters for staff, independent of the recruitment pipeline',
+  },
+  {
+    key:         'PAYROLL_NAME_VERIFIER',
+    name:        'Payroll Name Verifier',
+    description: 'Verify payroll spreadsheet names against real bank account names via Flutterwave before a payroll run, flagging mismatches for review',
+  },
 ] as const
 
 export type ModuleKey = typeof PLATFORM_MODULES[number]['key']

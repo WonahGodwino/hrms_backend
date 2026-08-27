@@ -6,6 +6,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { prisma } from '@/app/lib/db'
 import type { CustomFieldValue } from '@/app/lib/payroll/templates/types'
 import { getPayslipDisplayFields, calculateTotals } from '@/app/lib/payroll/utils'
+import { getAccessibleCompanies, resolveTargetCompanies } from '@/app/lib/reporting/access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 
 import { getPeriodMonthCandidates, type SalarySummaryPeriod } from './period-filter'
@@ -26,11 +27,17 @@ type AggregatedSalaryRow = {
   pension: number
   bonus: number
   templateType: string
+  employerPension: number
+  nsitf: number
+  medicalContribution: number
 }
 
-type AccessibleCompany = {
-  companyId: string
-  companyName: string
+type StaffMeta = {
+  departmentId: string | null
+  currentGradeId: string | null
+  designationId: string | null
+  bankName: string | null
+  accountNumber: string | null
 }
 
 function toNumber(value: unknown): number {
@@ -99,71 +106,6 @@ function toCustomFieldsMap(value: unknown): Record<string, CustomFieldValue> | n
   return value as Record<string, CustomFieldValue>
 }
 
-async function getAccessibleCompanies(user: any): Promise<AccessibleCompany[]> {
-  if (user.role === 'SUPER_ADMIN') {
-    const companies = await prisma.company.findMany({
-      where: { archived: 0 },
-      select: {
-        id: true,
-        companyName: true
-      },
-      orderBy: { companyName: 'asc' }
-    })
-    return companies.map((c) => ({
-      companyId: c.id,
-      companyName: c.companyName || ''
-    }))
-  }
-
-  const userCompanies = await prisma.userCompany.findMany({
-    where: {
-      userId: user.userId,
-      company: { archived: 0 }
-    },
-    select: {
-      companyId: true,
-      company: {
-        select: {
-          companyName: true
-        }
-      }
-    },
-    orderBy: {
-      company: {
-        companyName: 'asc'
-      }
-    }
-  })
-
-  const mapped = userCompanies.map((uc) => ({
-    companyId: uc.companyId,
-    companyName: uc.company?.companyName || ''
-  }))
-  if (mapped.length > 0) return mapped
-
-  if (!user.companyId) return []
-
-  const fallbackCompany = await prisma.company.findFirst({
-    where: {
-      id: user.companyId,
-      archived: 0
-    },
-    select: {
-      id: true,
-      companyName: true
-    }
-  })
-
-  if (!fallbackCompany) return []
-
-  return [
-    {
-      companyId: fallbackCompany.id,
-      companyName: fallbackCompany.companyName || ''
-    }
-  ]
-}
-
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
@@ -209,48 +151,13 @@ export async function GET(request: NextRequest) {
     }
 
     const accessibleCompanies = await getAccessibleCompanies(user)
-    const accessibleCompanyIds = accessibleCompanies.map((item) => item.companyId)
 
-    if (accessibleCompanyIds.length === 0) {
+    if (accessibleCompanies.length === 0) {
       return withCors(ApiResponse.error('No companies assigned to your account', 403), origin)
     }
 
-    let targetCompanyIds: string[] = []
-    let resolvedCompanyId: string | null = null
-
-    if (user.role === 'SUPER_ADMIN') {
-      targetCompanyIds = accessibleCompanyIds
-
-      if (companyId) {
-        if (!accessibleCompanyIds.includes(companyId)) {
-          return withCors(ApiResponse.error('Access denied to selected company', 403), origin)
-        }
-        targetCompanyIds = [companyId]
-        resolvedCompanyId = companyId
-      }
-    } else if (user.role === 'HR') {
-      const hrCompanyId = accessibleCompanyIds[0]
-
-      if (companyId && companyId !== hrCompanyId) {
-        return withCors(ApiResponse.error('HR can only access their assigned company', 403), origin)
-      }
-
-      targetCompanyIds = [hrCompanyId]
-      resolvedCompanyId = hrCompanyId
-    } else {
-      if (companyId) {
-        if (!accessibleCompanyIds.includes(companyId)) {
-          return withCors(ApiResponse.error('Access denied to selected company', 403), origin)
-        }
-
-        targetCompanyIds = [companyId]
-        resolvedCompanyId = companyId
-      } else {
-        // ADMIN default company to support dashboard loading before explicit selection.
-        targetCompanyIds = [accessibleCompanyIds[0]]
-        resolvedCompanyId = accessibleCompanyIds[0]
-      }
-    }
+    const { targetCompanyIds, resolvedCompanyId, error: accessError } = resolveTargetCompanies(user, companyId, accessibleCompanies)
+    if (accessError) return withCors(ApiResponse.error(accessError, 403), origin)
 
     const quarterRange = getQuarterRange(quarter)
     const periodMonthCandidates = getPeriodMonthCandidates(period, month, quarter)
@@ -276,7 +183,12 @@ export async function GET(request: NextRequest) {
             firstName: true,
             lastName: true,
             department: true,
-            position: true
+            departmentId: true,
+            position: true,
+            currentGradeId: true,
+            designationId: true,
+            bankName: true,
+            accountNumber: true
           }
         },
         payroll: {
@@ -289,7 +201,10 @@ export async function GET(request: NextRequest) {
             netSalary: true,
             payee: true,
             pensionDeduction: true,
-            bonusKPI: true
+            bonusKPI: true,
+            employerPension: true,
+            nsitf: true,
+            medicalContribution: true
           }
         }
       },
@@ -298,6 +213,7 @@ export async function GET(request: NextRequest) {
 
     const rows: AggregatedSalaryRow[] = []
     const monthStaffDedup = new Set<string>()
+    const staffMetaMap = new Map<string, StaffMeta>()
 
     for (const payslip of payslips) {
       const monthNumber = getMonthNumber(payslip.month)
@@ -360,8 +276,21 @@ export async function GET(request: NextRequest) {
         totalTax,
         pension,
         bonus,
-        templateType
+        templateType,
+        employerPension: toNumber(payslip.payroll?.employerPension),
+        nsitf: toNumber(payslip.payroll?.nsitf),
+        medicalContribution: toNumber(payslip.payroll?.medicalContribution)
       })
+
+      if (!staffMetaMap.has(payslip.staffRecordId)) {
+        staffMetaMap.set(payslip.staffRecordId, {
+          departmentId: payslip.staffRecord?.departmentId || null,
+          currentGradeId: payslip.staffRecord?.currentGradeId || null,
+          designationId: payslip.staffRecord?.designationId || null,
+          bankName: payslip.staffRecord?.bankName || null,
+          accountNumber: payslip.staffRecord?.accountNumber || null
+        })
+      }
     }
 
     const perMonthMap = new Map<string, any>()
@@ -424,6 +353,95 @@ export async function GET(request: NextRequest) {
     const perStaff = Array.from(perStaffMap.values()).sort((a, b) =>
       a.staffName.localeCompare(b.staffName)
     )
+
+    // Department/business-unit/grade/designation breakdowns — none of these
+    // dimensions live on Payroll directly, only on StaffRecord, so resolve
+    // them via a small batch of lookups against the distinct ids collected
+    // while building `rows` above, then aggregate in memory alongside the
+    // per-month/per-staff totals rather than re-querying Payroll per group.
+    const departmentIds = Array.from(new Set(Array.from(staffMetaMap.values()).map((m) => m.departmentId).filter(Boolean))) as string[]
+    const gradeIds = Array.from(new Set(Array.from(staffMetaMap.values()).map((m) => m.currentGradeId).filter(Boolean))) as string[]
+    const designationIds = Array.from(new Set(Array.from(staffMetaMap.values()).map((m) => m.designationId).filter(Boolean))) as string[]
+
+    const [departments, grades, designations] = await Promise.all([
+      departmentIds.length
+        ? prisma.department.findMany({ where: { id: { in: departmentIds } }, select: { id: true, name: true, businessUnit: true } })
+        : Promise.resolve([]),
+      gradeIds.length
+        ? (prisma as any).gradeLevel.findMany({ where: { id: { in: gradeIds } }, select: { id: true, name: true } })
+        : Promise.resolve([]),
+      designationIds.length
+        ? (prisma as any).designation.findMany({ where: { id: { in: designationIds } }, select: { id: true, title: true } })
+        : Promise.resolve([])
+    ])
+
+    const departmentById = new Map(departments.map((d) => [d.id, d]))
+    const gradeNameById = new Map((grades as Array<{ id: string; name: string }>).map((g) => [g.id, g.name]))
+    const designationTitleById = new Map((designations as Array<{ id: string; title: string }>).map((d) => [d.id, d.title]))
+
+    function accumulateBreakdown(map: Map<string, any>, key: string, row: AggregatedSalaryRow) {
+      if (!key) return
+      const entry = map.get(key) || { label: key, staffCount: 0, staffIds: new Set<string>(), totalGrossPay: 0, totalNetSalary: 0, totalTax: 0, totalPension: 0 }
+      entry.staffIds.add(row.staffRecordId)
+      entry.totalGrossPay += row.grossPay
+      entry.totalNetSalary += row.netPay
+      entry.totalTax += row.totalTax
+      entry.totalPension += row.pension
+      map.set(key, entry)
+    }
+
+    const byDepartmentMap = new Map<string, any>()
+    const byBusinessUnitMap = new Map<string, any>()
+    const byGradeMap = new Map<string, any>()
+    const byDesignationMap = new Map<string, any>()
+
+    for (const row of rows) {
+      const meta = staffMetaMap.get(row.staffRecordId)
+      const department = meta?.departmentId ? departmentById.get(meta.departmentId) : null
+      accumulateBreakdown(byDepartmentMap, department?.name || row.department || 'Unassigned', row)
+      accumulateBreakdown(byBusinessUnitMap, department?.businessUnit || 'Unassigned', row)
+      accumulateBreakdown(byGradeMap, (meta?.currentGradeId && gradeNameById.get(meta.currentGradeId)) || 'Ungraded', row)
+      accumulateBreakdown(byDesignationMap, (meta?.designationId && designationTitleById.get(meta.designationId)) || row.position || 'Unassigned', row)
+    }
+
+    const finalizeBreakdown = (map: Map<string, any>) =>
+      Array.from(map.values())
+        .map(({ staffIds, ...rest }) => ({ ...rest, staffCount: staffIds.size }))
+        .sort((a, b) => b.totalGrossPay - a.totalGrossPay)
+
+    const breakdowns = {
+      byDepartment: finalizeBreakdown(byDepartmentMap),
+      byBusinessUnit: finalizeBreakdown(byBusinessUnitMap),
+      byGrade: finalizeBreakdown(byGradeMap),
+      byDesignation: finalizeBreakdown(byDesignationMap)
+    }
+
+    // Statutory totals — summed straight from Payroll fields already on
+    // `rows`, across the whole filtered period (not per-month/per-staff).
+    const statutory = rows.reduce(
+      (acc, row) => {
+        acc.paye += row.totalTax
+        acc.pensionEmployee += row.pension
+        acc.pensionEmployer += row.employerPension
+        acc.nsitf += row.nsitf
+        acc.medicalContribution += row.medicalContribution
+        return acc
+      },
+      { paye: 0, pensionEmployee: 0, pensionEmployer: 0, nsitf: 0, medicalContribution: 0 }
+    )
+
+    // Bank payment schedule — one row per staff, net pay totalled across the
+    // filtered period, for handing straight to the bank/finance team.
+    const bankSchedule = perStaff.map((staff) => {
+      const meta = staffMetaMap.get(staff.staffRecordId)
+      return {
+        staffId: staff.staffId,
+        staffName: staff.staffName,
+        bankName: meta?.bankName || '',
+        accountNumber: meta?.accountNumber || '',
+        netSalary: staff.totalNetSalary
+      }
+    })
 
     const summary = perMonth.reduce(
       (acc, row) => {
@@ -497,6 +515,9 @@ export async function GET(request: NextRequest) {
           },
           perMonth,
           perStaff,
+          breakdowns,
+          statutory,
+          bankSchedule,
           summary,
           metrics: {
             monthsCovered: perMonth.length,

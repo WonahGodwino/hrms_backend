@@ -3,6 +3,7 @@ import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -16,12 +17,10 @@ export async function GET(req: NextRequest) {
     const user = await requireModuleAccess(token, 'TRAINING', ['STAFF', 'HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER'])
 
     const { searchParams } = new URL(req.url)
-    const companyId = searchParams.get('companyId') ?? user.companyId
+    const resolved = await resolveRequestCompanyId(user, searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+    const { companyId } = resolved
     const isActive  = searchParams.get('is_active')
-
-    if (!companyId) return withCors(ApiResponse.error('companyId is required', 400), origin)
-    if (user.companyId && companyId !== user.companyId)
-      return withCors(ApiResponse.error('Access denied', 403), origin)
 
     const where: any = { companyId }
     if (isActive !== null && isActive !== undefined) where.isActive = isActive !== 'false'
@@ -46,11 +45,13 @@ export async function POST(req: NextRequest) {
     const user = await requireModuleAccess(token, 'TRAINING', ['ADMIN', 'SUPER_ADMIN'])
 
     const { companyId, name, type, authority, templateId } = await req.json()
-    const cid = companyId ?? user.companyId
-    if (!cid || !name || !type || !authority)
+
+    const resolved = await resolveRequestCompanyId(user, companyId)
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+    const { companyId: cid } = resolved
+
+    if (!name || !type || !authority)
       return withCors(ApiResponse.error('companyId, name, type, authority are required', 400), origin)
-    if (user.companyId && cid !== user.companyId)
-      return withCors(ApiResponse.error('Access denied', 403), origin)
 
     const certType = await prisma.certificationType.create({
       data: { companyId: cid, name, type, authority, templateId: templateId ?? null, isActive: true, createdBy: user.userId },

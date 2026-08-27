@@ -11,6 +11,7 @@ interface AdminPayslipItem {
   year: number;
   grossPay: string | null;
   netPay: string | null;
+  draft: boolean;
   createdAt: Date;
   fileName: string;
   downloadUrl: string;
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest) {
     // Parse query parameters
     const { searchParams } = new URL(request.url)
     const staffRecordId = searchParams.get('staffRecordId')
-    const staffId = searchParams.get('staffId')
+    const search = searchParams.get('search')
     const requestedCompanyId = searchParams.get('companyId')
     const month = searchParams.get('month')
     const year = searchParams.get('year')
@@ -179,35 +180,23 @@ export async function GET(request: NextRequest) {
       }
       
       whereClause.staffRecordId = staffRecordId
-    } else if (staffId) {
-      // Find staffRecordId by staffId and enforce access scope
-      let staffRecord: { id: string; companyId: string } | null = null
+    } else if (search) {
+      // Search staff by staffId, name, or email (partial, case-insensitive).
+      // Company/role access scope is already enforced elsewhere in whereClause,
+      // so intersecting with staffRecordId IN [...] here is safe.
+      const matchingStaffRecords = await prisma.staffRecord.findMany({
+        where: {
+          OR: [
+            { staffId: { contains: search, mode: 'insensitive' } },
+            { firstName: { contains: search, mode: 'insensitive' } },
+            { lastName: { contains: search, mode: 'insensitive' } },
+            { email: { contains: search, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true }
+      })
 
-      if (user.role === 'HR' || user.role === 'ADMIN') {
-        const matchingStaffRecords = await prisma.staffRecord.findMany({
-          where: { staffId },
-          select: { id: true, companyId: true }
-        })
-
-        staffRecord =
-          matchingStaffRecords.find(s => ownStaffRecordId !== null && s.id === ownStaffRecordId) ||
-          matchingStaffRecords.find(s => userAssignedCompanyIds.includes(s.companyId)) ||
-          null
-      } else {
-        staffRecord = await prisma.staffRecord.findFirst({
-          where: { staffId },
-          select: { id: true, companyId: true }
-        })
-      }
-      
-      if (!staffRecord) {
-        return withCors(
-          ApiResponse.error('Staff record not found, you may Contact Support for more help', 404),
-          origin
-        )
-      }
-      
-      whereClause.staffRecordId = staffRecord.id
+      whereClause.staffRecordId = { in: matchingStaffRecords.map(s => s.id) }
     }
 
     // Filter by month/year if provided
@@ -256,6 +245,7 @@ export async function GET(request: NextRequest) {
       year: p.year,
       grossPay: p.grossPay ? p.grossPay.toString() : null,
       netPay: p.netPay ? p.netPay.toString() : null,
+      draft: p.draft,
       createdAt: p.createdAt,
       fileName: p.fileName,
       downloadUrl: `/api/payslips/${p.id}/download`,

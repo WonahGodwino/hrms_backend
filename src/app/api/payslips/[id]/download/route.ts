@@ -63,6 +63,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         year: true,
         grossPay: true,
         netPay: true,
+        draft: true,
         // Include payroll with custom fields and template
         payroll: {
           select: {
@@ -142,6 +143,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
               origin
             )
           }
+        }
+
+        // Drafts aren't visible to staff until HR/Admin publishes them
+        if (payslip.draft) {
+          return withCors(
+            ApiResponse.error('Payslip not found', 404),
+            origin
+          )
         }
         break
 

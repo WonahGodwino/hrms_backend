@@ -3,11 +3,11 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
+import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -47,15 +47,7 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = await requireModuleAccess(token, 'PAYROLL', ['HR', 'SUPER_ADMIN'])
-
-    if (!user.companyId) {
-      return withCors(
-        ApiResponse.error('Company context missing for this user', 400),
-        origin
-      )
-    }
-    const companyId = user.companyId as string
+    const user = await requireModuleAccess(token, 'PAYROLL', ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
     // 2) Parse body
     const body = await request.json()
@@ -64,16 +56,38 @@ export async function POST(request: NextRequest) {
       newEmail,
       month,
       year,
+      companyId: companyIdParam,
     }: {
       staffEmail: string
       newEmail?: string
       month?: string
       year?: number
+      companyId?: string
     } = body
 
     if (!staffEmail) {
       return withCors(
         ApiResponse.error('staffEmail is required', 400),
+        origin
+      )
+    }
+
+    // companyId is required for HR/ADMIN (who may manage multiple companies,
+    // same as the rest of the payroll module) — SUPER_ADMIN may omit it, but
+    // then the staffEmail lookup below is unscoped and must resolve uniquely.
+    const companyId = companyIdParam || user.companyId
+    if (!companyId) {
+      return withCors(
+        ApiResponse.error('Company selection is required', 400),
+        origin
+      )
+    }
+
+    const userRole = user.role === 'HR' ? 'HR' : user.role === 'ADMIN' ? 'ADMIN' : 'ALL'
+    const hasAccess = await validatePayrollCompanyAccess(user, companyId, userRole)
+    if (!hasAccess) {
+      return withCors(
+        ApiResponse.error(`You do not have ${userRole} access for this company`, 403),
         origin
       )
     }
@@ -179,6 +193,15 @@ export async function POST(request: NextRequest) {
         ),
         origin
       )
+    }
+
+    // 6b) Publish: sending is the HR/SUPER_ADMIN approval action, so this
+    // payslip becomes visible to staff as soon as the send is triggered.
+    if (payslip.draft) {
+      await prisma.payslip.update({
+        where: { id: payslip.id },
+        data: { draft: false },
+      })
     }
 
     // 7) Safely convert Decimal → number

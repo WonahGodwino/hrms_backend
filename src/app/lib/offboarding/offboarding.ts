@@ -36,19 +36,22 @@ export const ApproveOffboardingSchema = z.object({
 });
 
 // Query Filters Schema
-// Update the schema to handle single status values properly
+// `status` may arrive as: undefined/null (not filtering), a single enum string,
+// a comma-separated string (the frontend joins multi-select filters with ','),
+// or an array of the above — normalize all of these to a string[] before
+// validating each entry against the enum. `type`/`status` may also arrive as
+// `null` (searchParams.get() returns null, not undefined, when a param is
+// absent), so both are coerced to undefined first.
 export const OffboardingFiltersSchema = z.object({
 	status: z
-		.union([z.array(OffboardingStatusEnum), OffboardingStatusEnum])
-		.optional()
-		.transform((val) => {
-			// If it's a single value, convert to array
-			if (val && !Array.isArray(val)) {
-				return [val];
-			}
-			return val;
-		}),
-	type: OffboardingTypeEnum.optional(),
+		.preprocess((val) => {
+			if (val === null || val === undefined || val === '') return undefined;
+			const parts = Array.isArray(val) ? val : [val];
+			const split = parts.flatMap((v) => (typeof v === 'string' ? v.split(',') : v)).map((v) => (typeof v === 'string' ? v.trim() : v)).filter(Boolean);
+			return split.length ? split : undefined;
+		}, z.array(OffboardingStatusEnum))
+		.optional(),
+	type: z.preprocess((val) => (val === null || val === '' ? undefined : val), OffboardingTypeEnum).optional(),
 	search: z.string().optional(),
 	page: z.coerce.number().int().positive().default(1),
 	limit: z.coerce.number().int().positive().max(100).default(20),

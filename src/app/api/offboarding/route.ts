@@ -28,10 +28,10 @@ export async function GET(request: NextRequest) {
 
 		const searchParams = request.nextUrl.searchParams;
 		const filters = OffboardingFiltersSchema.parse({
-			status: searchParams.get('status')
-				? [searchParams.get('status') as any] // Single status becomes array
-				: undefined,
-			type: searchParams.get('type') as 'RESIGNATION' | 'TERMINATION' | undefined,
+			// Raw values (including a comma-separated status string, or null when
+			// a param is absent) are normalized inside the schema itself.
+			status: searchParams.get('status'),
+			type: searchParams.get('type'),
 			search: searchParams.get('search') || undefined,
 			page: parseInt(searchParams.get('page') || '1'),
 			limit: parseInt(searchParams.get('limit') || '20'),

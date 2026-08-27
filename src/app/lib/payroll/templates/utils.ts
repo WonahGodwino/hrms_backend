@@ -13,6 +13,32 @@ function normalizeSection(section?: string): string {
 }
 
 /**
+ * Shared company-access check for payroll upload endpoints (create, status,
+ * pending). `role` is the access level being asserted ('HR' | 'ADMIN' | 'ALL').
+ */
+export async function validatePayrollCompanyAccess(
+  user: any,
+  companyId: string,
+  role: string
+): Promise<boolean> {
+  if (user.role === 'SUPER_ADMIN') return true
+
+  if (user.role === 'STAFF') {
+    return user.companyId === companyId
+  }
+
+  const userCompany = await prisma.userCompany.findFirst({
+    where: {
+      userId: user.userId,
+      companyId: companyId,
+      role: { in: [role, 'ALL'] },
+    },
+  })
+
+  return !!userCompany
+}
+
+/**
  * Get payroll record with custom fields and related data
  */
 export async function getPayrollWithDetails(payrollId: string) {
@@ -275,18 +301,45 @@ export function formatNumber(num: number): string {
   return new Intl.NumberFormat('en-NG').format(num)
 }
 
+// No worker/queue backs this — a crashed or redeployed process leaves a row
+// stuck in PROCESSING forever. Treat anything older than this as abandoned
+// so a company doesn't get permanently locked out of uploading.
+const STALE_UPLOAD_THRESHOLD_MS = 15 * 60 * 1000
+
 /**
- * Create upload record for payroll processing
+ * Returns the company's in-flight upload (PENDING/PROCESSING), if any.
+ * A row stuck past the stale threshold is marked FAILED and treated as if
+ * no upload were in flight, so uploads can never be permanently blocked.
  */
-export async function createPayrollUploadRecord(
+export async function getActivePayrollUpload(companyId: string) {
+  const active = await prisma.payrollUpload.findFirst({
+    where: { companyId, status: { in: ['PENDING', 'PROCESSING'] } },
+    orderBy: { createdAt: 'desc' },
+  })
+
+  if (!active) return null
+
+  const startedAt = active.startedAt || active.createdAt
+  if (Date.now() - startedAt.getTime() > STALE_UPLOAD_THRESHOLD_MS) {
+    await failPayrollUploadRecord(active.id, 'Processing was interrupted (server restarted or timed out)')
+    return null
+  }
+
+  return active
+}
+
+/**
+ * Create a PENDING upload record immediately on receipt, before processing
+ * starts. The row's existence (in PENDING/PROCESSING state) is what the
+ * single-in-flight-upload-per-company check and the polling endpoint key off.
+ */
+export async function createPendingPayrollUpload(
   companyId: string,
   fileName: string,
   filePath: string,
   templateType: string,
   sendEmails: boolean,
-  results: ProcessingResult,
   userId: string,
-  processedFilePath?: string | null,
   templateId?: string | null,
   overwriteExisting?: boolean
 ) {
@@ -295,12 +348,31 @@ export async function createPayrollUploadRecord(
       companyId,
       fileName,
       filePath,
-      processedFilePath: processedFilePath || null,
-      processedFileName: processedFilePath ? path.basename(processedFilePath) : null,
       templateType,
       templateId: templateId || null,
       sendEmails,
       overwriteExisting: overwriteExisting ?? false,
+      uploadedBy: userId,
+      status: 'PROCESSING',
+      startedAt: new Date(),
+    },
+  })
+}
+
+/**
+ * Fill in final stats once processing completes (success or failure).
+ */
+export async function completePayrollUploadRecord(
+  uploadId: string,
+  results: ProcessingResult,
+  sendEmails: boolean,
+  processedFilePath?: string | null
+) {
+  return await prisma.payrollUpload.update({
+    where: { id: uploadId },
+    data: {
+      processedFilePath: processedFilePath || null,
+      processedFileName: processedFilePath ? path.basename(processedFilePath) : null,
       totalRecords: results.successful + results.failed,
       successful: results.successful,
       failed: results.failed,
@@ -308,8 +380,25 @@ export async function createPayrollUploadRecord(
       payslipsUpdated: results.payslipsUpdated > 0 ? results.payslipsUpdated : null,
       emailsSent: sendEmails ? results.emailsSent : null,
       emailAttempts: sendEmails ? results.emailAttempts : null,
+      emailFailures: sendEmails && results.emailFailures.length > 0 ? (results.emailFailures as any) : undefined,
       errors: results.errors,
-      uploadedBy: userId,
+      status: 'COMPLETED',
+      completedAt: new Date(),
+    },
+  })
+}
+
+/**
+ * Mark an upload as FAILED when a whole-file error aborts processing before
+ * any per-row results exist (unparseable workbook, no matching template, etc).
+ */
+export async function failPayrollUploadRecord(uploadId: string, reason: string) {
+  return await prisma.payrollUpload.update({
+    where: { id: uploadId },
+    data: {
+      status: 'FAILED',
+      failureReason: reason,
+      completedAt: new Date(),
     },
   })
 }

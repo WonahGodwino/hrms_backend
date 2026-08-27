@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
       lastUpdate: a.updatedAt.toISOString(),
     }))
 
-    const res = withCors(
+    const res = await withCors(
       ApiResponse.success({ applications }, 'Verified.'),
       origin,
     )

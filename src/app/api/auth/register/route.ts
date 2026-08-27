@@ -2,7 +2,7 @@
 import { NextRequest } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/app/lib/db'
-import { requireRole, signToken } from '@/app/lib/auth'
+import { requireRole, signToken, checkCompanyAccess } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/helpers'
@@ -26,7 +26,9 @@ export async function POST(request: NextRequest) {
 
     const token = authHeader.replace('Bearer ', '')
     // Decoded payload: { userId, email, role, companyId? }
-    const admin = await requireRole(token, ['SUPER_ADMIN'])
+    // SUPER_ADMIN can register users in any company; HR/ADMIN can register
+    // users only within the company(ies) they are assigned to.
+    const admin = await requireRole(token, ['SUPER_ADMIN', 'HR', 'ADMIN'])
 
     const body = await request.json()
     const {
@@ -61,11 +63,23 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // For SUPER_ADMIN, companyId is required in the request body
+    // Only SUPER_ADMIN may create SUPER_ADMIN or ADMIN accounts.
+    // HR/ADMIN callers may only register HR or STAFF users.
+    if (admin.role !== 'SUPER_ADMIN' && ['SUPER_ADMIN', 'ADMIN'].includes(role)) {
+      return withCors(
+        ApiResponse.error(
+          'Insufficient permissions to assign this role',
+          403
+        ),
+        origin
+      )
+    }
+
+    // companyId is required in the request body
     if (!companyId) {
       return withCors(
         ApiResponse.error(
-          'companyId is required for SUPER_ADMIN to register users',
+          'companyId is required to register users',
           400
         ),
         origin
@@ -90,8 +104,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // SUPER_ADMIN can register users in any company
-    // No need to check if admin has access to this company
+    // SUPER_ADMIN can register users in any company; HR/ADMIN are restricted
+    // to companies they are assigned to via UserCompany.
+    if (admin.role !== 'SUPER_ADMIN') {
+      const hasAccess = await checkCompanyAccess(admin.userId, companyId, admin.role)
+      if (!hasAccess) {
+        return withCors(
+          ApiResponse.error(
+            'You do not have access to register users for this company',
+            403
+          ),
+          origin
+        )
+      }
+    }
+
     const targetCompanyId = companyId
 
     const cleanEmail = email.toLowerCase().trim()

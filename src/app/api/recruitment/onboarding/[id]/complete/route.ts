@@ -127,6 +127,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           isActive: true,
           isRegistered: false,
           requirePasswordChange: true,
+          // The moment onboarding completes is the most accurate "hired"
+          // timestamp available for a candidate converting to staff.
+          hireDate: new Date(),
           ...(offer?.gradeId ? { currentGradeId: offer.gradeId } : {}),
           ...(designationId ? { designationId } : {}),
         } as any,

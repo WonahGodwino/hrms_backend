@@ -3,6 +3,7 @@ import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -18,13 +19,17 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string; 
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    if (!await getAssessment(params.id, user.companyId!))
+    const body = await req.json()
+
+    const resolved = await resolveRequestCompanyId(user, body.companyId ?? new URL(req.url).searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+
+    if (!await getAssessment(params.id, resolved.companyId))
       return withCors(ApiResponse.error('Assessment not found', 404), origin)
 
     const question = await prisma.question.findFirst({ where: { id: params.qid, assessmentId: params.id } })
     if (!question) return withCors(ApiResponse.error('Question not found', 404), origin)
 
-    const body = await req.json()
     const updated = await prisma.question.update({
       where: { id: params.qid },
       data: {
@@ -54,7 +59,10 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    if (!await getAssessment(params.id, user.companyId!))
+    const resolved = await resolveRequestCompanyId(user, new URL(req.url).searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+
+    if (!await getAssessment(params.id, resolved.companyId))
       return withCors(ApiResponse.error('Assessment not found', 404), origin)
 
     const question = await prisma.question.findFirst({ where: { id: params.qid, assessmentId: params.id } })

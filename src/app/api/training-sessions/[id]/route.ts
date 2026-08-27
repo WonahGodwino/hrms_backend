@@ -3,6 +3,7 @@ import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -14,8 +15,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'TRAINING', ['STAFF', 'HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER'])
 
+    const resolved = await resolveRequestCompanyId(user, new URL(req.url).searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+
     const session = await prisma.trainingSession.findFirst({
-      where: { id: params.id, companyId: user.companyId },
+      where: { id: params.id, companyId: resolved.companyId },
       include: { trainingProgram: { select: { id: true, programName: true, category: true, status: true } } },
     })
     if (!session) return withCors(ApiResponse.error('Session not found', 404), origin)
@@ -29,10 +33,14 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const session = await prisma.trainingSession.findFirst({ where: { id: params.id, companyId: user.companyId } })
+    const body = await req.json()
+
+    const resolved = await resolveRequestCompanyId(user, body.companyId ?? new URL(req.url).searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+
+    const session = await prisma.trainingSession.findFirst({ where: { id: params.id, companyId: resolved.companyId } })
     if (!session) return withCors(ApiResponse.error('Session not found', 404), origin)
 
-    const body = await req.json()
     const updated = await prisma.trainingSession.update({
       where: { id: params.id },
       data: {
@@ -59,7 +67,10 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'TRAINING', ['ADMIN', 'SUPER_ADMIN'])
 
-    const session = await prisma.trainingSession.findFirst({ where: { id: params.id, companyId: user.companyId } })
+    const resolved = await resolveRequestCompanyId(user, new URL(req.url).searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+
+    const session = await prisma.trainingSession.findFirst({ where: { id: params.id, companyId: resolved.companyId } })
     if (!session) return withCors(ApiResponse.error('Session not found', 404), origin)
 
     await prisma.trainingSession.delete({ where: { id: params.id } })

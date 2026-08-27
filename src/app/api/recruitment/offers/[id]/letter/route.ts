@@ -36,7 +36,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           'Cache-Control': 'no-store',
         },
       })
-      const corsRes = withCors(res, origin)
+      const corsRes = await withCors(res, origin)
       corsRes.headers.set('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type')
       return corsRes
     }
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           'Cache-Control': 'no-store',
         },
       })
-      const corsRes = withCors(res, origin)
+      const corsRes = await withCors(res, origin)
       corsRes.headers.set('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type')
       return corsRes
     }

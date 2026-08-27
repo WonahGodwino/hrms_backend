@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -15,11 +16,10 @@ export async function GET(req: NextRequest) {
     const user = requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const { searchParams } = new URL(req.url)
-    const companyId = searchParams.get('companyId') ?? user.companyId
+    const resolved = await resolveRequestCompanyId(user, searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+    const { companyId } = resolved
     const months    = Math.min(12, parseInt(searchParams.get('months') ?? '6'))
-    if (!companyId) return withCors(ApiResponse.error('companyId is required', 400), origin)
-    if (user.companyId && companyId !== user.companyId)
-      return withCors(ApiResponse.error('Access denied', 403), origin)
 
     const now = new Date()
     const chart: { month: string; completed: number; assigned: number; completionRate: number }[] = []

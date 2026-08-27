@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { requireRoleAsync } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { InitiateTerminationSchema } from '@/app/lib/offboarding/offboarding';
+import { prisma } from '@/app/lib/prisma';
 import { OffboardingService } from '@/app/lib/services/offboarding.service';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 
@@ -34,8 +35,19 @@ export async function POST(request: NextRequest) {
 			handoverRequired: validated.handoverRequired,
 		});
 
-		// TODO: Create notification for staff
-		// await NotificationService.notifyStaff(offboarding)
+		await prisma.notification.create({
+			data: {
+				userId: offboarding.staffId,
+				companyId: user.companyId || offboarding.companyId,
+				type: 'OFFBOARDING_TERMINATION_INITIATED',
+				title: 'Offboarding process initiated',
+				message: validated.handoverRequired
+					? 'Your offboarding process has been initiated. A handover is required before completion.'
+					: 'Your offboarding process has been initiated and completed.',
+				data: JSON.stringify({ offboardingId: offboarding.id }),
+				read: false,
+			},
+		});
 
 		return withCors(ApiResponse.success(offboarding, 'Termination initiated successfully'), origin);
 	} catch (error) {

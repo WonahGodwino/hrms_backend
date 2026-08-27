@@ -3,6 +3,8 @@ import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { logAssignmentRuleActivity } from '@/app/lib/training/assignment-rule-audit'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -17,12 +19,16 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
+    const body = await req.json()
+
+    const resolved = await resolveRequestCompanyId(user, body.companyId ?? new URL(req.url).searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+
     const rule = await prisma.assignmentRule.findFirst({
-      where: { id: params.id, companyId: user.companyId },
+      where: { id: params.id, companyId: resolved.companyId },
     })
     if (!rule) return withCors(ApiResponse.error('Assignment rule not found', 404), origin)
 
-    const body = await req.json()
     const updated = await prisma.assignmentRule.update({
       where: { id: params.id },
       data: {
@@ -45,6 +51,18 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       },
     })
 
+    const actor = await prisma.staffRecord.findUnique({
+      where: { id: user.userId },
+      select: { firstName: true, lastName: true },
+    })
+    await logAssignmentRuleActivity({
+      companyId: resolved.companyId,
+      actorId: user.userId,
+      actorName: actor ? `${actor.firstName} ${actor.lastName}` : 'System',
+      action: 'UPDATED',
+      rule: updated,
+    })
+
     return withCors(ApiResponse.success(updated, 'Assignment rule updated'), origin)
   } catch (e) {
     return withCors(handleApiError(e), origin)
@@ -58,12 +76,28 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'TRAINING', ['ADMIN', 'SUPER_ADMIN'])
 
+    const resolved = await resolveRequestCompanyId(user, new URL(req.url).searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+
     const rule = await prisma.assignmentRule.findFirst({
-      where: { id: params.id, companyId: user.companyId },
+      where: { id: params.id, companyId: resolved.companyId },
     })
     if (!rule) return withCors(ApiResponse.error('Assignment rule not found', 404), origin)
 
     await prisma.assignmentRule.delete({ where: { id: params.id } })
+
+    const actor = await prisma.staffRecord.findUnique({
+      where: { id: user.userId },
+      select: { firstName: true, lastName: true },
+    })
+    await logAssignmentRuleActivity({
+      companyId: resolved.companyId,
+      actorId: user.userId,
+      actorName: actor ? `${actor.firstName} ${actor.lastName}` : 'System',
+      action: 'DELETED',
+      rule,
+    })
+
     return withCors(ApiResponse.success(null, 'Assignment rule deleted'), origin)
   } catch (e) {
     return withCors(handleApiError(e), origin)

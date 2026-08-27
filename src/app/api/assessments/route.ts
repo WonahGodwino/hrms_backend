@@ -3,6 +3,7 @@ import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -16,7 +17,9 @@ export async function GET(req: NextRequest) {
     const user = await requireModuleAccess(token, 'TRAINING', ['STAFF', 'HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER'])
 
     const { searchParams } = new URL(req.url)
-    const companyId = searchParams.get('companyId') ?? user.companyId
+    const resolved = await resolveRequestCompanyId(user, searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+    const { companyId } = resolved
     const status    = searchParams.get('status')
     const type      = searchParams.get('type')
     const category  = searchParams.get('category')
@@ -24,10 +27,6 @@ export async function GET(req: NextRequest) {
     const search    = searchParams.get('search')
     const page      = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
     const limit     = Math.min(100, parseInt(searchParams.get('limit') ?? '20'))
-
-    if (!companyId) return withCors(ApiResponse.error('companyId is required', 400), origin)
-    if (user.companyId && companyId !== user.companyId)
-      return withCors(ApiResponse.error('Access denied', 403), origin)
 
     const where: any = { companyId, deletedAt: null }
     if (status)    where.status             = status
@@ -64,11 +63,12 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const { companyId, trainingProgramId, name, type, description, timeLimitMinutes, passingScore, maxAttempts, category, difficulty, shuffleQuestions } = body
 
-    const cid = companyId ?? user.companyId
-    if (!cid || !name || !type || passingScore === undefined)
+    const resolved = await resolveRequestCompanyId(user, companyId)
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+    const { companyId: cid } = resolved
+
+    if (!name || !type || passingScore === undefined)
       return withCors(ApiResponse.error('companyId, name, type, passingScore are required', 400), origin)
-    if (user.companyId && cid !== user.companyId)
-      return withCors(ApiResponse.error('Access denied', 403), origin)
 
     const assessment = await prisma.assessment.create({
       data: {

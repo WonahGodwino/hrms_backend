@@ -1,12 +1,13 @@
 // src/app/api/admin/staff/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { 
-  requireRole, 
-  createAuthPayloadWithCompanies, 
-  signToken, 
+import {
+  requireRole,
+  createAuthPayloadWithCompanies,
+  signToken,
   checkCompanyAccess
 } from '@/app/lib/auth'
+import { getAccessibleCompanyIds } from '@/app/lib/access-control'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -60,7 +61,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['ADMIN', 'HR', 'SUPER_ADMIN', 'STAFF'])
+    const user = requireRole(token, ['ADMIN', 'HR', 'SUPER_ADMIN'])
 
     const { searchParams } = new URL(request.url)
     const includeAll = searchParams.get('includeAll') === 'true'
@@ -72,15 +73,26 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20', 10)
     const skip = (page - 1) * limit
 
-    // Only SUPER_ADMIN can access this endpoint
-    if (user.role !== 'SUPER_ADMIN') {
-      return withCors(
-        ApiResponse.error('Forbidden: You do not have the right to access this resource', 403),
-        origin
-      )
-    }
     const allowedRoles = ['HR', 'ADMIN', 'SUPER_ADMIN']
     const where: any = { role: { in: allowedRoles } }
+
+    // SUPER_ADMIN sees every company's HR/ADMIN staff; ADMIN/HR are scoped to
+    // the companies they are assigned to (so they can only manage access for
+    // staff within their own organization(s)).
+    if (user.role !== 'SUPER_ADMIN') {
+      const companyIds = await getAccessibleCompanyIds({
+        userId: user.userId,
+        email: user.email,
+        role: user.role,
+      })
+      if (companyIds.length === 0) {
+        return withCors(
+          ApiResponse.error('No companies assigned to your account', 403),
+          origin
+        )
+      }
+      where.companyId = { in: companyIds }
+    }
     if (search) {
       where.OR = [
         { firstName: { contains: search, mode: 'insensitive' } },

@@ -58,6 +58,15 @@ model Company {
   // Offer letter templates
   offerTemplates         OfferTemplate[]
 
+  // Offer Letter module (standalone)
+  offerLetterTemplates       OfferLetterTemplate[]
+  generatedOfferLetters      GeneratedOfferLetter[]
+  offerLetterBulkJobs        OfferLetterBulkJob[]
+  offerLetterEmailTemplates  OfferLetterEmailTemplate[]
+  offerLetterEmails          OfferLetterEmail[]
+  offerLetterMailboxMessages OfferLetterMailboxMessage[]
+  offerLetterMailConfig      OfferLetterMailConfig?
+
   // AI & Settings
   aiSettings             AISettings?
   aiUsageLogs            AIUsageLog[]
@@ -89,6 +98,7 @@ model Company {
   payrollUploads         PayrollUpload[]
   payrolls               Payroll[]
   payslips               Payslip[]
+  payslipBulkSends       PayslipBulkSend[]
   payrollTemplates       PayrollTemplate[]
   payrollData            PayrollData[]
   payrollTemplateUploads PayrollTemplateUpload[]
@@ -302,6 +312,7 @@ model StaffRecord {
   departmentId                    String?
   position                        String
   phone                           String?
+  hireDate                        DateTime?
   bankName                        String?
   accountNumber                   String?
   bvn                             String?
@@ -409,6 +420,59 @@ model StaffRecord {
   @@map("staff_records")
 }
 
+// Audit trail for cross-company staff transfers — one row per transfer,
+// recording what moved and what was reset so it's forensically
+// reconstructable later. No enforced relation to StaffRecord (mirrors the
+// free-text-actor-ID style already used by RoleElevation.grantedBy/revokedBy)
+// since this is a pure audit log, not something that should cascade.
+model StaffCompanyTransfer {
+  id                     String   @id @default(cuid())
+  staffRecordId          String
+  fromCompanyId          String
+  toCompanyId            String
+  transferredBy          String
+  transferredAt          DateTime @default(now())
+  reason                 String?
+  previousDepartmentId   String?
+  previousGradeId        String?
+  previousDesignationId  String?
+  previousLocationId     String?
+  previousManagerId      String?
+  newDepartmentId        String?
+  newGradeId             String?
+  newDesignationId       String?
+  newLocationId          String?
+  recordCounts           Json
+
+  @@index([staffRecordId])
+  @@index([fromCompanyId])
+  @@index([toCompanyId])
+  @@map("staff_company_transfers")
+}
+
+// Compliance/audit snapshot written whenever a staff member is permanently
+// deleted (see lib/staff/deleteStaffPermanently.ts). Payroll, payslip, and
+// tax profile figures are captured here BEFORE the delete, since those live
+// rows are destroyed by StaffRecord's own cascade rules along with
+// everything else. No enforced relation to StaffRecord, same reasoning as
+// StaffCompanyTransfer above — this row must outlive the record it describes.
+model StaffDeletionRecord {
+  id            String   @id @default(cuid())
+  staffRecordId String
+  companyId     String
+  staffId       String
+  fullName      String
+  email         String
+  deletedBy     String
+  deletedAt     DateTime @default(now())
+  reason        String?
+  preservedData Json
+
+  @@index([companyId])
+  @@index([staffId])
+  @@map("staff_deletion_records")
+}
+
 model Payroll {
   id                     String      @id @default(cuid())
   companyId              String
@@ -486,6 +550,7 @@ model Payslip {
   year          Int
   grossPay      Decimal?    @db.Decimal(18, 2)
   netPay        Decimal?    @db.Decimal(18, 2)
+  draft         Boolean     @default(true)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @default(now()) @updatedAt
   updatedBy     String?
@@ -496,6 +561,7 @@ model Payslip {
   emailLogs     EmailLog[]
 
   @@index([staffRecordId, year, month])
+  @@index([staffRecordId, draft])
   @@map("payslips")
 }
 
@@ -506,42 +572,100 @@ model StaffUpload {
   filePath     String
   processedFilePath String?  // Add this field
   processedFileName String?  // Add this field
-  totalRecords Int
-  successful   Int
-  failed       Int
+  totalRecords Int      @default(0)
+  successful   Int      @default(0)
+  failed       Int      @default(0)
   errors       String[]
   uploadedBy   String
+  status        StaffUploadStatus @default(PENDING)
+  failureReason String?
+  startedAt     DateTime?
+  completedAt   DateTime?
   createdAt    DateTime @default(now())
   company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
+  @@index([companyId, status])
   @@map("staff_uploads")
 }
 
+enum StaffUploadStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 model PayrollUpload {
-  id                String           @id @default(cuid())
+  id                String              @id @default(cuid())
   companyId         String
   fileName          String
   filePath          String
   processedFilePath String?
   processedFileName String?
-  templateType      String           @default("ISURF_STANDARD")
+  templateType      String              @default("ISURF_STANDARD")
   templateId        String?
-  sendEmails        Boolean          @default(true)
-  totalRecords      Int              @default(0)      // ← ADD THIS
-  successful        Int              @default(0)      // ← ADD THIS
-  failed            Int              @default(0)      // ← ADD THIS
-  payslipsGenerated Int?                              // ← ADD THIS
+  sendEmails        Boolean             @default(true)
+  totalRecords      Int                 @default(0)      // ← ADD THIS
+  successful        Int                 @default(0)      // ← ADD THIS
+  failed            Int                 @default(0)      // ← ADD THIS
+  payslipsGenerated Int?                                 // ← ADD THIS
   payslipsUpdated   Int?
   emailsSent        Int?
   emailAttempts     Int?
-  overwriteExisting Boolean          @default(false) // ← ADD THIS
+  emailFailures     Json?
+  overwriteExisting Boolean             @default(false) // ← ADD THIS
   errors            String[]
   uploadedBy        String
-  createdAt         DateTime         @default(now())
-  company           Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  template          PayrollTemplate? @relation(fields: [templateId], references: [id])
+  status            PayrollUploadStatus @default(PENDING)
+  failureReason     String?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime            @default(now())
+  company           Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  template          PayrollTemplate?    @relation(fields: [templateId], references: [id])
 
+  @@index([companyId, status])
   @@map("payroll_uploads")
+}
+
+enum PayrollUploadStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// Tracks an async "publish + email an entire month's draft payslips" job,
+// triggered from the Company Payslips page. Mirrors PayrollUpload's
+// PENDING/PROCESSING/COMPLETED/FAILED lifecycle for the same reason: sending
+// potentially thousands of emails sequentially can't happen inside a single
+// HTTP request without risking a timeout.
+model PayslipBulkSend {
+  id            String                @id @default(cuid())
+  companyId     String
+  month         String
+  year          Int
+  totalPayslips Int                   @default(0)
+  sent          Int                   @default(0)
+  failed        Int                   @default(0)
+  emailFailures Json?
+  status        PayslipBulkSendStatus @default(PENDING)
+  failureReason String?
+  triggeredBy   String
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime              @default(now())
+  company       Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, status])
+  @@map("payslip_bulk_sends")
+}
+
+enum PayslipBulkSendStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
 }
 
 // ==================== RECRUITMENT: ASSESSMENT PLANS ====================
@@ -991,6 +1115,311 @@ model Interview {
   @@map("interviews")
 }
 
+// ==================== OFFER LETTER MODULE (standalone) ====================
+// Independent of the recruitment Offer/OfferTemplate system above — not tied
+// to a JobApplication/Candidate. HR uploads a real .docx sample (letterhead,
+// layout, wording, with {{variable}} placeholders); the original file is kept
+// byte-for-byte as the layout source of truth and every generated letter is
+// produced by substituting only the placeholder text via docxtemplater, so
+// letters from the same template stay visually identical apart from the
+// variable values.
+model OfferLetterTemplate {
+  id               String   @id @default(cuid())
+  companyId        String
+  name             String
+  description      String?
+  originalFileName String
+  fileData         Bytes // the uploaded .docx, byte-for-byte — the layout source of truth
+  fileSize         Int
+  variables        Json // detected {{tokens}}: string[], in first-appearance order
+  status           String   @default("ACTIVE") // ACTIVE | ARCHIVED
+  createdBy        String
+  updatedBy        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  archived         Int      @default(0)
+
+  company Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  letters GeneratedOfferLetter[]
+
+  @@index([companyId, archived])
+  @@map("offer_letter_templates")
+}
+
+// Deliberately has no link to StaffRecord anywhere — this module is a
+// standalone add-on, not part of onboarding/staff management. The uploaded
+// Excel sheet is the only source of recipient data; nothing here is ever
+// cross-referenced against a staff record.
+model GeneratedOfferLetter {
+  id             String   @id @default(cuid())
+  companyId      String
+  templateId     String?
+  recipientName  String
+  recipientEmail String
+  variableValues Json // exact values substituted for this specific letter
+  fileData       Bytes // the generated .docx for this letter
+  fileName       String
+  fileSize       Int
+  month          String // mirrors Payslip.month convention exactly
+  year           Int
+  status         String   @default("GENERATED") // GENERATED | REGENERATED
+  createdBy      String
+  updatedBy      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  company  Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  template OfferLetterTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  emails   OfferLetterEmail[]
+
+  @@index([companyId, year, month])
+  @@index([companyId, createdAt])
+  @@map("generated_offer_letters")
+}
+
+// Tracks any async offer-letter bulk operation — either generating many new
+// letters from an uploaded sheet (CREATE) or regenerating existing ones
+// (EDIT). Both share the exact same PENDING/PROCESSING/COMPLETED/FAILED
+// lifecycle and the same status/pending/failure-report endpoints; only the
+// row-processing logic differs per jobType.
+model OfferLetterBulkJob {
+  id            String                 @id @default(cuid())
+  companyId     String
+  jobType       OfferLetterBulkJobType
+  templateId    String? // CREATE/EDIT jobs are scoped to one Word template; EMAIL_SEND jobs are not (letters may span templates)
+  payload       Json? // job-type-specific input, e.g. EMAIL_SEND: { letterIds, emailTemplateId, subjectOverride?, bodyOverride? }
+  fileName      String?
+  totalRecords  Int                    @default(0)
+  successful    Int                    @default(0)
+  failed        Int                    @default(0)
+  errors        Json? // [{ row, message, data: {...original row cells} }]
+  uploadedBy    String
+  status        OfferLetterBulkJobStatus @default(PENDING)
+  failureReason String?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime               @default(now())
+  company       Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, status])
+  @@map("offer_letter_bulk_jobs")
+}
+
+enum OfferLetterBulkJobType {
+  CREATE
+  EDIT
+  EMAIL_SEND
+}
+
+enum OfferLetterBulkJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// Per-company Hostinger mailbox configuration — every company sends/receives
+// offer-letter mail through its own mailbox (no shared/global fallback).
+// Passwords are stored AES-256-GCM encrypted (backend/src/app/lib/crypto/mailSecret.ts),
+// never in plaintext. imapUser/imapPasswordEncrypted are null in the common
+// case where the IMAP account matches the SMTP one exactly.
+model OfferLetterMailConfig {
+  id                    String    @id @default(cuid())
+  companyId             String    @unique
+  fromName              String
+  smtpHost              String    @default("smtp.hostinger.com")
+  smtpPort              Int       @default(465)
+  smtpSecure            Boolean   @default(true)
+  smtpUser              String
+  smtpPasswordEncrypted String
+  imapHost              String    @default("imap.hostinger.com")
+  imapPort              Int       @default(993)
+  imapUser              String?
+  imapPasswordEncrypted String?
+  isVerified            Boolean   @default(false)
+  lastVerifiedAt        DateTime?
+  updatedBy             String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("offer_letter_mail_configs")
+}
+
+// Offer Letter email delivery — a second, independent email pathway from the
+// rest of this codebase (backend/src/app/lib/mailgun.ts, used for payslips).
+// Mail must be sent via real SMTP submission through the company's actual
+// Hostinger mailbox so it lands in that mailbox's own Sent folder, and
+// replies are pulled via real IMAP polling of that same mailbox's Inbox —
+// a relay-based provider like Mailgun can't satisfy either requirement.
+model OfferLetterEmailTemplate {
+  id               String   @id @default(cuid())
+  companyId        String
+  name             String
+  description      String?
+  ccEmails         Json? // string[]
+  bccEmails        Json? // string[]
+  subject          String // supports {{variable}} substitution — same flat-key convention as letter variables
+  body             String // HTML, supports {{variable}}
+  signatureHtml    String?
+  autoAttachLetter Boolean  @default(true)
+  isActive         Boolean  @default(true)
+  createdBy        String
+  updatedBy        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  company Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  emails  OfferLetterEmail[]
+
+  @@index([companyId, isActive])
+  @@map("offer_letter_email_templates")
+}
+
+// letterId doubles as the thread key — one candidate per generated letter,
+// so there's no need for a separate threadId. companyId is denormalized
+// from the letter at send time so every read can filter by it directly
+// without an extra join, which matters once multiple companies share one
+// physical mailbox (see OfferLetterUnmatchedReply below).
+model OfferLetterEmail {
+  id            String                     @id @default(cuid())
+  companyId     String
+  letterId      String
+  templateId    String?
+  parentEmailId String?
+  direction     OfferLetterEmailDirection
+  fromEmail     String
+  fromName      String
+  toEmail       String
+  toName        String
+  ccEmails      Json?
+  bccEmails     Json?
+  subject       String
+  body          String
+  status        OfferLetterEmailStatus @default(PENDING) // PENDING | SENT | FAILED — plain SMTP can't confirm DELIVERED/BOUNCED
+  messageId     String? // Message-ID we generate on send; the anchor reply-matching resolves against
+  inReplyTo     String? // raw header from an inbound message, kept for audit/debugging
+  errorMessage  String?
+  isRead        Boolean   @default(false)
+  sentAt        DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  company     Company                    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  letter      GeneratedOfferLetter       @relation(fields: [letterId], references: [id], onDelete: Cascade)
+  template    OfferLetterEmailTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  attachments OfferLetterEmailAttachment[]
+  mailboxMessages OfferLetterMailboxMessage[]
+
+  @@index([companyId, letterId])
+  @@index([messageId])
+  @@map("offer_letter_emails")
+}
+
+enum OfferLetterEmailDirection {
+  OUTBOUND
+  INBOUND
+}
+
+enum OfferLetterEmailStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model OfferLetterEmailAttachment {
+  id        String                       @id @default(cuid())
+  emailId   String
+  fileName  String
+  fileSize  Int
+  mimeType  String
+  fileData  Bytes // consistent with the rest of this module — no disk, no S3
+  source    OfferLetterAttachmentSource
+  createdAt DateTime                     @default(now())
+
+  email OfferLetterEmail @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@map("offer_letter_email_attachments")
+}
+
+// Neutral Inbox staging record. Mail is imported here before company
+// assignment; assigned rows are exposed through the company Inbox API.
+model OfferLetterMailboxMessage {
+  id            String   @id @default(cuid())
+  companyId     String?
+  folder        String   @default("INBOX")
+  uid           String?
+  fingerprint   String   @unique
+  direction     OfferLetterEmailDirection @default(INBOUND)
+  messageId     String?
+  inReplyTo     String?
+  references    Json?
+  fromEmail     String
+  fromName      String?
+  toEmails      Json?
+  ccEmails      Json?
+  subject       String
+  body          String
+  rawHeaders    Json
+  receivedAt    DateTime
+  linkedEmailId String?
+  isRead        Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company       Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  linkedEmail   OfferLetterEmail? @relation(fields: [linkedEmailId], references: [id], onDelete: SetNull)
+  attachments   OfferLetterMailboxAttachment[]
+
+  @@index([companyId, receivedAt])
+  @@index([messageId])
+  @@index([folder, uid])
+  @@map("offer_letter_mailbox_messages")
+}
+
+model OfferLetterMailboxAttachment {
+  id          String @id @default(cuid())
+  messageId   String
+  fileName    String
+  fileSize    Int
+  mimeType    String
+  fileData    Bytes
+  createdAt   DateTime @default(now())
+
+  message OfferLetterMailboxMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@map("offer_letter_mailbox_attachments")
+}
+
+enum OfferLetterAttachmentSource {
+  SYSTEM_LETTER
+  USER_UPLOADED
+  CANDIDATE_REPLY
+}
+
+// Triage queue for inbound mail whose In-Reply-To/References didn't match
+// any stored messageId — e.g. a corporate gateway stripped the headers, or
+// a candidate forwarded instead of replying. Deliberately NOT linked to any
+// company until a SUPER_ADMIN manually attributes it: the shared mailbox
+// means a wrong automatic guess would leak one company's candidate reply
+// into another company's thread.
+model OfferLetterUnmatchedReply {
+  id            String    @id @default(cuid())
+  messageId     String?
+  fromEmail     String
+  fromName      String?
+  subject       String
+  body          String
+  rawHeaders    Json // full header dump, for manual investigation
+  receivedAt    DateTime
+  linkedEmailId String? // set once a SUPER_ADMIN attributes it; this row stays as an audit trail
+  createdAt     DateTime  @default(now())
+
+  @@map("offer_letter_unmatched_replies")
+}
+
 model Offer {
   id                String         @id @default(cuid())
   companyId         String
@@ -1346,6 +1775,10 @@ model LeaveRequest {
   handoverNotes     String?
   attachmentUrl     String?
   fileName          String?
+  attachmentData     Bytes?
+  attachmentMimeType String?
+  attachmentSize     Int?
+  hasAttachment      Boolean      @default(false)
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
   createdBy         String
@@ -1591,15 +2024,16 @@ model EmailLog {
 // ==================== PAYROLL TEMPLATE MODULE ====================
 
 model PayrollTemplate {
-  id            String   @id @default(cuid())
-  companyId     String
-  templateName  String
-  sections      Json
-  isSystem      Boolean  @default(false)
-  createdBy     String
-  updatedBy     String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  companyId          String
+  templateName       String
+  sections           Json
+  isSystem           Boolean  @default(false)
+  payslipCompanyName String?
+  createdBy          String
+  updatedBy          String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   company        Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
   fields         PayrollTemplateField[]
@@ -2775,7 +3209,7 @@ model TrainingProgram {
   company            Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   sessions           TrainingSession[]
   materials          TrainingMaterial[]
-  assessment         Assessment?
+  assessments        Assessment[]
   participants       ParticipantProgress[]
   assignmentRules    AssignmentRule[]
 
@@ -2840,7 +3274,7 @@ model TrainingMaterial {
 model Assessment {
   id                String    @id @default(cuid())
   companyId         String
-  trainingProgramId String?   @unique
+  trainingProgramId String?
   name              String
   type              String    // Quiz | Certification | Evaluation
   status            String    @default("DRAFT") // DRAFT | ACTIVE | ARCHIVED
@@ -2863,6 +3297,7 @@ model Assessment {
 
   @@index([companyId, status])
   @@index([companyId, type])
+  @@index([trainingProgramId])
   @@map("assessments")
 }
 
@@ -3084,7 +3519,7 @@ model RiskItem {
 model TrainingAuditLog {
   id         String    @id @default(cuid())
   companyId  String
-  actorId    String
+  actorId    String?
   action     String    // ISSUED | RENEWED | ARCHIVED | BULK_REMIND | CREATED | UPDATED | DELETED
   entityType String    // certification_record | training_program | assessment | assignment_rule
   entityId   String
@@ -3092,8 +3527,8 @@ model TrainingAuditLog {
   ipAddress  String?
   createdAt  DateTime  @default(now())
 
-  company    Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  actor      StaffRecord @relation(fields: [actorId], references: [id])
+  company    Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  actor      StaffRecord? @relation(fields: [actorId], references: [id])
 
   @@index([companyId, entityType, entityId])
   @@index([companyId, actorId])
@@ -3421,7 +3856,7 @@ model BenefitAllocation {
   benefitId              String
   benefitName            String
   allocationAmount       Decimal             @db.Decimal(18, 2)
-  allocatedBy            String
+  allocatedBy            String?
   note                   String?
   status                 BenefitRequestStatus @default(ALLOCATED)
   createdAt              DateTime            @default(now())
@@ -3429,7 +3864,7 @@ model BenefitAllocation {
 
   company                Company             @relation("CompanyBenefitAllocations", fields: [companyId], references: [id], onDelete: Cascade)
   staff                  StaffRecord         @relation("StaffBenefitAllocations", fields: [staffId], references: [id], onDelete: Cascade)
-  allocator              StaffRecord         @relation("BenefitAllocator", fields: [allocatedBy], references: [id])
+  allocator              StaffRecord?        @relation("BenefitAllocator", fields: [allocatedBy], references: [id])
 
   @@index([staffId, companyId])
   @@index([companyId, createdAt])

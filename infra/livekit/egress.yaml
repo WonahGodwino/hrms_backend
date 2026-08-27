@@ -1,0 +1,19 @@
+# LiveKit Egress config — must share the SAME api_key/secret pair and redis
+# address as ./livekit.yaml, or Egress can't authenticate room-composite
+# recording requests.
+# Docs: https://docs.livekit.io/home/egress/overview/
+
+log_level: info
+
+api_key: REPLACE_WITH_API_KEY
+api_secret: REPLACE_WITH_API_SECRET
+
+# Loopback is fine here — Egress and LiveKit run on the same host network.
+ws_url: ws://127.0.0.1:7880
+
+redis:
+  address: 127.0.0.1:6390
+
+# S3 destination credentials are passed per-request by the backend
+# (LIVEKIT_S3_* env vars, see backend/src/app/lib/meetings/provider.ts), not
+# configured here — this file only needs to authenticate Egress to LiveKit.

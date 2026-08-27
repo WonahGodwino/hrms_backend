@@ -192,6 +192,7 @@ export async function GET(request: NextRequest) {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
+        omit: { attachmentData: true },
         include: {
           staffRecord: {
             select: {

@@ -127,10 +127,11 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json()
     const {
-      companyId, 
+      companyId,
       templateName,
       sections,
-      isSystem = false 
+      isSystem = false,
+      payslipCompanyName
     } = body
 
     const normalizedSections = normalizeTemplateSections(sections)
@@ -189,6 +190,7 @@ export async function POST(request: NextRequest) {
           templateName,
           sections: normalizedSections,
           isSystem,
+          payslipCompanyName: payslipCompanyName?.trim() || null,
           createdBy: user.userId
         }
       })
@@ -276,7 +278,8 @@ export async function PUT(request: NextRequest) {
     const {
       templateId,
       templateName,
-      sections
+      sections,
+      payslipCompanyName
     } = body
 
     const normalizedSections = sections ? normalizeTemplateSections(sections) : null
@@ -316,6 +319,7 @@ export async function PUT(request: NextRequest) {
         data: {
           templateName: templateName || existingTemplate.templateName,
           sections: normalizedSections ? (normalizedSections as any) : ((existingTemplate.sections ?? {}) as any),
+          payslipCompanyName: payslipCompanyName !== undefined ? payslipCompanyName?.trim() || null : existingTemplate.payslipCompanyName,
           updatedBy: user.userId,
           updatedAt: new Date()
         }

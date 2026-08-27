@@ -335,6 +335,7 @@ export async function GET(request: NextRequest) {
         { status: 'asc' },
         { createdAt: 'desc' }
       ],
+      omit: { attachmentData: true },
       include: {
         staffRecord: {
           select: {

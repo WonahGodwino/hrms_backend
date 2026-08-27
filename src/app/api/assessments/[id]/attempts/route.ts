@@ -3,6 +3,7 @@ import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import rateLimit from '@/app/lib/rateLimiter'
@@ -19,18 +20,21 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const { searchParams } = new URL(req.url)
+    const resolved = await resolveRequestCompanyId(user, searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+
     const employeeId = searchParams.get('employee_id')
     const outcome    = searchParams.get('outcome')
     const page       = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
     const limit      = Math.min(100, parseInt(searchParams.get('limit') ?? '20'))
 
     const assessment = await prisma.assessment.findFirst({
-      where: { id: params.id, companyId: user.companyId, deletedAt: null },
+      where: { id: params.id, companyId: resolved.companyId, deletedAt: null },
       select: { id: true },
     })
     if (!assessment) return withCors(ApiResponse.error('Assessment not found', 404), origin)
 
-    const where: any = { assessmentId: params.id, companyId: user.companyId }
+    const where: any = { assessmentId: params.id, companyId: resolved.companyId }
     if (employeeId) where.employeeId = employeeId
     if (outcome)    where.outcome    = outcome
 
@@ -61,8 +65,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     try { await limiter.check(10, `attempt-start:${user.userId}`) }
     catch { return withCors(ApiResponse.error('Too many requests. Please wait before starting another attempt.', 429), origin) }
 
+    const body = await req.json().catch(() => ({}))
+    const resolved = await resolveRequestCompanyId(user, body.companyId ?? new URL(req.url).searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+
     const assessment = await prisma.assessment.findFirst({
-      where: { id: params.id, companyId: user.companyId, status: 'ACTIVE', deletedAt: null },
+      where: { id: params.id, companyId: resolved.companyId, status: 'ACTIVE', deletedAt: null },
       include: {
         questions: {
           select: {
@@ -99,7 +107,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       data: {
         assessmentId:  params.id,
         employeeId:    user.userId,
-        companyId:     user.companyId!,
+        companyId:     resolved.companyId,
         attemptNumber: previousAttempts + 1,
         outcome:       'Pending',
         retakeAllowed: false,

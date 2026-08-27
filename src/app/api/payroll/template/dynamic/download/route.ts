@@ -114,6 +114,21 @@ export async function GET(request: NextRequest) {
       return 'Sample'
     }
 
+    // A handful of common STAFF_DETAILS fields get a friendlier, recognizable
+    // sample instead of the generic "Sample" text — purely cosmetic, doesn't
+    // affect which fields/columns actually appear (that's driven entirely by
+    // the template's real fields below).
+    const getStaffSampleValue = (field: { systemField?: string | null; displayName: string; dataType: string }): string => {
+      if (field.dataType !== 'Text') return getSampleValue(field.dataType)
+      const key = `${field.systemField || ''} ${field.displayName || ''}`.toLowerCase()
+      if (key.includes('staffid') || key.includes('staff id') || key.includes('employeeid') || key.includes('employee id')) return 'EMP001'
+      if (key.includes('email')) return 'john@example.com'
+      if (key.includes('name')) return 'John Doe'
+      if (key.includes('department') || key.includes('costcenter') || key.includes('cost center')) return 'IT'
+      if (key.includes('month')) return new Date().toLocaleString('en-US', { month: 'long' })
+      return getSampleValue(field.dataType)
+    }
+
     // Build worksheet data
     const worksheetData: any[][] = []
 
@@ -123,20 +138,11 @@ export async function GET(request: NextRequest) {
     worksheetData.push([`Created: ${new Date(template.createdAt).toLocaleDateString()}`])
     worksheetData.push([])
 
-    // Single unified headers row across all sections
-    const baseStaffHeaders = [
-      'Employee ID',
-      'Department',
-      'Name',
-      'Email'
-    ]
-    const baseHeaderLookup = new Set(baseStaffHeaders.map((header) => header.toLowerCase()))
-
-    const staffCustomFields = sections.STAFF_DETAILS.filter(
-      (field) => !baseHeaderLookup.has(field.displayName.toLowerCase())
-    )
-
-    const staffCustomHeaders = staffCustomFields.map((field) =>
+    // Single unified headers row across all sections. STAFF_DETAILS columns
+    // are derived entirely from the template's real fields — no hardcoded
+    // column list — so a field only ever appears here if it was actually
+    // added to the template (and every field that was added does appear).
+    const staffHeaders = sections.STAFF_DETAILS.map((field) =>
       field.required ? `${field.displayName}*` : field.displayName
     )
     const fixedHeaders = sections.FIXED_EARNINGS.map((field) =>
@@ -161,8 +167,7 @@ export async function GET(request: NextRequest) {
     )
 
     const unifiedColumns = [
-      ...baseStaffHeaders.map((label) => ({ label, section: 'STAFF_DETAILS' as const })),
-      ...staffCustomHeaders.map((label) => ({ label, section: 'STAFF_DETAILS' as const })),
+      ...staffHeaders.map((label) => ({ label, section: 'STAFF_DETAILS' as const })),
       ...fixedHeaders.map((label) => ({ label, section: 'FIXED_EARNINGS' as const })),
       ...fixedValueHeaders.map((label) => ({ label, section: 'FIXED_VALUE' as const })),
       ...earningsHeaders.map((label) => ({ label, section: 'EARNINGS' as const })),
@@ -173,11 +178,7 @@ export async function GET(request: NextRequest) {
 
     // Single sample row aligned with unified headers
     const unifiedSampleRow = [
-      'EMP001',
-      'IT',
-      'John Doe',
-      'john@example.com',
-      ...staffCustomFields.map((field) => getSampleValue(field.dataType)),
+      ...sections.STAFF_DETAILS.map((field) => getStaffSampleValue(field)),
       ...sections.FIXED_EARNINGS.map((field) => getSampleValue(field.dataType)),
       ...sections.FIXED_VALUE.map((field) => getSampleValue(field.dataType)),
       ...sections.EARNINGS.map((field) => getSampleValue(field.dataType)),
@@ -192,7 +193,7 @@ export async function GET(request: NextRequest) {
     referenceData.push(['=== INSTRUCTIONS ==='])
     referenceData.push(['1. Do not modify the header row order'])
     referenceData.push(['2. Fields marked with * are required'])
-    referenceData.push(['3. Employee ID must match existing employees in the system'])
+    referenceData.push(['3. Staff ID (or your template\'s staff identifier field) must match an existing employee in the system'])
     referenceData.push(['4. Add one row per employee when entering actual payroll data'])
     referenceData.push(['5. Leave values blank only when the field is not applicable'])
     referenceData.push(['6. Upload the file through the payroll upload endpoint'])

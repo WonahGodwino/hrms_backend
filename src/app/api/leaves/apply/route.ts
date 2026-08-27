@@ -1,7 +1,5 @@
 // /src/app/api/leaves/apply/route.ts - PRIMARY APPLICATION ENDPOINT
 import { NextRequest, NextResponse } from 'next/server'
-import fs from 'fs/promises'
-import path from 'path'
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { decimalToNumber } from '@/app/lib/prisma-utils'
@@ -15,6 +13,16 @@ import {
   NOTIFICATION_TYPES,
   getNotificationsForLeaveRequest 
 } from '@/app/lib/notifications/helpers'
+
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024 // 10MB
+const ALLOWED_ATTACHMENT_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+])
 
 const cuidOrUuidSchema = z.union([z.string().cuid(), z.string().uuid()])
 const optionalIdSchema = z.preprocess(
@@ -331,7 +339,9 @@ export async function POST(request: NextRequest) {
     const user = await requireModuleAccess(token, 'LEAVE', ['STAFF', 'HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
 
     let data: any = {}
-    let fileHandled = false
+    let attachmentBuffer: Buffer | null = null
+    let attachmentMimeType: string | null = null
+    let attachmentSize = 0
 
     // Detect multipart/form-data
     const contentType = request.headers.get('content-type') || ''
@@ -343,18 +353,32 @@ export async function POST(request: NextRequest) {
         } else if (value instanceof File) {
           // Only handle 'attachment' field as file
           if (key === 'attachment') {
+            if (value.size > MAX_ATTACHMENT_BYTES) {
+              const response = NextResponse.json(
+                { success: false, message: 'Attachment exceeds the 10MB limit.' },
+                { status: 400 }
+              )
+              return withCors(response, origin)
+            }
+            if (value.type && !ALLOWED_ATTACHMENT_TYPES.has(value.type)) {
+              const response = NextResponse.json(
+                { success: false, message: 'Unsupported attachment type. Please upload a PDF, image, or Word document.' },
+                { status: 400 }
+              )
+              return withCors(response, origin)
+            }
+
             const arrayBuffer = await value.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
-            const uploadDir = path.join(process.cwd(), 'public', 'leaves', 'attachments');
-            await fs.mkdir(uploadDir, { recursive: true });
-            const fileName = `${Date.now()}_${value.name}`;
-            const filePath = path.join(uploadDir, fileName);
-            await fs.writeFile(filePath, buffer);
-            data.attachmentUrl = `/leaves/attachments/${fileName}`;
+            attachmentBuffer = Buffer.from(arrayBuffer);
+            attachmentMimeType = value.type || 'application/octet-stream';
+            attachmentSize = attachmentBuffer.length;
             data.fileName = value.name;
-            fileHandled = true;
           }
         }
+      }
+      // Multipart fields arrive as strings — coerce the ones the schema expects as other types.
+      if (typeof data.isHalfDay === 'string') {
+        data.isHalfDay = data.isHalfDay === 'true';
       }
     } else {
       // Default: JSON body
@@ -722,6 +746,10 @@ export async function POST(request: NextRequest) {
         handoverNotes: data.handoverNotes,
         attachmentUrl: data.attachmentUrl,
         fileName: data.fileName,
+        attachmentData: attachmentBuffer,
+        attachmentMimeType,
+        attachmentSize: attachmentBuffer ? attachmentSize : null,
+        hasAttachment: !!attachmentBuffer,
         status,
         currentStep,
         managerApproverId: staff.manager?.id || null,

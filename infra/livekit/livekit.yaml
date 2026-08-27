@@ -1,0 +1,51 @@
+# LiveKit self-hosted server config.
+# Docs: https://docs.livekit.io/home/self-hosting/deployment/
+#
+# Fill in REPLACE_* values before starting the container. Generate an API
+# key/secret pair with:  docker run --rm livekit/livekit-server generate-keys
+#
+# NOTE: for the trickier "TURN/TLS sharing port 443 with the main domain"
+# setup, LiveKit's official `livekit/generate` tool (see docker-compose.yml
+# header) produces a tested Caddy config for that. This file instead gives
+# TURN/TLS its own dedicated port + certificate to avoid that complexity.
+
+port: 7880
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 60000
+  # This VPS has a single public IP with no NAT in front of it (typical
+  # Hostinger VPS) — LiveKit just needs to know what that IP is.
+  use_external_ip: true
+
+redis:
+  address: 127.0.0.1:6390
+
+keys:
+  REPLACE_WITH_API_KEY: REPLACE_WITH_API_SECRET
+
+# Embedded TURN server — avoids running a separate coturn instance. TURN is
+# what lets participants behind restrictive corporate/hotel firewalls connect
+# at all (plain STUN isn't enough for them).
+turn:
+  enabled: true
+  domain: REPLACE_WITH_TURN_SUBDOMAIN   # e.g. turn.247hr.co.uk — needs its own DNS A record at this VPS
+  tls_port: 5349
+  udp_port: 3478
+  # LiveKit terminates TLS itself here (not behind a load balancer), so it
+  # needs the actual certificate/key for the turn domain. Issue one with:
+  #   certbot certonly --standalone -d turn.247hr.co.uk
+  cert_file: /etc/letsencrypt/live/REPLACE_WITH_TURN_SUBDOMAIN/fullchain.pem
+  key_file: /etc/letsencrypt/live/REPLACE_WITH_TURN_SUBDOMAIN/privkey.pem
+
+# Notifies the backend when a recording (egress) finishes — required for
+# recording status/playback to work; without this, recordingStatus never
+# leaves RECORDING/PROCESSING. Must reach the backend over HTTPS (Caddy/nginx
+# in front of it), and api_key here must match one of the keys above.
+webhook:
+  api_key: REPLACE_WITH_API_KEY
+  urls:
+    - https://REPLACE_WITH_BACKEND_DOMAIN/api/meetings/webhook
+
+
