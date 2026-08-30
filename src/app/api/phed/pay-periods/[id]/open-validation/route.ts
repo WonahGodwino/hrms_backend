@@ -29,16 +29,23 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       select: { id: true },
     })
 
-    // Upsert validation record for each staff (idempotent)
-    await Promise.all(
-      allStaff.map((s: any) =>
-        (prisma as any).phedValidation.upsert({
-          where: { payPeriodId_staffId: { payPeriodId: params.id, staffId: s.id } },
-          create: { payPeriodId: params.id, staffId: s.id, companyId: period.companyId },
-          update: {},
-        })
+    // Upsert validation record for each staff (idempotent).
+    // Batch by a bounded chunk size so a large workforce can't open hundreds of
+    // concurrent upserts against the pg pool (max 10) — which would queue past
+    // `connectionTimeoutMillis` and surface as a 500 in production.
+    const BATCH_SIZE = 50
+    for (let i = 0; i < allStaff.length; i += BATCH_SIZE) {
+      const batch = allStaff.slice(i, i + BATCH_SIZE)
+      await Promise.all(
+        batch.map((s: any) =>
+          (prisma as any).phedValidation.upsert({
+            where: { payPeriodId_staffId: { payPeriodId: params.id, staffId: s.id } },
+            create: { payPeriodId: params.id, staffId: s.id, companyId: period.companyId },
+            update: {},
+          })
+        )
       )
-    )
+    }
 
     const updated = await (prisma as any).phedPayPeriod.update({
       where: { id: params.id },

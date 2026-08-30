@@ -35,7 +35,7 @@ export async function requireModuleAccess(
 
   const allowed = await hasModuleAccess(user.companyId, moduleKey)
   if (!allowed) {
-    throw new Error('This module is not available for your organisation')
+    throw new Error('Insufficient permissions: This module is not available for your organisation')
   }
 
   return user
