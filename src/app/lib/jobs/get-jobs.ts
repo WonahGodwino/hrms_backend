@@ -22,7 +22,7 @@ export async function getJobs(
 
   const includeFields: any = {
     keywords: true,
-    company: true
+    company: { select: { id: true, companyName: true } }
   };
 
   if (user.role === 'SUPER_ADMIN') {

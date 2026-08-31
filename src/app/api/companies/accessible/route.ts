@@ -96,7 +96,7 @@ export async function GET(request: NextRequest) {
               ]
             },
             include: {
-              company: true // Let Prisma decide what fields to include
+              company: { select: { id: true, companyName: true, email: true, phone: true, address: true, logo: true } }
             }
           })
           

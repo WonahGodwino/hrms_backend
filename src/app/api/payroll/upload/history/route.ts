@@ -115,10 +115,11 @@ export async function GET(request: NextRequest) {
         
         // Verify company exists
         const companyExists = await prisma.company.findUnique({
-          where: { 
+          where: {
             id: companyIdParam,
-            archived: 0 
-          }
+            archived: 0
+          },
+          select: { id: true }
         })
         
         if (!companyExists) {

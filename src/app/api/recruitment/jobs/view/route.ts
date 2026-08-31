@@ -104,10 +104,11 @@ export async function GET(request: NextRequest) {
       if (companyFilter) {
         // Validate company exists if filter is provided
         const companyExists = await prisma.company.findFirst({
-          where: { 
+          where: {
             id: companyFilter,
-            archived: 0 
-          }
+            archived: 0
+          },
+          select: { id: true }
         })
         
         if (!companyExists) {

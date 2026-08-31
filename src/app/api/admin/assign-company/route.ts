@@ -58,7 +58,8 @@ export async function POST(request: NextRequest) {
 
     // Verify company exists
     const companyExists = await prisma.company.findUnique({
-      where: { id: companyId }
+      where: { id: companyId },
+      select: { id: true }
     })
 
     if (!companyExists) {

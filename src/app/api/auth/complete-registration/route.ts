@@ -43,12 +43,10 @@ export async function POST(request: NextRequest) {
             companyId: companyId.toString(),
           },
         },
-        include: { company: true },
       })
     } else {
       const matches = await prisma.staffRecord.findMany({
         where: { staffId: cleanStaffId },
-        include: { company: true },
       })
 
       if (matches.length === 0) {
@@ -114,7 +112,7 @@ export async function POST(request: NextRequest) {
         isRegistered: true,
         isActive: true,
       },
-      include: { company: true },
+      include: { company: { select: { id: true, companyName: true, email: true, phone: true, address: true } } },
     })
 
     const token = signToken({

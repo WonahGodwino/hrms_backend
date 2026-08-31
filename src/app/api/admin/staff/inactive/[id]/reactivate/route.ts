@@ -6,6 +6,7 @@ import { requireRole } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { ApiResponse, formatError } from '@/app/lib/utils';
+import { findIdentifierHolder } from '@/app/lib/staff/identifierCollision';
 
 type RouteParams = {
 	params: {
@@ -72,6 +73,31 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 		// ✅ Check if already active
 		if (existingStaff.isActive === true) {
 			return withCors(ApiResponse.error('Staff record is already active', 400), origin);
+		}
+
+		// While this record was inactive, its email or staffId may have been
+		// legitimately reused by a different, currently-active staff member —
+		// that's the one case where reactivation must be blocked.
+		const emailHolder = await findIdentifierHolder(companyId, 'email', existingStaff.email, existingStaff.id);
+		if (emailHolder?.isActive) {
+			return withCors(
+				ApiResponse.error(
+					`Cannot reactivate — email "${existingStaff.email}" is now in use by another active staff member (${emailHolder.firstName} ${emailHolder.lastName}). Update this record's email before reactivating.`,
+					409
+				),
+				origin
+			);
+		}
+
+		const staffIdHolder = await findIdentifierHolder(companyId, 'staffId', existingStaff.staffId, existingStaff.id);
+		if (staffIdHolder?.isActive) {
+			return withCors(
+				ApiResponse.error(
+					`Cannot reactivate — Staff ID "${existingStaff.staffId}" is now in use by another active staff member (${staffIdHolder.firstName} ${staffIdHolder.lastName}). Update this record's Staff ID before reactivating.`,
+					409
+				),
+				origin
+			);
 		}
 
 		// Check if user has access to this staff's company

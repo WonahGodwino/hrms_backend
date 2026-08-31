@@ -56,7 +56,7 @@ async function buildOrgChartData(departmentId: string, companyId: string): Promi
           }
         }
       },
-      company: true
+      company: { select: { companyName: true } }
     }
   })
 

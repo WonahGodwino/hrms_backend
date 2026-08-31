@@ -65,7 +65,7 @@ export async function PATCH(req: NextRequest) {
     const module = await (prisma as any).platformModule.findUnique({ where: { key: moduleKey } })
     if (!module) return withCors(ApiResponse.notFound(`Module '${moduleKey}' not found`), origin)
 
-    const company = await prisma.company.findFirst({ where: { id: companyId, archived: 0 } })
+    const company = await prisma.company.findFirst({ where: { id: companyId, archived: 0 }, select: { id: true, companyName: true } })
     if (!company) return withCors(ApiResponse.notFound('Company not found'), origin)
 
     const row = await (prisma as any).companyModuleAccess.upsert({

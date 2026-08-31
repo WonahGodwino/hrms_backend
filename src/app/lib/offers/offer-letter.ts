@@ -121,7 +121,18 @@ export async function resolveOfferLetter(
 ): Promise<ResolvedOfferLetter | null> {
   const offer = await prisma.offer.findUnique({
     where: { id: offerId },
-    include: { company: true, candidate: true, application: { include: { job: true } } },
+    include: {
+      company: {
+        select: {
+          id: true, companyName: true, tradingName: true, logo: true, rcNumber: true, secondedCompany: true,
+          hrRepName: true, hrRepTitle: true, communicationTool: true, governingLaw: true, arbitrationVenue: true,
+          address: true, email: true, phone: true, signatoryName: true, signatoryPosition: true, signatureImage: true,
+          baseCurrency: true,
+        },
+      },
+      candidate: true,
+      application: { include: { job: true } },
+    },
   })
   if (!offer) return null
   if (opts.companyId && offer.companyId !== opts.companyId && opts.role !== 'SUPER_ADMIN') return null

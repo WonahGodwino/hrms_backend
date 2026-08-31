@@ -8,6 +8,7 @@ import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/helpers'
+import { findIdentifierHolder, describeIdentifierCollision } from '@/app/lib/staff/identifierCollision'
 
 // -----------------------------
 // Helpers (robust CSV + Excel cell parsing)
@@ -227,7 +228,8 @@ export async function POST(request: NextRequest) {
       where: {
         id: companyId,
         archived: 0
-      }
+      },
+      select: { id: true, companyName: true }
     })
 
     if (!company) {
@@ -399,29 +401,15 @@ export async function POST(request: NextRequest) {
           throw new Error(errorMessage)
         }
 
-        const existingStaffById = await prisma.staffRecord.findFirst({
-          where: {
-            companyId: companyId!,
-            staffId: staffId,
-            isActive: true,
-          },
-        })
-
-        if (existingStaffById) {
-          errorMessage = `Staff ID "${staffId}" already exists in ${company.companyName}. Please use a different Staff ID or check if this staff member is already registered.`
+        const staffIdHolder = await findIdentifierHolder(companyId!, 'staffId', staffId)
+        if (staffIdHolder) {
+          errorMessage = describeIdentifierCollision('staffId', staffId, staffIdHolder)
           throw new Error(errorMessage)
         }
 
-        const existingStaffByEmail = await prisma.staffRecord.findFirst({
-          where: {
-            companyId: companyId!,
-            email: email,
-            isActive: true,
-          },
-        })
-
-        if (existingStaffByEmail) {
-          errorMessage = `Email "${email}" is already registered in ${company.companyName}. Please use a different email address or check if this staff member is already registered.`
+        const emailHolder = await findIdentifierHolder(companyId!, 'email', email)
+        if (emailHolder) {
+          errorMessage = describeIdentifierCollision('email', email, emailHolder)
           throw new Error(errorMessage)
         }
 

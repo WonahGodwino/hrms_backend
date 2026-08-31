@@ -28,7 +28,7 @@ export async function getPayslipWithDetails(payslipId: string) {
         }
       },
       staffRecord: true,
-      company: true
+      company: { select: { id: true, companyName: true, email: true, phone: true, address: true } }
     }
   })
 

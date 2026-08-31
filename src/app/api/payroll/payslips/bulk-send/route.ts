@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error(`You do not have ${userRole} access for this company`, 403), origin)
     }
 
-    const company = await prisma.company.findFirst({ where: { id: companyId, archived: 0 } })
+    const company = await prisma.company.findFirst({ where: { id: companyId, archived: 0 }, select: { id: true } })
     if (!company) {
       return withCors(ApiResponse.error('Company not found or is archived', 404), origin)
     }

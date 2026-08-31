@@ -76,7 +76,7 @@ export async function validateCompanyAccess(user: AuthUser, companyId: string): 
 export async function getDepartmentWithAccess(user: AuthUser, departmentId: string) {
   const department = await prisma.department.findUnique({
     where: { id: departmentId },
-    include: { company: true }
+    include: { company: { select: { id: true, companyName: true } } }
   })
   
   if (!department) throw new Error('Department not found')

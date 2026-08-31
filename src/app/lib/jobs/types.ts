@@ -26,7 +26,7 @@ export interface ArchiveResult {
 export type JobWithRelations = Prisma.JobGetPayload<{
   include: {
     keywords: true;
-    company: true;
+    company: { select: { id: true; companyName: true } };
     applications: {
       include: {
         interviews: true;

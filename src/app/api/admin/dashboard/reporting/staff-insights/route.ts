@@ -12,29 +12,8 @@ import { requireRole } from '@/app/lib/auth'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { prisma } from '@/app/lib/db'
 import { getAccessibleCompanies, resolveTargetCompanies } from '@/app/lib/reporting/access'
+import { getPeriodRange, getQuarterFromMonth, type Period } from '@/app/lib/reporting/periodRange'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-
-type Period = 'monthly' | 'quarterly' | 'yearly'
-
-function getQuarterFromMonth(monthNumber: number): number {
-	if (monthNumber >= 1 && monthNumber <= 3) return 1
-	if (monthNumber >= 4 && monthNumber <= 6) return 2
-	if (monthNumber >= 7 && monthNumber <= 9) return 3
-	return 4
-}
-
-// Real [start, end) Date range for the requested period — end is exclusive,
-// the first instant of the following period.
-function getPeriodRange(period: Period, year: number, month: number, quarter: number): { start: Date; end: Date } {
-	if (period === 'yearly') {
-		return { start: new Date(Date.UTC(year, 0, 1)), end: new Date(Date.UTC(year + 1, 0, 1)) }
-	}
-	if (period === 'quarterly') {
-		const startMonth = (quarter - 1) * 3
-		return { start: new Date(Date.UTC(year, startMonth, 1)), end: new Date(Date.UTC(year, startMonth + 3, 1)) }
-	}
-	return { start: new Date(Date.UTC(year, month - 1, 1)), end: new Date(Date.UTC(year, month, 1)) }
-}
 
 function tenureBand(hireDate: Date, asOf: Date): string {
 	const years = (asOf.getTime() - hireDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000)

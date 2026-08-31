@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
         id: decoded.userId,
         ...(decoded.companyId ? { companyId: decoded.companyId } : {}),
       },
-      include: { company: true },
+      include: { company: { select: { id: true, companyName: true, email: true, phone: true, address: true } } },
     })
 
     if (!staff) {

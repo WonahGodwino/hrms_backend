@@ -1458,7 +1458,8 @@ export async function GET(request: NextRequest) {
     }
 
     const company = await prisma.company.findFirst({
-      where: { id: companyId, archived: 0 }
+      where: { id: companyId, archived: 0 },
+      select: { id: true, companyName: true }
     })
 
     if (!company) {
@@ -1542,7 +1543,8 @@ export async function POST(request: NextRequest) {
     }
 
     const company = await prisma.company.findFirst({
-      where: { id: companyId, archived: 0 }
+      where: { id: companyId, archived: 0 },
+      select: { id: true, companyName: true }
     })
 
     if (!company) {

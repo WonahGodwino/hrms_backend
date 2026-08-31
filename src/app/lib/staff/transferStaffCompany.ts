@@ -16,6 +16,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/app/lib/db'
 import { getAccessibleCompanies } from '@/app/lib/reporting/access'
+import { findIdentifierHolder, describeIdentifierCollision } from '@/app/lib/staff/identifierCollision'
 
 export type TransferInput = {
   staffRecordId: string
@@ -76,7 +77,7 @@ async function validateTransfer(actingUser: ActingUser, input: TransferInput) {
     throw new TransferValidationError('Staff member is already in the destination company')
   }
 
-  const destinationCompany = await prisma.company.findFirst({ where: { id: input.toCompanyId, archived: 0 } })
+  const destinationCompany = await prisma.company.findFirst({ where: { id: input.toCompanyId, archived: 0 }, select: { id: true } })
   if (!destinationCompany) throw new TransferValidationError('Destination company not found')
 
   if (actingUser.role === 'ADMIN') {
@@ -86,18 +87,14 @@ async function validateTransfer(actingUser: ActingUser, input: TransferInput) {
     }
   }
 
-  const staffIdCollision = await prisma.staffRecord.findFirst({
-    where: { companyId: input.toCompanyId, staffId: staff.staffId }
-  })
+  const staffIdCollision = await findIdentifierHolder(input.toCompanyId, 'staffId', staff.staffId)
   if (staffIdCollision) {
-    throw new TransferValidationError(`A staff member with ID "${staff.staffId}" already exists in the destination company`)
+    throw new TransferValidationError(describeIdentifierCollision('staffId', staff.staffId, staffIdCollision))
   }
 
-  const emailCollision = await prisma.staffRecord.findFirst({
-    where: { companyId: input.toCompanyId, email: staff.email }
-  })
+  const emailCollision = await findIdentifierHolder(input.toCompanyId, 'email', staff.email)
   if (emailCollision) {
-    throw new TransferValidationError(`A staff member with email "${staff.email}" already exists in the destination company`)
+    throw new TransferValidationError(describeIdentifierCollision('email', staff.email, emailCollision))
   }
 
   // Compound-unique tables (companyId is part of the key) — check for any

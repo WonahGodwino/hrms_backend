@@ -25,9 +25,13 @@ const PROFILE_SELECT = {
   logo: true,
   taxId: true,
   baseCurrency: true,
+  standardStartTime: true,
+  lateGraceMinutes: true,
   createdAt: true,
   updatedAt: true,
 } as const
+
+const START_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/
 
 // SUPER_ADMIN → any company; ADMIN → companies they are assigned to; HR → their
 // own company (read-only via GET).
@@ -74,10 +78,12 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   try {
     const token = extractToken(request)
     if (!token) return withCors(ApiResponse.error('Authorization header missing', 401), origin)
-    const user = await requireRole(token, ['SUPER_ADMIN', 'ADMIN'])
+    const user = await requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR'])
     const { id } = params
 
-    if (!(await canManage(user, id))) {
+    const isFullProfileManager = await canManage(user, id)
+    const isHrForOwnCompany = user.role === 'HR' && user.companyId === id
+    if (!isFullProfileManager && !isHrForOwnCompany) {
       return withCors(ApiResponse.error('You do not have permission to edit this company', 403), origin)
     }
 
@@ -88,10 +94,11 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
     // Required text fields must not be blanked; the rest may be cleared to null.
     const required = new Set(['companyName', 'email'])
-    const editable = [
-      'companyName', 'tradingName', 'rcNumber', 'industry', 'website', 'biography',
-      'fiscalYearStart', 'leaveYearStart', 'address', 'phone', 'email', 'logo', 'taxId',
-    ]
+    // HR (own company only) may only touch the Leave module's lateness rule —
+    // not the rest of the company profile, which stays SUPER_ADMIN/ADMIN-only.
+    const editable = isFullProfileManager
+      ? ['companyName', 'tradingName', 'rcNumber', 'industry', 'website', 'biography', 'fiscalYearStart', 'leaveYearStart', 'address', 'phone', 'email', 'logo', 'taxId']
+      : []
 
     const data: Record<string, unknown> = { updatedAt: new Date() }
     for (const field of editable) {
@@ -105,7 +112,29 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       }
     }
 
-    if (body.status !== undefined) {
+    if (body.standardStartTime !== undefined) {
+      if (body.standardStartTime === null || body.standardStartTime === '') {
+        data.standardStartTime = null
+      } else if (typeof body.standardStartTime === 'string' && START_TIME_PATTERN.test(body.standardStartTime)) {
+        data.standardStartTime = body.standardStartTime
+      } else {
+        return withCors(ApiResponse.error('standardStartTime must be in HH:mm 24-hour format', 400), origin)
+      }
+    }
+
+    if (body.lateGraceMinutes !== undefined) {
+      if (body.lateGraceMinutes === null) {
+        data.lateGraceMinutes = null
+      } else {
+        const minutes = Number(body.lateGraceMinutes)
+        if (!Number.isInteger(minutes) || minutes < 0 || minutes > 180) {
+          return withCors(ApiResponse.error('lateGraceMinutes must be an integer between 0 and 180', 400), origin)
+        }
+        data.lateGraceMinutes = minutes
+      }
+    }
+
+    if (body.status !== undefined && isFullProfileManager) {
       const allowedStatuses = ['Active', 'Inactive', 'Pending']
       if (!allowedStatuses.includes(body.status)) {
         return withCors(

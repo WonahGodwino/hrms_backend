@@ -30,7 +30,7 @@ export async function getJobById(
 
   const includeFields: any = {
     keywords: true,
-    company: true
+    company: { select: { id: true, companyName: true } }
   };
 
   if (user.role === 'SUPER_ADMIN') {

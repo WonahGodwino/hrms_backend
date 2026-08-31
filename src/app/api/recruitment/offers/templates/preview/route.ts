@@ -36,7 +36,14 @@ export async function POST(req: NextRequest) {
       const offer = await prisma.offer.findUnique({
         where: { id: body.offerId },
         include: {
-          company: true,
+          company: {
+            select: {
+              id: true, companyName: true, tradingName: true, logo: true, rcNumber: true, secondedCompany: true,
+              hrRepName: true, hrRepTitle: true, communicationTool: true, governingLaw: true, arbitrationVenue: true,
+              address: true, email: true, phone: true, signatoryName: true, signatoryPosition: true, signatureImage: true,
+              baseCurrency: true,
+            },
+          },
           candidate: true,
           application: { include: { job: true } },
         },
@@ -71,7 +78,15 @@ export async function POST(req: NextRequest) {
 
       // Load the caller's company profile and overlay company-specific keys.
       try {
-        const comp = await prisma.company.findUnique({ where: { id: companyId } })
+        const comp = await prisma.company.findUnique({
+          where: { id: companyId },
+          select: {
+            id: true, companyName: true, tradingName: true, logo: true, rcNumber: true, secondedCompany: true,
+            hrRepName: true, hrRepTitle: true, communicationTool: true, governingLaw: true, arbitrationVenue: true,
+            address: true, email: true, phone: true, signatoryName: true, signatoryPosition: true, signatureImage: true,
+            baseCurrency: true,
+          },
+        })
         if (comp) {
           if (comp.companyName) {
             values['company.name'] = comp.companyName

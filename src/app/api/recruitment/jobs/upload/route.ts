@@ -354,7 +354,8 @@ export async function POST(request: NextRequest) {
       where: {
         id: companyId,
         archived: 0
-      }
+      },
+      select: { id: true, companyName: true }
     });
 
     if (!company) {

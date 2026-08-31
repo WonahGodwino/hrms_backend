@@ -1,5 +1,43 @@
 export type SalarySummaryPeriod = 'monthly' | 'quarterly' | 'yearly'
 
+// A pay-period is one calendar month (e.g. "August"). Payroll.month is
+// stored as free text — "August", "Aug", "8" all mean the same month — so
+// every month-vs-month comparison anywhere in reporting goes through this
+// same parser rather than comparing the raw strings.
+export function getMonthNumber(month: string): number {
+  const normalized = (month || '').trim().toLowerCase()
+  const monthMap: Record<string, number> = {
+    january: 1,
+    february: 2,
+    march: 3,
+    april: 4,
+    may: 5,
+    june: 6,
+    july: 7,
+    august: 8,
+    september: 9,
+    october: 10,
+    november: 11,
+    december: 12
+  }
+
+  if (monthMap[normalized]) return monthMap[normalized]
+
+  const asNumber = Number(normalized)
+  if (Number.isFinite(asNumber) && asNumber >= 1 && asNumber <= 12) {
+    return asNumber
+  }
+
+  return 0
+}
+
+export function getQuarterFromMonth(monthNumber: number): number {
+  if (monthNumber >= 1 && monthNumber <= 3) return 1
+  if (monthNumber >= 4 && monthNumber <= 6) return 2
+  if (monthNumber >= 7 && monthNumber <= 9) return 3
+  return 4
+}
+
 function getMonthName(monthNumber: number): string {
   const names = [
     'january',

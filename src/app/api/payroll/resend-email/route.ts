@@ -8,6 +8,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
+import { findIdentifierHolder, describeIdentifierCollision } from '@/app/lib/staff/identifierCollision'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -121,20 +122,11 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      const existingWithNewEmail = await prisma.staffRecord.findFirst({
-        where: {
-          companyId,
-          email: newEmail.toLowerCase(),
-          NOT: { id: staff.id },
-        },
-      })
+      const emailHolder = await findIdentifierHolder(companyId, 'email', newEmail.toLowerCase(), staff.id)
 
-      if (existingWithNewEmail) {
+      if (emailHolder) {
         return withCors(
-          ApiResponse.error(
-            'Another staff already uses this new email in this company',
-            400
-          ),
+          ApiResponse.error(describeIdentifierCollision('email', newEmail.toLowerCase(), emailHolder), 400),
           origin
         )
       }

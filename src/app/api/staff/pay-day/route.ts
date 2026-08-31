@@ -249,8 +249,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     const payDate = await prisma.companyPayDate.findUnique({
-      where: { id: payDateId },
-      include: { company: true }
+      where: { id: payDateId }
     })
 
     if (!payDate) {

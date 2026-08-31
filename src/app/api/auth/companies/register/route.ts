@@ -180,6 +180,7 @@ export async function POST(request: NextRequest) {
           ...(cleanTaxId ? [{ taxId: cleanTaxId }] : []),
         ],
       },
+      select: { id: true, companyName: true, email: true, taxId: true },
     })
     if (existingCompany) {
       let errorMessage = 'Company with similar details already exists'

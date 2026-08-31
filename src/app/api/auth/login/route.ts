@@ -71,7 +71,10 @@ export async function POST(request: NextRequest) {
     // role-elevation (e.g. staff elevated to HR/ADMIN to sit on an interview panel)
     // in parallel.
     const [company, enabledModules, phedRoleGrant, elevatedRole] = await Promise.all([
-      prisma.company.findUnique({ where: { id: staff.companyId } }),
+      prisma.company.findUnique({
+        where: { id: staff.companyId },
+        select: { id: true, companyName: true, email: true, phone: true, address: true },
+      }),
       staff.role === 'SUPER_ADMIN'
         ? getEnabledModules(undefined)
         : getEnabledModules(staff.companyId),

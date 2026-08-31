@@ -16,6 +16,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import { findIdentifierHolder, describeIdentifierCollision } from '@/app/lib/staff/identifierCollision'
 import ExcelJS from 'exceljs'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
@@ -173,7 +174,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const company = await prisma.company.findFirst({ where: { id: companyId, archived: 0 } })
+    const company = await prisma.company.findFirst({ where: { id: companyId, archived: 0 }, select: { id: true, companyName: true } })
     if (!company) {
       return withCors(ApiResponse.error('Company not found or is archived', 404), origin)
     }
@@ -379,11 +380,9 @@ async function processStaffBulkEditInBackground({
               throw new Error(`Invalid email format: "${cellToString(emailRaw)}".`)
             }
             if (email !== existing.email) {
-              const emailTaken = await prisma.staffRecord.findFirst({
-                where: { companyId, email, isActive: true, NOT: { id: existing.id } },
-              })
-              if (emailTaken) {
-                throw new Error(`Email "${email}" is already used by another staff member.`)
+              const emailHolder = await findIdentifierHolder(companyId, 'email', email, existing.id)
+              if (emailHolder) {
+                throw new Error(describeIdentifierCollision('email', email, emailHolder))
               }
               updateData.email = email
             }

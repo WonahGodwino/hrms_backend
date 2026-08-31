@@ -6,6 +6,7 @@ import { requireRole } from '@/app/lib/auth';
 import { withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { ApiResponse, formatError } from '@/app/lib/utils';
+import { findIdentifierHolder, describeIdentifierCollision } from '@/app/lib/staff/identifierCollision';
 
 type RouteParams = {
 	params: {
@@ -283,17 +284,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 			if (!validator.isEmail(sanitizedEmail)) {
 				return withCors(ApiResponse.error('Invalid email format', 400), origin);
 			}
-			// Check if email is unique among active staff in the company
-			const existingEmail = await prisma.staffRecord.findFirst({
-				where: {
-					email: sanitizedEmail,
-					companyId: existingStaff.companyId,
-					id: { not: sanitizedId },
-					isActive: true,
-				},
-			});
-			if (existingEmail) {
-				return withCors(ApiResponse.error('Email already exists in an active staff record in this company', 400), origin);
+			const emailHolder = await findIdentifierHolder(existingStaff.companyId, 'email', sanitizedEmail, sanitizedId);
+			if (emailHolder) {
+				return withCors(ApiResponse.error(describeIdentifierCollision('email', sanitizedEmail, emailHolder), 400), origin);
 			}
 			updateData.email = sanitizedEmail;
 		}
@@ -306,17 +299,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 			if (!sanitizedStaffId || !validator.isLength(sanitizedStaffId, { min: 1, max: 100 })) {
 				return withCors(ApiResponse.error('Staff ID must be 1-100 characters', 400), origin);
 			}
-			// Check if staffId is unique among active staff in the company
-			const existingStaffId = await prisma.staffRecord.findFirst({
-				where: {
-					staffId: sanitizedStaffId,
-					companyId: existingStaff.companyId,
-					id: { not: sanitizedId },
-					isActive: true,
-				},
-			});
-			if (existingStaffId) {
-				return withCors(ApiResponse.error('Staff ID already exists in an active staff record in this company', 400), origin);
+			const staffIdHolder = await findIdentifierHolder(existingStaff.companyId, 'staffId', sanitizedStaffId, sanitizedId);
+			if (staffIdHolder) {
+				return withCors(ApiResponse.error(describeIdentifierCollision('staffId', sanitizedStaffId, staffIdHolder), 400), origin);
 			}
 			updateData.staffId = sanitizedStaffId;
 		}

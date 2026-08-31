@@ -29,6 +29,11 @@ model Company {
   createdAt              DateTime                 @default(now())
   updatedAt              DateTime?                @updatedAt
   workWeekPattern        String?                  @db.VarChar(20)
+  // Attendance lateness rule for Attendance Reporting — "HH:mm" (e.g. "09:00").
+  // Null falls back to "09:00"/0 minutes so behavior matches the previous
+  // hardcoded client-side default until a company configures its own.
+  standardStartTime      String?                  @db.VarChar(5)
+  lateGraceMinutes       Int?                     @default(0)
 
   // Offer letter / employer details (populated onto the offer letter template).
   // Every company-specific value comes from here so the shared template stays generic.

@@ -9,6 +9,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { sendEmail } from '@/app/lib/email'
 import { sign } from 'jsonwebtoken'
+import { findIdentifierHolder, describeIdentifierCollision } from '@/app/lib/staff/identifierCollision'
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://247hr.co.uk'
 
@@ -80,9 +81,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const job = (offer as any).application?.job
 
     // Guard against promoting someone who is already staff in this company.
-    const existing = await prisma.staffRecord.findFirst({ where: { email, companyId }, select: { id: true, staffId: true } })
-    if (existing) {
-      return withCors(ApiResponse.error(`A staff record already exists for ${email} (staffId ${existing.staffId})`, 409), origin)
+    // An inactive/offboarded holder doesn't block this — it's surfaced with a
+    // message pointing at reactivation instead of a flat "already exists".
+    const emailHolder = await findIdentifierHolder(companyId, 'email', email)
+    if (emailHolder) {
+      return withCors(ApiResponse.error(describeIdentifierCollision('email', email, emailHolder), 409), origin)
     }
 
     const position = String(body.position || job?.title || 'Staff').trim()

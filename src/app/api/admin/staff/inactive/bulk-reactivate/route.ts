@@ -96,16 +96,59 @@ export async function PATCH(request: NextRequest) {
 			}
 		}
 
-		// Get count of staff that will be reactivated
-		const countToReactivate = await prisma.staffRecord.count({ where });
+		// Get the candidate staff that would be reactivated, so each one can be
+		// checked individually — a candidate's email/staffId may have been
+		// legitimately reused by a different, currently-active staff member
+		// while it was inactive, which must block just that one record.
+		const candidates = await prisma.staffRecord.findMany({
+			where,
+			select: { id: true, staffId: true, email: true, firstName: true, lastName: true },
+		});
 
-		if (countToReactivate === 0) {
+		if (candidates.length === 0) {
 			return withCors(ApiResponse.error('No inactive staff found matching the criteria in this company', 404), origin);
 		}
 
-		// Perform bulk reactivation
+		const activeHolders = await prisma.staffRecord.findMany({
+			where: {
+				companyId,
+				isActive: true,
+				OR: [{ email: { in: candidates.map((c) => c.email) } }, { staffId: { in: candidates.map((c) => c.staffId) } }],
+			},
+			select: { staffId: true, email: true, firstName: true, lastName: true },
+		});
+		const activeByEmail = new Map(activeHolders.map((h) => [h.email, h]));
+		const activeByStaffId = new Map(activeHolders.map((h) => [h.staffId, h]));
+
+		const eligibleIds: string[] = [];
+		const blocked: Array<{ id: string; staffId: string; fullName: string; reason: string }> = [];
+		for (const candidate of candidates) {
+			const emailHolder = activeByEmail.get(candidate.email);
+			const staffIdHolder = activeByStaffId.get(candidate.staffId);
+			const holder = emailHolder || staffIdHolder;
+			if (holder) {
+				const field = emailHolder ? `email "${candidate.email}"` : `Staff ID "${candidate.staffId}"`;
+				blocked.push({
+					id: candidate.id,
+					staffId: candidate.staffId,
+					fullName: `${candidate.firstName} ${candidate.lastName}`,
+					reason: `${field} is now in use by another active staff member (${holder.firstName} ${holder.lastName}).`,
+				});
+			} else {
+				eligibleIds.push(candidate.id);
+			}
+		}
+
+		if (eligibleIds.length === 0) {
+			return withCors(
+				ApiResponse.error('None of the selected staff could be reactivated — every one has an email or Staff ID now in use by an active staff member', 409, blocked),
+				origin
+			);
+		}
+
+		// Perform bulk reactivation on only the eligible (non-clashing) records
 		const reactivatedStaff = await prisma.staffRecord.updateMany({
-			where,
+			where: { id: { in: eligibleIds } },
 			data: {
 				isActive: true,
 				updatedBy: currentUser.email || currentUser.userId,
@@ -115,10 +158,7 @@ export async function PATCH(request: NextRequest) {
 
 		// Get details of reactivated staff (for response)
 		const reactivatedStaffDetails = await prisma.staffRecord.findMany({
-			where: {
-				...where,
-				isActive: true, // Now active after update
-			},
+			where: { id: { in: eligibleIds } },
 			select: {
 				id: true,
 				staffId: true,
@@ -155,13 +195,17 @@ export async function PATCH(request: NextRequest) {
 						fullName: `${staff.firstName} ${staff.lastName}`,
 						status: 'Active',
 					})),
+					blocked,
 					summary: {
 						totalReactivated: reactivatedStaff.count,
+						totalBlocked: blocked.length,
 						reactivatedAt: new Date().toISOString(),
 						reactivatedBy: currentUser.email || currentUser.userId,
 					},
 				},
-				`${reactivatedStaff.count} staff records reactivated successfully`
+				blocked.length > 0
+					? `${reactivatedStaff.count} staff records reactivated, ${blocked.length} skipped due to an active identifier clash`
+					: `${reactivatedStaff.count} staff records reactivated successfully`
 			),
 			origin
 		);
