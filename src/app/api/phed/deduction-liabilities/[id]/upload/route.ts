@@ -59,24 +59,29 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     let failed   = 0
     const errors: string[] = [...parseErrors]
 
-    for (const row of rows) {
-      const dbId = staffMap.get(row.staffId.toLowerCase())
-      if (!dbId) {
-        failed++
-        errors.push(`Staff ID "${row.staffId}" not found in the system`)
-        continue
-      }
-      try {
-        await (prisma as any).phedStaffDeductionLiability.upsert({
-          where:  { staffId_deductionLiabilityId: { staffId: dbId, deductionLiabilityId: params.id } },
-          create: { staffId: dbId, deductionLiabilityId: params.id, amount: row.amount },
-          update: { amount: row.amount },
-        })
-        upserted++
-      } catch (err: any) {
-        failed++
-        errors.push(`Staff ID "${row.staffId}": ${err.message}`)
-      }
+    // Bounded-concurrency upsert so a large member file doesn't time out.
+    const CONCURRENCY = 10
+    for (let start = 0; start < rows.length; start += CONCURRENCY) {
+      const chunk = rows.slice(start, start + CONCURRENCY)
+      await Promise.all(chunk.map(async (row) => {
+        const dbId = staffMap.get(row.staffId.toLowerCase())
+        if (!dbId) {
+          failed++
+          errors.push(`Staff ID "${row.staffId}" not found in the system`)
+          return
+        }
+        try {
+          await (prisma as any).phedStaffDeductionLiability.upsert({
+            where:  { staffId_deductionLiabilityId: { staffId: dbId, deductionLiabilityId: params.id } },
+            create: { staffId: dbId, deductionLiabilityId: params.id, amount: row.amount },
+            update: { amount: row.amount },
+          })
+          upserted++
+        } catch (err: any) {
+          failed++
+          errors.push(`Staff ID "${row.staffId}": ${err.message}`)
+        }
+      }))
     }
 
     await (prisma as any).phedBulkUpload.create({

@@ -74,35 +74,40 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     let failed  = 0
     const errors: string[] = [...parseErrors]
 
-    for (const row of rows) {
-      const dbId = staffMap.get(row.staffId.toLowerCase())
+    // Bounded-concurrency create so a large member file doesn't time out.
+    const CONCURRENCY = 10
+    for (let start = 0; start < rows.length; start += CONCURRENCY) {
+      const chunk = rows.slice(start, start + CONCURRENCY)
+      await Promise.all(chunk.map(async (row) => {
+        const dbId = staffMap.get(row.staffId.toLowerCase())
 
-      if (!dbId) {
-        failed++
-        errors.push(`Staff ID "${row.staffId}" not found in the system`)
-        continue
-      }
-
-      if (existingSet.has(dbId)) {
-        skipped++   // already a member — not an error
-        continue
-      }
-
-      try {
-        await (prisma as any).phedStaffUnion.create({
-          data: { staffId: dbId, unionId: params.id },
-        })
-        existingSet.add(dbId)   // prevent duplicate within the same upload
-        added++
-      } catch (err: any) {
-        // Catch race-condition duplicates gracefully
-        if (err.code === 'P2002') {
-          skipped++
-        } else {
+        if (!dbId) {
           failed++
-          errors.push(`Staff ID "${row.staffId}": ${err.message}`)
+          errors.push(`Staff ID "${row.staffId}" not found in the system`)
+          return
         }
-      }
+
+        if (existingSet.has(dbId)) {
+          skipped++   // already a member — not an error
+          return
+        }
+
+        try {
+          await (prisma as any).phedStaffUnion.create({
+            data: { staffId: dbId, unionId: params.id },
+          })
+          existingSet.add(dbId)   // prevent duplicate within the same upload
+          added++
+        } catch (err: any) {
+          // Catch race-condition duplicates gracefully
+          if (err.code === 'P2002') {
+            skipped++
+          } else {
+            failed++
+            errors.push(`Staff ID "${row.staffId}": ${err.message}`)
+          }
+        }
+      }))
     }
 
     // ── Audit trail ───────────────────────────────────────────

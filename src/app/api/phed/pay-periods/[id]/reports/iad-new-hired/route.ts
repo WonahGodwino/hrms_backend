@@ -46,37 +46,42 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       orderBy: { createdAt: 'asc' },
     })
 
-    const rows = await Promise.all(
-      newHires.map(async staff => {
-        const startingBasicSalary = staff.basicSalary != null ? toNum(staff.basicSalary) : toNum(staff.grade?.defaultBasicSalary)
+    const rows: any[] = []
+    const CONCURRENCY = 10
+    for (let start = 0; start < newHires.length; start += CONCURRENCY) {
+      const chunk = newHires.slice(start, start + CONCURRENCY)
+      rows.push(...(await Promise.all(
+        chunk.map(async staff => {
+          const startingBasicSalary = staff.basicSalary != null ? toNum(staff.basicSalary) : toNum(staff.grade?.defaultBasicSalary)
 
-        // Best-effort: not every PhedStaff has a matching StaffRecord/Onboarding
-        // (e.g. seeded test data, or staff added before recruitment ran).
-        const staffRecord = await prisma.staffRecord.findUnique({
-          where: { email_companyId: { email: staff.email, companyId: period.companyId } },
-          select: { id: true },
+          // Best-effort: not every PhedStaff has a matching StaffRecord/Onboarding
+          // (e.g. seeded test data, or staff added before recruitment ran).
+          const staffRecord = await prisma.staffRecord.findUnique({
+            where: { email_companyId: { email: staff.email, companyId: period.companyId } },
+            select: { id: true },
+          })
+          const onboarding = staffRecord
+            ? await prisma.onboarding.findFirst({
+                where: { staffRecordId: staffRecord.id },
+                select: { startDate: true, status: true },
+              })
+            : null
+
+          return {
+            staffName: `${staff.firstName} ${staff.lastName}`,
+            staffIdCode: staff.staffId,
+            department: staff.department,
+            category: staff.category,
+            gradeName: staff.grade?.name ?? null,
+            startingBasicSalary,
+            hireDate: staff.createdAt,
+            onboardingMatched: !!onboarding,
+            onboardingStartDate: onboarding?.startDate ?? null,
+            onboardingStatus: onboarding?.status ?? null,
+          }
         })
-        const onboarding = staffRecord
-          ? await prisma.onboarding.findFirst({
-              where: { staffRecordId: staffRecord.id },
-              select: { startDate: true, status: true },
-            })
-          : null
-
-        return {
-          staffName: `${staff.firstName} ${staff.lastName}`,
-          staffIdCode: staff.staffId,
-          department: staff.department,
-          category: staff.category,
-          gradeName: staff.grade?.name ?? null,
-          startingBasicSalary,
-          hireDate: staff.createdAt,
-          onboardingMatched: !!onboarding,
-          onboardingStartDate: onboarding?.startDate ?? null,
-          onboardingStatus: onboarding?.status ?? null,
-        }
-      }),
-    )
+      )))
+    }
 
     const format = new URL(req.url).searchParams.get('format') ?? 'json'
     if (format === 'json') return withCors(ApiResponse.success(rows), origin)

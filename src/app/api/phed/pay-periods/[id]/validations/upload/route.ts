@@ -66,41 +66,44 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     let failed     = 0
     const errors: string[] = [...parseErrors]
 
-    for (const row of rows) {
-      const dbId = staffMap.get(row.staffId.toLowerCase())
-      if (!dbId) {
-        failed++
-        errors.push(`Staff ID "${row.staffId}" not found in this company's staff list`)
-        console.warn(`[VALIDATION UPLOAD] staff not found: "${row.staffId}"`)
-        continue
-      }
+    // Bounded-concurrency upsert so a large validation file doesn't time out
+    // on thousands of sequential round-trips.
+    const CONCURRENCY = 10
+    for (let start = 0; start < rows.length; start += CONCURRENCY) {
+      const chunk = rows.slice(start, start + CONCURRENCY)
+      await Promise.all(chunk.map(async (row) => {
+        const dbId = staffMap.get(row.staffId.toLowerCase())
+        if (!dbId) {
+          failed++
+          errors.push(`Staff ID "${row.staffId}" not found in this company's staff list`)
+          return
+        }
 
-      try {
-        await (prisma as any).phedValidation.upsert({
-          where: { payPeriodId_staffId: { payPeriodId: params.id, staffId: dbId } },
-          create: {
-            payPeriodId: params.id,
-            staffId:     dbId,
-            companyId:   period.companyId,
-            status:      row.status,
-            reason:      row.reason || null,
-            validatedBy: user.userId,
-            validatedAt: new Date(),
-          },
-          update: {
-            status:      row.status,
-            reason:      row.reason || null,
-            validatedBy: user.userId,
-            validatedAt: new Date(),
-          },
-        })
-        console.log(`[VALIDATION UPLOAD] ✓ upserted staffId="${row.staffId}" dbId="${dbId}" status="${row.status}"`)
-        successful++
-      } catch (err: any) {
-        failed++
-        errors.push(`Staff ${row.staffId}: ${err.message}`)
-        console.error(`[VALIDATION UPLOAD] ✗ upsert failed staffId="${row.staffId}":`, err.message)
-      }
+        try {
+          await (prisma as any).phedValidation.upsert({
+            where: { payPeriodId_staffId: { payPeriodId: params.id, staffId: dbId } },
+            create: {
+              payPeriodId: params.id,
+              staffId:     dbId,
+              companyId:   period.companyId,
+              status:      row.status,
+              reason:      row.reason || null,
+              validatedBy: user.userId,
+              validatedAt: new Date(),
+            },
+            update: {
+              status:      row.status,
+              reason:      row.reason || null,
+              validatedBy: user.userId,
+              validatedAt: new Date(),
+            },
+          })
+          successful++
+        } catch (err: any) {
+          failed++
+          errors.push(`Staff ${row.staffId}: ${err.message}`)
+        }
+      }))
     }
 
     await (prisma as any).phedBulkUpload.create({

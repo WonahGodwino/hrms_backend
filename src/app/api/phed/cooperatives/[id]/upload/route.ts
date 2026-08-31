@@ -61,40 +61,45 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     let failed   = 0
     const errors: string[] = [...parseErrors]
 
-    for (const row of rows) {
-      const dbId = staffMap.get(row.staffId.toLowerCase())
+    // Bounded-concurrency upsert so a large member file doesn't time out.
+    const CONCURRENCY = 10
+    for (let start = 0; start < rows.length; start += CONCURRENCY) {
+      const chunk = rows.slice(start, start + CONCURRENCY)
+      await Promise.all(chunk.map(async (row) => {
+        const dbId = staffMap.get(row.staffId.toLowerCase())
 
-      if (!dbId) {
-        failed++
-        errors.push(`Staff ID "${row.staffId}" not found in the system`)
-        continue
-      }
+        if (!dbId) {
+          failed++
+          errors.push(`Staff ID "${row.staffId}" not found in the system`)
+          return
+        }
 
-      const contribution = row.contributionAmount
-      const loan         = row.loanAmount
-      const total        = row.totalAmount
+        const contribution = row.contributionAmount
+        const loan         = row.loanAmount
+        const total        = row.totalAmount
 
-      try {
-        await (prisma as any).phedStaffCooperative.upsert({
-          where: { staffId_cooperativeId: { staffId: dbId, cooperativeId: params.id } },
-          create: {
-            staffId:            dbId,
-            cooperativeId:      params.id,
-            contributionAmount: contribution,
-            loanAmount:         loan,
-            totalAmount:        total,
-          },
-          update: {
-            contributionAmount: contribution,
-            loanAmount:         loan,
-            totalAmount:        total,
-          },
-        })
-        upserted++
-      } catch (err: any) {
-        failed++
-        errors.push(`Staff ID "${row.staffId}": ${err.message}`)
-      }
+        try {
+          await (prisma as any).phedStaffCooperative.upsert({
+            where: { staffId_cooperativeId: { staffId: dbId, cooperativeId: params.id } },
+            create: {
+              staffId:            dbId,
+              cooperativeId:      params.id,
+              contributionAmount: contribution,
+              loanAmount:         loan,
+              totalAmount:        total,
+            },
+            update: {
+              contributionAmount: contribution,
+              loanAmount:         loan,
+              totalAmount:        total,
+            },
+          })
+          upserted++
+        } catch (err: any) {
+          failed++
+          errors.push(`Staff ID "${row.staffId}": ${err.message}`)
+        }
+      }))
     }
 
     await (prisma as any).phedBulkUpload.create({

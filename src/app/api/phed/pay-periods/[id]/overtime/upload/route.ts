@@ -37,26 +37,31 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     let failed     = 0
     const errors   = [...parseErrors]
 
-    for (const row of rows) {
-      const dbId = staffMap.get(row.staffId.toLowerCase())
-      if (!dbId) { failed++; errors.push(`Staff ID "${row.staffId}" not found`); continue }
+    // Bounded-concurrency upsert so a large overtime file doesn't time out.
+    const CONCURRENCY = 10
+    for (let start = 0; start < rows.length; start += CONCURRENCY) {
+      const chunk = rows.slice(start, start + CONCURRENCY)
+      await Promise.all(chunk.map(async (row) => {
+        const dbId = staffMap.get(row.staffId.toLowerCase())
+        if (!dbId) { failed++; errors.push(`Staff ID "${row.staffId}" not found`); return }
 
-      try {
-        await (prisma as any).phedOvertimeEntry.upsert({
-          where: { payPeriodId_staffId: { payPeriodId: params.id, staffId: dbId } },
-          create: {
-            payPeriodId:   params.id,
-            staffId:       dbId,
-            companyId:     period.companyId,
-            overtimeHours: Number(row.overtimeHours),
-          },
-          update: { overtimeHours: Number(row.overtimeHours), computedAmount: null },
-        })
-        successful++
-      } catch (err: any) {
-        failed++
-        errors.push(`Staff ${row.staffId}: ${err.message}`)
-      }
+        try {
+          await (prisma as any).phedOvertimeEntry.upsert({
+            where: { payPeriodId_staffId: { payPeriodId: params.id, staffId: dbId } },
+            create: {
+              payPeriodId:   params.id,
+              staffId:       dbId,
+              companyId:     period.companyId,
+              overtimeHours: Number(row.overtimeHours),
+            },
+            update: { overtimeHours: Number(row.overtimeHours), computedAmount: null },
+          })
+          successful++
+        } catch (err: any) {
+          failed++
+          errors.push(`Staff ${row.staffId}: ${err.message}`)
+        }
+      }))
     }
 
     await (prisma as any).phedBulkUpload.create({

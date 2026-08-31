@@ -86,8 +86,11 @@ export async function POST(req: NextRequest) {
     const rowErrors: string[] = [...parseErrors]
     const rowErrorsWithData: Array<{ rowNum: number; staffId: string; firstName: string; lastName: string; email: string; error: string }> = []
 
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i]
+    // Process one uploaded row: validate, upsert PHED staff, provision a login
+    // account for NEW staff only, and sync the tax profile. Returns null on
+    // success, or { error, withData } on failure. bcrypt is computed only for
+    // new accounts so re-uploads skip the expensive hash.
+    const processUploadRow = async (r: any, i: number): Promise<{ error: string | null; withData: { rowNum: number; staffId: string; firstName: string; lastName: string; email: string; error: string } | null }> => {
       try {
         const categoryRaw   = (r.category || 'REGULAR').toUpperCase().replace(/[\s/]+/g, '_')
         const categoryUpper = categoryRaw === 'NYSC_IT' || categoryRaw === 'NYSCIT' ? 'NYSC_IT' : categoryRaw
@@ -97,9 +100,7 @@ export async function POST(req: NextRequest) {
         const hasLA = ['yes', 'true', '1'].includes((r.hasLifeAssurance || '').toLowerCase().trim())
         const laAmount = r.lifeAssuranceAmount ? Number(r.lifeAssuranceAmount) : 0
         if (hasLA && laAmount <= 0) {
-          rowErrors.push(`Row ${i + 2}: lifeAssuranceAmount must be greater than 0 when hasLifeAssurance is YES`)
-          failed++
-          continue
+          return { error: `Row ${i + 2}: lifeAssuranceAmount must be greater than 0 when hasLifeAssurance is YES`, withData: null }
         }
 
         // Validate State of Residence early (before any write) so an invalid state
@@ -109,10 +110,10 @@ export async function POST(req: NextRequest) {
           normalizedState = normalizeState(r.stateOfResidence)
           if (!normalizedState) {
             const err = `Row ${i + 2}: invalid State of Residence "${r.stateOfResidence}" — use Akwa Ibom, Bayelsa, Cross River or Rivers`
-            rowErrors.push(err)
-            rowErrorsWithData.push({ rowNum: i + 2, staffId: r.staffId, firstName: r.firstName, lastName: r.lastName, email: r.email, error: err.replace(`Row ${i + 2}: `, '') })
-            failed++
-            continue
+            return {
+              error: err,
+              withData: { rowNum: i + 2, staffId: r.staffId, firstName: r.firstName, lastName: r.lastName, email: r.email, error: err.replace(`Row ${i + 2}: `, '') },
+            }
           }
         }
 
@@ -226,21 +227,17 @@ export async function POST(req: NextRequest) {
 
         // ── Provision 24/7HR login account ─────────────────
         const plainPassword  = `${r.firstName}${r.lastName}`.toLowerCase().replace(/\s+/g, '')
-        const hashedPassword = await bcrypt.hash(plainPassword, 10)
 
         const existingAccount = await prisma.staffRecord.findUnique({
           where: { staffId_companyId: { staffId: r.staffId, companyId } },
-          select: { id: true, password: true },
+          select: { id: true },
         })
 
         let staffRecordId: string | null = existingAccount?.id ?? null
 
-        if (existingAccount) {
-          // Account already exists — do not touch the password or requirePasswordChange flag.
-          // Re-uploading staff data (e.g. to update department) must not force existing users
-          // to change their password again.
-        } else {
-          // New account — create with temporary credentials
+        if (!existingAccount) {
+          // New account — hash only here (existing accounts skip the bcrypt cost)
+          const hashedPassword = await bcrypt.hash(plainPassword, 10)
           const newAccount = await prisma.staffRecord.create({
             data: {
               staffId:               r.staffId,
@@ -299,9 +296,8 @@ export async function POST(req: NextRequest) {
           })
         }
 
-        successful++
+        return { error: null, withData: null }
       } catch (err: any) {
-        failed++
         const rowNum = i + 2
         const msg = err?.message || ''
 
@@ -319,15 +315,45 @@ export async function POST(req: NextRequest) {
           friendlyMsg = `Row ${rowNum}: ${msg}`
         }
 
-        rowErrors.push(friendlyMsg)
-        rowErrorsWithData.push({
-          rowNum,
-          staffId: r.staffId || '',
-          firstName: r.firstName || '',
-          lastName: r.lastName || '',
-          email: r.email || '',
-          error: friendlyMsg.replace(`Row ${rowNum}: `, ''),
-        })
+        return {
+          error: friendlyMsg,
+          withData: {
+            rowNum,
+            staffId: r.staffId || '',
+            firstName: r.firstName || '',
+            lastName: r.lastName || '',
+            email: r.email || '',
+            error: friendlyMsg.replace(`Row ${rowNum}: `, ''),
+          },
+        }
+      }
+    }
+
+    // ── Bounded-concurrency worker pool ─────────────────────
+    // Processes rows in parallel (DB I/O overlaps bcrypt CPU work) so a large
+    // template completes within the request timeout instead of timing out on
+    // thousands of sequential round-trips. Concurrency is capped well below
+    // the pg pool max so we never exhaust connections.
+    const CONCURRENCY = 10
+    const outcomes: Array<{ error: string | null; withData: { rowNum: number; staffId: string; firstName: string; lastName: string; email: string; error: string } | null }> = new Array(rows.length)
+    let cursor = 0
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, rows.length) }, async () => {
+        while (true) {
+          const idx = cursor++
+          if (idx >= rows.length) break
+          outcomes[idx] = await processUploadRow(rows[idx], idx)
+        }
+      })
+    )
+
+    for (const outcome of outcomes) {
+      if (outcome.error === null) {
+        successful++
+      } else {
+        failed++
+        rowErrors.push(outcome.error)
+        if (outcome.withData) rowErrorsWithData.push(outcome.withData)
       }
     }
 

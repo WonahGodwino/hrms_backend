@@ -167,46 +167,57 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
 
     // ── Persist computed results (upsert — no prior template upload required) ──
-    await Promise.all([
-      ...results.map(({ result: r }) =>
-        (prisma as any).phedComputedPayroll.upsert({
-          where:  { payPeriodId_staffId: { payPeriodId: params.id, staffId: r.staffId } },
-          create: {
-            payPeriodId: params.id,
-            staffId:     r.staffId,
-            companyId:   period.companyId,
-            staffName:   r.staffName,
-            staffEmail:  r.staffEmail,
-            staffIdCode: r.staffIdCode,
-            category:    r.category,
-            gradeName:   r.gradeName,
-            department:  r.department,
-            unit:        r.unit,
-            regionName:  r.regionName,
-            ...fullPayrollFields(r),
-          },
-          update: {
-            staffName:   r.staffName,
-            staffEmail:  r.staffEmail,
-            staffIdCode: r.staffIdCode,
-            category:    r.category,
-            gradeName:   r.gradeName,
-            department:  r.department,
-            unit:        r.unit,
-            regionName:  r.regionName,
-            ...fullPayrollFields(r),
-          },
-        })
-      ),
-      ...results
-        .filter(({ result: r }) => r.overtimeEarnings > 0)
-        .map(({ result: r }) =>
+    // Batch by a bounded chunk size so a large workforce can't open hundreds of
+    // concurrent upserts against the pg pool (max 10), which would queue past
+    // `connectionTimeoutMillis` and fail with a 500 "timeout exceeded".
+    const upsertComputed = ({ result: r }: { result: any }) =>
+      (prisma as any).phedComputedPayroll.upsert({
+        where:  { payPeriodId_staffId: { payPeriodId: params.id, staffId: r.staffId } },
+        create: {
+          payPeriodId: params.id,
+          staffId:     r.staffId,
+          companyId:   period.companyId,
+          staffName:   r.staffName,
+          staffEmail:  r.staffEmail,
+          staffIdCode: r.staffIdCode,
+          category:    r.category,
+          gradeName:   r.gradeName,
+          department:  r.department,
+          unit:        r.unit,
+          regionName:  r.regionName,
+          ...fullPayrollFields(r),
+        },
+        update: {
+          staffName:   r.staffName,
+          staffEmail:  r.staffEmail,
+          staffIdCode: r.staffIdCode,
+          category:    r.category,
+          gradeName:   r.gradeName,
+          department:  r.department,
+          unit:        r.unit,
+          regionName:  r.regionName,
+          ...fullPayrollFields(r),
+        },
+      })
+
+    const BATCH_SIZE = 50
+    for (let i = 0; i < results.length; i += BATCH_SIZE) {
+      const batch = results.slice(i, i + BATCH_SIZE)
+      await Promise.all(batch.map(upsertComputed))
+    }
+
+    const overtimeResults = results.filter(({ result: r }) => r.overtimeEarnings > 0)
+    for (let i = 0; i < overtimeResults.length; i += BATCH_SIZE) {
+      const batch = overtimeResults.slice(i, i + BATCH_SIZE)
+      await Promise.all(
+        batch.map(({ result: r }) =>
           (prisma as any).phedOvertimeEntry.updateMany({
             where: { payPeriodId: params.id, staffId: r.staffId },
             data:  { computedAmount: r.overtimeEarnings },
           })
-        ),
-    ])
+        )
+      )
+    }
 
     // ── Advance to REVIEW ─────────────────────────────────────
     const updatedPeriod = await (prisma as any).phedPayPeriod.update({
