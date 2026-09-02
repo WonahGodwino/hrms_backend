@@ -128,8 +128,18 @@ function createPool() {
     keepAlive: true,
     keepAliveInitialDelayMillis: 10_000,
     idleTimeoutMillis: 60_000,
-    connectionTimeoutMillis: 10_000,
-    max: 10,
+    // A little more headroom for slow Aiven connection establishment (TLS +
+    // auth handshake) — too tight here surfaces as
+    // "Connection terminated due to connection timeout".
+    connectionTimeoutMillis: 20_000,
+    // Bigger pool so concurrent fan-out (payroll compute, reports, uploads)
+    // doesn't starve other requests. Tune via PG_POOL_MAX if the Aiven plan
+    // has a lower connection limit.
+    max: Number(process.env.PG_POOL_MAX ?? 20),
+    // Server-side safety nets: a single runaway query (or a transaction left
+    // open) can never hold a pooled connection forever and starve the rest of
+    // the app — that is what manifests as connection timeouts.
+    options: '-c statement_timeout=60000 -c idle_in_transaction_session_timeout=60000',
   })
 }
 
