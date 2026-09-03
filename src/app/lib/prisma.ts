@@ -127,7 +127,10 @@ function createPool() {
     // before the server kills them, avoiding P1017 ConnectionClosed errors.
     keepAlive: true,
     keepAliveInitialDelayMillis: 10_000,
-    idleTimeoutMillis: 60_000,
+    // Hold idle connections a bit longer (still well under Aiven's ~300 s
+    // cutoff) so low-traffic periods don't force a brand-new — and slow —
+    // handshake on every request.
+    idleTimeoutMillis: 120_000,
     // A little more headroom for slow Aiven connection establishment (TLS +
     // auth handshake) — too tight here surfaces as
     // "Connection terminated due to connection timeout".
