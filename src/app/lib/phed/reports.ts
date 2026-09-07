@@ -460,66 +460,87 @@ export function buildCostCentreSummary(
     rows: f2Rows,
   }
 
-  // ── Sheet 3: Head Office Staff Cost (department groups) ─────
+  // ── Sheet 3: Head Office Staff Cost (department groups × units) ──
+  // Each department is broken down into its units; the department total is the
+  // sum of its unit rows, and the group total is the sum of its departments.
   const hoRows: Record<string, any>[] = []
-  const deptBuckets = new Map<string, Payroll[]>()
+  const deptUnitBuckets = new Map<string, { deptName: string; units: Map<string, Payroll[]> }>()
   for (const r of active) {
     const dept = (r.department ?? '').trim() || 'Unassigned'
-    if (!deptBuckets.has(dept)) deptBuckets.set(dept, [])
-    deptBuckets.get(dept)!.push(r)
+    const unit = (r.unit ?? '').trim() || dept
+    const key  = dept.toLowerCase()
+    if (!deptUnitBuckets.has(key)) deptUnitBuckets.set(key, { deptName: dept, units: new Map() })
+    const bucket = deptUnitBuckets.get(key)!
+    if (!bucket.units.has(unit)) bucket.units.set(unit, [])
+    bucket.units.get(unit)!.push(r)
   }
 
   const knownDeptSet = new Set<string>()
   let grandStaffCost = 0
   const hoCatGrand = zeroCats()
 
-  const pushDeptRow = (dept: string, list: Payroll[]) => {
+  const pushUnitRow = (label: string, list: Payroll[]) => {
     const cats = catSums(list)
-    const staffCost = round2(list.reduce((s, r) => s + staffCostOf(r), 0))
-    for (const k of HEAD_OFFICE_ORDER) hoCatGrand[k] = round2(hoCatGrand[k] + cats[k])
-    grandStaffCost = round2(grandStaffCost + staffCost)
-    hoRows.push({ department: dept, ...catRow(cats, HEAD_OFFICE_ORDER), staffCost })
+    hoRows.push({ department: label, ...catRow(cats, HEAD_OFFICE_ORDER), staffCost: round2(list.reduce((s, r) => s + staffCostOf(r), 0)) })
   }
 
-  const pushGroupTotal = (rowsSoFar: Record<string, any>[], label: string) => {
-    if (!rowsSoFar.length) return
+  const pushDeptBlock = (deptName: string, units: Map<string, Payroll[]>): { staffCost: number; cats: Record<LabourCategoryKey, number> } => {
+    const before = hoRows.length
+    for (const [unit, list] of units) {
+      const label = units.size > 1 ? unit : deptName
+      pushUnitRow(label, list)
+    }
+    const deptRows = hoRows.slice(before)
     const acc = zeroCats()
     let staffCost = 0
-    for (const row of rowsSoFar) {
+    for (const row of deptRows) {
       for (const k of HEAD_OFFICE_ORDER) acc[k] = round2(acc[k] + (Number(row[k]) || 0))
       staffCost = round2(staffCost + (Number(row.staffCost) || 0))
     }
-    hoRows.push({ department: label, ...catRow(acc, HEAD_OFFICE_ORDER), staffCost })
+    hoRows.push({ department: `${deptName} Total`, ...catRow(acc, HEAD_OFFICE_ORDER), staffCost })
+    return { staffCost, cats: acc }
   }
 
   for (const group of HEAD_OFFICE_GROUPS) {
-    const before = hoRows.length
+    const groupAcc = zeroCats()
+    let groupStaffCost = 0
+    let any = false
     for (const deptKey of group.departments) {
-      // Find matching department buckets by case-insensitive match (DB free-text may differ in case).
-      const match = [...deptBuckets.keys()].find(k => k.toLowerCase() === deptKey)
-      if (!match) continue
-      if (knownDeptSet.has(match)) {
+      const bucket = deptUnitBuckets.get(deptKey)
+      if (!bucket) continue
+      if (knownDeptSet.has(deptKey)) {
         // Duplicate label in the template (e.g. "Information Technology" appears in both the
         // Information Technology group and the Internal Audit group). Keep the row to preserve
         // the template layout, but leave it at zero so staff are counted only once.
-        hoRows.push({ department: match, ...catRow(zeroCats(), HEAD_OFFICE_ORDER), staffCost: 0 })
+        hoRows.push({ department: bucket.deptName, ...catRow(zeroCats(), HEAD_OFFICE_ORDER), staffCost: 0 })
         continue
       }
-      knownDeptSet.add(match)
-      pushDeptRow(match, deptBuckets.get(match)!)
+      knownDeptSet.add(deptKey)
+      const { staffCost, cats } = pushDeptBlock(bucket.deptName, bucket.units)
+      for (const k of HEAD_OFFICE_ORDER) groupAcc[k] = round2(groupAcc[k] + cats[k])
+      groupStaffCost = round2(groupStaffCost + staffCost)
+      any = true
     }
-    if (group.label) {
-      const rowsSoFar = hoRows.slice(before)
-      pushGroupTotal(rowsSoFar, group.label)
+    if (group.label && any) {
+      for (const k of HEAD_OFFICE_ORDER) hoCatGrand[k] = round2(hoCatGrand[k] + groupAcc[k])
+      grandStaffCost = round2(grandStaffCost + groupStaffCost)
+      hoRows.push({ department: group.label, ...catRow(groupAcc, HEAD_OFFICE_ORDER), staffCost: groupStaffCost })
     }
   }
 
   // Departments not present in the template taxonomy → "Other Departments" (Admin) group.
-  const otherDepts = [...deptBuckets.keys()].filter(k => !knownDeptSet.has(k)).sort()
+  const otherDepts = [...deptUnitBuckets.entries()].filter(([k]) => !knownDeptSet.has(k)).sort((a, b) => a[0].localeCompare(b[0]))
   if (otherDepts.length) {
-    const before = hoRows.length
-    for (const dept of otherDepts) pushDeptRow(dept, deptBuckets.get(dept)!)
-    pushGroupTotal(hoRows.slice(before), 'Other Departments Total')
+    const otherAcc = zeroCats()
+    let otherStaffCost = 0
+    for (const [, bucket] of otherDepts) {
+      const { staffCost, cats } = pushDeptBlock(bucket.deptName, bucket.units)
+      for (const k of HEAD_OFFICE_ORDER) otherAcc[k] = round2(otherAcc[k] + cats[k])
+      otherStaffCost = round2(otherStaffCost + staffCost)
+    }
+    for (const k of HEAD_OFFICE_ORDER) hoCatGrand[k] = round2(hoCatGrand[k] + otherAcc[k])
+    grandStaffCost = round2(grandStaffCost + otherStaffCost)
+    hoRows.push({ department: 'Other Departments Total', ...catRow(otherAcc, HEAD_OFFICE_ORDER), staffCost: otherStaffCost })
   }
 
   hoRows.push({

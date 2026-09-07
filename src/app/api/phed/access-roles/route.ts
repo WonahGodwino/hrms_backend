@@ -11,7 +11,7 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 
 const ROLE_LABELS: Record<string, string> = {
   MANAGER_COMP_BENEFITS: 'Manager, Compensation & Benefits',
-  TAX_AUDIT: 'Tax Audit',
+  TAX_AUDIT: 'Tax Manager',
   HEAD_INTERNAL_AUDIT: 'Head, Internal Audit',
   CHIEF_PEOPLE_OFFICER: 'Chief People Officer',
   CHIEF_FINANCE_OFFICER: 'Chief Finance Officer',

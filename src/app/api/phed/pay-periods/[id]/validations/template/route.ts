@@ -34,7 +34,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       where: { payPeriodId: params.id },
       include: {
         staff: {
-          select: { staffId: true, firstName: true, lastName: true, department: true, category: true },
+          select: {
+            staffId: true, firstName: true, lastName: true, department: true, category: true,
+            region: { select: { name: true } },
+          },
         },
       },
       orderBy: { staff: { lastName: 'asc' } },
@@ -47,6 +50,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       { header: 'Staff ID *',   key: 'staffId',     width: 18 },
       { header: 'Full Name',    key: 'fullName',     width: 26 },
       { header: 'Department',   key: 'department',   width: 22 },
+      { header: 'Region',       key: 'region',       width: 18 },
       { header: 'Category',     key: 'category',     width: 14 },
       { header: 'Status *',     key: 'status',       width: 20 },
       { header: 'Reason',       key: 'reason',       width: 36 },
@@ -66,8 +70,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     ws.getCell('B1').note = 'Do not edit'
     ws.getCell('C1').note = 'Do not edit'
     ws.getCell('D1').note = 'Do not edit'
-    ws.getCell('E1').note = 'Enter YES or NO'
-    ws.getCell('F1').note = 'Optional — required only when Status is NO'
+    ws.getCell('E1').note = 'Do not edit'
+    ws.getCell('F1').note = 'Enter YES or NO'
+    ws.getCell('G1').note = 'Optional — required only when Status is NO'
 
     // Data rows start at row 2 (directly after the single header row)
     validations.forEach((v: any, i: number) => {
@@ -79,18 +84,19 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       row.getCell(1).value = v.staff.staffId
       row.getCell(2).value = `${v.staff.firstName} ${v.staff.lastName}`
       row.getCell(3).value = v.staff.department ?? ''
-      row.getCell(4).value = v.staff.category
-      row.getCell(5).value = status
-      row.getCell(6).value = v.reason ?? ''
+      row.getCell(4).value = v.staff.region?.name ?? ''
+      row.getCell(5).value = v.staff.category
+      row.getCell(6).value = status
+      row.getCell(7).value = v.reason ?? ''
 
-      // Lock cols 1–4
-      for (let c = 1; c <= 4; c++) {
+      // Lock cols 1–5
+      for (let c = 1; c <= 5; c++) {
         row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFf9fafb' } }
         row.getCell(c).font = { color: { argb: 'FF374151' }, size: 9 }
       }
 
       // Editable status cell with dropdown
-      const statusCell = row.getCell(5)
+      const statusCell = row.getCell(6)
       statusCell.fill  = { type: 'pattern', pattern: 'solid',
         fgColor: { argb: status === 'YES' ? 'FFe6f4ea' : status === 'NO' ? 'FFfce8e6' : 'FFfffde7' } }
       statusCell.font  = { bold: true, size: 10,
@@ -104,7 +110,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         error: 'Please enter YES or NO',
       }
 
-      row.getCell(6).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFfffde7' } }
+      row.getCell(7).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFfffde7' } }
     })
 
     ws.views = [{ state: 'frozen', ySplit: 1 }]

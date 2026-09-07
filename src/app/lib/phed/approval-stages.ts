@@ -10,9 +10,13 @@ export interface PhedApprovalStageDef {
   label: string
   action: PhedApprovalStampAction // stamp action recorded when forwarding FROM this stage
   resultStatus: PhedApprovalMemoStatus // memo status after forwarding FROM this stage
+  nextStage: number // the stage the memo lands at after forwarding FROM this stage
   stampLabel: string // display label for the stamp ledger / PDF
 }
 
+// Fixed six-stage chain. After the Tax Manager (Stage 2) concurs, the memo
+// returns to the HR uploader (Stage 1) for sign-off; HR then releases it to
+// Head, Internal Audit (Stage 3).
 export const PHED_APPROVAL_STAGES: PhedApprovalStageDef[] = [
   {
     stage: 1,
@@ -20,15 +24,17 @@ export const PHED_APPROVAL_STAGES: PhedApprovalStageDef[] = [
     label: 'Manager, Compensation & Benefits',
     action: 'SUBMITTED',
     resultStatus: 'PENDING_TAX_AUDIT',
+    nextStage: 2,
     stampLabel: 'Prepared By',
   },
   {
     stage: 2,
     role: 'TAX_AUDIT',
-    label: 'Tax Audit',
+    label: 'Tax Manager',
     action: 'TAX_AUDITED',
-    resultStatus: 'PENDING_REVIEW',
-    stampLabel: 'Tax Audit Approval By',
+    resultStatus: 'PENDING_HR_APPROVAL',
+    nextStage: 1,
+    stampLabel: 'Tax Manager Approval By',
   },
   {
     stage: 3,
@@ -36,6 +42,7 @@ export const PHED_APPROVAL_STAGES: PhedApprovalStageDef[] = [
     label: 'Head, Internal Audit',
     action: 'RECOMMENDED',
     resultStatus: 'PENDING_FIRST_LEVEL_APPROVAL',
+    nextStage: 4,
     stampLabel: 'Reviewed & Concurred By',
   },
   {
@@ -44,6 +51,7 @@ export const PHED_APPROVAL_STAGES: PhedApprovalStageDef[] = [
     label: 'Chief People Officer',
     action: 'APPROVED',
     resultStatus: 'PENDING_SECOND_LEVEL_APPROVAL',
+    nextStage: 5,
     stampLabel: 'First-Level Executive Approval By',
   },
   {
@@ -52,6 +60,7 @@ export const PHED_APPROVAL_STAGES: PhedApprovalStageDef[] = [
     label: 'Chief Finance Officer',
     action: 'APPROVED',
     resultStatus: 'PENDING_FINAL_APPROVAL',
+    nextStage: 6,
     stampLabel: 'Second-Level Approval & Financial Endorsement By',
   },
   {
@@ -60,6 +69,7 @@ export const PHED_APPROVAL_STAGES: PhedApprovalStageDef[] = [
     label: 'MD/CEO',
     action: 'FINAL_APPROVED',
     resultStatus: 'APPROVED',
+    nextStage: 6,
     stampLabel: 'Final Approval & Release Authorisation By',
   },
 ]
@@ -79,5 +89,6 @@ export function getStageForRole(role: PhedAccessRole): PhedApprovalStageDef | un
 export function getDisplayStatus(status: PhedApprovalMemoStatus): string {
   if (status === 'APPROVED') return 'Approved'
   if (status === 'RETURNED_FOR_CORRECTION') return 'Flagged & Restarted'
+  if (status === 'PENDING_HR_APPROVAL') return 'Awaiting HR Sign-off'
   return 'Currently In Progress'
 }

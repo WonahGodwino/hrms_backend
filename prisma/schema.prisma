@@ -3028,7 +3028,8 @@ model PhedStaffAccessRole {
 // Stage order/role mapping is fixed in application code (PHED_APPROVAL_STAGES),
 // never DB-configurable.
 enum PhedApprovalMemoStatus {
-  PENDING_TAX_AUDIT             // at Stage 2 (Tax Audit)
+  PENDING_TAX_AUDIT             // at Stage 2 (Tax Manager)
+  PENDING_HR_APPROVAL           // back at Stage 1 — Tax Manager concurred, awaiting HR sign-off
   PENDING_REVIEW                // at Stage 3 (Head IAD)
   PENDING_FIRST_LEVEL_APPROVAL  // at Stage 4 (CPO)
   PENDING_SECOND_LEVEL_APPROVAL // at Stage 5 (CFO)
@@ -3040,6 +3041,7 @@ enum PhedApprovalMemoStatus {
 enum PhedApprovalStampAction {
   SUBMITTED
   TAX_AUDITED
+  RELEASED_TO_AUDIT
   RECOMMENDED
   APPROVED
   FINAL_APPROVED

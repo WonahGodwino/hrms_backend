@@ -41,6 +41,27 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       if (typeof v === 'object' && typeof v.toNumber === 'function') return v.toNumber()
       return Number(v) || 0
     }
+    const r2 = (v: number) => Math.round(v * 100) / 100
+
+    // Per-staff union / cooperative names so the payslip email lists each
+    // deduction by name rather than a single unnamed total.
+    const staffIds = payrolls.map((p: any) => p.staffId)
+    const [allUnions, allCoops, staffUnions, staffCoops] = await Promise.all([
+      (prisma as any).phedUnion.findMany({ where: { companyId, isActive: true }, orderBy: { name: 'asc' } }),
+      (prisma as any).phedCooperative.findMany({ where: { companyId, isActive: true }, orderBy: { name: 'asc' } }),
+      (prisma as any).phedStaffUnion.findMany({ where: { staffId: { in: staffIds } } }),
+      (prisma as any).phedStaffCooperative.findMany({ where: { staffId: { in: staffIds } } }),
+    ])
+    const unionMembers = new Map<string, Set<string>>()
+    staffUnions.forEach((su: any) => {
+      if (!unionMembers.has(su.staffId)) unionMembers.set(su.staffId, new Set())
+      unionMembers.get(su.staffId)!.add(su.unionId)
+    })
+    const coopAmounts = new Map<string, Map<string, number>>()
+    staffCoops.forEach((sc: any) => {
+      if (!coopAmounts.has(sc.staffId)) coopAmounts.set(sc.staffId, new Map())
+      coopAmounts.get(sc.staffId)!.set(sc.cooperativeId, Number(sc.totalAmount))
+    })
 
     let sent    = 0
     let failed  = 0
@@ -53,7 +74,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         continue
       }
       try {
-        const html = buildPayslipHtml(payroll, period.periodName, n)
+        const memberUnions = unionMembers.get(payroll.staffId) ?? new Set<string>()
+        const staffCoopMap = coopAmounts.get(payroll.staffId) ?? new Map<string, number>()
+        const unionRows = allUnions
+          .filter((u: any) => memberUnions.has(u.id))
+          .map((u: any) => ({ name: u.name, amount: r2(n(payroll.grossSalary) * Number(u.percentage)) }))
+        const coopRows = allCoops
+          .filter((c: any) => (staffCoopMap.get(c.id) ?? 0) > 0)
+          .map((c: any) => ({ name: c.name, amount: r2(staffCoopMap.get(c.id) ?? 0) }))
+        const html = buildPayslipHtml(payroll, period.periodName, n, unionRows, coopRows)
         const res = await sendEmail({
           to:      payroll.staffEmail,
           subject: `Your Payslip – ${period.periodName}`,
@@ -84,8 +113,24 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 
-function buildPayslipHtml(p: any, periodName: string, n: (v: any) => number): string {
+function buildPayslipHtml(
+  p: any,
+  periodName: string,
+  n: (v: any) => number,
+  unionRows: { name: string; amount: number }[] = [],
+  coopRows: { name: string; amount: number }[] = [],
+): string {
   const fmt = (v: any) => `₦${n(v).toLocaleString('en-NG', { minimumFractionDigits: 2 })}`
+  const deductionBreakdown = [
+    ['Pension (Employee 8%)', p.pensionEmployee],
+    ['NHF (2.5%)', p.nhf],
+    ['PAYE Tax', p.monthlyPAYE],
+    ...unionRows.map(u => [u.name ? `${u.name} (Union)` : 'Union Dues', u.amount] as [string, any]),
+    ...coopRows.map(c => [c.name ? `${c.name} (Cooperative)` : 'Cooperative', c.amount] as [string, any]),
+  ]
+  const deductionRows = deductionBreakdown
+    .map(([label, amount]) => `<tr><td>${label}</td><td>${fmt(amount)}</td></tr>`)
+    .join('')
   return `
 <!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>
@@ -125,11 +170,7 @@ function buildPayslipHtml(p: any, periodName: string, n: (v: any) => number): st
   <h3>Deductions</h3>
   <table>
     <tr><th>Component</th><th>Amount</th></tr>
-    <tr><td>Pension (Employee 8%)</td><td>${fmt(p.pensionEmployee)}</td></tr>
-    <tr><td>NHF (2.5%)</td><td>${fmt(p.nhf)}</td></tr>
-    <tr><td>PAYE Tax</td><td>${fmt(p.monthlyPAYE)}</td></tr>
-    <tr><td>Union Dues</td><td>${fmt(p.unionDeductions)}</td></tr>
-    <tr><td>Cooperative</td><td>${fmt(p.cooperativeDeductions)}</td></tr>
+    ${deductionRows}
     <tr class="total"><td>Total Deductions</td><td>${fmt(p.totalDeductions)}</td></tr>
   </table>
 

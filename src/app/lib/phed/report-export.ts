@@ -2490,124 +2490,8 @@ function writeChangesSheet(
   writeRegisterSheet(wb, sheetName, employees, buildChangesCols(input))
 }
 
-// Validate sheet — side-by-side current vs previous employee comparison,
-// replicating the client template with live formulas:
-//   Total     = EROBREA + Gross Pay
-//   Total_Jan = EROBREA + Gross Pay (previous side)
-//   Total_Feb = VLOOKUP of the current Total by Employee ID
-//   Vari      = Total_Feb - Total_Jan
-function writeValidateSheet(
-  wb:          ExcelJS.Workbook,
-  data:        IADSummaryInput,
-  companyName: string,
-): void {
-  const ws = wb.addWorksheet('Validate')
-
-  const current  = data.validateCurrent
-  const previous = data.validatePrevious
-  const rows     = Math.max(current.length, previous.length)
-
-  const widths = [10, 16, 26, 14, 16, 16, 12, 16, 2, 16, 26, 16, 16, 16, 12, 16, 16, 16]
-  widths.forEach((w, i) => { ws.getColumn(i + 1).width = w })
-
-  const monthName = (s: string) => s.replace(/\s+\d{4}\s*$/, '')
-
-  const label = (r: number, c1: number, c2: number, text: string, fill: string, color: string, bold = false, italic = false, size = 9) => {
-    ws.mergeCells(r, c1, r, c2)
-    const cell = ws.getCell(r, c1)
-    cell.value = text
-    cell.font  = { bold, italic, size, color: { argb: color } }
-    cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } }
-    cell.alignment = { horizontal: 'center', vertical: 'middle' }
-    return cell
-  }
-
-  // Row 1: side labels (B1:G1 and J1:O1 merged, per template)
-  label(1, 2, 7, monthName(data.summary.periodName).toUpperCase(), `FF${BRAND_MID}`, 'FFFFFFFF', true, false, 10)
-  label(1, 10, 15, monthName(data.previousSummary?.periodName ?? 'Previous Period').toUpperCase(), `FF${BRAND_MID}`, 'FFFFFFFF', true, false, 10)
-  ws.getRow(1).height = 22
-
-  // Row 2: column headers
-  const leftHeaders  = ['Employee ID', 'Name', 'Status', 'Initial Gross Pay', 'Gross Pay', 'EROBREA', 'Total']
-  const rightHeaders = ['Employee ID', 'Name', 'Pay Point', 'Initial Gross Pay', 'Gross Pay', 'EROBREA', 'Total_Jan', 'Total_Feb', 'Vari']
-  const hdr = ws.getRow(2)
-  leftHeaders.forEach((h, i) => {
-    const cell = hdr.getCell(2 + i)
-    cell.value = h
-    cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${BRAND_BLUE}` } }
-    cell.font  = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } }
-    cell.alignment = { horizontal: i <= 2 ? 'left' : 'right', vertical: 'middle', wrapText: true }
-  })
-  rightHeaders.forEach((h, i) => {
-    const cell = hdr.getCell(10 + i)
-    cell.value = h
-    cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${BRAND_BLUE}` } }
-    cell.font  = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } }
-    cell.alignment = { horizontal: i <= 2 ? 'left' : 'right', vertical: 'middle', wrapText: true }
-  })
-  hdr.height = 30
-
-  const style = (r: number, c: number, fill: string, bold = false) => {
-    const cell = ws.getCell(r, c)
-    cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } }
-    cell.font  = { size: 9, bold, color: { argb: 'FF1f2937' } }
-    return cell
-  }
-  const text = (r: number, c: number, v: string, fill: string, bold = false) => {
-    const cell = style(r, c, fill, bold)
-    cell.value = v
-    cell.alignment = { horizontal: 'left', vertical: 'middle' }
-  }
-  const num = (r: number, c: number, v: number, fill: string, bold = false) => {
-    const cell = style(r, c, fill, bold)
-    cell.value = v
-    cell.numFmt = '#,##0.00'
-    cell.alignment = { horizontal: 'right', vertical: 'middle' }
-  }
-  const formula = (r: number, c: number, f: string, fill: string, bold = false) => {
-    const cell = style(r, c, fill, bold)
-    cell.value = { formula: f }
-    cell.numFmt = '#,##0.00'
-    cell.alignment = { horizontal: 'right', vertical: 'middle' }
-  }
-
-  for (let i = 0; i < rows; i++) {
-    const r  = 3 + i
-    const bg = i % 2 === 0 ? 'FFFFFFFF' : `FF${GREY_ROW}`
-    const cur = current[i]
-    const prv = previous[i]
-
-    if (cur) {
-      text(r, 2, cur.staffIdCode, bg)
-      text(r, 3, cur.staffName, bg)
-      text(r, 4, cur.status, bg)
-      num(r, 5, cur.initialGrossPay, bg)
-      num(r, 6, cur.grossPay, bg)
-      num(r, 7, cur.erobrea, bg)
-      formula(r, 8, `G${r}+F${r}`, bg, true)                       // Total = EROBREA + Gross
-    }
-
-    if (prv) {
-      text(r, 10, prv.staffIdCode, bg)
-      text(r, 11, prv.staffName, bg)
-      text(r, 12, prv.payPoint, bg)
-      num(r, 13, prv.initialGrossPay, bg)
-      num(r, 14, prv.grossPay, bg)
-      num(r, 15, prv.erobrea, bg)
-      formula(r, 16, `O${r}+N${r}`, bg, true)                      // Total_Jan
-      formula(r, 17, `IFERROR(VLOOKUP(J${r},B:H,7,0),"")`, bg)     // Total_Feb (lookup)
-      formula(r, 18, `Q${r}-P${r}`, bg, true)                      // Vari
-    }
-    ws.getRow(r).height = 18
-  }
-
-  // Footer
-  label(rows + 4, 1, 18, companyName
-    ? `This document is generated by ${companyName}, it is confidential and intended for authorized use only.`
-    : 'This document is confidential and intended for authorized use only.', 'FFFFFFFF', 'FF9CA3AF', false, true, 8)
-
-  ws.views = [{ state: 'frozen', ySplit: 2 }]
-}
+// Validate sheet removed — the IAD report no longer includes the side-by-side
+// current vs previous employee comparison sheet (client request).
 
 // Summary sheet block — title + headers + 3 category rows + TOTAL row,
 // laid out exactly like the client template (columns B–H, A/I unused).
@@ -2736,9 +2620,6 @@ export async function exportIADSummaryToExcel(
   // Sheets 4–5: Exited
   writeRegisterSheet(wb, `${pfx} Exited_Regular`,  data.exitedRegular,  buildExitedRegularCols(data))
   writeRegisterSheet(wb, `${pfx} Exited_Contract`, data.exitedContract, buildExitedContractCols(data))
-
-  // Sheet 6: Validate — side-by-side current vs previous employee comparison
-  writeValidateSheet(wb, data, companyName)
 
   return (await wb.xlsx.writeBuffer()) as unknown as Buffer
 }

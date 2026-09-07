@@ -504,6 +504,9 @@ export async function parseOvertimeCsv(
     const staffId      = r['staffid'] || r['employeeid'] || r['staff_id'] || ''
     const overtimeHours = r['overtimehours'] || r['othours'] || r['hours'] || ''
 
+    // Skip entirely blank/empty rows silently (e.g. trailing empty template rows)
+    if (!staffId && !overtimeHours) return
+
     if (!staffId) {
       errors.push(`Row ${rowNum}: staffId is required`)
       return

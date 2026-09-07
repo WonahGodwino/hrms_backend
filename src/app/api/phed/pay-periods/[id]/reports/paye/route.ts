@@ -5,8 +5,8 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
 import { buildPAYESchedule } from '@/app/lib/phed/reports'
-import { exportReportToExcel, exportReportToPdf, exportWorkbook, PAYE_COLS } from '@/app/lib/phed/report-export'
-import { buildStatutorySheet, periodLabels, fetchStateOfResidenceMap } from '@/app/lib/phed/payroll-sheets'
+import { exportReportToPdf, exportWorkbook, PAYE_COLS } from '@/app/lib/phed/report-export'
+import { buildTaxScheduleWorkbook, periodLabels, fetchStateOfResidenceMap } from '@/app/lib/phed/payroll-sheets'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -45,13 +45,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     if (format === 'xlsx') {
       const stateMap = await fetchStateOfResidenceMap(prisma, period.companyId)
-      const sheet = buildStatutorySheet(`PAYE_${periodLabels(period.month, period.year).apostrophe}`, 'paye', payrolls, { stateMap })
-      const buf = await exportWorkbook([sheet], companyName)
+      const sheets = buildTaxScheduleWorkbook(periodLabels(period.month, period.year), payrolls, { stateMap })
+      const buf = await exportWorkbook(sheets, companyName)
       return new NextResponse(buf as any, {
         status: 200,
         headers: {
           'Content-Type':        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition': `attachment; filename="paye-schedule-${safeName}.xlsx"`,
+          'Content-Disposition': `attachment; filename="tax-schedule-${safeName}.xlsx"`,
           'Access-Control-Allow-Origin': origin ?? '*',
         },
       })

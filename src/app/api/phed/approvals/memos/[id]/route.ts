@@ -36,7 +36,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const stamps = memo.stamps.map(s => ({ ...s, superseded: s.attemptNumber < memo.attemptNumber }))
     const iadConcurrenceStamp =
-      stamps.find(s => s.stage === 2 && s.attemptNumber === memo.attemptNumber && !s.superseded) ?? null
+      stamps.find(s => s.stage === 3 && s.attemptNumber === memo.attemptNumber && !s.superseded) ?? null
 
     return withCors(
       ApiResponse.success({

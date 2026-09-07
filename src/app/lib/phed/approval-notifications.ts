@@ -178,6 +178,23 @@ export async function notifyAfterForward(memo: PhedApprovalMemo, fromActorName: 
     return
   }
 
+  // Tax Manager concurred → memo returns to the HR uploader for sign-off
+  // before Internal Audit. Notify the creator explicitly.
+  if (memo.status === 'PENDING_HR_APPROVAL') {
+    await notifyCreator({
+      companyId: memo.companyId,
+      payPeriodId: memo.payPeriodId,
+      memoId: memo.id,
+      notificationType: NOTIFICATION_TYPES.PHED_APPROVAL_PROGRESS,
+      title: 'Tax Manager concurred — awaiting your sign-off',
+      message: `${fromActorName} (Tax Manager) concurred with the payroll approval memo. It is now back with you for sign-off before Internal Audit.`,
+      emailHeading: 'Tax Manager concurred — your sign-off is required',
+      emailBody: `${fromActorName} (Tax Manager) has concurred with the Payroll Approval Memo. Please review and sign off to release it to Head, Internal Audit.`,
+      tone: 'info',
+    })
+    return
+  }
+
   const nextStage = getStageDef(memo.currentStage)
   if (!nextStage) return
 

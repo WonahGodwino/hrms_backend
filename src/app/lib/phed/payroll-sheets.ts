@@ -394,6 +394,46 @@ export function buildStatutorySheet(name: string, kind: 'nsitf' | 'itf' | 'nhf' 
   return statBase(name, 'amount', amountHeader, list, kind === 'paye')
 }
 
+// Tax Schedule workbook — the per-employee PAYE schedule (matching the client's
+// TAX SCHEDULE.xlsx: Employee ID, Name, earnings breakdown, Gross Pay, State,
+// PAYE) plus a State Sub-totals sheet.
+export function buildTaxScheduleWorkbook(labels: PeriodLabels, rows: Payroll[], ctx: RegisterCtx = {}): CostCentreSheet[] {
+  const payeSheet = buildStatutorySheet(`Tax Schedule_${labels.apostrophe}`, 'paye', rows, ctx)
+
+  // Per-state sub-totals (head count, gross pay, monthly PAYE).
+  const active = rows.filter(r => r.paymentStatus === 'ACTIVE')
+  const stateMap = new Map<string, { count: number; gross: number; paye: number }>()
+  for (const r of active) {
+    const st = (ctx.stateMap?.get(r.staffId) ?? '').trim() || 'Unassigned'
+    const bucket = stateMap.get(st) ?? { count: 0, gross: 0, paye: 0 }
+    bucket.count += 1
+    bucket.gross = r2(bucket.gross + toNum(r.grossSalary))
+    bucket.paye  = r2(bucket.paye  + toNum(r.monthlyPAYE))
+    stateMap.set(st, bucket)
+  }
+
+  const stateRows = [...stateMap.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([state, v]) => ({ state, headCount: v.count, grossPay: v.gross, paye: v.paye }))
+  if (stateRows.length) {
+    stateRows.push({
+      state: 'Total',
+      headCount: stateRows.reduce((s, r) => s + r.headCount, 0),
+      grossPay: r2(stateRows.reduce((s, r) => s + r.grossPay, 0)),
+      paye: r2(stateRows.reduce((s, r) => s + r.paye, 0)),
+    })
+  }
+
+  const stateSheet = sheet('State Sub-totals', [
+    { key: 'state', header: 'State', type: 'text', width: 22 },
+    { key: 'headCount', header: 'No. of Employee', type: 'integer', width: 14 },
+    { key: 'grossPay', header: 'Gross Pay', type: 'currency', width: 18 },
+    { key: 'paye', header: 'PAYE', type: 'currency', width: 18 },
+  ], stateRows)
+
+  return [payeSheet, stateSheet]
+}
+
 export function buildInsuranceSheet(name: string, rows: Payroll[]): CostCentreSheet {
   return sheet(name, [
     { key: 'employeeId', header: 'Employee ID', type: 'text', width: 16 },
@@ -755,7 +795,6 @@ export function buildIadWorkbook(labels: PeriodLabels, payrolls: Payroll[], prev
   const newHiredSheet = sheet(`${labels.shortYear} New Hired_Reg`, REGISTER_COLS, newHired.filter(r => r.category === 'REGULAR').map(r => mapRegisterRow(r)))
   const exitedRegSheet = sheet(`${labels.shortYear} Exited_Regular`, REGISTER_COLS, exited.filter(r => r.category === 'REGULAR').map(r => mapRegisterRow(r)))
   const exitedConSheet = sheet(`${labels.shortYear} Exited_Contract`, REGISTER_COLS, exited.filter(r => r.category === 'CONTRACT').map(r => mapRegisterRow(r)))
-  const validateSheet = sheet('Validate', REGISTER_COLS, payrolls.map(r => mapRegisterRow(r)))
 
-  return [summarySheet, changesSheet, newHiredSheet, exitedRegSheet, exitedConSheet, validateSheet]
+  return [summarySheet, changesSheet, newHiredSheet, exitedRegSheet, exitedConSheet]
 }

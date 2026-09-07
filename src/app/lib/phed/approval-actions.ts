@@ -50,7 +50,10 @@ function checkAtOwnDesk(memo: PhedApprovalMemo, user: PhedAuthUser): ApprovalAct
   return null
 }
 
-// Forward action shared by recommend / approve / finalapprove.
+// Forward action shared by recommend / approve / finalapprove / tax-audit.
+// The Tax Manager (Stage 2) is special: concurring returns the memo to Stage 1
+// (the HR uploader) instead of advancing to Stage 3 — the memo's `nextStage`
+// encodes that route (PRD 12.7).
 export async function forwardApprovalStage(
   memoId: string,
   user: PhedAuthUser,
@@ -86,12 +89,68 @@ export async function forwardApprovalStage(
     const updatedMemo = await tx.phedApprovalMemo.update({
       where: { id: memo.id },
       data: {
-        currentStage: isFinal ? myStage.stage : myStage.stage + 1,
+        currentStage: isFinal ? myStage.stage : myStage.nextStage,
         status: myStage.resultStatus,
         stageEnteredAt: new Date(),
       },
     })
 
+    return updatedMemo
+  })
+
+  notifyAfterForward(updated, name).catch(err => console.error('PHED approval notification failed:', err))
+
+  return { ok: true, memo: updated }
+}
+
+// HR sign-off action after the Tax Manager has concurred (Stage 1 → Stage 3).
+// Stage 1 is performed by the HR/ADMIN/SUPER_ADMIN payroll uploader, so this
+// is gated by module access rather than a PHED role desk check.
+export async function releaseApprovalToAudit(
+  memoId: string,
+  user: { userId: string; role: string; companyId?: string },
+  comment?: string,
+): Promise<ApprovalActionResult> {
+  const memo = await loadMemoForCompany(memoId, user)
+  if (!memo) return { ok: false, status: 404, message: 'Approval memo not found' }
+
+  if (memo.status === 'APPROVED') {
+    return { ok: false, status: 409, message: 'This memo has already been fully approved' }
+  }
+  if (memo.currentStage !== 1 || memo.status !== 'PENDING_HR_APPROVAL') {
+    return {
+      ok: false,
+      status: 409,
+      message: 'This memo is not awaiting your sign-off. The Tax Manager has not concurred yet, or it is already past this desk.',
+    }
+  }
+
+  const auditStage = getStageDef(3)
+  if (!auditStage) return { ok: false, status: 500, message: 'Approval chain configuration error' }
+
+  const name = await actorName(user.userId)
+
+  const updated = await prisma.$transaction(async tx => {
+    await tx.phedApprovalStamp.create({
+      data: {
+        memoId: memo.id,
+        attemptNumber: memo.attemptNumber,
+        stage: 1,
+        action: 'RELEASED_TO_AUDIT',
+        staffRecordId: user.userId,
+        actorName: name,
+        actorRole: 'MANAGER_COMP_BENEFITS',
+        comment: comment || null,
+      },
+    })
+    const updatedMemo = await tx.phedApprovalMemo.update({
+      where: { id: memo.id },
+      data: {
+        currentStage: 3,
+        status: 'PENDING_REVIEW',
+        stageEnteredAt: new Date(),
+      },
+    })
     return updatedMemo
   })
 

@@ -129,6 +129,6 @@ export async function POST(req: NextRequest) {
 
     notifyAfterForward(memo, actorName).catch(err => console.error('PHED approval notification failed:', err))
 
-    return withCors(ApiResponse.success(memo, 'Approval memo created and sent to Tax Audit', 201), origin)
+    return withCors(ApiResponse.success(memo, 'Approval memo created and sent to Tax Manager', 201), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
