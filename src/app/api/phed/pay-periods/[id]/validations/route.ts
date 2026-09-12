@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { requirePhedPayrollReadAccess } from '@/app/lib/phed/access-role'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
@@ -15,14 +16,14 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    await requirePhedPayrollReadAccess(token)
 
     const p      = new URL(req.url).searchParams
     const status = p.get('status')
 
     const validations = await (prisma as any).phedValidation.findMany({
       where: { payPeriodId: params.id, ...(status ? { status } : {}) },
-      include: { staff: { select: { id: true, staffId: true, firstName: true, lastName: true, department: true, category: true } } },
+      include: { staff: { select: { id: true, staffId: true, firstName: true, lastName: true, department: true, category: true, region: { select: { name: true } } } } },
       orderBy: { staff: { lastName: 'asc' } },
     })
     return withCors(ApiResponse.success(validations), origin)

@@ -2364,6 +2364,13 @@ function buildExitedContractCols(input: IADSummaryInput): RegisterCol[] {
   ]
 }
 
+// New Hired (Contract) register sheet — shares the client's contract register
+// layout (Employee ID / S/N / Name / Pay Point / Grade / Level / Approved Role /
+// Approved Feeder / Approved Region / Contract Start & End dates ...).
+function buildNewHiredContractCols(input: IADSummaryInput): RegisterCol[] {
+  return buildExitedContractCols(input)
+}
+
 function buildChangesCols(input: IADSummaryInput): RegisterCol[] {
   return [
     rText('Employee ID', 'staffIdCode', 16),
@@ -2614,10 +2621,13 @@ export async function exportIADSummaryToExcel(
   // Sheet 2: Changes (staff whose pay changed vs previous period)
   writeChangesSheet(wb, `${pfx} Changes`, data.changedStaff, data)
 
-  // Sheet 3: New Hired (regular + contract merged, per client template)
-  writeRegisterSheet(wb, `${pfx} New Hired_Reg`, [...data.newlyHiredRegular, ...data.newlyHiredContract], buildNewHiredCols(data))
+  // Sheet 3: New Hired (Regular)
+  writeRegisterSheet(wb, `${pfx} New Hired_Reg`, data.newlyHiredRegular, buildNewHiredCols(data))
 
-  // Sheets 4–5: Exited
+  // Sheet 4: New Hired (Contract)
+  writeRegisterSheet(wb, `${pfx} New Hired_Contract`, data.newlyHiredContract, buildNewHiredContractCols(data))
+
+  // Sheets 5–6: Exited
   writeRegisterSheet(wb, `${pfx} Exited_Regular`,  data.exitedRegular,  buildExitedRegularCols(data))
   writeRegisterSheet(wb, `${pfx} Exited_Contract`, data.exitedContract, buildExitedContractCols(data))
 

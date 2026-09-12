@@ -63,6 +63,19 @@ export function generateApprovalMemoPdf(data: ApprovalMemoPdfData): Promise<Buff
 
     let y = MT
 
+    // Bottom of the usable area — the fixed footer lives below this line.
+    const FOOTER_RESERVE = 44
+    const footerY = doc.page.height - FOOTER_RESERVE
+
+    // Adds a new page when the next block (height `needed`) won't fit.
+    const ensure = (needed: number): number => {
+      if (y + needed > footerY) {
+        doc.addPage()
+        y = MT
+      }
+      return y
+    }
+
     // ── 1. HEADER ──────────────────────────────────────────────
     const HEADER_H = 70
     doc.rect(col1X, y, usableW, HEADER_H).fill(C_DARK)
@@ -89,6 +102,7 @@ export function generateApprovalMemoPdf(data: ApprovalMemoPdfData): Promise<Buff
     const META_H = 6 + metaRows.length * META_ROW_H + 8
     const LBL_W = 58
 
+    y = ensure(META_H)
     doc.rect(col1X, y, usableW, META_H).fill(C_LIGHT)
     doc.rect(col1X, y + META_H - 2, usableW, 2).fill(C_MID)
 
@@ -112,44 +126,57 @@ export function generateApprovalMemoPdf(data: ApprovalMemoPdfData): Promise<Buff
     // ── 3. APPROVAL REQUEST SENTENCE ───────────────────────────
     doc.font('Helvetica').fontSize(9).fillColor(C_BLACK)
     const sentenceH = doc.heightOfString(data.approvalSentence, { width: usableW - 20, lineGap: 2 })
+    y = ensure(sentenceH + 16)
     doc.rect(col1X, y, usableW, sentenceH + 16).fill(C_ROW_ALT)
     doc.fillColor(C_BLACK).font('Helvetica-Oblique').fontSize(9)
        .text(data.approvalSentence, col1X + 10, y + 8, { width: usableW - 20, lineGap: 2 })
     y += sentenceH + 16 + GAP
 
     // ── 4. SECTION A — TOTAL PAYROLL COST ──────────────────────
-    y = drawSectionTitle(doc, 'SECTION A — TOTAL PAYROLL COST', col1X, y, usableW)
-    y = drawSectionATable(doc, data.sectionA, col1X, y, usableW)
+    y = drawSectionTitle(doc, 'A. Total Payroll Cost', col1X, y, usableW, footerY)
+    y = drawSectionATable(doc, data.sectionA, col1X, y, usableW, footerY)
     y += GAP
 
     // ── 4b. SALARY EARNINGS BREAKDOWN ──────────────────────────
-    y = drawSectionTitle(doc, 'SALARY EARNINGS BREAKDOWN', col1X, y, usableW)
+    y = drawSectionTitle(doc, 'SALARY EARNINGS BREAKDOWN', col1X, y, usableW, footerY)
     y = drawMoneyTable(
       doc,
       data.sectionEarnings.map(r => [r.label, r.amount, r.label === 'Total Gross Pay'] as [string, number, boolean]),
-      col1X, y, usableW,
+      col1X, y, usableW, footerY,
     )
     y += GAP
 
     // ── 5. SECTION B — DEDUCTIONS AND REMITTANCES ──────────────
-    y = drawSectionTitle(doc, 'SECTION B — DEDUCTIONS AND REMITTANCES', col1X, y, usableW)
-    y = drawMoneyTable(doc, data.sectionB.map(r => [r.label, r.amount, r.label === 'Total'] as [string, number, boolean]), col1X, y, usableW)
+    y = drawSectionTitle(doc, 'B. Deductions and Remittances', col1X, y, usableW, footerY)
+
+    // Deductible Items / Amount header row (matches the client memo template)
+    y = ensure(ROW_H)
+    doc.rect(col1X, y, usableW, ROW_H).fill(C_LIGHT)
+    const sectionBHeaderY = y + 4
+    doc.fillColor(C_MID).font('Helvetica-Bold').fontSize(7.5)
+       .text('Deductible Items', col1X + 8, sectionBHeaderY, { width: usableW * 0.6 - 8, lineBreak: false })
+       .text('Amount', col1X + usableW * 0.6, sectionBHeaderY, { width: usableW * 0.4 - 16, align: 'right', lineBreak: false })
+    y += ROW_H
+
+    y = drawMoneyTable(doc, data.sectionB.map(r => [r.label, r.amount, r.label === 'Total'] as [string, number, boolean]), col1X, y, usableW, footerY)
     y += GAP
 
-    // ── 6. SECTION C — EMPLOYEE'S NET PAY ──────────────────────
+    // ── 6. SECTION C — EMPLOYEE'S NET PAY (kept together) ──────
     const BAR_H = 34
+    y = ensure(BAR_H + GAP)
     doc.rect(col1X, y, usableW, BAR_H).fill(C_DARK)
     doc.fillColor('#bdd1e8').font('Helvetica').fontSize(8)
-       .text('SECTION C — TOTAL NET PAY', col1X + 14, y + 7, { lineBreak: false })
+       .text("C. Employee's Net Pay", col1X + 14, y + 7, { lineBreak: false })
     doc.fillColor(C_WHITE).font('Helvetica-Bold').fontSize(15)
        .text(fmt(data.totalNetPay), col1X + 14, y + 17, { width: usableW - 28, align: 'right', lineBreak: false })
     y += BAR_H + GAP
 
-    // ── 7. STAMP LEDGER (replaces signature block) ─────────────
-    y = drawSectionTitle(doc, 'APPROVAL STAMP LEDGER', col1X, y, usableW)
+    // ── 7. STAMP LEDGER (signature block) ──────────────────────
+    y = drawSectionTitle(doc, 'APPROVAL STAMP LEDGER', col1X, y, usableW, footerY)
     y += 6
 
     if (data.stamps.length === 0) {
+      y = ensure(ROW_H)
       doc.fillColor(C_GREY).font('Helvetica-Oblique').fontSize(8)
          .text('No stamps recorded yet.', col1X + 4, y, { width: usableW, lineBreak: false })
       y += ROW_H
@@ -161,18 +188,21 @@ export function generateApprovalMemoPdf(data: ApprovalMemoPdfData): Promise<Buff
         const line1 = `${stamp.stampLabel}: ${stamp.actorName}`
         const line2 = timestamp
         const commentText = stamp.comment ? `Comment: ${stamp.comment}` : ''
+        const commentH = commentText
+          ? doc.font('Helvetica-Oblique').fontSize(8).heightOfString(commentText, { width: usableW - 8 })
+          : 0
+        const blockH = 24 + commentH
+
+        y = ensure(blockH + 14)
 
         doc.fillColor(C_MID).font('Helvetica-Bold').fontSize(9)
            .text(line1, col1X + 4, y, { width: usableW - 8, lineBreak: false })
         doc.fillColor(C_GREY).font('Helvetica').fontSize(8)
            .text(line2, col1X + 4, y + 12, { width: usableW - 8, lineBreak: false })
 
-        let blockH = 24
         if (commentText) {
-          const commentH = doc.font('Helvetica-Oblique').fontSize(8).heightOfString(commentText, { width: usableW - 8 })
           doc.fillColor(C_BLACK).font('Helvetica-Oblique').fontSize(8)
              .text(commentText, col1X + 4, y + 24, { width: usableW - 8 })
-          blockH = 24 + commentH
         }
 
         doc.strokeColor('#d1d5db').lineWidth(0.5)
@@ -182,15 +212,15 @@ export function generateApprovalMemoPdf(data: ApprovalMemoPdfData): Promise<Buff
       }
     }
 
-    // ── 8. FOOTER ───────────────────────────────────────────────
+    // ── 8. FOOTER (bottom of last page) ────────────────────────
     doc.fillColor(C_GREY).font('Helvetica').fontSize(7)
        .text(
          'This is a digital Approval Memo. Stamps are immutable once recorded and constitute the permanent approval record.',
-         col1X, y + 4, { width: usableW, align: 'center', lineBreak: false },
+         col1X, footerY, { width: usableW, align: 'center', lineBreak: false },
        )
     doc.text(
       `Generated by 24/7HR Platform for ${data.companyName}. Confidential — authorised personnel only.`,
-      col1X, y + 14, { width: usableW, align: 'center', lineBreak: false },
+      col1X, footerY + 10, { width: usableW, align: 'center', lineBreak: false },
     )
 
     doc.end()
@@ -199,7 +229,15 @@ export function generateApprovalMemoPdf(data: ApprovalMemoPdfData): Promise<Buff
 
 // ── Helpers ────────────────────────────────────────────────────
 
-function drawSectionTitle(doc: PDFKit.PDFDocument, title: string, x: number, y: number, width: number): number {
+function drawSectionTitle(
+  doc: PDFKit.PDFDocument,
+  title: string,
+  x: number,
+  y: number,
+  width: number,
+  footerY: number,
+): number {
+  if (y + HDR_H > footerY) { doc.addPage(); y = MT }
   doc.rect(x, y, width, HDR_H).fill(C_MID)
   doc.fillColor(C_WHITE).font('Helvetica-Bold').fontSize(8)
      .text(title, x + 8, y + 6, { width: width - 16, lineBreak: false })
@@ -212,27 +250,32 @@ function drawSectionATable(
   x: number,
   y: number,
   width: number,
+  footerY: number,
 ): number {
-  const labelW = width * 0.34
+  const labelW = width * 0.38
   const colW = (width - labelW) / 3
 
-  // Column header row
-  doc.rect(x, y, width, ROW_H).fill(C_LIGHT)
-  const hy = y + 4
-  doc.fillColor(C_MID).font('Helvetica-Bold').fontSize(7.5)
-     .text('STAFF CATEGORY', x + 8, hy, { width: labelW - 8, lineBreak: false })
-     .text('GROSS PAY', x + labelW, hy, { width: colW - 8, align: 'right', lineBreak: false })
-     .text('TOTAL DEDUCTIONS', x + labelW + colW, hy, { width: colW - 8, align: 'right', lineBreak: false })
-     .text('NET PAY', x + labelW + colW * 2, hy, { width: colW - 8, align: 'right', lineBreak: false })
-  y += ROW_H
+  const drawHeader = (yy: number): number => {
+    doc.rect(x, yy, width, ROW_H).fill(C_LIGHT)
+    const hy = yy + 4
+    doc.fillColor(C_MID).font('Helvetica-Bold').fontSize(7.5)
+       .text('Type of employment', x + 8, hy, { width: labelW - 8, lineBreak: false })
+       .text('Gross', x + labelW, hy, { width: colW - 8, align: 'right', lineBreak: false })
+       .text('Deduction', x + labelW + colW, hy, { width: colW - 8, align: 'right', lineBreak: false })
+       .text('Net Pay', x + labelW + colW * 2, hy, { width: colW - 8, align: 'right', lineBreak: false })
+    return yy + ROW_H
+  }
+
+  if (y + ROW_H + 2 > footerY) { doc.addPage(); y = MT }
+  y = drawHeader(y)
 
   rows.forEach((row, i) => {
+    if (y + ROW_H > footerY) { doc.addPage(); y = MT; y = drawHeader(y) }
     const isTotal = row.label === 'Total'
-    const ry = y + i * ROW_H
     const bg = isTotal ? C_TOTAL : (i % 2 === 0 ? C_WHITE : C_ROW_ALT)
-    doc.rect(x, ry, width, ROW_H).fill(bg)
+    doc.rect(x, y, width, ROW_H).fill(bg)
 
-    const ty = ry + 4
+    const ty = y + 4
     const font = isTotal ? 'Helvetica-Bold' : 'Helvetica'
     const clr = isTotal ? C_MID : C_BLACK
 
@@ -242,9 +285,10 @@ function drawSectionATable(
        .text(fmt(row.gross), x + labelW, ty, { width: colW - 8, align: 'right', lineBreak: false })
        .text(fmt(row.deduction), x + labelW + colW, ty, { width: colW - 8, align: 'right', lineBreak: false })
        .text(fmt(row.netPay), x + labelW + colW * 2, ty, { width: colW - 8, align: 'right', lineBreak: false })
+    y += ROW_H
   })
 
-  return y + rows.length * ROW_H
+  return y
 }
 
 function drawMoneyTable(
@@ -253,16 +297,17 @@ function drawMoneyTable(
   x: number,
   y: number,
   width: number,
+  footerY: number,
 ): number {
   const labelW = width * 0.6
   const valueW = width - labelW - 16
 
   rows.forEach(([label, value, isTotal], i) => {
-    const ry = y + i * ROW_H
+    if (y + ROW_H > footerY) { doc.addPage(); y = MT }
     const bg = isTotal ? C_TOTAL : (i % 2 === 0 ? C_WHITE : C_ROW_ALT)
-    doc.rect(x, ry, width, ROW_H).fill(bg)
+    doc.rect(x, y, width, ROW_H).fill(bg)
 
-    const ty = ry + 4
+    const ty = y + 4
     const font = isTotal ? 'Helvetica-Bold' : 'Helvetica'
     const clr = isTotal ? C_MID : C_BLACK
 
@@ -270,9 +315,10 @@ function drawMoneyTable(
        .text(label, x + 8, ty, { width: labelW - 8, lineBreak: false })
     doc.font('Helvetica-Bold')
        .text(fmt(value), x + labelW, ty, { width: valueW, align: 'right', lineBreak: false })
+    y += ROW_H
   })
 
-  return y + rows.length * ROW_H
+  return y
 }
 
 // Matches the "N[Amount]" convention used in the PRD's own approval

@@ -156,6 +156,38 @@ export async function requirePhedReadAccess(
   throw new Error('Insufficient permissions. Required: HR/ADMIN access or an assigned PHED role.')
 }
 
+// PRD 13.2 — the five PHED roles granted every pageKey (full access). They may
+// read the entire payroll engine (staff, validations, pay periods, reports),
+// unlike the page-access-only roles (Treasury / Financial Reporting / Tax) and
+// Head, Internal Audit, whose view is restricted to their assigned pages.
+export const PHED_FULL_ACCESS_ROLES: PhedAccessRole[] = [
+  'MANAGER_COMP_BENEFITS',
+  'TAX_AUDIT',
+  'CHIEF_PEOPLE_OFFICER',
+  'CHIEF_FINANCE_OFFICER',
+  'MD_CEO',
+]
+
+// Read-only guard for the payroll engine's core data (staff roster, validation
+// sheet) — HR/ADMIN/SUPER_ADMIN or any full-access PHED role. Write actions
+// (create/compute/approve) remain HR/ADMIN/SUPER_ADMIN only.
+export async function requirePhedPayrollReadAccess(
+  token: string | null,
+): Promise<AuthUser & { phedAccessRole: PhedAccessRole | null }> {
+  const user = await requireModuleAccess(token, 'PHED', ANY_GLOBAL_ROLE)
+
+  if (['HR', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
+    return { ...user, phedAccessRole: await getPhedAccessRole(user.userId) }
+  }
+
+  const accessRole = await getPhedAccessRole(user.userId)
+  if (accessRole && PHED_FULL_ACCESS_ROLES.includes(accessRole)) {
+    return { ...user, phedAccessRole: accessRole }
+  }
+
+  throw new Error('Insufficient permissions. Required: HR/ADMIN access or a full-access PHED role.')
+}
+
 // Module 13 — page-level guard. HR/ADMIN/SUPER_ADMIN keep the full access
 // they already have on these routes (unchanged from before this module).
 // Every other PHED access role is checked against PhedRoleAccessGrant for

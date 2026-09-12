@@ -28,15 +28,21 @@ const ROW_H    = 15
 const INFO_ROW = 19
 
 export interface PayslipData {
-  companyName:  string
-  staffName:    string
-  staffIdCode:  string
-  gradeName:    string
-  department:   string
-  unit:         string
-  regionName:   string
-  category:     string
-  periodName:   string
+  companyName:     string
+  companyAddress?: string
+  staffName:       string
+  staffIdCode:     string
+  gradeName:       string
+  department:      string
+  unit:            string
+  regionName:      string
+  category:        string
+  role?:           string
+  feeder?:         string
+  nhfNumber?:      string
+  month?:          number
+  year?:           number
+  periodName:      string
 
   basicSalary:           number
   housingAllowance:      number
@@ -62,6 +68,7 @@ export interface PayslipData {
   pensionEmployer:        number
   nhf:                    number
   monthlyPAYE:            number
+  insurance?:             number
   unions:                 { name: string; amount: number }[]
   cooperatives:           { name: string; amount: number }[]
   deductionLiabilities:   number
@@ -103,23 +110,33 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
     let y = MT
 
     // ──────────────────────────────────────────────────────────
-    // 1. HEADER
+    // 1. HEADER — company + "Advice for {Month Year}" + period dates
     // ──────────────────────────────────────────────────────────
     const HEADER_H = 70
     doc.rect(col1X, y, usableW, HEADER_H).fill(C_DARK)
 
     doc.fillColor(C_WHITE).font('Helvetica-Bold').fontSize(14)
-       .text(data.companyName || '24/7HR', col1X + 14, y + 14,
+       .text(data.companyName || '24/7HR', col1X + 14, y + 12,
              { width: colW - 14, lineBreak: false })
     doc.fillColor('#bdd1e8').font('Helvetica').fontSize(8)
-       .text('24/7HR Platform', col1X + 14, y + 36,
+       .text(data.companyAddress || '', col1X + 14, y + 32,
              { width: colW - 14, lineBreak: false })
 
+    const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
+    const monthName = (data.month != null && data.month >= 1 && data.month <= 12)
+      ? MONTH_NAMES[data.month - 1]
+      : data.periodName
+    const pad2 = (v: number) => String(v).padStart(2, '0')
+    const lastDay = (m: number, yr: number) => new Date(yr, m, 0).getDate()
+    const dateRange = (data.month != null && data.year != null)
+      ? `(${pad2(1)}/${pad2(data.month)}/${data.year} - ${pad2(lastDay(data.month, data.year))}/${pad2(data.month)}/${data.year})`
+      : ''
+
     doc.fillColor('#bdd1e8').font('Helvetica').fontSize(8)
-       .text('EMPLOYEE PAYSLIP', col2X, y + 14,
+       .text(`Advice for ${monthName} ${data.year ?? ''}`, col2X, y + 12,
              { width: colW - 14, align: 'right', lineBreak: false })
-    doc.fillColor(C_WHITE).font('Helvetica-Bold').fontSize(13)
-       .text(`Period: ${data.periodName}`, col2X, y + 30,
+    doc.fillColor(C_WHITE).font('Helvetica-Bold').fontSize(10)
+       .text(dateRange || data.periodName, col2X, y + 30,
              { width: colW - 14, align: 'right', lineBreak: false })
 
     doc.rect(col1X, y + HEADER_H - 3, usableW, 3).fill(C_MID)
@@ -129,10 +146,11 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
     // 2. EMPLOYEE INFO BOX
     // ──────────────────────────────────────────────────────────
     const infoRows: [string, string, string, string][] = [
-      ['Name',      data.staffName    || '—', 'Department', data.department  || '—'],
-      ['Staff ID',  data.staffIdCode  || '—', 'Unit',       data.unit        || '—'],
-      ['Grade',     data.gradeName    || '—', 'Region',     data.regionName  || '—'],
-      ['Category',  data.category     || '—', 'Pay Period', data.periodName],
+      ['Name of Employee', data.staffName      || '—', 'Employee Number', data.staffIdCode  || '—'],
+      ['Department',       data.department     || '—', 'Role',            data.role         || '—'],
+      ['Region',           data.regionName     || '—', 'Feeder',          data.feeder       || '—'],
+      ['NHF Number',       data.nhfNumber      || '—', 'PFA',             data.pfaName      || '—'],
+      ['Pension No',       data.pensionNumber  || '—', 'Grade',           data.gradeName    || '—'],
     ]
     const INFO_H = 6 + infoRows.length * INFO_ROW + 8
 
@@ -169,37 +187,33 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
     //    isTotal=true → bold label + highlighted background.
     // ──────────────────────────────────────────────────────────
     const earningRows: [string, number, boolean][] = [
-      ['Basic Salary',            data.basicSalary,            false],
-      ['Housing Allowance',       data.housingAllowance,       false],
-      ['Transport Allowance',     data.transportAllowance,     false],
-      ['Furniture Allowance',     data.furnitureAllowance,     false],
-      ['Meal Subsidy',            data.mealSubsidy,            false],
-      ['Utility Allowance',       data.utilityAllowance,       false],
-      ['Leave Allowance',         data.leaveAllowance,         false],
-      ['Domestic Allowance',      data.domesticAllowance,      false],
-      ['Hazard Allowance',        data.hazardAllowance,        false],
-      ['Electricity Allowance',   data.electricityAllowance,   false],
-      ['Discovery Allowance',     data.discoveryAllowance,     false],
-      ['Car Subsidy',             data.carSubsidy,             false],
-      ['Entertainment Allowance', data.entertainmentAllowance, false],
-      ['Data Allowance',          data.dataAllowance,          false],
-      ['Night Allowance',         data.nightAllowance,         false],
-      ['Arrears',                 data.arrears,                false],
+      ['Basic Pay',               data.basicSalary,            false],
+      ['Housing',                 data.housingAllowance,       false],
+      ['Transport',               data.transportAllowance,     false],
+      ['Furniture',               data.furnitureAllowance,     false],
+      ['Domestic',                data.domesticAllowance,      false],
+      ['Meal',                    data.mealSubsidy,            false],
+      ['Hazard',                  data.hazardAllowance,        false],
+      ['Leave Grant',             data.leaveAllowance,         false],
+      ['Electricity',             data.electricityAllowance,   false],
       ['Other Allowances',        data.otherAllowances,        false],
-      ['Overtime Earnings',       data.overtimeEarnings,       false],
-      ['Gross Salary',            data.grossSalary,            true],
+      ['Discretionary Allowance', data.discoveryAllowance,     false],
+      ['Car Subsidy',             data.carSubsidy,             false],
+      ['Entertainment',           data.entertainmentAllowance, false],
+      ['Arrears',                 data.arrears,                false],
+      ['Overtime',                data.overtimeEarnings,       false],
+      ['Total Earnings',          data.grossSalary,            true],
     ]
 
     const deductRows: [string, number, boolean][] = [
-      ['Pension (Employee 8%)',  data.pensionEmployee, false],
-      ['Pension (Employer 10%)', data.pensionEmployer, false],
-      ['NHF (2.5% of basic)',    data.nhf,             false],
-      ['Monthly PAYE',           data.monthlyPAYE,     false],
+      ['Pension',               data.pensionEmployee, false],
+      ['National Housing Fund', data.nhf,             false],
+      ['PAYE',                  data.monthlyPAYE,     false],
       ...data.unions.map(u => [u.name, u.amount, false] as [string, number, boolean]),
       ...data.cooperatives.map(c => [c.name, c.amount, false] as [string, number, boolean]),
-      ['Deduction Liabilities',  data.deductionLiabilities, false],
-      ['Other Deductions',       data.otherDeductions,      false],
-      ['Total Deductions',       data.totalDeductions,      true],
+      ['Insurance',             data.insurance || 0, false],
+      ['Ded/Liabilities',       data.deductionLiabilities, false],
+      ['Total Deductions',      data.totalDeductions, true],
     ]
 
     drawMoneyTable(doc, 'EARNINGS',   earningRows, col1X, y, colW, C_DARK)
@@ -209,90 +223,35 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
     y += tableH + GAP
 
     // ──────────────────────────────────────────────────────────
-    // 4. NET SALARY BAR
+    // 4. SUMMARY — Net Pay | Total Gross Pay | Bank
     // ──────────────────────────────────────────────────────────
     const BAR_H = 34
+    const cellW = (usableW - 2) / 3
     doc.rect(col1X, y, usableW, BAR_H).fill(C_DARK)
 
-    doc.fillColor('#bdd1e8').font('Helvetica').fontSize(8)
-       .text('NET SALARY', col1X + 14, y + 7, { lineBreak: false })
-    doc.fillColor(C_WHITE).font('Helvetica-Bold').fontSize(15)
-       .text(fmt(data.netSalary), col1X + 14, y + 17,
-             { width: usableW - 28, align: 'right', lineBreak: false })
+    const summaryCells: [string, string | number, boolean][] = [
+      ['Net Pay',         data.netSalary,      true],
+      ['Total Gross Pay', data.grossSalary,    true],
+      ['Bank',            data.bankName || '—', false],
+    ]
+    summaryCells.forEach(([label, value, isAmount], i) => {
+      const cx = col1X + i * (cellW + 1)
+      doc.fillColor('#bdd1e8').font('Helvetica').fontSize(8)
+         .text(label, cx + 12, y + 5, { width: cellW - 24, lineBreak: false })
+      if (isAmount) {
+        drawAmount(doc, value as number, cx + 12, y + 17, {
+          width: cellW - 24, align: 'left', font: 'Helvetica-Bold', fontSize: 12, color: C_WHITE,
+        })
+      } else {
+        doc.fillColor(C_WHITE).font('Helvetica-Bold').fontSize(12)
+           .text(String(value), cx + 12, y + 17, { width: cellW - 24, align: 'left', lineBreak: false })
+      }
+    })
 
     y += BAR_H + GAP
 
     // ──────────────────────────────────────────────────────────
-    // 5. BANKING & PENSION — two-column key-value grid
-    // ──────────────────────────────────────────────────────────
-    const bankingRows: [string, string, string, string][] = [
-      ['Bank Name',      data.bankName      || '—', 'PFA Name', data.pfaName || '—'],
-      ['Account Number', data.accountNumber || '—', 'RSA PIN',  data.rsaPin  || '—'],
-      ['Account Name',   data.accountName   || '—', '',         ''],
-    ]
-    if (data.pensionNumber || data.tin) {
-      bankingRows.push([
-        'Pension Number', data.pensionNumber || '—',
-        'TIN',            data.tin           || '—',
-      ])
-    }
-
-    const BANK_ROW_H = 18
-    const BANK_H     = HDR_H + bankingRows.length * BANK_ROW_H
-
-    doc.rect(col1X, y, usableW, BANK_H).fill(C_LIGHT)
-    doc.rect(col1X, y, usableW, HDR_H).fill(C_MID)
-    doc.fillColor(C_WHITE).font('Helvetica-Bold').fontSize(8)
-       .text('BANKING & PENSION', col1X + 8, y + 6,
-             { width: usableW - 16, lineBreak: false })
-
-    const BLBL_W = 80
-
-    bankingRows.forEach(([lbl1, val1, lbl2, val2], i) => {
-      const ry = y + HDR_H + i * BANK_ROW_H
-      const bg = i % 2 === 0 ? C_WHITE : C_ROW_ALT
-      doc.rect(col1X, ry, usableW, BANK_ROW_H).fill(bg)
-      const ty = ry + 5
-
-      doc.fillColor(C_GREY).font('Helvetica').fontSize(8)
-         .text(lbl1 + (lbl1 ? ':' : ''), col1X + 10, ty,
-               { width: BLBL_W, lineBreak: false })
-      doc.fillColor(C_BLACK).font('Helvetica-Bold').fontSize(8)
-         .text(val1, col1X + 10 + BLBL_W, ty,
-               { width: colW - BLBL_W - 10, lineBreak: false })
-
-      if (lbl2) {
-        doc.strokeColor('#b0c8e0').lineWidth(0.5)
-           .moveTo(col2X - 5, ry + 3).lineTo(col2X - 5, ry + BANK_ROW_H - 3).stroke()
-        doc.fillColor(C_GREY).font('Helvetica').fontSize(8)
-           .text(lbl2 + ':', col2X, ty, { width: BLBL_W, lineBreak: false })
-        doc.fillColor(C_BLACK).font('Helvetica-Bold').fontSize(8)
-           .text(val2, col2X + BLBL_W, ty,
-                 { width: colW - BLBL_W - 10, lineBreak: false })
-      }
-    })
-
-    y += BANK_H + GAP
-
-    // ──────────────────────────────────────────────────────────
-    // 6. TAX COMPUTATION
-    // ──────────────────────────────────────────────────────────
-    const taxRows: [string, number, boolean][] = [
-      ['Annual Gross Income',      data.annualGrossIncome,      false],
-      ['Annual Rent Relief',       data.annualRentRelief,       false],
-      ['Annual Pension Deduction', data.annualPensionDeduction, false],
-      ...(data.lifeAssuranceAmount > 0
-        ? [['Life Assurance', data.lifeAssuranceAmount, false] as [string, number, boolean]]
-        : []),
-      ['Annual Chargeable Income', data.annualChargeableIncome, false],
-      ['Annual PAYE',              data.annualPAYE,             false],
-      ['Monthly PAYE',             data.monthlyPAYE,            true],
-    ]
-    drawMoneyTable(doc, 'TAX COMPUTATION', taxRows, col1X, y, usableW, '#374151')
-    y += HDR_H + taxRows.length * ROW_H + GAP
-
-    // ──────────────────────────────────────────────────────────
-    // 7. FOOTER
+    // 5. FOOTER
     // ──────────────────────────────────────────────────────────
     doc.strokeColor('#d1d5db').lineWidth(0.5)
        .moveTo(col1X, y).lineTo(col1X + usableW, y).stroke()
@@ -340,15 +299,76 @@ function drawMoneyTable(
 
     doc.fillColor(clr).font(font).fontSize(8)
        .text(label, x + 8, ty, { width: labelW - 8, lineBreak: false })
-    doc.font('Helvetica-Bold')
-       .text(fmt(value), x + labelW, ty,
-             { width: valueW, align: 'right', lineBreak: false })
+    drawAmount(doc, value, x + labelW, ty, {
+      width: valueW, align: 'right', font: 'Helvetica-Bold', fontSize: 8, color: clr,
+    })
   })
 }
 
-function fmt(v: number): string {
-  return '₦' + (v || 0).toLocaleString('en-NG', {
+function formatAmount(v: number): string {
+  return (v || 0).toLocaleString('en-NG', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
+}
+
+// Draws a proper ₦ (Naira) symbol with vector strokes so it renders
+// correctly in every PDF viewer, regardless of font glyph coverage.
+function drawNairaSymbol(doc: PDFKit.PDFDocument, x: number, y: number, size: number, color: string): void {
+  const symbolHeight = Math.max(size, 8)
+  const symbolWidth  = symbolHeight * 0.72
+  const lineWidth    = Math.max(0.8, symbolHeight * 0.08)
+  const barInset     = lineWidth
+  const bar1Y        = y + symbolHeight * 0.38
+  const bar2Y        = y + symbolHeight * 0.62
+
+  doc.save()
+  doc.strokeColor(color)
+  doc.lineWidth(lineWidth)
+  doc.moveTo(x, y)
+    .lineTo(x, y + symbolHeight)
+    .moveTo(x, y + symbolHeight)
+    .lineTo(x + symbolWidth, y)
+    .moveTo(x + symbolWidth, y)
+    .lineTo(x + symbolWidth, y + symbolHeight)
+    .moveTo(x - barInset, bar1Y)
+    .lineTo(x + symbolWidth + barInset, bar1Y)
+    .moveTo(x - barInset, bar2Y)
+    .lineTo(x + symbolWidth + barInset, bar2Y)
+    .stroke()
+  doc.restore()
+}
+
+// Renders a currency amount as a vector-drawn ₦ symbol followed by the
+// formatted number. Supports left and right alignment within a width.
+function drawAmount(
+  doc:    PDFKit.PDFDocument,
+  value:  number,
+  x:      number,
+  y:      number,
+  opts: {
+    width:    number
+    align?:   'left' | 'right'
+    font:     string
+    fontSize: number
+    color:    string
+  },
+): void {
+  const formatted   = formatAmount(value)
+  const symbolSize  = Math.max(opts.fontSize * 0.9, 8)
+  const symbolGap   = Math.max(opts.fontSize * 0.35, 3)
+  const symbolWidth = symbolSize * 0.72 + symbolGap
+
+  doc.font(opts.font).fontSize(opts.fontSize).fillColor(opts.color)
+
+  if (opts.align === 'right' && opts.width) {
+    const textWidth = doc.widthOfString(formatted)
+    const startX    = x + opts.width - (symbolWidth + textWidth)
+    drawNairaSymbol(doc, startX, y + Math.max(opts.fontSize * 0.08, 0.5), symbolSize, opts.color)
+    doc.text(formatted, startX + symbolWidth, y, { lineBreak: false })
+    return
+  }
+
+  drawNairaSymbol(doc, x, y + Math.max(opts.fontSize * 0.08, 0.5), symbolSize, opts.color)
+  doc.text(formatted, x + symbolWidth, y, { lineBreak: false })
 }

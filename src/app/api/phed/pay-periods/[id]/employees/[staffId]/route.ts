@@ -34,8 +34,8 @@ export async function GET(
 
     const record = await (prisma as any).phedComputedPayroll.findUnique({
       where:   { payPeriodId_staffId: { payPeriodId: params.id, staffId: params.staffId } },
-      include: { payPeriod: { select: { periodName: true, status: true,
-                                        company: { select: { companyName: true } } } } },
+      include: { payPeriod: { select: { periodName: true, status: true, month: true, year: true,
+                                        company: { select: { companyName: true, address: true } } } } },
     })
 
     if (!record)
@@ -62,10 +62,17 @@ export async function GET(
       amount: r2(coopAmountMap.get(c.id) ?? 0),
     }))
 
+    // Role / feeder / NHF number come from the onboarding record (not the payroll snapshot).
+    const staffRecord = await (prisma as any).phedStaff.findUnique({
+      where:  { id: record.staffId },
+      select: { jobTitle: true, nhfNumber: true, feeder: { select: { name: true } } },
+    })
+
     // ── PDF ───────────────────────────────────────────────────
     if (format === 'pdf') {
       const pdf = await generatePayslipPdf({
         companyName:            record.payPeriod?.company?.companyName ?? '',
+        companyAddress:         record.payPeriod?.company?.address ?? '',
         staffName:              record.staffName    ?? '',
         staffIdCode:            record.staffIdCode  ?? '',
         gradeName:              record.gradeName    ?? '',
@@ -73,6 +80,11 @@ export async function GET(
         unit:                   record.unit         ?? '',
         regionName:             record.regionName   ?? '',
         category:               record.category     ?? '',
+        role:                   staffRecord?.jobTitle ?? '',
+        feeder:                 staffRecord?.feeder?.name ?? '',
+        nhfNumber:              staffRecord?.nhfNumber ?? record.nhfNumber ?? '',
+        month:                  record.payPeriod?.month,
+        year:                   record.payPeriod?.year,
         periodName:             record.payPeriod?.periodName ?? '',
         basicSalary:            n(record.basicSalary),
         housingAllowance:       n(record.housingAllowance),
@@ -97,6 +109,7 @@ export async function GET(
         pensionEmployer:        n(record.pensionEmployer),
         nhf:                    n(record.nhf),
         monthlyPAYE:            n(record.monthlyPAYE),
+        insurance:              n(record.insurance),
         unions,
         cooperatives,
         deductionLiabilities:   n(record.deductionLiabilities),
@@ -218,6 +231,10 @@ export async function GET(
           department: record.department  ?? '',
           unit:       record.unit        ?? '',
           regionName: record.regionName  ?? '',
+          role:       staffRecord?.jobTitle ?? '',
+          feeder:     staffRecord?.feeder?.name ?? '',
+          nhfNumber:  staffRecord?.nhfNumber ?? record.nhfNumber ?? '',
+          pensionNumber: (record as any).pensionNumber ?? '',
         },
         earnings: {
           basicSalary:            n(record.basicSalary),
@@ -245,6 +262,7 @@ export async function GET(
           pensionEmployer:      n(record.pensionEmployer),
           nhf:                  n(record.nhf),
           monthlyPAYE:          n(record.monthlyPAYE),
+          insurance:            n(record.insurance),
           unions,
           cooperatives,
           deductionLiabilities: n(record.deductionLiabilities),

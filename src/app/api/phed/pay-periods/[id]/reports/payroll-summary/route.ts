@@ -41,7 +41,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const period = await (prisma as any).phedPayPeriod.findUnique({
       where:  { id: params.id },
-      select: { id: true, periodName: true, month: true, year: true, companyId: true,
+      select: { id: true, periodName: true, month: true, year: true, companyId: true, approvedAt: true,
                 company: { select: { companyName: true } } },
     })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
@@ -51,7 +51,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     // ── Fetch current period payrolls ─────────────────────────
     const currentPayrolls = await (prisma as any).phedComputedPayroll.findMany({
-      where: { payPeriodId: params.id },
+      where:   { payPeriodId: params.id },
+      orderBy: { staffIdCode: 'asc' },
     })
 
     // ── Category summary (backward-compat + Sheet 1) ──────────
@@ -212,7 +213,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
           { year: period.year, month: { lt: period.month } },
         ],
       },
-      select: { id: true, periodName: true, month: true, year: true },
+      select: { id: true, periodName: true, month: true, year: true, approvedAt: true, createdAt: true },
       orderBy: [{ year: 'desc' }, { month: 'desc' }],
     })
     const prevSummaryPayrolls = immediatePrevPeriod
@@ -242,16 +243,32 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const validateCurrent  = currentPayrolls.map(toValidateRow)
     const validatePrevious = prevSummaryPayrolls.map(toValidateRow)
 
-    // Changes sheet — staff present in both periods whose gross or net pay changed.
+    // Changes sheet — staff with any payroll-affecting edit logged since the
+    // previous period (the same source as the IAD Page "Changes" tab), plus
+    // staff whose gross/net pay moved versus the previous period.
+    const changeWindowStart = immediatePrevPeriod?.approvedAt ?? immediatePrevPeriod?.createdAt ?? new Date(0)
+    const changeWindowEnd   = period.approvedAt ?? new Date()
+    const changeLogs = await (prisma as any).phedChangeLog.findMany({
+      where: {
+        companyId: period.companyId,
+        changedAt: { gte: changeWindowStart, lte: changeWindowEnd },
+      },
+      select: { staffId: true },
+    })
+    const changedStaffIds = new Set<string>(changeLogs.map((c: any) => c.staffId))
+
     const prevPayrollByStaff = new Map<string, any>(
       prevSummaryPayrolls.map((r: any) => [r.staffId, r] as [string, any])
     )
+    currentPayrolls.forEach((r: any) => {
+      const prev = prevPayrollByStaff.get(r.staffId)
+      if (prev && (n(r.grossSalary) !== n(prev.grossSalary) || n(r.netSalary) !== n(prev.netSalary))) {
+        changedStaffIds.add(r.staffId)
+      }
+    })
+
     const changedStaff = currentPayrolls
-      .filter((r: any) => {
-        const prev = prevPayrollByStaff.get(r.staffId)
-        if (!prev) return false
-        return n(r.grossSalary) !== n(prev.grossSalary) || n(r.netSalary) !== n(prev.netSalary)
-      })
+      .filter((r: any) => changedStaffIds.has(r.staffId))
       .map(toIAD)
 
     const varianceRows = previousSummary

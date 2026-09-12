@@ -37,29 +37,57 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       return withCors(ApiResponse.notFound('Pay period not found'), origin)
     }
 
-    const monthStart = new Date(Date.UTC(period.year, period.month - 1, 1))
-    const monthEnd = new Date(Date.UTC(period.year, period.month, 1))
-
-    const newHires = await prisma.phedStaff.findMany({
-      where: { companyId: period.companyId, createdAt: { gte: monthStart, lt: monthEnd } },
-      include: { grade: true },
-      orderBy: { createdAt: 'asc' },
+    // New hires = staff present in this period's computed payroll but absent
+    // from ALL earlier periods' computed payroll — identical to the IAD summary
+    // workbook classification, so this tab and the workbook always agree.
+    const currentPayrolls = await prisma.phedComputedPayroll.findMany({
+      where:   { payPeriodId: params.id },
+      select:  { staffId: true, staffIdCode: true, staffName: true, category: true, gradeName: true, department: true, basicSalary: true },
+      orderBy: { staffIdCode: 'asc' },
     })
+
+    const prevPeriods = await prisma.phedPayPeriod.findMany({
+      where:  { companyId: period.companyId, id: { not: params.id } },
+      select: { id: true },
+    })
+    const prevStaffIds = new Set<string>()
+    if (prevPeriods.length > 0) {
+      const prevPayrolls = await prisma.phedComputedPayroll.findMany({
+        where:  { payPeriodId: { in: prevPeriods.map((p: any) => p.id) } },
+        select: { staffId: true },
+      })
+      prevPayrolls.forEach((p: any) => prevStaffIds.add(p.staffId))
+    }
+
+    const newHirePayrolls = currentPayrolls.filter((p: any) => !prevStaffIds.has(p.staffId))
+
+    const staffRecords = newHirePayrolls.length > 0
+      ? await prisma.phedStaff.findMany({
+          where:   { id: { in: newHirePayrolls.map((p: any) => p.staffId) } },
+          include: { grade: true },
+        })
+      : []
+    const staffById = new Map(staffRecords.map((s: any) => [s.id, s]))
 
     const rows: any[] = []
     const CONCURRENCY = 10
-    for (let start = 0; start < newHires.length; start += CONCURRENCY) {
-      const chunk = newHires.slice(start, start + CONCURRENCY)
+    for (let start = 0; start < newHirePayrolls.length; start += CONCURRENCY) {
+      const chunk = newHirePayrolls.slice(start, start + CONCURRENCY)
       rows.push(...(await Promise.all(
-        chunk.map(async staff => {
-          const startingBasicSalary = staff.basicSalary != null ? toNum(staff.basicSalary) : toNum(staff.grade?.defaultBasicSalary)
+        chunk.map(async (payroll: any) => {
+          const staff = staffById.get(payroll.staffId)
+          const startingBasicSalary = staff?.basicSalary != null
+            ? toNum(staff.basicSalary)
+            : (staff?.grade?.defaultBasicSalary != null ? toNum(staff.grade.defaultBasicSalary) : toNum(payroll.basicSalary))
 
           // Best-effort: not every PhedStaff has a matching StaffRecord/Onboarding
           // (e.g. seeded test data, or staff added before recruitment ran).
-          const staffRecord = await prisma.staffRecord.findUnique({
-            where: { email_companyId: { email: staff.email, companyId: period.companyId } },
-            select: { id: true },
-          })
+          const staffRecord = staff?.email
+            ? await prisma.staffRecord.findUnique({
+                where: { email_companyId: { email: staff.email, companyId: period.companyId } },
+                select: { id: true },
+              })
+            : null
           const onboarding = staffRecord
             ? await prisma.onboarding.findFirst({
                 where: { staffRecordId: staffRecord.id },
@@ -68,13 +96,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
             : null
 
           return {
-            staffName: `${staff.firstName} ${staff.lastName}`,
-            staffIdCode: staff.staffId,
-            department: staff.department,
-            category: staff.category,
-            gradeName: staff.grade?.name ?? null,
+            staffName: staff ? `${staff.firstName} ${staff.lastName}` : (payroll.staffName ?? ''),
+            staffIdCode: payroll.staffIdCode ?? staff?.staffId ?? '',
+            department: staff?.department ?? payroll.department ?? null,
+            category: payroll.category ?? staff?.category ?? 'REGULAR',
+            gradeName: staff?.grade?.name ?? payroll.gradeName ?? null,
             startingBasicSalary,
-            hireDate: staff.createdAt,
+            hireDate: staff?.createdAt ?? null,
             onboardingMatched: !!onboarding,
             onboardingStartDate: onboarding?.startDate ?? null,
             onboardingStatus: onboarding?.status ?? null,
