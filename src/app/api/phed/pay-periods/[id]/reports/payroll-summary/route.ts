@@ -255,7 +255,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       },
       select: { staffId: true },
     })
-    const changedStaffIds = new Set<string>(changeLogs.map((c: any) => c.staffId))
+    const changedStaffIds = new Set<string>()
+    // Change-log entries count as "changes" only for staff who already existed
+    // in a prior period — a new hire's initial setup edits belong to the
+    // New Hired tab, not Changes.
+    changeLogs.forEach((c: any) => {
+      if (prevStaffIds.has(c.staffId)) changedStaffIds.add(c.staffId)
+    })
 
     const prevPayrollByStaff = new Map<string, any>(
       prevSummaryPayrolls.map((r: any) => [r.staffId, r] as [string, any])

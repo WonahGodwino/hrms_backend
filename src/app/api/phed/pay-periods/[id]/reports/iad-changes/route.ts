@@ -44,21 +44,39 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const windowStart = previousPeriod?.approvedAt ?? previousPeriod?.createdAt ?? new Date(0)
     const windowEnd = period.approvedAt ?? new Date()
 
+    // New hires (staff with no computed payroll in any prior period) are
+    // reported under the New Hired tab, not Changes — their initial setup
+    // edits must not pollute the Changes view.
+    const prevPeriods = await prisma.phedPayPeriod.findMany({
+      where: { companyId: period.companyId, id: { not: params.id } },
+      select: { id: true },
+    })
+    const prevStaffIds = new Set<string>()
+    if (prevPeriods.length > 0) {
+      const prevPayrolls = await prisma.phedComputedPayroll.findMany({
+        where: { payPeriodId: { in: prevPeriods.map((p: any) => p.id) } },
+        select: { staffId: true },
+      })
+      prevPayrolls.forEach((p: any) => prevStaffIds.add(p.staffId))
+    }
+
     const changes = await prisma.phedChangeLog.findMany({
       where: { companyId: period.companyId, changedAt: { gte: windowStart, lte: windowEnd } },
       include: { staff: { select: { firstName: true, lastName: true, staffId: true } } },
       orderBy: { changedAt: 'desc' },
     })
 
-    const items = changes.map(c => ({
-      staffName: `${c.staff.firstName} ${c.staff.lastName}`,
-      staffIdCode: c.staff.staffId,
-      field: c.field,
-      oldValue: c.oldValue,
-      newValue: c.newValue,
-      changedBy: c.changedByName,
-      changedAt: c.changedAt,
-    }))
+    const items = changes
+      .filter(c => prevStaffIds.has(c.staffId))
+      .map(c => ({
+        staffName: `${c.staff.firstName} ${c.staff.lastName}`,
+        staffIdCode: c.staff.staffId,
+        field: c.field,
+        oldValue: c.oldValue,
+        newValue: c.newValue,
+        changedBy: c.changedByName,
+        changedAt: c.changedAt,
+      }))
 
     const format = new URL(req.url).searchParams.get('format') ?? 'json'
     if (format === 'json') return withCors(ApiResponse.success(items), origin)
