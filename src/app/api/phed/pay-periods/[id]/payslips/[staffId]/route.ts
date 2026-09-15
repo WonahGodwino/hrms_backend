@@ -52,13 +52,25 @@ export async function GET(
     // denormalised onto the payroll snapshot), matching the payslip template.
     const staffRecord = await (prisma as any).phedStaff.findUnique({
       where:  { id: payroll.staffId },
-      select: { jobTitle: true, nhfNumber: true, feeder: { select: { name: true } } },
+      select: { jobTitle: true, nhfNumber: true, email: true, feeder: { select: { name: true } } },
     })
 
+    // "Franchise State" = the staff's state of residence (tax profile), matched
+    // best-effort via the shared email (no FK between PhedStaff and StaffRecord).
+    let franchiseState = ''
+    if (staffRecord?.email) {
+      const sr = await (prisma as any).staffRecord.findUnique({
+        where:  { email_companyId: { email: staffRecord.email, companyId: payroll.companyId } },
+        select: { taxProfile: { select: { stateOfResidence: true } } },
+      })
+      franchiseState = sr?.taxProfile?.stateOfResidence ?? ''
+    }
+
     const pdf = await generatePayslipPdf(buildPayslipData(payroll, unions, cooperatives, {
-      role:      staffRecord?.jobTitle ?? '',
-      feeder:    staffRecord?.feeder?.name ?? '',
-      nhfNumber: staffRecord?.nhfNumber ?? payroll.nhfNumber ?? '',
+      role:           staffRecord?.jobTitle ?? '',
+      feeder:         staffRecord?.feeder?.name ?? '',
+      nhfNumber:      staffRecord?.nhfNumber ?? payroll.nhfNumber ?? '',
+      franchiseState,
     }))
 
     const fileName = `payslip-${payroll.staffIdCode ?? params.staffId}-${payroll.payPeriod.periodName.replace(/\s+/g, '-')}.pdf`
@@ -81,7 +93,7 @@ function buildPayslipData(
   p: any,
   unions: { name: string; amount: number }[],
   cooperatives: { name: string; amount: number }[],
-  extra: { role: string; feeder: string; nhfNumber: string } = { role: '', feeder: '', nhfNumber: '' },
+  extra: { role: string; feeder: string; nhfNumber: string; franchiseState?: string } = { role: '', feeder: '', nhfNumber: '' },
 ) {
   const n = (v: any) => {
     if (v === null || v === undefined) return 0
@@ -98,10 +110,11 @@ function buildPayslipData(
     unit:         p.unit         ?? '',
     regionName:   p.regionName   ?? '',
     category:     p.category     ?? '',
-    role:         extra.role,
-    feeder:       extra.feeder,
-    nhfNumber:    extra.nhfNumber,
-    month:        p.payPeriod?.month,
+    role:           extra.role,
+    feeder:         extra.feeder,
+    nhfNumber:      extra.nhfNumber,
+    franchiseState: extra.franchiseState ?? '',
+    month:          p.payPeriod?.month,
     year:         p.payPeriod?.year,
     periodName:   p.payPeriod?.periodName ?? '',
     basicSalary:            n(p.basicSalary),
@@ -128,6 +141,7 @@ function buildPayslipData(
     nhf:                    n(p.nhf),
     monthlyPAYE:            n(p.monthlyPAYE),
     insurance:              n(p.insurance),
+    loan:                   n(p.loan),
     unions,
     cooperatives,
     deductionLiabilities:   n(p.deductionLiabilities),

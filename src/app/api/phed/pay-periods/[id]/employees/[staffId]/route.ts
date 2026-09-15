@@ -65,8 +65,19 @@ export async function GET(
     // Role / feeder / NHF number come from the onboarding record (not the payroll snapshot).
     const staffRecord = await (prisma as any).phedStaff.findUnique({
       where:  { id: record.staffId },
-      select: { jobTitle: true, nhfNumber: true, feeder: { select: { name: true } } },
+      select: { jobTitle: true, nhfNumber: true, email: true, feeder: { select: { name: true } } },
     })
+
+    // "Franchise State" = the staff's state of residence (tax profile), matched
+    // best-effort via the shared email (no FK between PhedStaff and StaffRecord).
+    let franchiseState = ''
+    if (staffRecord?.email) {
+      const sr = await (prisma as any).staffRecord.findUnique({
+        where:  { email_companyId: { email: staffRecord.email, companyId: record.companyId } },
+        select: { taxProfile: { select: { stateOfResidence: true } } },
+      })
+      franchiseState = sr?.taxProfile?.stateOfResidence ?? ''
+    }
 
     // ── PDF ───────────────────────────────────────────────────
     if (format === 'pdf') {
@@ -83,6 +94,7 @@ export async function GET(
         role:                   staffRecord?.jobTitle ?? '',
         feeder:                 staffRecord?.feeder?.name ?? '',
         nhfNumber:              staffRecord?.nhfNumber ?? record.nhfNumber ?? '',
+        franchiseState,
         month:                  record.payPeriod?.month,
         year:                   record.payPeriod?.year,
         periodName:             record.payPeriod?.periodName ?? '',
@@ -110,6 +122,7 @@ export async function GET(
         nhf:                    n(record.nhf),
         monthlyPAYE:            n(record.monthlyPAYE),
         insurance:              n(record.insurance),
+        loan:                   n(record.loan),
         unions,
         cooperatives,
         deductionLiabilities:   n(record.deductionLiabilities),
@@ -263,6 +276,7 @@ export async function GET(
           nhf:                  n(record.nhf),
           monthlyPAYE:          n(record.monthlyPAYE),
           insurance:            n(record.insurance),
+          loan:                 n(record.loan),
           unions,
           cooperatives,
           deductionLiabilities: n(record.deductionLiabilities),

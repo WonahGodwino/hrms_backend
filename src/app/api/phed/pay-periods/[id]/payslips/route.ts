@@ -32,9 +32,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (!['APPROVED', 'PAID'].includes(period.status))
       return withCors(ApiResponse.error('Payslips can only be sent for APPROVED or PAID periods', 400), origin)
 
-    const payrolls = await (prisma as any).phedComputedPayroll.findMany({
-      where: { payPeriodId: params.id, paymentStatus: 'ACTIVE' },
+    // Fetch every computed payroll for the period and determine eligibility in
+    // code — a staff member is eligible for a payslip unless explicitly
+    // WITHHELD. This avoids silently dropping eligible staff whose
+    // `paymentStatus` is null or stale.
+    const allPayrolls = await (prisma as any).phedComputedPayroll.findMany({
+      where: { payPeriodId: params.id },
     })
+    const payrolls = allPayrolls.filter((p: any) => p.paymentStatus !== 'WITHHELD')
 
     const n = (v: any) => {
       if (v === null || v === undefined) return 0
@@ -63,15 +68,25 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       coopAmounts.get(sc.staffId)!.set(sc.cooperativeId, Number(sc.totalAmount))
     })
 
+    // Fall back to the current staff email when the computed snapshot is blank.
+    const staffRecords = await (prisma as any).phedStaff.findMany({
+      where: { id: { in: staffIds } },
+      select: { id: true, email: true },
+    })
+    const emailMap = new Map<string, string>(
+      staffRecords.map((s: any) => [s.id, s.email])
+    )
+
     let sent    = 0
     let failed  = 0
     let skipped = 0
     const errors: string[] = []
 
-    for (const payroll of payrolls) {
-      if (!payroll.staffEmail) {
+    const sendOne = async (payroll: any) => {
+      const email = payroll.staffEmail || emailMap.get(payroll.staffId) || ''
+      if (!email) {
         skipped++
-        continue
+        return
       }
       try {
         const memberUnions = unionMembers.get(payroll.staffId) ?? new Set<string>()
@@ -84,7 +99,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           .map((c: any) => ({ name: c.name, amount: r2(staffCoopMap.get(c.id) ?? 0) }))
         const html = buildPayslipHtml(payroll, period.periodName, n, unionRows, coopRows)
         const res = await sendEmail({
-          to:      payroll.staffEmail,
+          to:      email,
           subject: `Your Payslip – ${period.periodName}`,
           html,
           text:    `Your payslip for ${period.periodName} is ready. Please view in HTML.`,
@@ -99,6 +114,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         failed++
         errors.push(`${payroll.staffName}: ${err.message}`)
       }
+    }
+
+    // Bounded concurrency so a large workforce completes within the request
+    // window without overwhelming the email provider.
+    const EMAIL_CONCURRENCY = 10
+    for (let start = 0; start < payrolls.length; start += EMAIL_CONCURRENCY) {
+      const chunk = payrolls.slice(start, start + EMAIL_CONCURRENCY)
+      await Promise.all(chunk.map(sendOne))
     }
 
     // Mark period as PAID if approved
@@ -120,12 +143,14 @@ function buildPayslipHtml(
   unionRows: { name: string; amount: number }[] = [],
   coopRows: { name: string; amount: number }[] = [],
 ): string {
-  const fmt = (v: any) => `₦${n(v).toLocaleString('en-NG', { minimumFractionDigits: 2 })}`
+  const fmt = (v: any) => `NGN ${n(v).toLocaleString('en-NG', { minimumFractionDigits: 2 })}`
   const deductionBreakdown = [
-    ['Pension (Employee 8%)', p.pensionEmployee],
-    ['NHF (2.5%)', p.nhf],
-    ['PAYE Tax', p.monthlyPAYE],
+    ['Pension', p.pensionEmployee],
+    ['National Housing Fund', p.nhf],
+    ['PAYE', p.monthlyPAYE],
     ...unionRows.map(u => [u.name ? `${u.name} (Union)` : 'Union Dues', u.amount] as [string, any]),
+    ['Loan', p.loan],
+    ['Ded/Liabilities', p.deductionLiabilities],
     ...coopRows.map(c => [c.name ? `${c.name} (Cooperative)` : 'Cooperative', c.amount] as [string, any]),
   ]
   const deductionRows = deductionBreakdown
@@ -155,16 +180,20 @@ function buildPayslipHtml(
   <h3>Earnings</h3>
   <table>
     <tr><th>Component</th><th>Amount</th></tr>
-    <tr><td>Basic Salary</td><td>${fmt(p.basicSalary)}</td></tr>
-    <tr><td>Housing Allowance</td><td>${fmt(p.housingAllowance)}</td></tr>
-    <tr><td>Transport Allowance</td><td>${fmt(p.transportAllowance)}</td></tr>
-    <tr><td>Furniture Allowance</td><td>${fmt(p.furnitureAllowance)}</td></tr>
-    <tr><td>Meal Subsidy</td><td>${fmt(p.mealSubsidy)}</td></tr>
-    <tr><td>Utility Allowance</td><td>${fmt(p.utilityAllowance)}</td></tr>
-    <tr><td>Leave Allowance</td><td>${fmt(p.leaveAllowance)}</td></tr>
-    <tr><td>Other Allowances</td><td>${fmt(p.otherAllowances)}</td></tr>
-    <tr><td>Overtime Earnings</td><td>${fmt(p.overtimeEarnings)}</td></tr>
-    <tr class="total"><td>Gross Salary</td><td>${fmt(p.grossSalary)}</td></tr>
+    <tr><td>Basic Pay</td><td>${fmt(p.basicSalary)}</td></tr>
+    <tr><td>Housing</td><td>${fmt(p.housingAllowance)}</td></tr>
+    <tr><td>Transport</td><td>${fmt(p.transportAllowance)}</td></tr>
+    <tr><td>Meal Allowance</td><td>${fmt(p.mealSubsidy)}</td></tr>
+    <tr><td>Furniture</td><td>${fmt(p.furnitureAllowance)}</td></tr>
+    <tr><td>Utility</td><td>${fmt(p.utilityAllowance)}</td></tr>
+    <tr><td>Leave Grant</td><td>${fmt(p.leaveAllowance)}</td></tr>
+    <tr><td>Electricity</td><td>${fmt(p.electricityAllowance)}</td></tr>
+    <tr><td>Entertainment</td><td>${fmt(p.entertainmentAllowance)}</td></tr>
+    <tr><td>Domestic</td><td>${fmt(p.domesticAllowance)}</td></tr>
+    <tr><td>Shift Allowance</td><td>${fmt(p.hazardAllowance)}</td></tr>
+    <tr><td>Overtime</td><td>${fmt(p.overtimeEarnings)}</td></tr>
+    <tr><td>Arrears</td><td>${fmt(p.arrears)}</td></tr>
+    <tr class="total"><td>Total Earnings</td><td>${fmt(p.grossSalary)}</td></tr>
   </table>
 
   <h3>Deductions</h3>

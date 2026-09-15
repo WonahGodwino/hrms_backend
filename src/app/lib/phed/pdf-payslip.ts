@@ -6,6 +6,8 @@
 // ============================================================
 
 import PDFDocument from 'pdfkit'
+import fs from 'fs'
+import path from 'path'
 
 // ── Palette ───────────────────────────────────────────────────
 const C_DARK    = '#1a3a5c'
@@ -40,6 +42,7 @@ export interface PayslipData {
   role?:           string
   feeder?:         string
   nhfNumber?:      string
+  franchiseState?: string
   month?:          number
   year?:           number
   periodName:      string
@@ -69,6 +72,7 @@ export interface PayslipData {
   nhf:                    number
   monthlyPAYE:            number
   insurance?:             number
+  loan?:                  number
   unions:                 { name: string; amount: number }[]
   cooperatives:           { name: string; amount: number }[]
   deductionLiabilities:   number
@@ -110,18 +114,8 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
     let y = MT
 
     // ──────────────────────────────────────────────────────────
-    // 1. HEADER — company + "Advice for {Month Year}" + period dates
+    // 1. HEADER — logo + company block, then the "Pay Advice for …" title
     // ──────────────────────────────────────────────────────────
-    const HEADER_H = 70
-    doc.rect(col1X, y, usableW, HEADER_H).fill(C_DARK)
-
-    doc.fillColor(C_WHITE).font('Helvetica-Bold').fontSize(14)
-       .text(data.companyName || '24/7HR', col1X + 14, y + 12,
-             { width: colW - 14, lineBreak: false })
-    doc.fillColor('#bdd1e8').font('Helvetica').fontSize(8)
-       .text(data.companyAddress || '', col1X + 14, y + 32,
-             { width: colW - 14, lineBreak: false })
-
     const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
     const monthName = (data.month != null && data.month >= 1 && data.month <= 12)
       ? MONTH_NAMES[data.month - 1]
@@ -132,32 +126,49 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
       ? `(${pad2(1)}/${pad2(data.month)}/${data.year} - ${pad2(lastDay(data.month, data.year))}/${pad2(data.month)}/${data.year})`
       : ''
 
-    doc.fillColor('#bdd1e8').font('Helvetica').fontSize(8)
-       .text(`Advice for ${monthName} ${data.year ?? ''}`, col2X, y + 12,
-             { width: colW - 14, align: 'right', lineBreak: false })
-    doc.fillColor(C_WHITE).font('Helvetica-Bold').fontSize(10)
-       .text(dateRange || data.periodName, col2X, y + 30,
-             { width: colW - 14, align: 'right', lineBreak: false })
+    const LOGO_H   = 36
+    const LOGO_W   = Math.round(LOGO_H * (115 / 56)) // ≈ 74 — preserves logo aspect ratio
+    const logoPath = path.join(process.cwd(), 'public', 'logo.png')
+    const hasLogo  = fs.existsSync(logoPath)
+    const nameX    = col1X + (hasLogo ? LOGO_W + 14 : 0)
+    const nameW    = usableW - (nameX - col1X)
 
-    doc.rect(col1X, y + HEADER_H - 3, usableW, 3).fill(C_MID)
-    y += HEADER_H + GAP
+    if (hasLogo) {
+      doc.image(logoPath, col1X, y, { width: LOGO_W, height: LOGO_H })
+    }
+
+    doc.fillColor(C_DARK).font('Helvetica-Bold').fontSize(13)
+       .text(data.companyName || '24/7HR', nameX, y + 2, { width: nameW, lineBreak: false })
+    doc.fillColor(C_GREY).font('Helvetica').fontSize(8)
+       .text(data.companyAddress || '', nameX, y + 20, { width: nameW, lineBreak: false })
+
+    y += LOGO_H + 4
+
+    // Title (centered) — matches the client template's "Pay Advice for …" line.
+    const titleLine = `Pay Advice for ${monthName} ${data.year ?? ''}${dateRange ? ' ' + dateRange : ''}`
+    doc.fillColor(C_DARK).font('Helvetica-Bold').fontSize(12)
+       .text(titleLine, col1X, y, { width: usableW, align: 'center', lineBreak: false })
+    y += 18
+
+    doc.rect(col1X, y, usableW, 3).fill(C_DARK)
+    y += 3 + GAP
 
     // ──────────────────────────────────────────────────────────
     // 2. EMPLOYEE INFO BOX
     // ──────────────────────────────────────────────────────────
     const infoRows: [string, string, string, string][] = [
-      ['Name of Employee', data.staffName      || '—', 'Employee Number', data.staffIdCode  || '—'],
-      ['Department',       data.department     || '—', 'Role',            data.role         || '—'],
-      ['Region',           data.regionName     || '—', 'Feeder',          data.feeder       || '—'],
-      ['NHF Number',       data.nhfNumber      || '—', 'PFA',             data.pfaName      || '—'],
-      ['Pension No',       data.pensionNumber  || '—', 'Grade',           data.gradeName    || '—'],
+      ['Name of Employee', data.staffName       || '—', 'Feeder',          data.feeder         || '—'],
+      ['Employee Number', data.staffIdCode      || '—', 'Franchise State', data.franchiseState || '—'],
+      ['Department',      data.department       || '—', 'NHF Number',      data.nhfNumber      || '—'],
+      ['Role',            data.role             || '—', 'PFA',             data.pfaName        || '—'],
+      ['Region',          data.regionName       || '—', 'Pension No',      data.pensionNumber  || '—'],
     ]
     const INFO_H = 6 + infoRows.length * INFO_ROW + 8
 
     doc.rect(col1X, y, usableW, INFO_H).fill(C_LIGHT)
     doc.rect(col1X, y + INFO_H - 2, usableW, 2).fill(C_MID)
 
-    const LBL_W = 58
+    const LBL_W = 80
 
     infoRows.forEach(([lbl1, val1, lbl2, val2], i) => {
       const ry = y + 6 + i * INFO_ROW
@@ -187,22 +198,20 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
     //    isTotal=true → bold label + highlighted background.
     // ──────────────────────────────────────────────────────────
     const earningRows: [string, number, boolean][] = [
-      ['Basic Pay',               data.basicSalary,            false],
-      ['Housing',                 data.housingAllowance,       false],
-      ['Transport',               data.transportAllowance,     false],
-      ['Furniture',               data.furnitureAllowance,     false],
-      ['Domestic',                data.domesticAllowance,      false],
-      ['Meal',                    data.mealSubsidy,            false],
-      ['Hazard',                  data.hazardAllowance,        false],
-      ['Leave Grant',             data.leaveAllowance,         false],
-      ['Electricity',             data.electricityAllowance,   false],
-      ['Other Allowances',        data.otherAllowances,        false],
-      ['Discretionary Allowance', data.discoveryAllowance,     false],
-      ['Car Subsidy',             data.carSubsidy,             false],
-      ['Entertainment',           data.entertainmentAllowance, false],
-      ['Arrears',                 data.arrears,                false],
-      ['Overtime',                data.overtimeEarnings,       false],
-      ['Total Earnings',          data.grossSalary,            true],
+      ['Basic Pay',       data.basicSalary,            false],
+      ['Housing',         data.housingAllowance,       false],
+      ['Transport',       data.transportAllowance,     false],
+      ['Meal Allowance',  data.mealSubsidy,            false],
+      ['Furniture',       data.furnitureAllowance,     false],
+      ['Utility',         data.utilityAllowance,       false],
+      ['Leave Grant',     data.leaveAllowance,         false],
+      ['Electricity',     data.electricityAllowance,   false],
+      ['Entertainment',   data.entertainmentAllowance, false],
+      ['Domestic',        data.domesticAllowance,      false],
+      ['Shift Allowance', data.hazardAllowance,        false],
+      ['Overtime',        data.overtimeEarnings,       false],
+      ['Arrears',         data.arrears,                false],
+      ['Total Earnings',  data.grossSalary,            true],
     ]
 
     const deductRows: [string, number, boolean][] = [
@@ -210,60 +219,71 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
       ['National Housing Fund', data.nhf,             false],
       ['PAYE',                  data.monthlyPAYE,     false],
       ...data.unions.map(u => [u.name, u.amount, false] as [string, number, boolean]),
-      ...data.cooperatives.map(c => [c.name, c.amount, false] as [string, number, boolean]),
-      ['Insurance',             data.insurance || 0, false],
+      ['Loan',                  data.loan || 0,       false],
       ['Ded/Liabilities',       data.deductionLiabilities, false],
+      ...data.cooperatives.map(c => [c.name, c.amount, false] as [string, number, boolean]),
       ['Total Deductions',      data.totalDeductions, true],
     ]
 
-    drawMoneyTable(doc, 'EARNINGS',   earningRows, col1X, y, colW, C_DARK)
-    drawMoneyTable(doc, 'DEDUCTIONS', deductRows,  col2X, y, colW, C_MID)
+    drawMoneyTable(doc, 'Pay Items', earningRows, col1X, y, colW, C_DARK)
+    drawMoneyTable(doc, 'Deduction', deductRows,  col2X, y, colW, C_MID)
 
     const tableH = HDR_H + Math.max(earningRows.length, deductRows.length) * ROW_H
     y += tableH + GAP
 
     // ──────────────────────────────────────────────────────────
-    // 4. SUMMARY — Net Pay | Total Gross Pay | Bank
+    // 4. SUMMARY — Net Pay / EROBREA / Net Pay plus EROBREA /
+    //    Total Earnings Plus EROBREA / Bank-Cash
     // ──────────────────────────────────────────────────────────
-    const BAR_H = 34
-    const cellW = (usableW - 2) / 3
-    doc.rect(col1X, y, usableW, BAR_H).fill(C_DARK)
-
-    const summaryCells: [string, string | number, boolean][] = [
-      ['Net Pay',         data.netSalary,      true],
-      ['Total Gross Pay', data.grossSalary,    true],
-      ['Bank',            data.bankName || '—', false],
+    const EROBREA = 0 // additive variable; sourced once the business provides it
+    const summaryRows: [string, number | string][] = [
+      ['Net Pay',                     data.netSalary],
+      ['EROBREA',                     EROBREA],
+      ['Net Pay plus EROBREA',        data.netSalary + EROBREA],
+      ['Total Earnings Plus EROBREA', data.grossSalary + EROBREA],
+      ['Bank/Cash',                   data.bankName || '—'],
     ]
-    summaryCells.forEach(([label, value, isAmount], i) => {
-      const cx = col1X + i * (cellW + 1)
-      doc.fillColor('#bdd1e8').font('Helvetica').fontSize(8)
-         .text(label, cx + 12, y + 5, { width: cellW - 24, lineBreak: false })
-      if (isAmount) {
-        drawAmount(doc, value as number, cx + 12, y + 17, {
-          width: cellW - 24, align: 'left', font: 'Helvetica-Bold', fontSize: 12, color: C_WHITE,
+    const SUM_ROW_H = 17
+    const SUM_PAD   = 8
+    const SUM_H     = SUM_PAD * 2 + summaryRows.length * SUM_ROW_H
+
+    doc.rect(col1X, y, usableW, SUM_H).fill(C_LIGHT)
+    doc.rect(col1X, y + SUM_H - 2, usableW, 2).fill(C_MID)
+
+    const sumLabelW = 185
+    const sumValueX = col1X + sumLabelW
+    const sumValueW = usableW - sumLabelW - 16
+
+    summaryRows.forEach(([label, value], i) => {
+      const ry = y + SUM_PAD + i * SUM_ROW_H
+      const isNet = i === 0
+      doc.fillColor(isNet ? C_DARK : C_GREY).font(isNet ? 'Helvetica-Bold' : 'Helvetica').fontSize(8)
+         .text(label, col1X + 12, ry + 3, { width: sumLabelW - 12, lineBreak: false })
+      if (typeof value === 'number') {
+        drawAmount(doc, value, sumValueX, ry + 3, {
+          width: sumValueW, align: 'left', font: 'Helvetica-Bold', fontSize: 9, color: C_BLACK,
         })
       } else {
-        doc.fillColor(C_WHITE).font('Helvetica-Bold').fontSize(12)
-           .text(String(value), cx + 12, y + 17, { width: cellW - 24, align: 'left', lineBreak: false })
+        doc.fillColor(C_BLACK).font('Helvetica-Bold').fontSize(9)
+           .text(String(value), sumValueX, ry + 3, { width: sumValueW, lineBreak: false })
       }
     })
 
-    y += BAR_H + GAP
+    y += SUM_H + GAP
 
     // ──────────────────────────────────────────────────────────
-    // 5. FOOTER
+    // 5. FOOTER — company slogan + generation note
     // ──────────────────────────────────────────────────────────
     doc.strokeColor('#d1d5db').lineWidth(0.5)
        .moveTo(col1X, y).lineTo(col1X + usableW, y).stroke()
+    doc.fillColor(C_DARK).font('Helvetica-Bold').fontSize(9)
+       .text('PLAY TO WIN BY DOING RIGHT', col1X, y + 6,
+             { width: usableW, align: 'center', lineBreak: false })
     doc.fillColor(C_GREY).font('Helvetica').fontSize(7)
        .text(
          'This payslip is computer-generated and does not require a signature.',
-         col1X, y + 6, { width: usableW, align: 'center', lineBreak: false }
+         col1X, y + 18, { width: usableW, align: 'center', lineBreak: false }
        )
-    doc.text(
-      `Generated by 24/7HR Platform for ${data.companyName}. Confidential — authorised personnel only.`,
-      col1X, y + 16, { width: usableW, align: 'center', lineBreak: false }
-    )
 
     doc.end()
   })
@@ -281,12 +301,16 @@ function drawMoneyTable(
   hdrFill: string,
 ): void {
   doc.rect(x, y, width, HDR_H).fill(hdrFill)
-  doc.fillColor(C_WHITE).font('Helvetica-Bold').fontSize(8)
-     .text(title, x + 8, y + 6, { width: width - 16, lineBreak: false })
 
   const LABEL_RATIO = 0.62
   const labelW      = width * LABEL_RATIO
   const valueW      = width - labelW - 16
+
+  // Two-column header: section title (left) | Amount (right)
+  doc.fillColor(C_WHITE).font('Helvetica-Bold').fontSize(8)
+     .text(title, x + 8, y + 6, { width: labelW - 8, lineBreak: false })
+  doc.fillColor(C_WHITE).font('Helvetica-Bold').fontSize(8)
+     .text('Amount', x + labelW, y + 6, { width: valueW, align: 'right', lineBreak: false })
 
   rows.forEach(([label, value, isTotal], i) => {
     const ry = y + HDR_H + i * ROW_H
@@ -312,35 +336,8 @@ function formatAmount(v: number): string {
   })
 }
 
-// Draws a proper ₦ (Naira) symbol with vector strokes so it renders
-// correctly in every PDF viewer, regardless of font glyph coverage.
-function drawNairaSymbol(doc: PDFKit.PDFDocument, x: number, y: number, size: number, color: string): void {
-  const symbolHeight = Math.max(size, 8)
-  const symbolWidth  = symbolHeight * 0.72
-  const lineWidth    = Math.max(0.8, symbolHeight * 0.08)
-  const barInset     = lineWidth
-  const bar1Y        = y + symbolHeight * 0.38
-  const bar2Y        = y + symbolHeight * 0.62
-
-  doc.save()
-  doc.strokeColor(color)
-  doc.lineWidth(lineWidth)
-  doc.moveTo(x, y)
-    .lineTo(x, y + symbolHeight)
-    .moveTo(x, y + symbolHeight)
-    .lineTo(x + symbolWidth, y)
-    .moveTo(x + symbolWidth, y)
-    .lineTo(x + symbolWidth, y + symbolHeight)
-    .moveTo(x - barInset, bar1Y)
-    .lineTo(x + symbolWidth + barInset, bar1Y)
-    .moveTo(x - barInset, bar2Y)
-    .lineTo(x + symbolWidth + barInset, bar2Y)
-    .stroke()
-  doc.restore()
-}
-
-// Renders a currency amount as a vector-drawn ₦ symbol followed by the
-// formatted number. Supports left and right alignment within a width.
+// Renders a currency amount with an "NGN" prefix (no ₦ glyph, so it renders
+// identically in every PDF viewer). Supports left and right alignment.
 function drawAmount(
   doc:    PDFKit.PDFDocument,
   value:  number,
@@ -354,21 +351,11 @@ function drawAmount(
     color:    string
   },
 ): void {
-  const formatted   = formatAmount(value)
-  const symbolSize  = Math.max(opts.fontSize * 0.9, 8)
-  const symbolGap   = Math.max(opts.fontSize * 0.35, 3)
-  const symbolWidth = symbolSize * 0.72 + symbolGap
-
+  const formatted = `NGN ${formatAmount(value)}`
   doc.font(opts.font).fontSize(opts.fontSize).fillColor(opts.color)
-
   if (opts.align === 'right' && opts.width) {
-    const textWidth = doc.widthOfString(formatted)
-    const startX    = x + opts.width - (symbolWidth + textWidth)
-    drawNairaSymbol(doc, startX, y + Math.max(opts.fontSize * 0.08, 0.5), symbolSize, opts.color)
-    doc.text(formatted, startX + symbolWidth, y, { lineBreak: false })
+    doc.text(formatted, x, y, { width: opts.width, align: 'right', lineBreak: false })
     return
   }
-
-  drawNairaSymbol(doc, x, y + Math.max(opts.fontSize * 0.08, 0.5), symbolSize, opts.color)
-  doc.text(formatted, x + symbolWidth, y, { lineBreak: false })
+  doc.text(formatted, x, y, { lineBreak: false })
 }

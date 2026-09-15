@@ -27,6 +27,11 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
     validationStatus,
   } = input
 
+  // Prorate recurring salary components for staff who exited mid-month.
+  // Arrears (backpay) and overtime (already-worked hours) are NOT prorated.
+  const prorationFactor = Math.min(1, Math.max(0, input.prorationFactor ?? 1))
+  const pr = (v: number) => r2(v * prorationFactor)
+
   const {
     basicSalary,
     housingAllowance,
@@ -45,7 +50,25 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
     nightAllowance,
     arrears,
     otherAllowances,
-  } = salary
+  } = {
+    basicSalary:            pr(salary.basicSalary),
+    housingAllowance:       pr(salary.housingAllowance),
+    transportAllowance:     pr(salary.transportAllowance),
+    furnitureAllowance:     pr(salary.furnitureAllowance),
+    mealSubsidy:            pr(salary.mealSubsidy),
+    utilityAllowance:       pr(salary.utilityAllowance),
+    leaveAllowance:         pr(salary.leaveAllowance),
+    domesticAllowance:      pr(salary.domesticAllowance),
+    hazardAllowance:        pr(salary.hazardAllowance),
+    electricityAllowance:   pr(salary.electricityAllowance),
+    discoveryAllowance:     pr(salary.discoveryAllowance),
+    carSubsidy:             pr(salary.carSubsidy),
+    entertainmentAllowance: pr(salary.entertainmentAllowance),
+    dataAllowance:          pr(salary.dataAllowance),
+    nightAllowance:         pr(salary.nightAllowance),
+    arrears:                salary.arrears,
+    otherAllowances:        pr(salary.otherAllowances),
+  }
 
   // ── Earnings ──────────────────────────────────────────────
   // Initial Gross Pay (FE guide §3): the agreed package HR spreads across

@@ -63,6 +63,7 @@ export interface PhedPayrollInput {
   unit: string
   regionName: string
   salary: PhedSalaryComponents    // HR-entered via payroll template
+  prorationFactor?: number        // 0–1 multiplier for mid-month exits (final prorated pay)
   hasLifeAssurance: boolean
   lifeAssuranceAmount: number     // Annual life assurance premium (0 if none)
   overtimeHours: number           // Used only for OT amount computation; actual OT amount comes from stored entry

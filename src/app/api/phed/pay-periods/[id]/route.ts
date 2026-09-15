@@ -44,16 +44,16 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 
     const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
-    if (!['DRAFT'].includes(period.status))
-      return withCors(ApiResponse.error('Only DRAFT pay periods can be deleted', 400), origin)
+    if (period.status === 'PAID')
+      return withCors(ApiResponse.error('Paid pay periods cannot be deleted', 400), origin)
 
     await (prisma as any).phedPayPeriod.delete({ where: { id: params.id } })
     return withCors(ApiResponse.success(null, 'Pay period deleted'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 
-// PATCH /api/phed/pay-periods/:id — edit a DRAFT period's year/month.
-// A period's identity can only change before any data is attached to it.
+// PATCH /api/phed/pay-periods/:id — edit a period's year/month.
+// Locked only once the period has been PAID.
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
@@ -64,8 +64,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
-    if (period.status !== 'DRAFT')
-      return withCors(ApiResponse.error('Only DRAFT pay periods can be edited', 400), origin)
+    if (period.status === 'PAID')
+      return withCors(ApiResponse.error('Paid pay periods cannot be edited', 400), origin)
 
     const body = await req.json().catch(() => ({}))
     const y = Number(body?.year ?? period.year)

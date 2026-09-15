@@ -31,10 +31,26 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (!['VALIDATION_CLOSED', 'REVIEW', 'APPROVED'].includes(period.status))
       return withCors(ApiResponse.error('Period must be in VALIDATION_CLOSED, REVIEW or APPROVED status to compute', 400), origin)
 
-    // ── Load all active staff + per-period data ───────────────
+    // ── Exits on/after this month's start — these staff get one final,
+    //    prorated payroll row for the month they leave. ─────────
+    const monthStartUTC = new Date(Date.UTC(period.year, period.month - 1, 1))
+    const exits = await (prisma as any).phedStaffExit.findMany({
+      where:  { companyId: period.companyId, exitDate: { gte: monthStartUTC } },
+      select: { staffId: true, exitDate: true },
+    })
+    const exitDateMap    = new Map<string, Date>(exits.map((e: any) => [e.staffId, new Date(e.exitDate)]))
+    const exitedStaffIds = [...exitDateMap.keys()]
+
+    // ── Load all active staff + staff who exited this month + per-period data ──
     const [allStaff, validations, overtimeEntries, periodAdvances] = await Promise.all([
       (prisma as any).phedStaff.findMany({
-        where:   { companyId: period.companyId, isActive: true },
+        where: {
+          companyId: period.companyId,
+          OR: [
+            { isActive: true },
+            ...(exitedStaffIds.length > 0 ? [{ id: { in: exitedStaffIds } }] : []),
+          ],
+        },
         include: {
           region:               true,
           grade:                { select: { name: true, code: true, defaultBasicSalary: true, allowanceTemplates: true } },
@@ -113,6 +129,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         0,
       )
 
+      // Final-pay proration: staff who exited during this month are paid for
+      // the days they worked (exit day / days in month).
+      const exitDate = exitDateMap.get(staff.id)
+      const monthDays = new Date(Date.UTC(period.year, period.month, 0)).getUTCDate()
+      let prorationFactor = 1
+      if (exitDate && exitDate.getUTCFullYear() === period.year && exitDate.getUTCMonth() === period.month - 1) {
+        prorationFactor = Math.min(1, Math.max(0, exitDate.getUTCDate() / monthDays))
+      }
+
       const input: PhedPayrollInput = {
         staffId:                  staff.id,
         staffDbId:                staff.id,
@@ -125,6 +150,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         unit:                     staff.unit        ?? '',
         regionName:               staff.region?.name ?? '',
         salary,
+        prorationFactor,
         hasLifeAssurance:         Boolean(staff.hasLifeAssurance),
         lifeAssuranceAmount:      Number(staff.lifeAssuranceAmount ?? 0),
         overtimeHours:            0,
