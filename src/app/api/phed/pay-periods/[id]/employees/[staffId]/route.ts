@@ -230,13 +230,20 @@ export async function GET(
     // ── JSON — structured breakdown ───────────────────────────
     return withCors(
       ApiResponse.success({
+        company: {
+          companyName: record.payPeriod?.company?.companyName ?? '',
+          address:     record.payPeriod?.company?.address     ?? '',
+        },
         period: {
           id:         params.id,
           periodName: record.payPeriod?.periodName ?? '',
           status:     record.payPeriod?.status     ?? '',
+          month:      record.payPeriod?.month      ?? null,
+          year:       record.payPeriod?.year       ?? null,
         },
         employee: {
           staffId:    record.staffIdCode ?? '',
+          staffIdCode: record.staffIdCode ?? '',
           staffName:  record.staffName   ?? '',
           staffEmail: record.staffEmail  ?? '',
           category:   record.category    ?? '',
@@ -248,6 +255,7 @@ export async function GET(
           feeder:     staffRecord?.feeder?.name ?? '',
           nhfNumber:  staffRecord?.nhfNumber ?? record.nhfNumber ?? '',
           pensionNumber: (record as any).pensionNumber ?? '',
+          franchiseState,
         },
         earnings: {
           basicSalary:            n(record.basicSalary),

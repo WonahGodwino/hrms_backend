@@ -123,24 +123,37 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
     const pad2 = (v: number) => String(v).padStart(2, '0')
     const lastDay = (m: number, yr: number) => new Date(yr, m, 0).getDate()
     const dateRange = (data.month != null && data.year != null)
-      ? `(${pad2(1)}/${pad2(data.month)}/${data.year} - ${pad2(lastDay(data.month, data.year))}/${pad2(data.month)}/${data.year})`
+      ? `(${pad2(1)}/${pad2(data.month)}/${data.year}-${pad2(lastDay(data.month, data.year))}/${pad2(data.month)}/${data.year})`
       : ''
 
     const LOGO_H   = 36
     const LOGO_W   = Math.round(LOGO_H * (115 / 56)) // ≈ 74 — preserves logo aspect ratio
     const logoPath = path.join(process.cwd(), 'public', 'logo.png')
     const hasLogo  = fs.existsSync(logoPath)
-    const nameX    = col1X + (hasLogo ? LOGO_W + 14 : 0)
-    const nameW    = usableW - (nameX - col1X)
 
     if (hasLogo) {
       doc.image(logoPath, col1X, y, { width: LOGO_W, height: LOGO_H })
     }
 
+    // Company name + address are centered across the full width (logo stays as
+    // a small brand mark in the top-left corner).
     doc.fillColor(C_DARK).font('Helvetica-Bold').fontSize(13)
-       .text(data.companyName || '24/7HR', nameX, y + 2, { width: nameW, lineBreak: false })
-    doc.fillColor(C_GREY).font('Helvetica').fontSize(8)
-       .text(data.companyAddress || '', nameX, y + 20, { width: nameW, lineBreak: false })
+       .text(data.companyName || '24/7HR', col1X, y + 2, { width: usableW, align: 'center', lineBreak: false })
+
+    // Address — split into two lines ("No 1, Moscow Road" / "Rivers State
+    // Nigeria") to mirror the client's Excel header block. Split at the last
+    // comma so a multi-part street address stays together.
+    const addrParts = (data.companyAddress || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    const addrLines = addrParts.length > 1
+      ? [addrParts.slice(0, -1).join(', '), addrParts[addrParts.length - 1]]
+      : addrParts
+    addrLines.forEach((line, i) => {
+      doc.fillColor(C_GREY).font('Helvetica').fontSize(8)
+         .text(line, col1X, y + 14 + i * 10, { width: usableW, align: 'center', lineBreak: false })
+    })
 
     y += LOGO_H + 4
 
@@ -150,8 +163,8 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
        .text(titleLine, col1X, y, { width: usableW, align: 'center', lineBreak: false })
     y += 18
 
-    doc.rect(col1X, y, usableW, 3).fill(C_DARK)
-    y += 3 + GAP
+    doc.rect(col1X, y, usableW, 1).fill(C_BLACK)
+    y += 1 + GAP
 
     // ──────────────────────────────────────────────────────────
     // 2. EMPLOYEE INFO BOX
@@ -166,7 +179,13 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
     const INFO_H = 6 + infoRows.length * INFO_ROW + 8
 
     doc.rect(col1X, y, usableW, INFO_H).fill(C_LIGHT)
-    doc.rect(col1X, y + INFO_H - 2, usableW, 2).fill(C_MID)
+    // Excel-style thin gridlines inside the info block (row separators only;
+    // the medium outer border is drawn at the end).
+    doc.lineWidth(0.5).strokeColor(C_BLACK)
+    for (let i = 1; i <= infoRows.length; i++) {
+      const ly = y + 6 + i * INFO_ROW
+      doc.moveTo(col1X, ly).lineTo(col1X + usableW, ly).stroke()
+    }
 
     const LBL_W = 80
 
@@ -248,7 +267,6 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
     const SUM_H     = SUM_PAD * 2 + summaryRows.length * SUM_ROW_H
 
     doc.rect(col1X, y, usableW, SUM_H).fill(C_LIGHT)
-    doc.rect(col1X, y + SUM_H - 2, usableW, 2).fill(C_MID)
 
     const sumLabelW = 185
     const sumValueX = col1X + sumLabelW
@@ -259,7 +277,18 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
       const isNet = i === 0
       doc.fillColor(isNet ? C_DARK : C_GREY).font(isNet ? 'Helvetica-Bold' : 'Helvetica').fontSize(8)
          .text(label, col1X + 12, ry + 3, { width: sumLabelW - 12, lineBreak: false })
-      if (typeof value === 'number') {
+      if (i === 4) {
+        // Bank/Cash — split just this row's value area into
+        // Bank name (left) | Account number (right).
+        const halfW = sumValueW / 2
+        doc.fillColor(C_BLACK).font('Helvetica-Bold').fontSize(8)
+           .text(data.bankName || '—', sumValueX + 4, ry + 3, { width: halfW - 8, lineBreak: false })
+        doc.fillColor(C_BLACK).font('Helvetica-Bold').fontSize(8)
+           .text(data.accountNumber || '—', sumValueX + halfW + 4, ry + 3,
+                 { width: halfW - 8, align: 'right', lineBreak: false })
+        doc.lineWidth(0.5).strokeColor(C_BLACK)
+           .moveTo(sumValueX + halfW, ry + 1).lineTo(sumValueX + halfW, ry + SUM_ROW_H - 1).stroke()
+      } else if (typeof value === 'number') {
         drawAmount(doc, value, sumValueX, ry + 3, {
           width: sumValueW, align: 'left', font: 'Helvetica-Bold', fontSize: 9, color: C_BLACK,
         })
@@ -269,12 +298,20 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
       }
     })
 
+    // Excel-style thin gridlines for the summary block.
+    doc.lineWidth(0.5).strokeColor(C_BLACK)
+    doc.moveTo(col1X + sumLabelW, y).lineTo(col1X + sumLabelW, y + SUM_H).stroke()
+    summaryRows.forEach((_, i) => {
+      const ry = y + SUM_PAD + (i + 1) * SUM_ROW_H
+      doc.moveTo(col1X, ry).lineTo(col1X + usableW, ry).stroke()
+    })
+
     y += SUM_H + GAP
 
     // ──────────────────────────────────────────────────────────
     // 5. FOOTER — company slogan + generation note
     // ──────────────────────────────────────────────────────────
-    doc.strokeColor('#d1d5db').lineWidth(0.5)
+    doc.lineWidth(0.5).strokeColor(C_BLACK)
        .moveTo(col1X, y).lineTo(col1X + usableW, y).stroke()
     doc.fillColor(C_DARK).font('Helvetica-Bold').fontSize(9)
        .text('PLAY TO WIN BY DOING RIGHT', col1X, y + 6,
@@ -284,6 +321,10 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
          'This payslip is computer-generated and does not require a signature.',
          col1X, y + 18, { width: usableW, align: 'center', lineBreak: false }
        )
+
+    // Excel-style medium outer border around the entire payslip.
+    doc.lineWidth(2).strokeColor(C_BLACK)
+       .rect(col1X, MT, usableW, (y + 28) - MT).stroke()
 
     doc.end()
   })
@@ -306,11 +347,11 @@ function drawMoneyTable(
   const labelW      = width * LABEL_RATIO
   const valueW      = width - labelW - 16
 
-  // Two-column header: section title (left) | Amount (right)
+  // Two-column header: section title (left) | Amount (NGN) (right)
   doc.fillColor(C_WHITE).font('Helvetica-Bold').fontSize(8)
      .text(title, x + 8, y + 6, { width: labelW - 8, lineBreak: false })
   doc.fillColor(C_WHITE).font('Helvetica-Bold').fontSize(8)
-     .text('Amount', x + labelW, y + 6, { width: valueW, align: 'right', lineBreak: false })
+     .text('Amount (NGN)', x + labelW, y + 6, { width: valueW, align: 'right', lineBreak: false })
 
   rows.forEach(([label, value, isTotal], i) => {
     const ry = y + HDR_H + i * ROW_H
@@ -327,6 +368,16 @@ function drawMoneyTable(
       width: valueW, align: 'right', font: 'Helvetica-Bold', fontSize: 8, color: clr,
     })
   })
+
+  // Excel-style thin gridlines: column divider + row separators.
+  const tableBottom = y + HDR_H + rows.length * ROW_H
+  doc.lineWidth(0.5).strokeColor(C_BLACK)
+  doc.moveTo(x + labelW, y).lineTo(x + labelW, tableBottom).stroke()
+  doc.moveTo(x, y + HDR_H).lineTo(x + width, y + HDR_H).stroke()
+  rows.forEach((_, i) => {
+    const ry = y + HDR_H + (i + 1) * ROW_H
+    doc.moveTo(x, ry).lineTo(x + width, ry).stroke()
+  })
 }
 
 function formatAmount(v: number): string {
@@ -336,8 +387,8 @@ function formatAmount(v: number): string {
   })
 }
 
-// Renders a currency amount with an "NGN" prefix (no ₦ glyph, so it renders
-// identically in every PDF viewer). Supports left and right alignment.
+// Renders a currency amount as a plain number — the "NGN" currency label lives
+// in the Amount column header, so amounts stay clean in every PDF viewer.
 function drawAmount(
   doc:    PDFKit.PDFDocument,
   value:  number,
@@ -351,7 +402,7 @@ function drawAmount(
     color:    string
   },
 ): void {
-  const formatted = `NGN ${formatAmount(value)}`
+  const formatted = formatAmount(value)
   doc.font(opts.font).fontSize(opts.fontSize).fillColor(opts.color)
   if (opts.align === 'right' && opts.width) {
     doc.text(formatted, x, y, { width: opts.width, align: 'right', lineBreak: false })

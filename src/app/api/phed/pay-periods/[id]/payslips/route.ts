@@ -36,10 +36,20 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // code — a staff member is eligible for a payslip unless explicitly
     // WITHHELD. This avoids silently dropping eligible staff whose
     // `paymentStatus` is null or stale.
+    //
+    // Large workforces are sent in batched requests (`skip`/`take`) so a single
+    // request never outlives the serverless request window. Ordering by staffId
+    // makes the batches deterministic across requests.
     const allPayrolls = await (prisma as any).phedComputedPayroll.findMany({
       where: { payPeriodId: params.id },
+      orderBy: { staffId: 'asc' },
     })
-    const payrolls = allPayrolls.filter((p: any) => p.paymentStatus !== 'WITHHELD')
+    const eligible = allPayrolls.filter((p: any) => p.paymentStatus !== 'WITHHELD')
+    const total   = eligible.length
+    const skip    = Math.max(0, Number(body.skip) || 0)
+    const take    = Number(body.take) || 0
+    const payrolls = take > 0 ? eligible.slice(skip, skip + take) : eligible.slice(skip)
+    const remaining = Math.max(0, total - (skip + payrolls.length))
 
     const n = (v: any) => {
       if (v === null || v === undefined) return 0
@@ -124,15 +134,22 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       await Promise.all(chunk.map(sendOne))
     }
 
-    // Mark period as PAID if approved
-    if (period.status === 'APPROVED') {
+    // Mark period as PAID if approved and this is the final batch — never mark
+    // PAID while further batches remain to be sent.
+    if (period.status === 'APPROVED' && remaining === 0) {
       await (prisma as any).phedPayPeriod.update({
         where: { id: params.id },
         data:  { status: 'PAID' },
       })
     }
 
-    return withCors(ApiResponse.success({ sent, failed, skipped, errors }, `${sent} payslips sent`), origin)
+    return withCors(
+      ApiResponse.success(
+        { sent, failed, skipped, errors, total, processed: payrolls.length, remaining },
+        remaining === 0 ? `${sent} payslips sent` : `${sent} payslips sent — ${remaining} remaining`,
+      ),
+      origin
+    )
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 
@@ -143,7 +160,7 @@ function buildPayslipHtml(
   unionRows: { name: string; amount: number }[] = [],
   coopRows: { name: string; amount: number }[] = [],
 ): string {
-  const fmt = (v: any) => `NGN ${n(v).toLocaleString('en-NG', { minimumFractionDigits: 2 })}`
+  const fmt = (v: any) => n(v).toLocaleString('en-NG', { minimumFractionDigits: 2 })
   const deductionBreakdown = [
     ['Pension', p.pensionEmployee],
     ['National Housing Fund', p.nhf],
@@ -179,7 +196,7 @@ function buildPayslipHtml(
 
   <h3>Earnings</h3>
   <table>
-    <tr><th>Component</th><th>Amount</th></tr>
+    <tr><th>Component</th><th>Amount (NGN)</th></tr>
     <tr><td>Basic Pay</td><td>${fmt(p.basicSalary)}</td></tr>
     <tr><td>Housing</td><td>${fmt(p.housingAllowance)}</td></tr>
     <tr><td>Transport</td><td>${fmt(p.transportAllowance)}</td></tr>
@@ -198,7 +215,7 @@ function buildPayslipHtml(
 
   <h3>Deductions</h3>
   <table>
-    <tr><th>Component</th><th>Amount</th></tr>
+    <tr><th>Component</th><th>Amount (NGN)</th></tr>
     ${deductionRows}
     <tr class="total"><td>Total Deductions</td><td>${fmt(p.totalDeductions)}</td></tr>
   </table>
