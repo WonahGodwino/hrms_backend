@@ -68,13 +68,13 @@ export function buildPayslipHtml(
   const earningHtml = earningRows.map(([l, v]) => moneyRow(l, v)).join('') + `
     <tr>
       <td style="padding:4px 8px;background:#eef2f7;border-top:1px solid #1f2937;font-weight:700;font-size:12px;">Total Earnings</td>
-      <td style="padding:4px 8px;background:#eef2f7;border-top:1px solid #1f2937;border-left:1px solid #d1d5db;text-align:right;font-weight:700;font-size:12px;font-family:Consolas,Monaco,monospace;">${fmt(p.grossSalary)}</td>
+      <td style="padding:4px 8px;background:#eef2f7;border-top:1px solid #1f2937;border-left:1px solid #d1d5db;text-align:right;font-weight:700;font-size:12px;font-family:Consolas,Monaco,monospace;">NGN ${fmt(p.grossSalary)}</td>
     </tr>`
 
   const deductionHtml = deductionRows.map(([l, v]) => moneyRow(l, v)).join('') + `
     <tr>
       <td style="padding:4px 8px;background:#eef2f7;border-top:1px solid #1f2937;font-weight:700;font-size:12px;">Total Deductions</td>
-      <td style="padding:4px 8px;background:#eef2f7;border-top:1px solid #1f2937;border-left:1px solid #d1d5db;text-align:right;font-weight:700;font-size:12px;font-family:Consolas,Monaco,monospace;">${fmt(p.totalDeductions)}</td>
+      <td style="padding:4px 8px;background:#eef2f7;border-top:1px solid #1f2937;border-left:1px solid #d1d5db;text-align:right;font-weight:700;font-size:12px;font-family:Consolas,Monaco,monospace;">NGN ${fmt(p.totalDeductions)}</td>
     </tr>`
 
   const summaryRows: [string, string, boolean][] = [

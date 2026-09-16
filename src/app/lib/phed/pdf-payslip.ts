@@ -366,6 +366,7 @@ function drawMoneyTable(
        .text(label, x + 8, ty, { width: labelW - 8, lineBreak: false })
     drawAmount(doc, value, x + labelW, ty, {
       width: valueW, align: 'right', font: 'Helvetica-Bold', fontSize: 8, color: clr,
+      ngn: isTotal,
     })
   })
 
@@ -387,8 +388,8 @@ function formatAmount(v: number): string {
   })
 }
 
-// Renders a currency amount as a plain number — the "NGN" currency label lives
-// in the Amount column header, so amounts stay clean in every PDF viewer.
+// Renders a currency amount — plain number by default; pass ngn:true to prefix
+// "NGN " (used on the Total Earnings / Total Deductions rows).
 function drawAmount(
   doc:    PDFKit.PDFDocument,
   value:  number,
@@ -400,9 +401,10 @@ function drawAmount(
     font:     string
     fontSize: number
     color:    string
+    ngn?:     boolean
   },
 ): void {
-  const formatted = formatAmount(value)
+  const formatted = (opts.ngn ? 'NGN ' : '') + formatAmount(value)
   doc.font(opts.font).fontSize(opts.fontSize).fillColor(opts.color)
   if (opts.align === 'right' && opts.width) {
     doc.text(formatted, x, y, { width: opts.width, align: 'right', lineBreak: false })
