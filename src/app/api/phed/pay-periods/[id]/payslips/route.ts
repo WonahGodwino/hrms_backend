@@ -6,6 +6,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { sendEmail } from '@/app/lib/email'
+import { buildPayslipHtml } from '@/app/lib/phed/payslip-email'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -25,7 +26,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const allowed = await verifyCompanyAccess(user, companyId)
     if (!allowed) return withCors(ApiResponse.forbidden('You do not have access to this company'), origin)
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
+    const period = await (prisma as any).phedPayPeriod.findUnique({
+      where: { id: params.id },
+      include: { company: { select: { companyName: true, address: true } } },
+    })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     if (period.companyId !== companyId)
       return withCors(ApiResponse.notFound('Pay period not found'), origin)
@@ -78,13 +82,36 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       coopAmounts.get(sc.staffId)!.set(sc.cooperativeId, Number(sc.totalAmount))
     })
 
-    // Fall back to the current staff email when the computed snapshot is blank.
+    // Fall back to the current staff email when the computed snapshot is blank,
+    // and gather the onboarding-only fields (role / feeder / NHF number /
+    // franchise state) the payslip email needs to mirror the PDF layout.
     const staffRecords = await (prisma as any).phedStaff.findMany({
       where: { id: { in: staffIds } },
-      select: { id: true, email: true },
+      select: {
+        id: true, email: true, jobTitle: true, nhfNumber: true,
+        feeder: { select: { name: true } },
+      },
     })
     const emailMap = new Map<string, string>(
       staffRecords.map((s: any) => [s.id, s.email])
+    )
+    const emails = staffRecords.map((s: any) => s.email).filter(Boolean)
+    const taxProfiles = emails.length
+      ? await (prisma as any).staffRecord.findMany({
+          where: { email: { in: emails } },
+          select: { email: true, taxProfile: { select: { stateOfResidence: true } } },
+        })
+      : []
+    const stateByEmail = new Map<string, string>(
+      taxProfiles.map((sr: any) => [sr.email, sr.taxProfile?.stateOfResidence ?? ''])
+    )
+    const extrasMap = new Map<string, any>(
+      staffRecords.map((s: any) => [s.id, {
+        role:           s.jobTitle ?? '',
+        feeder:         s.feeder?.name ?? '',
+        nhfNumber:      s.nhfNumber ?? '',
+        franchiseState: stateByEmail.get(s.email) ?? '',
+      }])
     )
 
     let sent    = 0
@@ -107,7 +134,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         const coopRows = allCoops
           .filter((c: any) => (staffCoopMap.get(c.id) ?? 0) > 0)
           .map((c: any) => ({ name: c.name, amount: r2(staffCoopMap.get(c.id) ?? 0) }))
-        const html = buildPayslipHtml(payroll, period.periodName, n, unionRows, coopRows)
+        const html = buildPayslipHtml(payroll, period, n, unionRows, coopRows, extrasMap.get(payroll.staffId))
         const res = await sendEmail({
           to:      email,
           subject: `Your Payslip – ${period.periodName}`,
@@ -151,83 +178,5 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       origin
     )
   } catch (e) { return withCors(handleApiError(e), origin) }
-}
-
-function buildPayslipHtml(
-  p: any,
-  periodName: string,
-  n: (v: any) => number,
-  unionRows: { name: string; amount: number }[] = [],
-  coopRows: { name: string; amount: number }[] = [],
-): string {
-  const fmt = (v: any) => n(v).toLocaleString('en-NG', { minimumFractionDigits: 2 })
-  const deductionBreakdown = [
-    ['Pension', p.pensionEmployee],
-    ['National Housing Fund', p.nhf],
-    ['PAYE', p.monthlyPAYE],
-    ...unionRows.map(u => [u.name ? `${u.name} (Union)` : 'Union Dues', u.amount] as [string, any]),
-    ['Loan', p.loan],
-    ['Ded/Liabilities', p.deductionLiabilities],
-    ...coopRows.map(c => [c.name ? `${c.name} (Cooperative)` : 'Cooperative', c.amount] as [string, any]),
-  ]
-  const deductionRows = deductionBreakdown
-    .map(([label, amount]) => `<tr><td>${label}</td><td>${fmt(amount)}</td></tr>`)
-    .join('')
-  return `
-<!DOCTYPE html><html><head><meta charset="UTF-8">
-<style>
-  body { font-family: Arial, sans-serif; font-size: 13px; color: #333; }
-  .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-  h2 { color: #1a3a5c; border-bottom: 2px solid #1a3a5c; padding-bottom: 8px; }
-  table { width: 100%; border-collapse: collapse; margin: 10px 0; }
-  th { background: #1a3a5c; color: #fff; padding: 6px 10px; text-align: left; }
-  td { padding: 5px 10px; border-bottom: 1px solid #eee; }
-  .total { font-weight: bold; background: #f0f4f8; }
-  .net { font-size: 15px; font-weight: bold; color: #1a3a5c; }
-</style></head><body>
-<div class="container">
-  <h2>Payslip – ${periodName}</h2>
-  <table>
-    <tr><td><strong>Name</strong></td><td>${p.staffName ?? ''}</td></tr>
-    <tr><td><strong>Staff ID</strong></td><td>${p.staffIdCode ?? ''}</td></tr>
-    <tr><td><strong>Grade</strong></td><td>${p.gradeName ?? ''}</td></tr>
-    <tr><td><strong>Department</strong></td><td>${p.department ?? ''}</td></tr>
-  </table>
-
-  <h3>Earnings</h3>
-  <table>
-    <tr><th>Component</th><th>Amount (NGN)</th></tr>
-    <tr><td>Basic Pay</td><td>${fmt(p.basicSalary)}</td></tr>
-    <tr><td>Housing</td><td>${fmt(p.housingAllowance)}</td></tr>
-    <tr><td>Transport</td><td>${fmt(p.transportAllowance)}</td></tr>
-    <tr><td>Meal Allowance</td><td>${fmt(p.mealSubsidy)}</td></tr>
-    <tr><td>Furniture</td><td>${fmt(p.furnitureAllowance)}</td></tr>
-    <tr><td>Utility</td><td>${fmt(p.utilityAllowance)}</td></tr>
-    <tr><td>Leave Grant</td><td>${fmt(p.leaveAllowance)}</td></tr>
-    <tr><td>Electricity</td><td>${fmt(p.electricityAllowance)}</td></tr>
-    <tr><td>Entertainment</td><td>${fmt(p.entertainmentAllowance)}</td></tr>
-    <tr><td>Domestic</td><td>${fmt(p.domesticAllowance)}</td></tr>
-    <tr><td>Shift Allowance</td><td>${fmt(p.hazardAllowance)}</td></tr>
-    <tr><td>Overtime</td><td>${fmt(p.overtimeEarnings)}</td></tr>
-    <tr><td>Arrears</td><td>${fmt(p.arrears)}</td></tr>
-    <tr class="total"><td>Total Earnings</td><td>${fmt(p.grossSalary)}</td></tr>
-  </table>
-
-  <h3>Deductions</h3>
-  <table>
-    <tr><th>Component</th><th>Amount (NGN)</th></tr>
-    ${deductionRows}
-    <tr class="total"><td>Total Deductions</td><td>${fmt(p.totalDeductions)}</td></tr>
-  </table>
-
-  <table>
-    <tr class="net"><td>NET SALARY</td><td>${fmt(p.netSalary)}</td></tr>
-  </table>
-
-  <p style="color:#888;font-size:11px;margin-top:20px;">
-    This payslip was generated automatically by the 24/7HR Platform.
-    Bank: ${p.bankName ?? ''} | Account: ${p.accountNumber ?? ''} | Name: ${p.accountName ?? ''}
-  </p>
-</div></body></html>`
 }
 
