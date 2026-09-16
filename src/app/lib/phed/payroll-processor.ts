@@ -133,7 +133,10 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
   )
 
   const netSalary    = r2(grossSalary - totalDeductions)
-  const paymentStatus = validationStatus === 'NO_FOR_PAYMENT' ? 'WITHHELD' : 'ACTIVE'
+  // Only staff explicitly validated "Yes for Payment" are payable. Everything
+  // else (No, Pending, or no validation record) is withheld so unvalidated
+  // staff never receive a payslip.
+  const paymentStatus = validationStatus === 'YES_FOR_PAYMENT' ? 'ACTIVE' : 'WITHHELD'
 
   return {
     staffId:      input.staffId,

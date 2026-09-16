@@ -30,8 +30,6 @@ export function buildPayslipHtml(
     ? [addrParts.slice(0, -1).join(', '), addrParts[addrParts.length - 1]]
     : addrParts
 
-  const EROBREA = 0
-
   const earningRows: [string, any][] = [
     ['Basic Pay', p.basicSalary], ['Housing', p.housingAllowance], ['Transport', p.transportAllowance],
     ['Meal Allowance', p.mealSubsidy], ['Furniture', p.furnitureAllowance], ['Utility', p.utilityAllowance],
@@ -79,9 +77,7 @@ export function buildPayslipHtml(
 
   const summaryRows: [string, string, boolean][] = [
     ['Net Pay', fmt(p.netSalary), true],
-    ['EROBREA', fmt(EROBREA), false],
-    ['Net Pay plus EROBREA', fmt(n(p.netSalary) + EROBREA), false],
-    ['Total Earnings Plus EROBREA', fmt(n(p.grossSalary) + EROBREA), false],
+    ['Total Earnings', fmt(p.grossSalary), false],
   ]
   const summaryHtml = summaryRows.map(([l, v, isNet]) => `
     <tr>
@@ -131,7 +127,7 @@ export function buildPayslipHtml(
     <table style="width:100%;border-collapse:collapse;margin-top:8px;">
       ${summaryHtml}
       <tr>
-        <td style="padding:4px 10px;color:#6b7280;font-weight:500;font-size:12px;">Bank/Cash</td>
+        <td style="padding:4px 10px;color:#6b7280;font-weight:500;font-size:12px;">Bank</td>
         <td style="padding:4px 10px;border-left:1px solid #d1d5db;">
           <table style="width:100%;border-collapse:collapse;"><tr>
             <td style="font-weight:700;color:#1a3a5c;font-size:12px;">${esc(p.bankName || '—')}</td>

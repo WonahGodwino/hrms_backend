@@ -254,13 +254,10 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
     // 4. SUMMARY — Net Pay / EROBREA / Net Pay plus EROBREA /
     //    Total Earnings Plus EROBREA / Bank-Cash
     // ──────────────────────────────────────────────────────────
-    const EROBREA = 0 // additive variable; sourced once the business provides it
     const summaryRows: [string, number | string][] = [
-      ['Net Pay',                     data.netSalary],
-      ['EROBREA',                     EROBREA],
-      ['Net Pay plus EROBREA',        data.netSalary + EROBREA],
-      ['Total Earnings Plus EROBREA', data.grossSalary + EROBREA],
-      ['Bank/Cash',                   data.bankName || '—'],
+      ['Net Pay',        data.netSalary],
+      ['Total Earnings', data.grossSalary],
+      ['Bank',           data.bankName || '—'],
     ]
     const SUM_ROW_H = 17
     const SUM_PAD   = 8
@@ -277,8 +274,8 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
       const isNet = i === 0
       doc.fillColor(isNet ? C_DARK : C_GREY).font(isNet ? 'Helvetica-Bold' : 'Helvetica').fontSize(8)
          .text(label, col1X + 12, ry + 3, { width: sumLabelW - 12, lineBreak: false })
-      if (i === 4) {
-        // Bank/Cash — split just this row's value area into
+      if (i === 2) {
+        // Bank — split just this row's value area into
         // Bank name (left) | Account number (right).
         const halfW = sumValueW / 2
         doc.fillColor(C_BLACK).font('Helvetica-Bold').fontSize(8)
