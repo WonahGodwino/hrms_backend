@@ -39,7 +39,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const category      = p.get('category')      ?? ''
     const paymentStatus = p.get('paymentStatus') ?? ''
     const page          = Math.max(1, Number(p.get('page')  ?? 1))
-    const limit         = Math.min(200, Math.max(1, Number(p.get('limit') ?? 50)))
+    const limit         = Math.max(1, Number(p.get('limit') ?? 50))
 
     const period = await (prisma as any).phedPayPeriod.findUnique({
       where:  { id: params.id },
