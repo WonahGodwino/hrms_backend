@@ -56,7 +56,6 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         sections: {
           subject: sections.subject,
           sectionA: isIad ? [] : sections.sectionA,
-          sectionEarnings: isIad ? [] : sections.sectionEarnings,
           sectionB: isIad ? [] : sections.sectionB,
           totalNetPay: isIad ? 0 : sections.totalNetPay,
           approvalSentence: isIad ? '' : sections.approvalSentence,

@@ -41,7 +41,6 @@ export interface ApprovalMemoPdfData {
   currentStageLabel: string
   approvalSentence: string
   sectionA: { label: string; gross: number; deduction: number; netPay: number }[]
-  sectionEarnings: { label: string; amount: number }[] // salary components
   sectionB: { label: string; amount: number }[]
   totalNetPay: number
   stamps: ApprovalMemoPdfStamp[] // current attempt only, chronological
@@ -135,15 +134,6 @@ export function generateApprovalMemoPdf(data: ApprovalMemoPdfData): Promise<Buff
     // ── 4. SECTION A — TOTAL PAYROLL COST ──────────────────────
     y = drawSectionTitle(doc, 'A. Total Payroll Cost', col1X, y, usableW, footerY)
     y = drawSectionATable(doc, data.sectionA, col1X, y, usableW, footerY)
-    y += GAP
-
-    // ── 4b. SALARY EARNINGS BREAKDOWN ──────────────────────────
-    y = drawSectionTitle(doc, 'SALARY EARNINGS BREAKDOWN', col1X, y, usableW, footerY)
-    y = drawMoneyTable(
-      doc,
-      data.sectionEarnings.map(r => [r.label, r.amount, r.label === 'Total Gross Pay'] as [string, number, boolean]),
-      col1X, y, usableW, footerY,
-    )
     y += GAP
 
     // ── 5. SECTION B — DEDUCTIONS AND REMITTANCES ──────────────

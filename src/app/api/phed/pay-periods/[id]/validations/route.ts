@@ -6,6 +6,7 @@ import { requirePhedPayrollReadAccess } from '@/app/lib/phed/access-role'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { getPayPeriodFreezeState } from '@/app/lib/phed/pay-period-lock'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -41,8 +42,9 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
-    if (period.status === 'PAID')
-      return withCors(ApiResponse.error('Validation edits are locked once the period is paid', 400), origin)
+    const freeze = await getPayPeriodFreezeState(params.id, period.status)
+    if (freeze.frozen)
+      return withCors(ApiResponse.error(freeze.reason || 'Pay period is locked', 409), origin)
 
     const { updates } = await req.json()
     if (!Array.isArray(updates))
@@ -87,8 +89,9 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 
     const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
-    if (period.status === 'PAID')
-      return withCors(ApiResponse.error('Validation edits are locked once the period is paid', 400), origin)
+    const freeze = await getPayPeriodFreezeState(params.id, period.status)
+    if (freeze.frozen)
+      return withCors(ApiResponse.error(freeze.reason || 'Pay period is locked', 409), origin)
 
     const staffId = new URL(req.url).searchParams.get('staffId')
     if (!staffId) return withCors(ApiResponse.error('staffId is required', 400), origin)

@@ -8,6 +8,8 @@ import { PhedAccessRole, PhedApprovalMemo } from '@prisma/client'
 import { createNotification, NOTIFICATION_TYPES } from '@/app/lib/notifications/helpers'
 import { sendPhedApprovalNotificationEmail } from '@/app/lib/phed/email'
 import { getStageDef, FINAL_STAGE } from '@/app/lib/phed/approval-stages'
+import { signEmailActionToken } from '@/app/lib/phed/email-action-token'
+import { buildApprovalMemoPdfBuffer } from '@/app/lib/phed/approval-memo-pdf'
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://247hr.co.uk'
 
@@ -20,6 +22,7 @@ async function notifyRoleHolders(params: {
   message: string
   emailHeading: string
   emailBody: string
+  buttonLabel?: string
   tone?: 'info' | 'warning'
 }) {
   const [recipients, memo, company] = await Promise.all([
@@ -72,6 +75,7 @@ async function notifyRoleHolders(params: {
         subjectLine: params.title,
         heading: params.emailHeading,
         bodyText: params.emailBody,
+        buttonLabel: params.buttonLabel,
         deepLink,
         tone: params.tone,
       }).catch(err => console.error('[PHED NOTIFY] email send failed:', err))
@@ -146,6 +150,87 @@ async function notifyCreator(params: {
   }).catch(err => console.error('[PHED NOTIFY] creator email failed:', err))
 }
 
+// The memo just landed at the MD/CEO's desk (Stage 6). Send a rich email with
+// the signed memo PDF attached and one-click Approve / Reject links (signed
+// tokens) so the MD/CEO can act from the inbox without logging in.
+async function notifyMdFinalApproval(params: {
+  memo: PhedApprovalMemo
+  fromActorName: string
+  isResubmission: boolean
+}): Promise<void> {
+  const { memo, fromActorName, isResubmission } = params
+
+  const [holders, company, period] = await Promise.all([
+    prisma.phedStaffAccessRole.findMany({
+      where: { companyId: memo.companyId, accessRole: 'MD_CEO' },
+      include: { staffRecord: { select: { id: true, email: true, firstName: true, lastName: true } } },
+    }),
+    prisma.company.findUnique({ where: { id: memo.companyId }, select: { companyName: true } }),
+    prisma.phedPayPeriod.findUnique({ where: { id: memo.payPeriodId }, select: { periodName: true } }),
+  ])
+
+  if (holders.length === 0) {
+    console.warn(`[PHED NOTIFY] No MD_CEO holders found for company ${memo.companyId} — final approval email not sent.`)
+    return
+  }
+
+  const periodName = period?.periodName ?? ''
+  const companyName = company?.companyName ?? ''
+  const deepLink = `${FRONTEND_URL}/phed/approvals/memos/${memo.id}`
+
+  const pdf = await buildApprovalMemoPdfBuffer(memo.id).catch((err) => {
+    console.error('[PHED NOTIFY] memo PDF build failed:', err)
+    return null
+  })
+
+  const API_ORIGIN = (
+    process.env.BACKEND_URL ||
+    process.env.NEXT_PUBLIC_BASE_API_URL?.replace(/\/api\/?$/, '') ||
+    'https://hrms.isurfglobal.com'
+  ).replace(/\/$/, '')
+
+  for (const { staffRecord: staff } of holders) {
+    if (!staff.email) {
+      console.warn(`[PHED NOTIFY] MD_CEO holder ${staff.firstName} has no email — skipping.`)
+      continue
+    }
+    const name = `${staff.firstName} ${staff.lastName}`.trim() || staff.email
+
+    const approveLink = `${API_ORIGIN}/api/phed/approvals/memos/${memo.id}/email-action?token=${signEmailActionToken(memo.id, 'approve')}`
+    const rejectLink = `${API_ORIGIN}/api/phed/approvals/memos/${memo.id}/email-action?token=${signEmailActionToken(memo.id, 'reject')}`
+
+    await createNotification(
+      staff.id,
+      NOTIFICATION_TYPES.PHED_APPROVAL_ACTION_NEEDED,
+      isResubmission
+        ? 'A corrected payroll memo needs your final approval'
+        : 'A payroll memo awaits your final approval',
+      isResubmission
+        ? `${fromActorName} re-submitted a corrected payroll approval memo for your final approval.`
+        : `${fromActorName} forwarded a payroll approval memo for your final approval.`,
+      { memoId: memo.id, deepLink },
+      memo.companyId,
+    ).catch((err) => console.error('[PHED NOTIFY] MD in-app notification failed:', err))
+
+    await sendPhedApprovalNotificationEmail({
+      to: staff.email,
+      recipientName: name,
+      companyName,
+      periodName,
+      subjectLine: isResubmission
+        ? 'Final approval required — corrected payroll memo'
+        : 'Final approval required — payroll memo',
+      heading: 'Final approval required',
+      bodyText: isResubmission
+        ? `${fromActorName} has re-submitted the corrected Payroll Approval Memo for your final approval. The signed memo is attached; you can Approve or Reject directly from this email.`
+        : `The Payroll Approval Memo has completed internal review and now awaits your final approval. The signed memo is attached; you can Approve or Reject directly from this email.`,
+      deepLink,
+      actionButtons: { approveLink, rejectLink },
+      ...(pdf ? { attachments: [{ filename: pdf.fileName, data: pdf.data, contentType: 'application/pdf' }] } : {}),
+    }).catch((err) => console.error('[PHED NOTIFY] MD final-approval email failed:', err))
+  }
+}
+
 // Called after a forward action (recommend/approve/finalapprove) commits.
 export async function notifyAfterForward(memo: PhedApprovalMemo, fromActorName: string): Promise<void> {
   console.log(
@@ -200,6 +285,34 @@ export async function notifyAfterForward(memo: PhedApprovalMemo, fromActorName: 
 
   const isResubmission = memo.attemptNumber > 1
   const actorStage = getStageDef(memo.currentStage - 1)
+  const actorLabel = actorStage?.label ?? 'A reviewer'
+
+  const period = await prisma.phedPayPeriod.findUnique({
+    where: { id: memo.payPeriodId },
+    select: { periodName: true },
+  })
+  const periodName = period?.periodName ?? ''
+
+  // Standardized milestone copy: "<Role> approved the payroll for <Period>".
+  const actionPhrase = isResubmission
+    ? `${actorLabel} re-submitted the payroll for ${periodName}`
+    : `${actorLabel} approved the payroll for ${periodName}`
+
+  // The HR/ADMIN who submitted the memo (Stage 1) is the originator whose name
+  // appears in the "has forwarded this … memo to your desk" wording sent to
+  // every downstream desk.
+  const originatorStamp = await prisma.phedApprovalStamp.findFirst({
+    where: { memoId: memo.id, stage: 1, action: 'SUBMITTED' },
+    orderBy: { createdAt: 'desc' },
+    select: { actorName: true },
+  })
+  const originatorName = originatorStamp?.actorName || fromActorName
+
+  // Tax Manager's desk uses "Payroll review Memo" + "Review Memo" button;
+  // every other desk uses "Payroll Approval Memo" + "Approval Memo" button.
+  const isTaxManager = nextStage.role === 'TAX_AUDIT'
+  const memoLabel = isTaxManager ? 'Payroll review Memo' : 'Payroll Approval Memo'
+  const forwardedBody = `${originatorName} has forwarded this ${memoLabel} to your desk. Please review and take action.`
 
   // Notify the payroll creator that the memo advanced (or was re-submitted).
   await notifyCreator({
@@ -207,36 +320,31 @@ export async function notifyAfterForward(memo: PhedApprovalMemo, fromActorName: 
     payPeriodId: memo.payPeriodId,
     memoId: memo.id,
     notificationType: NOTIFICATION_TYPES.PHED_APPROVAL_PROGRESS,
-    title: isResubmission ? 'Payroll approval memo re-submitted' : 'Payroll approval memo advanced',
-    message: isResubmission
-      ? `${fromActorName} re-submitted the payroll approval memo for approval. It is now with ${nextStage.label}.`
-      : `${fromActorName}${actorStage ? ` (${actorStage.label})` : ''} approved the payroll approval memo. It is now with ${nextStage.label}.`,
-    emailHeading: isResubmission ? 'Memo re-submitted' : 'Approval memo advanced',
-    emailBody: isResubmission
-      ? `${fromActorName} has re-submitted the Payroll Approval Memo after corrections. It is now with the next stage (${nextStage.label}).`
-      : `${fromActorName}${actorStage ? ` (${actorStage.label})` : ''} has approved the Payroll Approval Memo and it has advanced to the next stage (${nextStage.label}).`,
+    title: actionPhrase,
+    message: `${actionPhrase}. It is now with ${nextStage.label}.`,
+    emailHeading: isResubmission ? 'Payroll re-submitted' : 'Payroll approved',
+    emailBody: `${actionPhrase}. It is now with ${nextStage.label}.`,
     tone: isResubmission ? 'warning' : 'info',
   })
 
-  await notifyRoleHolders({
-    companyId: memo.companyId,
-    accessRole: nextStage.role,
-    memoId: memo.id,
-    notificationType: NOTIFICATION_TYPES.PHED_APPROVAL_ACTION_NEEDED,
-    title: isResubmission
-      ? 'A corrected payroll memo has been re-submitted for your approval'
-      : 'A payroll approval memo awaits your review',
-    message: isResubmission
-      ? `${fromActorName} re-submitted a corrected payroll approval memo to your desk.`
-      : `${fromActorName} forwarded a payroll approval memo to your desk.`,
-    emailHeading: isResubmission
-      ? 'Re-submission — please review and approve again'
-      : 'A payroll approval memo is awaiting your review',
-    emailBody: isResubmission
-      ? `${fromActorName} has re-submitted the Payroll Approval Memo after corrections were made. Please review the updated figures and approve again to continue the approval cycle.`
-      : `${fromActorName} has forwarded this Payroll Approval Memo to your desk (${nextStage.label}). Please review and take action.`,
-    tone: isResubmission ? 'warning' : 'info',
-  })
+  if (nextStage.role === 'MD_CEO') {
+    // Final desk — send the memo PDF + one-click Approve/Reject buttons instead
+    // of the generic notification email.
+    await notifyMdFinalApproval({ memo, fromActorName, isResubmission })
+  } else {
+    await notifyRoleHolders({
+      companyId: memo.companyId,
+      accessRole: nextStage.role,
+      memoId: memo.id,
+      notificationType: NOTIFICATION_TYPES.PHED_APPROVAL_ACTION_NEEDED,
+      title: `${memoLabel} forwarded for your review`,
+      message: forwardedBody,
+      emailHeading: `${memoLabel} forwarded to your desk`,
+      emailBody: forwardedBody,
+      buttonLabel: isTaxManager ? 'Review Memo' : 'Approval Memo',
+      tone: isResubmission ? 'warning' : 'info',
+    })
+  }
 }
 
 // Called after a flag action commits — always returns to Stage 1.

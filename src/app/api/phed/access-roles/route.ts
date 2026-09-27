@@ -90,6 +90,7 @@ export async function POST(req: NextRequest) {
     const staffRecordId = typeof body?.staffRecordId === 'string' ? body.staffRecordId : ''
     const accessRole = typeof body?.accessRole === 'string' ? body.accessRole : ''
     const reason = typeof body?.reason === 'string' ? body.reason.trim() : ''
+    const newGlobalRole = typeof body?.newGlobalRole === 'string' ? body.newGlobalRole.trim().toUpperCase() : ''
 
     if (!companyId || !await canManagePhedRolesForCompany(user, companyId)) {
       return withCors(ApiResponse.forbidden('You are not assigned to manage PHED roles for this company'), origin)
@@ -106,11 +107,14 @@ export async function POST(req: NextRequest) {
     if (!reason || reason.length > 1000) {
       return withCors(ApiResponse.error('A role-change reason between 1 and 1000 characters is required', 400), origin)
     }
+    if (newGlobalRole && !['STAFF', 'HR', 'ADMIN'].includes(newGlobalRole)) {
+      return withCors(ApiResponse.error('newGlobalRole must be one of STAFF, HR or ADMIN', 400), origin)
+    }
 
     const [target, actor] = await Promise.all([
       prisma.staffRecord.findFirst({
         where: { id: staffRecordId, companyId, isActive: true },
-        select: { id: true, firstName: true, lastName: true, email: true },
+        select: { id: true, firstName: true, lastName: true, email: true, role: true },
       }),
       prisma.staffRecord.findUnique({ where: { id: user.userId }, select: { firstName: true, lastName: true } }),
     ])
@@ -131,6 +135,23 @@ export async function POST(req: NextRequest) {
         update: { accessRole: accessRole as any, companyId },
         create: { companyId, staffRecordId, accessRole: accessRole as any },
       })
+      // Assigning the Chief People Officer elevates the holder's global role to
+      // HR so they inherit HR-side permissions (full memo/report views). Only a
+      // promotion from STAFF is applied — ADMIN/SUPER_ADMIN are never demoted.
+      // De-assigning CPO resets the global role to the chosen value.
+      if (accessRole === 'CHIEF_PEOPLE_OFFICER') {
+        if (target.role === 'STAFF') {
+          await tx.staffRecord.update({
+            where: { id: staffRecordId },
+            data: { role: 'HR' },
+          })
+        }
+      } else if (existing?.accessRole === 'CHIEF_PEOPLE_OFFICER') {
+        await tx.staffRecord.update({
+          where: { id: staffRecordId },
+          data: { role: newGlobalRole || 'STAFF' },
+        })
+      }
       await tx.phedAccessRoleChange.create({
         data: {
           companyId,

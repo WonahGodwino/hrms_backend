@@ -6,6 +6,7 @@ import { requirePhedReadAccess } from '@/app/lib/phed/access-role'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { isFrozenStatus } from '@/app/lib/phed/pay-period-lock'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -25,6 +26,7 @@ export async function GET(req: NextRequest) {
       where: { companyId },
       orderBy: [{ year: 'desc' }, { month: 'desc' }],
       include: {
+        approvalMemo: { select: { id: true, status: true } },
         _count: {
           select: {
             validations:     true,
@@ -34,7 +36,11 @@ export async function GET(req: NextRequest) {
         },
       },
     })
-    return withCors(ApiResponse.success(periods), origin)
+    const enriched = periods.map((p: any) => ({
+      ...p,
+      frozen: isFrozenStatus(p.status, p.approvalMemo?.status),
+    }))
+    return withCors(ApiResponse.success(enriched), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 

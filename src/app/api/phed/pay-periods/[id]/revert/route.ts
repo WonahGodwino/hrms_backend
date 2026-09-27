@@ -4,6 +4,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { getPayPeriodFreezeState } from '@/app/lib/phed/pay-period-lock'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -60,6 +61,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         ApiResponse.error('A PAID pay period cannot be reverted', 400),
         origin
       )
+    }
+    // Final-approval freeze: an APPROVED period (or one whose memo is APPROVED)
+    // cannot be rolled back — that would reopen a signed-off payroll.
+    const freeze = await getPayPeriodFreezeState(params.id, current)
+    if (freeze.frozen) {
+      return withCors(ApiResponse.error(freeze.reason || 'Pay period is locked', 409), origin)
     }
     if (!Object.keys(REVERT_MAP).includes(current)) {
       return withCors(ApiResponse.error('This pay period cannot be reverted', 400), origin)

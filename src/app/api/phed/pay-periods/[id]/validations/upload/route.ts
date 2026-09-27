@@ -6,6 +6,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { parseValidationCsv } from '@/app/lib/phed/csv-parser'
+import { getPayPeriodFreezeState } from '@/app/lib/phed/pay-period-lock'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -19,8 +20,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
-    if (period.status === 'PAID')
-      return withCors(ApiResponse.error('Validation uploads are locked once the period is paid', 400), origin)
+    const freeze = await getPayPeriodFreezeState(params.id, period.status)
+    if (freeze.frozen)
+      return withCors(ApiResponse.error(freeze.reason || 'Pay period is locked', 409), origin)
 
     const formData = await req.formData()
     const file     = formData.get('file') as File | null

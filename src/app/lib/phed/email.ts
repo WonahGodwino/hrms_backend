@@ -204,14 +204,50 @@ export async function sendPhedApprovalNotificationEmail(options: {
   bodyText:      string
   deepLink:      string
   tone?:         'info' | 'warning'
+  attachments?:  Array<{ filename: string; data: Buffer; contentType?: string }>
+  actionButtons?: { approveLink: string; rejectLink: string }
+  buttonLabel?:  string
 }): Promise<{ success: boolean; error?: string }> {
   const { to, recipientName, companyName, periodName, subjectLine, heading, bodyText, deepLink } = options
+  const buttonLabel = options.buttonLabel || 'Review Memo'
   const isWarning = options.tone === 'warning'
   const headerBg  = isWarning ? '#9a3412' : BRAND_BLUE
   const headerSub = isWarning ? '#fed7aa' : '#b8cbe0'
   const accent    = isWarning ? '#c2410c' : BRAND_MID
   const chipBg    = isWarning ? '#fff7ed' : ACCENT_BLUE
   const buttonBg  = isWarning ? '#ea580c' : BRAND_BLUE
+
+  const actionHtml = options.actionButtons
+    ? `
+          <tr>
+            <td style="padding:8px 48px;text-align:center;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="text-align:center;padding:6px;">
+                    <a href="${options.actionButtons.approveLink}" style="display:inline-block;background-color:#16a34a;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 36px;border-radius:8px;">Approve</a>
+                  </td>
+                  <td style="text-align:center;padding:6px;">
+                    <a href="${options.actionButtons.rejectLink}" style="display:inline-block;background-color:#dc2626;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 36px;border-radius:8px;">Reject</a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:18px 0 0;font-size:12px;color:#9ca3af;line-height:1.7;">
+                Prefer to act in the system? <a href="${deepLink}" style="color:${accent};">Open the memo in 24/7HR</a>.
+              </p>
+            </td>
+          </tr>`
+    : `
+          <tr>
+            <td style="padding:32px 48px;text-align:center;">
+              <a href="${deepLink}" style="display:inline-block;background-color:${buttonBg};color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 44px;border-radius:8px;">
+                ${buttonLabel}
+              </a>
+              <p style="margin:18px 0 0;font-size:12px;color:#9ca3af;line-height:1.7;">
+                If the button doesn't work, copy this link into your browser:<br>
+                <a href="${deepLink}" style="color:${accent};word-break:break-all;">${deepLink}</a>
+              </p>
+            </td>
+          </tr>`
 
   const html = `
 <!DOCTYPE html>
@@ -256,17 +292,7 @@ export async function sendPhedApprovalNotificationEmail(options: {
             </td>
           </tr>
 
-          <tr>
-            <td style="padding:32px 48px;text-align:center;">
-              <a href="${deepLink}" style="display:inline-block;background-color:${buttonBg};color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 44px;border-radius:8px;">
-                Review Memo
-              </a>
-              <p style="margin:18px 0 0;font-size:12px;color:#9ca3af;line-height:1.7;">
-                If the button doesn't work, copy this link into your browser:<br>
-                <a href="${deepLink}" style="color:${accent};word-break:break-all;">${deepLink}</a>
-              </p>
-            </td>
-          </tr>
+          ${actionHtml}
 
           <tr>
             <td style="padding:0 48px;">
@@ -292,6 +318,10 @@ export async function sendPhedApprovalNotificationEmail(options: {
 </html>
 `
 
+  const actionLinks = options.actionButtons
+    ? `\nApprove: ${options.actionButtons.approveLink}\nReject: ${options.actionButtons.rejectLink}\n`
+    : `\nReview the memo here: ${deepLink}\n`
+
   const text = `
 Dear ${recipientName},
 
@@ -300,9 +330,7 @@ ${heading}
 ${bodyText}
 
 Pay Period: ${periodName}
-
-Review the memo here: ${deepLink}
-
+${actionLinks}
 This is an automated message from ${companyName} via the 24/7HR Platform. Please do not reply.
 `.trim()
 
@@ -312,8 +340,12 @@ This is an automated message from ${companyName} via the 24/7HR Platform. Please
     html,
     text,
     from: `${companyName} HR <${FROM_EMAIL}>`,
+    ...(options.attachments?.length ? { attachments: options.attachments } : {}),
   })
 }
+
+// MD/CEO final-approval emails reuse sendPhedApprovalNotificationEmail with
+// actionButtons + attachments (signed memo PDF) — see notifyMdFinalApproval.
 
 export async function sendPhedAccessRoleChangeEmail(options: {
   to: string

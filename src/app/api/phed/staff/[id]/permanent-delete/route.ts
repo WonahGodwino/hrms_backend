@@ -4,6 +4,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { deletePhedStaffRecord } from '@/app/lib/phed/staff-delete'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -192,22 +193,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     const fileName = `staff-history-${safeName}.csv`
 
     // ── Delete related records in dependency order ──────────
-    // Prisma cascade handles most, but we do explicit cleanup for clarity
-    await (prisma as any).phedStaffCooperative.deleteMany({ where: { staffId: params.id } }).catch(() => {})
-    await (prisma as any).phedStaffUnion.deleteMany({ where: { staffId: params.id } }).catch(() => {})
-    await (prisma as any).phedValidation.deleteMany({ where: { staffId: params.id } }).catch(() => {})
-    await (prisma as any).phedOvertimeEntry.deleteMany({ where: { staffId: params.id } }).catch(() => {})
-    await (prisma as any).phedStaffPeriodAdvance.deleteMany({ where: { staffId: params.id } }).catch(() => {})
-    await (prisma as any).phedStaffDeductionLiability.deleteMany({ where: { staffId: params.id } }).catch(() => {})
-    await (prisma as any).phedComputedPayroll.deleteMany({ where: { staffId: params.id } }).catch(() => {})
-
-    // Delete login account
-    await prisma.staffRecord.deleteMany({
-      where: { staffId: staff.staffId, companyId: staff.companyId },
-    }).catch(() => {})
-
-    // Finally delete the PHED staff record itself
-    await (prisma as any).phedStaff.delete({ where: { id: params.id } })
+    await deletePhedStaffRecord(params.id)
 
     // ── Return CSV for download ─────────────────────────────
     return new NextResponse(csvContent, {

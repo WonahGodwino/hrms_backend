@@ -5,6 +5,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { getPayPeriodFreezeState } from '@/app/lib/phed/pay-period-lock'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -74,8 +75,9 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 
     const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
-    if (['APPROVED', 'PAID'].includes(period.status))
-      return withCors(ApiResponse.error('Cannot clear overtime for approved/paid periods', 400), origin)
+    const freeze = await getPayPeriodFreezeState(params.id, period.status)
+    if (freeze.frozen)
+      return withCors(ApiResponse.error(freeze.reason || 'Pay period is locked', 409), origin)
 
     const { count } = await (prisma as any).phedOvertimeEntry.deleteMany({ where: { payPeriodId: params.id } })
     return withCors(ApiResponse.success({ deleted: count }, 'Overtime entries cleared'), origin)
@@ -96,8 +98,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
-    if (['APPROVED', 'PAID'].includes(period.status))
-      return withCors(ApiResponse.error('Cannot edit overtime for approved/paid periods', 400), origin)
+    const freeze = await getPayPeriodFreezeState(params.id, period.status)
+    if (freeze.frozen)
+      return withCors(ApiResponse.error(freeze.reason || 'Pay period is locked', 409), origin)
 
     const body = await req.json().catch(() => ({}))
     const updates = Array.isArray(body?.updates) ? body.updates : (body?.entryId ? [body] : [])

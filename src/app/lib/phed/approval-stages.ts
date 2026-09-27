@@ -34,7 +34,7 @@ export const PHED_APPROVAL_STAGES: PhedApprovalStageDef[] = [
     action: 'TAX_AUDITED',
     resultStatus: 'PENDING_HR_APPROVAL',
     nextStage: 1,
-    stampLabel: 'Tax Manager Approval By',
+    stampLabel: 'Tax Manager Concurred By',
   },
   {
     stage: 3,

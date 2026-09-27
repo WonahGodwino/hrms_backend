@@ -37,7 +37,6 @@ export interface ApprovalMemoSections {
   companyName: string
   subject: string // 'Payment of [Month] [Year] Salary'
   sectionA: ApprovalMemoSectionARow[]
-  sectionEarnings: ApprovalMemoSectionBRow[] // salary components summing to gross
   sectionB: ApprovalMemoSectionBRow[]
   totalNetPay: number // Section C — equal to Section A's Total row
   approvalSentence: string
@@ -84,38 +83,6 @@ export async function buildApprovalMemoSections(payPeriodId: string): Promise<Ap
     period.year,
   )
 
-  // ── Section Earnings — Salary Component Breakdown ───────────
-  // Shows every non-zero earnings component aggregated across all staff,
-  // so approvers can see what makes up the total gross pay.
-  const earningsMap: [string, string][] = [
-    ['Basic Salary',              'basicSalary'],
-    ['Housing Allowance',         'housingAllowance'],
-    ['Transport Allowance',       'transportAllowance'],
-    ['Furniture Allowance',       'furnitureAllowance'],
-    ['Meal Subsidy',              'mealSubsidy'],
-    ['Utility Allowance',         'utilityAllowance'],
-    ['Leave Grant',               'leaveAllowance'],
-    ['Domestic Allowance',        'domesticAllowance'],
-    ['Hazard Allowance',          'hazardAllowance'],
-    ['Electricity Allowance',     'electricityAllowance'],
-    ['Discretionary Allowance',   'discoveryAllowance'],
-    ['Car Subsidy',               'carSubsidy'],
-    ['Entertainment Allowance',   'entertainmentAllowance'],
-    ['Data Allowance',            'dataAllowance'],
-    ['Night Allowance',           'nightAllowance'],
-    ['Arrears',                   'arrears'],
-    ['Other Allowances',          'otherAllowances'],
-    ['Overtime',                  'overtimeEarnings'],
-  ]
-  const sectionEarnings: ApprovalMemoSectionBRow[] = earningsMap
-    .map(([label, field]) => ({
-      label,
-      amount: round2(payrolls.reduce((s, r) => s + toNum((r as any)[field]), 0)),
-    }))
-    .filter(row => row.amount > 0)
-  const totalGross = round2(payrolls.reduce((s, r) => s + toNum(r.grossSalary), 0))
-  sectionEarnings.push({ label: 'Total Gross Pay', amount: totalGross })
-
   // ── Section A — Total Payroll Cost ──────────────────────────
   const LABELS: Record<string, string> = { 'Regular Staff': 'Regular Staff', 'Contract Staff': 'Contract Staff', 'NYSC & IT': 'NYSC/Internship', 'TOTAL': 'Total' }
   const sectionA: ApprovalMemoSectionARow[] = finance.payrollCost.map(row => ({
@@ -161,7 +128,6 @@ export async function buildApprovalMemoSections(payPeriodId: string): Promise<Ap
     companyName: period.company?.companyName ?? '',
     subject,
     sectionA,
-    sectionEarnings,
     sectionB,
     totalNetPay,
     approvalSentence,

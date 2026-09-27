@@ -6,6 +6,7 @@ import { requirePhedReadAccess } from '@/app/lib/phed/access-role'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { getPayPeriodFreezeState, isFrozenStatus } from '@/app/lib/phed/pay-period-lock'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -20,6 +21,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const period = await (prisma as any).phedPayPeriod.findUnique({
       where: { id: params.id },
       include: {
+        approvalMemo: { select: { id: true, status: true } },
         _count: {
           select: {
             validations:     true,
@@ -32,7 +34,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && user.companyId && period.companyId !== user.companyId)
       return withCors(ApiResponse.notFound('Pay period not found'), origin)
-    return withCors(ApiResponse.success(period), origin)
+    return withCors(
+      ApiResponse.success({ ...period, frozen: isFrozenStatus(period.status, period.approvalMemo?.status) }),
+      origin
+    )
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 
@@ -44,8 +49,9 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 
     const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
-    if (period.status === 'PAID')
-      return withCors(ApiResponse.error('Paid pay periods cannot be deleted', 400), origin)
+    const freeze = await getPayPeriodFreezeState(params.id, period.status)
+    if (freeze.frozen)
+      return withCors(ApiResponse.error(freeze.reason || 'Pay period is locked', 409), origin)
 
     await (prisma as any).phedPayPeriod.delete({ where: { id: params.id } })
     return withCors(ApiResponse.success(null, 'Pay period deleted'), origin)
@@ -64,8 +70,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
-    if (period.status === 'PAID')
-      return withCors(ApiResponse.error('Paid pay periods cannot be edited', 400), origin)
+    const freeze = await getPayPeriodFreezeState(params.id, period.status)
+    if (freeze.frozen)
+      return withCors(ApiResponse.error(freeze.reason || 'Pay period is locked', 409), origin)
 
     const body = await req.json().catch(() => ({}))
     const y = Number(body?.year ?? period.year)

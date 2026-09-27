@@ -56,7 +56,6 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       currentStageLabel: getStageDef(memo.currentStage)?.label ?? `Stage ${memo.currentStage}`,
       approvalSentence: sections.approvalSentence,
       sectionA: sections.sectionA,
-      sectionEarnings: sections.sectionEarnings,
       sectionB: sections.sectionB,
       totalNetPay: sections.totalNetPay,
       stamps: currentStamps,

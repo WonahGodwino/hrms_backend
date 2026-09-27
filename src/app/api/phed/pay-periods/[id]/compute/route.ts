@@ -5,6 +5,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { processOneStaff } from '@/app/lib/phed/payroll-processor'
+import { getPayPeriodFreezeState } from '@/app/lib/phed/pay-period-lock'
 import type { PhedPayrollInput, PhedSalaryComponents } from '@/app/lib/phed/types'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
@@ -27,6 +28,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && user.companyId && period.companyId !== user.companyId)
       return withCors(ApiResponse.notFound('Pay period not found'), origin)
+
+    const freeze = await getPayPeriodFreezeState(params.id, period.status)
+    if (freeze.frozen)
+      return withCors(ApiResponse.error(freeze.reason || 'Pay period is locked', 409), origin)
 
     if (!['VALIDATION_CLOSED', 'REVIEW', 'APPROVED'].includes(period.status))
       return withCors(ApiResponse.error('Period must be in VALIDATION_CLOSED, REVIEW or APPROVED status to compute', 400), origin)
