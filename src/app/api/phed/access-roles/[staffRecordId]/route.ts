@@ -19,7 +19,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { staffReco
     const requestedCompanyId = typeof body?.companyId === 'string' ? body.companyId : null
     const companyId = requestedCompanyId || user.companyId
     const reason = typeof body?.reason === 'string' ? body.reason.trim() : ''
-    const newGlobalRole = typeof body?.newGlobalRole === 'string' ? body.newGlobalRole.trim().toUpperCase() : ''
+    const globalRole = typeof body?.globalRole === 'string' ? body.globalRole.trim().toUpperCase() : ''
 
     if (!companyId || !await canManagePhedRolesForCompany(user, companyId)) {
       return withCors(ApiResponse.forbidden('You are not assigned to manage PHED roles for this company'), origin)
@@ -27,14 +27,14 @@ export async function DELETE(req: NextRequest, { params }: { params: { staffReco
     if (!reason || reason.length > 1000) {
       return withCors(ApiResponse.error('A role-revocation reason between 1 and 1000 characters is required', 400), origin)
     }
-    if (newGlobalRole && !['STAFF', 'HR', 'ADMIN'].includes(newGlobalRole)) {
-      return withCors(ApiResponse.error('newGlobalRole must be one of STAFF, HR or ADMIN', 400), origin)
+    if (globalRole && !['STAFF', 'HR', 'ADMIN'].includes(globalRole)) {
+      return withCors(ApiResponse.error('globalRole must be one of STAFF, HR or ADMIN', 400), origin)
     }
 
     const [assignment, actor] = await Promise.all([
       prisma.phedStaffAccessRole.findFirst({
         where: { staffRecordId: params.staffRecordId, companyId },
-        include: { staffRecord: { select: { firstName: true, lastName: true } } },
+        include: { staffRecord: { select: { firstName: true, lastName: true, role: true } } },
       }),
       prisma.staffRecord.findUnique({ where: { id: user.userId }, select: { firstName: true, lastName: true } }),
     ])
@@ -56,12 +56,12 @@ export async function DELETE(req: NextRequest, { params }: { params: { staffReco
         },
       })
       await tx.phedStaffAccessRole.delete({ where: { id: assignment.id } })
-      // Revoking CPO resets the holder's global role to the chosen value
-      // (default STAFF) to keep global permissions consistent.
-      if (assignment.accessRole === 'CHIEF_PEOPLE_OFFICER') {
+      // De-assigning CPO: the assigner chooses the holder's new global role
+      // (STAFF / HR / ADMIN). SUPER_ADMIN is never demoted by this flow.
+      if (assignment.accessRole === 'CHIEF_PEOPLE_OFFICER' && assignment.staffRecord.role !== 'SUPER_ADMIN') {
         await tx.staffRecord.update({
           where: { id: params.staffRecordId },
-          data: { role: newGlobalRole || 'STAFF' },
+          data: { role: globalRole || 'STAFF' },
         })
       }
     })
