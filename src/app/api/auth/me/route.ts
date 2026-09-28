@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
           email: staff.email,
           firstName: staff.firstName,
           lastName: staff.lastName,
-          role: phedRoleGrant?.accessRole ?? staff.role,
+          role: staff.role,
           phedAccessRole: phedRoleGrant?.accessRole ?? null,
           elevatedRole: elevatedRole || null,
           companyId: staff.companyId,
