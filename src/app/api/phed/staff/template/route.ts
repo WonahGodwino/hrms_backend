@@ -107,7 +107,7 @@ export async function GET(req: NextRequest) {
       { header: 'Arrears',                  key: 'arrears',                width: 18, required: false, addOn: true, note: 'One-off salary arrears payable this month (₦) — added on top of Initial Gross Pay, not part of it' },
       { header: 'Annual Rent',       key: 'annualRent',     width: 18, required: false, note: 'Annual rent paid — NTA 2025 rent relief is a flat ₦500,000 for all staff' },
       { header: 'Has Life Assurance',    key: 'hasLifeAssurance',    width: 20, required: false, note: 'YES or NO' },
-      { header: 'Life Assurance Amount', key: 'lifeAssuranceAmount', width: 22, required: false, note: 'Annual life assurance premium (₦) — required if Has Life Assurance is YES' },
+      { header: 'Life Assurance Amount', key: 'lifeAssuranceAmount', width: 22, required: false, note: 'Monthly life assurance premium (₦) — required if Has Life Assurance is YES' },
       // ── Deductions ────────────────────────────────────────────
       { header: 'Voluntary Pension',        key: 'voluntaryPension',       width: 20, required: false, note: 'Monthly voluntary pension contribution (₦) — in addition to statutory 8%' },
       { header: 'Insurance',                key: 'insurance',              width: 18, required: false, note: 'Monthly insurance premium deduction (₦)' },
@@ -344,7 +344,7 @@ export async function GET(req: NextRequest) {
         : 'Monthly basic salary in naira. If left blank, the grade\'s default salary is used during computation.'],
       ['Annual Rent',            'Total rent paid per year. NTA 2025 rent relief is a flat ₦500,000 regardless of actual rent paid.'],
       ['Has Life Assurance',     'Enter YES if the employee has a life assurance policy. If YES, Life Assurance Amount is required.'],
-      ['Life Assurance Amount',  'Annual life assurance premium (₦). Required only when Has Life Assurance is YES. Deducted from annual gross before PAYE.'],
+      ['Life Assurance Amount',  'Monthly life assurance premium (₦). Required only when Has Life Assurance is YES. Deducted from monthly gross before PAYE.'],
       ['Salary & Allowances',    'Columns from Housing Allowance to Other Allowances are monthly naira amounts that make up Initial Gross Pay. Leave blank or enter 0 for allowances that do not apply. These values are used every pay period unless updated.'],
       ['Initial Gross Pay',      'If the employee\'s agreed gross package is e.g. ₦300,000, spread that exact amount across Basic Salary and the allowances up to Other Allowances — they must sum to ₦300,000, not more. This column auto-calculates the sum so you can check it as you go. DO NOT edit — it is a formula column.'],
       ['Discretionary / Car Subsidy / Entertainment / Data / Night Allowance (orange columns)',

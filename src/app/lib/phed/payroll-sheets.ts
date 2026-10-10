@@ -194,7 +194,7 @@ export function mapRegisterRow(p: Payroll, ctx: RegisterCtx = {}): Record<string
     overtime: toNum(p.overtimeEarnings),
     arrears: toNum(p.arrears),
     grossPay: toNum(p.grossSalary),
-    reimbursement: 0,
+    reimbursement: r2(toNum(p.discoveryAllowance) + toNum(p.carSubsidy) + toNum(p.entertainmentAllowance) + toNum(p.dataAllowance) + toNum(p.nightAllowance)),
     lifeAssurance: toNum(p.lifeAssuranceAmount),
     nhf: toNum(p.nhf),
     pensionEmployee: toNum(p.pensionEmployee),
@@ -224,7 +224,7 @@ export function mapRegisterRow(p: Payroll, ctx: RegisterCtx = {}): Record<string
     salaryCost: r2(toNum(p.grossSalary) + toNum(p.pensionEmployer)),
     rentRelief: toNum(p.annualRentRelief),
     totalAllowableDeduction: r2(Math.max(0, annualGross - annualChargeable)),
-    totalTaxableIncome: annualGross,
+    totalTaxableIncome: annualChargeable,
     band1: bands[0], band2: bands[1], band3: bands[2], band4: bands[3], band5: bands[4], band6: bands[5],
     payeAnnual: toNum(p.annualPAYE),
     totalGrossPay: toNum(p.grossSalary),   // = Gross + EROBREA (EROBREA = 0)
@@ -245,15 +245,15 @@ export function buildUnionCoopMaps(
   staffCoops:  { staffId: string; cooperativeId: string; totalAmount: any }[],
   payrolls:    Payroll[],
 ): { unionMap: Map<string, number>; ssaeacMap: Map<string, number>; coopMap: Map<string, Record<string, number>> } {
-  const grossByStaff = new Map<string, number>(payrolls.map(r => [r.staffId, toNum(r.grossSalary)]))
+  const basicByStaff = new Map<string, number>(payrolls.map(r => [r.staffId, toNum(r.basicSalary)]))
   const nueeUnion   = unions.find(u => /nuee/i.test(u.name))
   const ssaeacUnion = unions.find(u => /ssaeac/i.test(u.name))
   const unionMap = new Map<string, number>()
   const ssaeacMap = new Map<string, number>()
   for (const su of staffUnions) {
-    const gross = grossByStaff.get(su.staffId) ?? 0
-    if (nueeUnion && su.unionId === nueeUnion.id) unionMap.set(su.staffId, r2(gross * nueeUnion.percentage))
-    if (ssaeacUnion && su.unionId === ssaeacUnion.id) ssaeacMap.set(su.staffId, r2(gross * ssaeacUnion.percentage))
+    const basic = basicByStaff.get(su.staffId) ?? 0
+    if (nueeUnion && su.unionId === nueeUnion.id) unionMap.set(su.staffId, r2(basic * nueeUnion.percentage))
+    if (ssaeacUnion && su.unionId === ssaeacUnion.id) ssaeacMap.set(su.staffId, r2(basic * ssaeacUnion.percentage))
   }
   const coopMap = new Map<string, Record<string, number>>()
   for (const sc of staffCoops) {

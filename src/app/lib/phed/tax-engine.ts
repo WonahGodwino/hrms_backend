@@ -17,7 +17,7 @@ const TAX_BANDS: TaxBand[] = [
 const RENT_RELIEF            = 500_000   // Fixed ₦500,000 for all staff (NTA 2025)
 const PENSION_EMPLOYEE_RATE  = 0.08      // 8% of pensionable emoluments
 const PENSION_EMPLOYER_RATE  = 0.10      // 10% of pensionable emoluments
-const NHF_RATE               = 0.025     // 2.5% of monthly basic salary
+export const NHF_RATE        = 0.025     // 2.5% of monthly basic salary
 
 /**
  * Compute annual PAYE using the NTA 2025 progressive bands.
@@ -47,60 +47,105 @@ export function computeAnnualPAYE(annualChargeableIncome: number): number {
 }
 
 /**
- * Full tax derivation for one staff member.
- *
- * PAYE is levied on total monthly earnings except overtime, arrears, and
- * reimbursements. Pension (8%/10%) still uses only Basic + Housing + Transport.
- *
- * @param monthlyTaxableGross  Monthly gross subject to PAYE — every earning
- *                             component except overtime, arrears, and reimbursements.
- * @param monthlyPensionable   Basic + Housing + Transport (pensionable emoluments)
- * @param lifeAssuranceAmount  Annual life assurance premium (0 if staff has none)
+ * Monthly PAYE using the template's exact per-band ROUND(IF(…),2) logic.
+ * Monthly thresholds are the annual band limits divided by 12.
  */
-export function deriveTaxData(
-  monthlyTaxableGross: number,
-  monthlyPensionable: number,
-  lifeAssuranceAmount: number = 0
-): {
+export function computeMonthlyPAYE(monthlyChargeableIncome: number): number {
+  const m = Math.max(0, monthlyChargeableIncome)
+  const band1 = 0 // first ₦800,000/yr @ 0%
+  const band2 = round2((800_000 / 12) > m ? 0 : ((3_000_000 / 12) > m ? (m - 800_000 / 12) * 0.15 : (2_200_000 / 12) * 0.15))
+  const band3 = round2((3_000_000 / 12) > m ? 0 : ((12_000_000 / 12) > m ? (m - 3_000_000 / 12) * 0.18 : (9_000_000 / 12) * 0.18))
+  const band4 = round2((12_000_000 / 12) > m ? 0 : ((25_000_000 / 12) > m ? (m - 12_000_000 / 12) * 0.21 : (13_000_000 / 12) * 0.21))
+  const band5 = round2((25_000_000 / 12) > m ? 0 : ((50_000_000 / 12) > m ? (m - 25_000_000 / 12) * 0.23 : (25_000_000 / 12) * 0.23))
+  const band6 = round2((50_000_000 / 12) > m ? 0 : (m - 50_000_000 / 12) * 0.25)
+  return round2(band1 + band2 + band3 + band4 + band5 + band6)
+}
+
+export interface TaxDataInput {
+  monthlyGrossPay: number        // full monthly gross, incl. overtime & arrears
+  monthlyPensionable: number     // Basic + Housing + Transport
+  monthlyReimbursement: number   // Discretionary + Car + Entertainment + Data + Night (tax-exempt)
+  monthlyNhf: number             // Basic × 2.5%
+  monthlyVoluntaryPension: number
+  monthlyInsurance: number
+  lifeAssuranceAmount: number    // monthly premium (0 if none)
+}
+
+/**
+ * Full tax derivation for one staff member, aligned with the payroll input
+ * template ("Test_Payroll Input.xlsx").
+ *
+ * Template column mapping:
+ *   Gross Pay (Z)            = SUM of all earnings (Basic → Arrears, incl. Overtime + Arrears)
+ *   Reimbursement (AA)       = Discretionary + Car Subsidy + Entertainment + Data + Night
+ *   NHF (AC)                 = Basic × 2.5%
+ *   Employee Pension (AD)    = (Basic + Housing + Transport) × 8%
+ *   Employer Pension (BA)    = (Basic + Housing + Transport) × 10%
+ *   Rent Relief (BC)         = ₦500,000 / 12
+ *   Total allowable (BD)     = Reimbursement + Life Assurance + NHF + Employee Pension
+ *                              + Voluntary Pension + Insurance + Rent Relief
+ *   Total taxable income (BE)= Gross Pay − Total allowable deduction
+ *   PAYE (BL)                = progressive tax on Total taxable income
+ */
+export function deriveTaxData(input: TaxDataInput): {
   pensionEmployee: number
   pensionEmployer: number
   nhfMonthly: number
-  rentRelief: number
-  lifeAssuranceAmount: number
+  rentRelief: number            // annual ₦500,000
+  lifeAssuranceAmount: number   // monthly
+  reimbursement: number         // monthly tax-exempt reimbursement
   annualGrossIncome: number
   annualPensionDeduction: number
   annualChargeableIncome: number
   annualPAYE: number
   monthlyPAYE: number
 } {
-  const pensionEmployee = round2(monthlyPensionable * PENSION_EMPLOYEE_RATE)
-  const pensionEmployer = round2(monthlyPensionable * PENSION_EMPLOYER_RATE)
+  const {
+    monthlyGrossPay,
+    monthlyPensionable,
+    monthlyReimbursement,
+    monthlyNhf,
+    monthlyVoluntaryPension,
+    monthlyInsurance,
+    lifeAssuranceAmount,
+  } = input
 
-  // NHF computed separately in payroll-processor (needs basicSalary directly)
-  const nhfMonthly = 0
+  const pensionEmployeeFull = monthlyPensionable * PENSION_EMPLOYEE_RATE
+  const pensionEmployerFull = monthlyPensionable * PENSION_EMPLOYER_RATE
 
-  const annualGrossIncome      = round2(monthlyTaxableGross * 12)
-  const annualPensionDeduction = round2(pensionEmployee * 12)
-  const rentRelief             = RENT_RELIEF
-  const lifeAssurance          = round2(Math.max(0, lifeAssuranceAmount))
+  const rentReliefAnnual      = RENT_RELIEF                   // ₦500,000 / year
+  const rentReliefMonthly     = rentReliefAnnual / 12         // ₦41,666.67 / month
+  const lifeAssurance         = Math.max(0, lifeAssuranceAmount)
+  const lifeAssuranceMonthly  = lifeAssurance                 // monthly premium (used directly)
 
-  const annualChargeableIncome = Math.max(
-    0,
-    round2(annualGrossIncome - annualPensionDeduction - rentRelief - lifeAssurance)
-  )
-  const annualPAYE  = computeAnnualPAYE(annualChargeableIncome)
-  const monthlyPAYE = round2(annualPAYE / 12)
+  // Template "Total allowable deduction" = Reimbursement + Life Assurance + NHF
+  // + Employee Pension + Voluntary Pension + Insurance + Rent Relief.
+  const monthlyAllowableDeductions =
+    monthlyReimbursement +
+    lifeAssuranceMonthly +
+    monthlyNhf +
+    pensionEmployeeFull +
+    monthlyVoluntaryPension +
+    monthlyInsurance +
+    rentReliefMonthly
+
+  // Template "Total taxable income" = Gross Pay − Total allowable deduction.
+  const monthlyChargeableIncome = Math.max(0, monthlyGrossPay - monthlyAllowableDeductions)
+
+  // Per-band rounding (monthly), mirroring the template's ROUND(IF(…),2) cells.
+  const monthlyPAYE = computeMonthlyPAYE(monthlyChargeableIncome)
 
   return {
-    pensionEmployee,
-    pensionEmployer,
-    nhfMonthly,
-    rentRelief,
-    lifeAssuranceAmount: lifeAssurance,
-    annualGrossIncome,
-    annualPensionDeduction,
-    annualChargeableIncome,
-    annualPAYE,
+    pensionEmployee: round2(pensionEmployeeFull),
+    pensionEmployer: round2(pensionEmployerFull),
+    nhfMonthly: round2(monthlyNhf),
+    rentRelief: rentReliefAnnual,
+    lifeAssuranceAmount: round2(lifeAssurance),
+    reimbursement: round2(monthlyReimbursement),
+    annualGrossIncome: round2(monthlyGrossPay * 12),
+    annualPensionDeduction: round2(pensionEmployeeFull * 12),
+    annualChargeableIncome: round2(monthlyChargeableIncome * 12),
+    annualPAYE: round2(monthlyPAYE * 12),
     monthlyPAYE,
   }
 }

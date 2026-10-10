@@ -71,11 +71,23 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         Number(cp.hazardAllowance ?? 0) + Number(cp.leaveAllowance ?? 0) + Number(cp.electricityAllowance ?? 0) +
         Number(cp.otherAllowances ?? 0)
       )
-      const unionAmounts = unions.map((u: any) => { const m = staff?.unions?.find((su: any) => su.unionId === u.id); return m ? r2(grossSalary * Number(u.percentage ?? 0)) : 0 })
+      const unionAmounts = unions.map((u: any) => { const m = staff?.unions?.find((su: any) => su.unionId === u.id); return m ? r2(Number(cp.basicSalary ?? 0) * Number(u.percentage ?? 0)) : 0 })
       const coopAmounts = cooperatives.map((c: any) => { const m = staff?.cooperatives?.find((sc: any) => sc.cooperativeId === c.id); return m ? Number(m.totalAmount ?? 0) : 0 })
       const dedAmounts = deductionLiabilities.map((d: any) => { const a = staff?.deductionLiabilities?.find((sd: any) => sd.deductionLiabilityId === d.id); return a && a.deductionLiability?.isActive ? Number(a.amount ?? 0) : 0 })
       const netPay = Number(cp.netSalary ?? 0); const pensionEmp = Number(cp.pensionEmployee ?? 0); const pensionEmpr = Number(cp.pensionEmployer ?? 0)
-      const salaryCost = r2(grossSalary + pensionEmpr); const rentRelief = r2(Number(cp.annualRentRelief ?? 0) / 12); const totalAllowDed = r2(pensionEmp + rentRelief)
+      const salaryCost = r2(grossSalary + pensionEmpr); const rentRelief = r2(Number(cp.annualRentRelief ?? 0) / 12)
+      // Template "Total allowable deduction" = Reimbursement + Life Assurance + NHF
+      // + Employee Pension + Voluntary Pension + Insurance + Rent Relief.
+      const reimbursement = r2(
+        Number(cp.discoveryAllowance ?? 0) + Number(cp.carSubsidy ?? 0) +
+        Number(cp.entertainmentAllowance ?? 0) + Number(cp.dataAllowance ?? 0) +
+        Number(cp.nightAllowance ?? 0)
+      )
+      const lifeAssuranceMonthly = r2(Number(cp.lifeAssuranceAmount ?? 0))
+      const totalAllowDed = r2(
+        reimbursement + lifeAssuranceMonthly + Number(cp.nhf ?? 0) + pensionEmp +
+        Number(cp.voluntaryPension ?? 0) + Number(cp.insurance ?? 0) + rentRelief
+      )
       const rowData: any[] = [cp.staffIdCode ?? '', cp.staffName ?? '', staff?.department ?? '', cp.gradeName ?? '', staff?.grade?.code ?? '', initialGross, Number(cp.basicSalary ?? 0), Number(cp.housingAllowance ?? 0), Number(cp.transportAllowance ?? 0), Number(cp.furnitureAllowance ?? 0), Number(cp.domesticAllowance ?? 0), Number(cp.mealSubsidy ?? 0), Number(cp.hazardAllowance ?? 0), Number(cp.leaveAllowance ?? 0), Number(cp.electricityAllowance ?? 0), Number(cp.otherAllowances ?? 0), Number(cp.discoveryAllowance ?? 0), Number(cp.carSubsidy ?? 0), Number(cp.entertainmentAllowance ?? 0), Number(cp.dataAllowance ?? 0), Number(cp.nightAllowance ?? 0), otEarnings, Number(cp.arrears ?? 0), grossSalary, 0, Number(cp.lifeAssuranceAmount ?? 0), Number(cp.nhf ?? 0), pensionEmp, Number(cp.voluntaryPension ?? 0), Number(cp.insurance ?? 0), Number(cp.monthlyPAYE ?? 0), Number(adv?.cashAdvanced ?? cp.cashAdvanced ?? 0), Number(adv?.loan ?? cp.loan ?? 0), Number(adv?.domesticLoan ?? cp.domesticLoan ?? 0), ...unionAmounts, ...coopAmounts, ...dedAmounts, Number(cp.totalDeductions ?? 0), netPay, pensionEmpr, salaryCost, rentRelief, totalAllowDed, Number(cp.annualChargeableIncome ?? 0), bands.band1, bands.band2, bands.band3, bands.band4, bands.band5, bands.band6, Number(cp.annualPAYE ?? 0)]
       const dataRow = sheet.addRow(rowData); dataRow.height = 16
       const isWithheld = cp.paymentStatus === 'WITHHELD'

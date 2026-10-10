@@ -2647,7 +2647,7 @@ model PhedStaff {
 
   // Life assurance
   hasLifeAssurance   Boolean                @default(false)
-  lifeAssuranceAmount Decimal?              @db.Decimal(18, 2) // Annual premium — deducted from annual gross before PAYE
+  lifeAssuranceAmount Decimal?              @db.Decimal(18, 2) // Monthly premium — deducted from monthly gross before PAYE
 
   // For rent relief calculation
   annualRent         Decimal?               @db.Decimal(18, 2)

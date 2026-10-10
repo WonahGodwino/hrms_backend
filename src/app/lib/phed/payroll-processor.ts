@@ -2,7 +2,7 @@
 // PHED Module – Payroll Processor
 // ============================================================
 
-import { deriveTaxData, getNhfMonthly } from './tax-engine'
+import { deriveTaxData, getNhfMonthly, NHF_RATE } from './tax-engine'
 import type { PhedPayrollInput, PhedPayrollResult } from './types'
 
 /**
@@ -103,18 +103,30 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
   const grossSalary      = r2(grossBeforeOT + overtimeEarnings)
 
   // ── Statutory Deductions ──────────────────────────────────
-  // PAYE is levied on everything except overtime and arrears (and, once
-  // tracked as a distinct field, reimbursements). Pension stays on the
-  // narrower Basic + Housing + Transport base.
-  const taxableGross = r2(grossSalary - overtimeEarnings - arrears)
-  const pensionable  = r2(basicSalary + housingAllowance + transportAllowance)
+  // Template: Total taxable income = Gross Pay − (Reimbursement + Life Assurance
+  // + NHF + Employee Pension + Voluntary Pension + Insurance + Rent Relief).
+  // Overtime and arrears are part of Gross Pay and are therefore taxable.
+  // Pension stays on the narrower Basic + Housing + Transport base.
+  const pensionable = r2(basicSalary + housingAllowance + transportAllowance)
+  const nhf         = getNhfMonthly(basicSalary)
+  // Template "Reimbursement" = Discretionary + Car Subsidy + Entertainment +
+  // Data Allowance + Night Allowance (tax-exempt).
+  const reimbursement = r2(discoveryAllowance + carSubsidy + entertainmentAllowance + dataAllowance + nightAllowance)
 
-  const annualLifeAssurance = lifeAssuranceAmount > 0 ? lifeAssuranceAmount : 0
-  const taxData = deriveTaxData(taxableGross, pensionable, annualLifeAssurance)
-  const nhf     = getNhfMonthly(basicSalary)
+  const monthlyLifeAssurance = lifeAssuranceAmount > 0 ? lifeAssuranceAmount : 0
+  const taxData = deriveTaxData({
+    monthlyGrossPay:         grossSalary,
+    monthlyPensionable:      pensionable,
+    monthlyReimbursement:    reimbursement,
+    monthlyNhf:              basicSalary * NHF_RATE, // full precision for the tax base
+    monthlyVoluntaryPension: voluntaryPension,
+    monthlyInsurance:        insurance,
+    lifeAssuranceAmount:     monthlyLifeAssurance,
+  })
 
   // ── Variable Deductions ───────────────────────────────────
-  const unionDeductions       = r2(grossSalary * unionDeductionTotal)
+  // Template: union check-off (NUEE 3.8%, SSAEAC 3%) is a % of Basic, not gross.
+  const unionDeductions       = r2(basicSalary * unionDeductionTotal)
   const cooperativeDeductions = r2(cooperativeDeductionTotal)
   const deductionLiabilities  = r2(deductionLiabilityTotal)
 
