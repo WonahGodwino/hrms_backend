@@ -176,6 +176,10 @@ model Company {
   phedRoleAccessGrants   PhedRoleAccessGrant[]
   phedChangeLogs         PhedChangeLog[]
   phedStaffExits         PhedStaffExit[]
+  phedLetterTemplates    PhedLetterTemplate[]
+  phedLetterRuns         PhedLetterRun[]
+  phedLetterRunRows      PhedLetterRunRow[]
+  phedLetterAuditEvents  PhedLetterAuditEvent[]
 
   // Training & Certification Module relations
   trainingPrograms       TrainingProgram[]
@@ -3563,6 +3567,94 @@ model PhedBulkUpload {
   @@index([companyId, type])
   @@map("phed_bulk_uploads")
   //@@map("computed_payslips")
+}
+
+// ============================================================
+// Bulk Staff Promotion Letter Automation (salary-increase letters)
+// Additive-only tables. Status/type are plain TEXT (validated in app code)
+// so the production migration needs no enum CREATE/ALTER TYPE.
+// ============================================================
+
+model PhedLetterTemplate {
+  id             String   @id @default(cuid())
+  companyId      String
+  type           String   @default("SALARY_INCREASE")
+  version        Int      @default(1)
+  body           String   // canonical text with {{tokens}}
+  letterhead     String   // address block + "Personal and Confidential"
+  signatoryName  String
+  signatoryTitle String
+  tokens         Json     // string[] of tokens used
+  createdById    String
+  createdAt      DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, type, version])
+  @@map("phed_letter_templates")
+}
+
+model PhedLetterRun {
+  id               String    @id @default(cuid())
+  companyId        String
+  operatorId       String
+  sourceFileName   String
+  sourceFileSize   Int
+  sourceFileSha256 String
+  storageKey       String?
+  runInputs        Json
+  templateId       String?   // snapshot id of the template version used (plain string, no FK)
+  templateVersion  Int?
+  status           String    @default("VALIDATING") // VALIDATING | AWAITING_CONFIRMATION | GENERATING | COMPLETED | COMPLETED_WITH_FAILURES | CANCELLED | EXPIRED
+  counts           Json?
+  createdAt        DateTime  @default(now())
+  completedAt      DateTime?
+  filesExpireAt    DateTime?
+
+  company Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  rows    PhedLetterRunRow[]
+
+  @@index([companyId, createdAt])
+  @@index([companyId, status])
+  @@map("phed_letter_runs")
+}
+
+model PhedLetterRunRow {
+  id         String   @id @default(cuid())
+  runId      String
+  companyId  String
+  excelRow   Int
+  employeeId String
+  values     Json?
+  findings   Json?
+  status     String   @default("PENDING") // PENDING | EXCLUDED | QUEUED | GENERATED | FAILED
+  outputKey  String?
+  error      String?
+  createdAt  DateTime @default(now())
+
+  run     PhedLetterRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  company Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, employeeId])
+  @@index([companyId, runId])
+  @@map("phed_letter_run_rows")
+}
+
+model PhedLetterAuditEvent {
+  id        String   @id @default(cuid())
+  companyId String
+  actorId   String?
+  action    String
+  runId     String?
+  detail    String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@index([runId])
+  @@map("phed_letter_audit_events")
 }
 
 // payment date
