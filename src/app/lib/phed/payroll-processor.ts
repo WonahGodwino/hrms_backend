@@ -223,3 +223,16 @@ export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
 function r2(v: number): number {
   return Math.round(v * 100) / 100
 }
+
+/**
+ * Overtime earnings (PHED rule):
+ *   1) computed overtime hours = input hours × 1.5
+ *   2) hourly pay = monthly gross ÷ 730
+ *   3) overtime earnings = hourly pay × computed overtime hours
+ * Overtime earnings are part of Gross Pay and therefore taxable income.
+ */
+export function computeOvertimeEarnings(overtimeHours: number, monthlyGross: number): number {
+  if (!Number.isFinite(overtimeHours) || overtimeHours <= 0) return 0
+  if (!Number.isFinite(monthlyGross) || monthlyGross <= 0) return 0
+  return r2((overtimeHours * 1.5) * (monthlyGross / 730))
+}

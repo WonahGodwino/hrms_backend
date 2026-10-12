@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { computeOvertimeEarnings } from '@/app/lib/phed/payroll-processor'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
@@ -56,7 +57,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
             n('hazardAllowance') + n('electricityAllowance') + n('discoveryAllowance') +
             n('carSubsidy') + n('entertainmentAllowance') + n('dataAllowance') +
             n('nightAllowance') + n('arrears') + n('otherAllowances')
-          computedAmount = Math.round(((grossBeforeOT / 160) * 1.5 * hours) * 100) / 100
+          computedAmount = computeOvertimeEarnings(hours, grossBeforeOT)
         }
       }
 

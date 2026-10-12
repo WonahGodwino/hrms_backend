@@ -4,7 +4,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
-import { processOneStaff } from '@/app/lib/phed/payroll-processor'
+import { computeOvertimeEarnings, processOneStaff } from '@/app/lib/phed/payroll-processor'
 import { getPayPeriodFreezeState } from '@/app/lib/phed/pay-period-lock'
 import type { PhedPayrollInput, PhedSalaryComponents } from '@/app/lib/phed/types'
 
@@ -171,7 +171,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
             salary.carSubsidy + salary.entertainmentAllowance + salary.dataAllowance +
             salary.nightAllowance + salary.arrears + salary.otherAllowances
           )
-          return r2((grossBeforeOT / 160) * 1.5 * otEntry.hours)
+          return computeOvertimeEarnings(otEntry.hours, grossBeforeOT)
         })(),
         unionDeductionTotal,
         cooperativeDeductionTotal,
