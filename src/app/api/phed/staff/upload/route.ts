@@ -76,10 +76,23 @@ export async function POST(req: NextRequest) {
     ])
 
     const companyName  = company?.companyName ?? 'Your Company'
-    const gradeMap     = new Map(grades.map((g: any) => [g.code.toLowerCase(), g.id]))
+    const gradeCodeMap = new Map<string, string>(grades.map((g: any) => [String(g.code).toLowerCase(), String(g.id)]))
+    const gradeNameMap = new Map<string, string>(grades.map((g: any) => [String(g.name).toLowerCase(), String(g.id)]))
     const regionMap    = new Map(regions.map((r: any) => [r.name.toLowerCase(), r.id]))
     const feederMap    = new Map(feeders.map((f: any) => [f.name.toLowerCase(), f.id]))
     const payPointMap  = new Map(payPoints.map((p: any) => [p.name.toLowerCase(), p.id]))
+
+    // Resolve grade by name OR code — users identify grades by name in the UI.
+    const resolveGradeId = (r: any): string | null => {
+      for (const raw of [r.gradeCode, r.gradeName]) {
+        if (!raw) continue
+        const v = String(raw).toLowerCase().trim()
+        if (!v) continue
+        const hit: string | undefined = gradeCodeMap.get(v) ?? gradeNameMap.get(v)
+        if (hit) return hit
+      }
+      return null
+    }
 
     let successful = 0
     let failed     = 0
@@ -132,7 +145,7 @@ export async function POST(req: NextRequest) {
             callCenter:    r.callCenter || null,
             resumptionDate: r.resumptionDate ? (() => { try { const d = new Date(r.resumptionDate!); return isNaN(d.getTime()) ? null : d } catch { return null } })() : null,
             category,
-            gradeId:    r.gradeCode ? (gradeMap.get(r.gradeCode.toLowerCase()) ?? null) : null,
+            gradeId:    resolveGradeId(r),
             department: r.department || null,
             unit:       r.unit       || null,
             regionId:   r.region   ? (regionMap.get(r.region.toLowerCase())     ?? null) : null,
@@ -183,7 +196,7 @@ export async function POST(req: NextRequest) {
             callCenter: r.callCenter || null,
             resumptionDate: r.resumptionDate ? (() => { try { const d = new Date(r.resumptionDate!); return isNaN(d.getTime()) ? null : d } catch { return null } })() : null,
             category,
-            gradeId:    r.gradeCode ? (gradeMap.get(r.gradeCode.toLowerCase()) ?? null) : null,
+            gradeId:    resolveGradeId(r),
             department: r.department || null,
             unit:       r.unit       || null,
             regionId:   r.region   ? (regionMap.get(r.region.toLowerCase())     ?? null) : null,

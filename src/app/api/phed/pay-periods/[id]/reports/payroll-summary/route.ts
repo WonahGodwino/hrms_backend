@@ -80,10 +80,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const staffIds = currentPayrolls.map((r: any) => r.staffId)
     const staffRecords = await (prisma as any).phedStaff.findMany({
       where:  { id: { in: staffIds } },
-      select: { id: true, isActive: true },
+      select: { id: true, isActive: true, level: true },
     })
     const staffActiveMap = new Map<string, boolean>(
       staffRecords.map((s: any) => [s.id, s.isActive] as [string, boolean])
+    )
+    const staffLevelMap = new Map<string, string>(
+      staffRecords.map((s: any) => [s.id, (s.level ?? '') as string] as [string, string])
     )
 
     // ── Dynamic entity data ───────────────────────────────────
@@ -128,6 +131,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         staffIdCode:             r.staffIdCode ?? '',
         staffName:               r.staffName   ?? '',
         gradeName:               r.gradeName   ?? '',
+        level:                   staffLevelMap.get(r.staffId) ?? '',
         category:                r.category    ?? '',
         regionName:              r.regionName  ?? '',
         basicSalary:             n(r.basicSalary),

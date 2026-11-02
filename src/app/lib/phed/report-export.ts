@@ -2091,6 +2091,7 @@ export interface IADEmployee {
   staffIdCode:             string
   staffName:               string
   gradeName:               string
+  level:                   string
   category:                string
   regionName:              string
   basicSalary:             number
@@ -2231,7 +2232,7 @@ function buildNewHiredCols(input: IADSummaryInput): RegisterCol[] {
     rText('Approved Role', undefined, 20),
     rText('Pay Point', undefined, 14),
     rText('Grade', 'gradeName', 16),
-    rText('Level', undefined, 10),
+    rText('Level', 'level', 10),
     rMoney('Initial Gross Pay', 'basicSalary', 16),
     rMoney('Basic', 'basicSalary', 14),
     rMoney('Housing Allow', 'housingAllowance', 14),
@@ -2273,7 +2274,7 @@ function buildExitedRegularCols(input: IADSummaryInput): RegisterCol[] {
     rText('Approved Role', undefined, 20),
     rText('Pay Point', undefined, 14),
     rText('Grade', 'gradeName', 16),
-    rText('Level', undefined, 10),
+    rText('Level', 'level', 10),
     rMoney('Initial Gross Pay', 'basicSalary', 16),
     rMoney('Basic', 'basicSalary', 14),
     rMoney('Housing Allow', 'housingAllowance', 14),
@@ -2320,7 +2321,7 @@ function buildExitedContractCols(input: IADSummaryInput): RegisterCol[] {
     rText(' Name ', 'staffName', 26),
     rText('Pay Point', undefined, 14),
     rText('Grade', 'gradeName', 16),
-    rText('Level', undefined, 10),
+    rText('Level', 'level', 10),
     rText('Approved Role', undefined, 20),
     rText('Approved Feeder', undefined, 16),
     rText('Approved Region ', 'regionName', 18),
@@ -2379,7 +2380,7 @@ function buildChangesCols(input: IADSummaryInput): RegisterCol[] {
     rText('Approved Role', undefined, 20),
     rText('Pay Point', undefined, 14),
     rText('Grade', 'gradeName', 16),
-    rText('Level', undefined, 10),
+    rText('Level', 'level', 10),
     rMoney('Initial Gross Pay', 'basicSalary', 16),
     rMoney('Basic', 'basicSalary', 14),
     rMoney('Housing Allow', 'housingAllowance', 14),

@@ -277,6 +277,7 @@ export interface StaffCsvRow {
   jobTitle?: string
   category: string
   gradeCode?: string
+  gradeName?: string
   level?: string
   callCenter?: string
   department?: string

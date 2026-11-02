@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
       { header: 'Unit',              key: 'unit',           width: 20, required: false, note: 'Unit or team name' },
       { header: 'Email *',           key: 'email',          width: 28, required: true,  note: 'Work email address' },
       { header: 'Phone',             key: 'phone',          width: 16, required: false, note: 'Phone number (optional)' },
-      { header: 'Grade Code',        key: 'gradeCode',      width: 16, required: false, note: grades.length ? 'Select from dropdown — must match a grade in the system' : 'Grade code e.g. GL06 (must match a grade in the system)' },
+      { header: 'Grade Name',        key: 'gradeCode',      width: 16, required: false, note: grades.length ? 'Select from dropdown — must match a grade name in the system' : 'Grade name e.g. Officer IV (must match a grade in the system)' },
       { header: 'Level',             key: 'level',          width: 12, required: false, note: 'Grade level or step e.g. 6, 9, GL14' },
       { header: 'Pay Point',         key: 'payPoint',       width: 20, required: false, note: 'Pick from dropdown — must match a pay point in the system' },
       // ── Bank & statutory ──────────────────────────────────────
@@ -87,7 +87,7 @@ export async function GET(req: NextRequest) {
       { header: 'Call Center',       key: 'callCenter',     width: 18, required: false, note: 'Call center / support desk the employee is assigned to (optional)' },
       // ── Salary (formula then components) ──────────────────────
       { header: 'Initial Gross Pay', key: '__initialGross', width: 22, required: false, note: 'Auto-calculated: Basic Salary + Housing, Transport, Furniture, Domestic, Meal Subsidy, Hazard, Leave Grant, Electricity and Other Allowances. Read-only — spread the employee\'s agreed gross across these so they sum to it exactly, not more.' },
-      { header: 'Basic Salary',      key: 'basicSalary',    width: 18, required: false, note: grades.length ? 'Auto-filled from Grade Code — override by typing a value' : 'Monthly basic salary in naira' },
+      { header: 'Basic Salary',      key: 'basicSalary',    width: 18, required: false, note: grades.length ? 'Auto-filled from Grade Name — override by typing a value' : 'Monthly basic salary in naira' },
       // ── Allowances ────────────────────────────────────────────
       { header: 'Housing Allowance',        key: 'housingAllowance',       width: 20, required: false, note: 'Monthly housing allowance (₦)' },
       { header: 'Transport Allowance',      key: 'transportAllowance',     width: 20, required: false, note: 'Monthly transport allowance (₦)' },
@@ -197,12 +197,12 @@ export async function GET(req: NextRequest) {
         for (let r = 3; r <= 1002; r++) {
           ws.getCell(`${gradeCol}${r}`).dataValidation = {
             type: 'list', allowBlank: true,
-            formulae: [`'${REF_SHEET}'!$D$2:$D$${grades.length + 1}`],
-            showErrorMessage: true, errorTitle: 'Invalid Grade Code', error: `Select a grade from the "${REF_SHEET}" sheet`,
+            formulae: [`'${REF_SHEET}'!$E$2:$E$${grades.length + 1}`],
+            showErrorMessage: true, errorTitle: 'Invalid Grade Name', error: `Select a grade name from the "${REF_SHEET}" sheet`,
           }
           // VLOOKUP auto-fills Basic Salary from Reference Data col F
           ws.getCell(`${basicCol}${r}`).value = {
-            formula: `IF(${gradeCol}${r}="","",IFERROR(VLOOKUP(${gradeCol}${r},'${REF_SHEET}'!$D:$F,3,FALSE),""))`,
+            formula: `IF(${gradeCol}${r}="","",IFERROR(VLOOKUP(${gradeCol}${r},'${REF_SHEET}'!$E:$F,2,FALSE),""))`,
             result:  0,
           } as any
           ws.getCell(`${basicCol}${r}`).numFmt = '#,##0.00'
@@ -261,7 +261,7 @@ export async function GET(req: NextRequest) {
         if (payPoints[i]) row.getCell(3).value = payPoints[i].name
         if (grades[i]) {
           row.getCell(4).value = grades[i].code
-          row.getCell(5).value = `${grades[i].name} (${grades[i].category})`
+          row.getCell(5).value = grades[i].name
           const sal = grades[i].defaultBasicSalary ? Number(grades[i].defaultBasicSalary) : null
           if (sal != null) { row.getCell(6).value = sal; row.getCell(6).numFmt = '#,##0.00' }
         }
@@ -332,15 +332,15 @@ export async function GET(req: NextRequest) {
       ['Resumption Date',        'Date the employee started (resumed) work. Enter in dd/mm/yyyy format.'],
       ['Job Title',              'Employee\'s job title or designation (e.g. Operations Engineer, Senior Technician).'],
       ['Category',               'Must be REGULAR, CONTRACT or NYSC/IT (case-insensitive on upload). NYSC/IT covers both NYSC corps members and IT students.'],
-      ['Grade Code',             grades.length
-        ? `Select from dropdown in the Grade Code column — all grades are listed in the "${REF_SHEET}" sheet. Only the code is uploaded.`
-        : 'Must match the code of a grade created in the system (e.g. GL06, GL09, GM). Leave blank if grade will be assigned later.'],
+      ['Grade Name',             grades.length
+        ? `Select from dropdown in the Grade Name column — all grades are listed in the "${REF_SHEET}" sheet. The grade name is matched on upload.`
+        : 'Must match the name of a grade created in the system (e.g. Officer IV). Leave blank if grade will be assigned later.'],
       ['Level',                  'Staff grade level or step number (e.g. 6, 9, 14, or GL06/3). Free-text; used for reporting only.'],
       ['Region / Feeder / Pay Point', companyId
         ? `Select from dropdowns. Valid values are listed in the "${REF_SHEET}" sheet.`
         : 'Must exactly match the name of a region, feeder, or pay point created in the system.'],
       ['Basic Salary',           grades.length
-        ? 'Auto-filled from Grade Code via VLOOKUP. Type over the value to override it.'
+        ? 'Auto-filled from Grade Name via VLOOKUP. Type over the value to override it.'
         : 'Monthly basic salary in naira. If left blank, the grade\'s default salary is used during computation.'],
       ['Annual Rent',            'Total rent paid per year. NTA 2025 rent relief is a flat ₦500,000 regardless of actual rent paid.'],
       ['Has Life Assurance',     'Enter YES if the employee has a life assurance policy. If YES, Life Assurance Amount is required.'],

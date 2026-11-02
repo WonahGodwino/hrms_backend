@@ -103,6 +103,16 @@ async function parseBuffer(
   return rows
 }
 
+// ── Configuration bulk upload (regions / feeders / grades) ──
+// Flat template: row 1 = headers, row 2 = notes, row 3+ = data.
+// Returns rows keyed by normalized header; blank rows are skipped.
+export async function parseConfigCsv(
+  buffer: Buffer,
+  fileExt: string
+): Promise<Record<string, string>[]> {
+  return parseBuffer(buffer, fileExt, 1)
+}
+
 // ── Staff CSV ────────────────────────────────────────────────
 
 export async function parseStaffCsv(
@@ -176,6 +186,7 @@ export async function parseStaffCsv(
       jobTitle:      r['jobtitle']      || r['job_title'] || r['position'] || r['title'] || undefined,
       category:      r['category']      || 'REGULAR',
       gradeCode:     r['gradecode']      || r['grade']  || undefined,
+      gradeName:     r['gradename']      || r['grade_name'] || undefined,
       level:         r['level']          || undefined,
       callCenter:    r['callcenter']    || r['call_center'] || undefined,
       department:    r['department']    || r['dept']   || undefined,
