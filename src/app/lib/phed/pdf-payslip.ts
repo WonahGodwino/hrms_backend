@@ -233,6 +233,17 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
       ['Total Earnings',  data.grossSalary,            true],
     ]
 
+    // Fixed cooperative line items that must always appear on the payslip,
+    // even when the staff has no membership (renders as 0.00).
+    const FIXED_COOP_KEYS = ['iel', 'nsmpcs']
+    const coopAmount = (key: string) => {
+      const c = data.cooperatives.find((x) => x.name.toLowerCase().includes(key))
+      return c ? c.amount : 0
+    }
+    const dynamicCoops = data.cooperatives.filter(
+      (c) => !FIXED_COOP_KEYS.some((k) => c.name.toLowerCase().includes(k))
+    )
+
     const deductRows: [string, number, boolean][] = [
       ['Pension',               data.pensionEmployee, false],
       ['National Housing Fund', data.nhf,             false],
@@ -240,9 +251,21 @@ export function generatePayslipPdf(data: PayslipData): Promise<Buffer> {
       ...data.unions.map(u => [u.name, u.amount, false] as [string, number, boolean]),
       ['Loan',                  data.loan || 0,       false],
       ['Ded/Liabilities',       data.deductionLiabilities, false],
-      ...data.cooperatives.map(c => [c.name, c.amount, false] as [string, number, boolean]),
+      ...dynamicCoops.map(c => [c.name, c.amount, false] as [string, number, boolean]),
+      ['IEL Coop',              coopAmount('iel'),    false],
+      ['NSMPCS Uyo',            coopAmount('nsmpcs'), false],
       ['Total Deductions',      data.totalDeductions, true],
     ]
+
+    // Align "Total Earnings" and "Total Deductions" on the same row: pad the
+    // shorter column with blank rows so both totals sit at the bottom.
+    const earnTotal = earningRows.pop()!
+    const dedTotal  = deductRows.pop()!
+    const maxItems  = Math.max(earningRows.length, deductRows.length)
+    while (earningRows.length < maxItems) earningRows.push(['', 0, false])
+    while (deductRows.length  < maxItems) deductRows.push(['', 0, false])
+    earningRows.push(earnTotal)
+    deductRows.push(dedTotal)
 
     drawMoneyTable(doc, 'Pay Items', earningRows, col1X, y, colW, C_DARK)
     drawMoneyTable(doc, 'Deduction', deductRows,  col2X, y, colW, C_MID)
@@ -354,6 +377,9 @@ function drawMoneyTable(
     const ry = y + HDR_H + i * ROW_H
     const bg = isTotal ? C_TOTAL : (i % 2 === 0 ? C_WHITE : C_ROW_ALT)
     doc.rect(x, ry, width, ROW_H).fill(bg)
+
+    // Blank padding rows keep the grid aligned but render no text/amount.
+    if (!label) return
 
     const ty   = ry + 4
     const font = isTotal ? 'Helvetica-Bold' : 'Helvetica'

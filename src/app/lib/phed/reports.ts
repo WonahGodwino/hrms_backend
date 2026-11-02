@@ -431,8 +431,8 @@ export function buildCostCentreSummary(
   })
 
   const financeBase = [
-    { key: 'feeder', header: 'Feeder', type: 'text' as const, width: 24 },
     { key: 'region', header: 'Region', type: 'text' as const, width: 18 },
+    { key: 'feeder', header: 'Feeder', type: 'text' as const, width: 24 },
     ...catCols(FINANCE_ORDER, LABOUR_LABEL),
     { key: 'totalPerFeeder', header: 'Total Per Feeder', type: 'currency' as const, width: 16 },
   ]

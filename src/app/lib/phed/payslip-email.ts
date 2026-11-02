@@ -37,11 +37,22 @@ export function buildPayslipHtml(
     ['Domestic', p.domesticAllowance], ['Shift Allowance', p.hazardAllowance], ['Overtime', p.overtimeEarnings],
     ['Arrears', p.arrears],
   ]
+  const FIXED_COOP_KEYS = ['iel', 'nsmpcs']
+  const coopAmount = (key: string) => {
+    const c = coopRows.find((x) => x.name.toLowerCase().includes(key))
+    return c ? c.amount : 0
+  }
+  const dynamicCoops = coopRows.filter(
+    (c) => !FIXED_COOP_KEYS.some((k) => c.name.toLowerCase().includes(k))
+  )
+
   const deductionRows: [string, any][] = [
     ['Pension', p.pensionEmployee], ['National Housing Fund', p.nhf], ['PAYE', p.monthlyPAYE],
     ...unionRows.map(u => [u.name ? `${u.name} (Union)` : 'Union Dues', u.amount] as [string, any]),
     ['Loan', p.loan], ['Ded/Liabilities', p.deductionLiabilities],
-    ...coopRows.map(c => [c.name ? `${c.name} (Cooperative)` : 'Cooperative', c.amount] as [string, any]),
+    ...dynamicCoops.map(c => [c.name ? `${c.name} (Cooperative)` : 'Cooperative', c.amount] as [string, any]),
+    ['IEL Coop',   coopAmount('iel')],
+    ['NSMPCS Uyo', coopAmount('nsmpcs')],
   ]
 
   const infoRows: [string, string, string, string][] = [
@@ -63,13 +74,23 @@ export function buildPayslipHtml(
       <td style="padding:3px 8px;border-bottom:1px solid #d1d5db;border-left:1px solid #d1d5db;text-align:right;font-size:12px;font-family:Consolas,Monaco,monospace;">${fmt(value)}</td>
     </tr>`
 
-  const earningHtml = earningRows.map(([l, v]) => moneyRow(l, v)).join('') + `
+  const blankRow = `
+    <tr>
+      <td style="padding:3px 8px;border-bottom:1px solid #d1d5db;font-size:12px;">&nbsp;</td>
+      <td style="padding:3px 8px;border-bottom:1px solid #d1d5db;border-left:1px solid #d1d5db;text-align:right;font-size:12px;font-family:Consolas,Monaco,monospace;">&nbsp;</td>
+    </tr>`
+  const maxItems = Math.max(earningRows.length, deductionRows.length)
+  const pad = (n: number) => Array(Math.max(0, n)).fill(blankRow).join('')
+
+  const earningHtml = earningRows.map(([l, v]) => moneyRow(l, v)).join('') +
+    pad(maxItems - earningRows.length) + `
     <tr>
       <td style="padding:4px 8px;background:#eef2f7;border-top:1px solid #1f2937;font-weight:700;font-size:12px;">Total Earnings</td>
       <td style="padding:4px 8px;background:#eef2f7;border-top:1px solid #1f2937;border-left:1px solid #d1d5db;text-align:right;font-weight:700;font-size:12px;font-family:Consolas,Monaco,monospace;">NGN ${fmt(p.grossSalary)}</td>
     </tr>`
 
-  const deductionHtml = deductionRows.map(([l, v]) => moneyRow(l, v)).join('') + `
+  const deductionHtml = deductionRows.map(([l, v]) => moneyRow(l, v)).join('') +
+    pad(maxItems - deductionRows.length) + `
     <tr>
       <td style="padding:4px 8px;background:#eef2f7;border-top:1px solid #1f2937;font-weight:700;font-size:12px;">Total Deductions</td>
       <td style="padding:4px 8px;background:#eef2f7;border-top:1px solid #1f2937;border-left:1px solid #d1d5db;text-align:right;font-weight:700;font-size:12px;font-family:Consolas,Monaco,monospace;">NGN ${fmt(p.totalDeductions)}</td>
