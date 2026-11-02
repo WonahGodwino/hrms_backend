@@ -35,7 +35,17 @@ export async function POST(req: NextRequest) {
     if (rows.length === 0)
       return withCors(ApiResponse.error('No rows found in file — ensure data starts at row 3', 400), origin)
 
-    const VALID_CATEGORIES = ['REGULAR', 'CONTRACT', 'NYSC_IT']
+    // Load existing grades so we can upsert by code and auto-assign levelOrder,
+    // exactly like the individual "New Grade" dialog (which only exposes
+    // Grade Name + Level and defaults category to REGULAR).
+    const existingGrades = await (prisma as any).phedGrade.findMany({
+      where: { companyId },
+      select: { id: true, code: true, name: true, levelOrder: true },
+    })
+    const existingByCode = new Map<string, any>(
+      existingGrades.map((g: any) => [(g.code || '').toLowerCase(), g])
+    )
+    let nextLevel = existingGrades.reduce((m: number, g: any) => Math.max(m, Number(g.levelOrder) || 0), 0)
 
     let created = 0
     let updated = 0
@@ -43,40 +53,35 @@ export async function POST(req: NextRequest) {
     const errors: string[] = []
 
     for (const r of rows) {
-      const name     = (r['gradename'] || r['grade'] || r['name'] || '').trim()
-      const code     = (r['gradecode'] || r['code'] || '').trim().toUpperCase()
-      const category = (r['category'] || '').trim().toUpperCase()
-      const levelRaw = (r['level'] || r['levelorder'] || '').trim()
-      const salary   = (r['defaultbasicsalary'] || r['basicsalary'] || '').trim()
+      const name  = (r['gradename'] || r['grade'] || r['name'] || '').trim()
+      const level = (r['level'] || r['gradecode'] || r['code'] || r['levelcode'] || '').trim()
 
-      if (!name) { failed++; errors.push('A row is missing the Grade Name'); continue }
-      if (!code) { failed++; errors.push(`Grade "${name}": Grade Code is required`); continue }
-      if (!VALID_CATEGORIES.includes(category)) {
-        failed++; errors.push(`Grade "${name}": category must be REGULAR, CONTRACT or NYSC_IT`); continue
-      }
-      const level = Number(levelRaw)
-      if (!Number.isInteger(level) || level < 1) {
-        failed++; errors.push(`Grade "${name}": Level must be a positive integer`); continue
-      }
-      const defaultBasicSalary = salary ? Number(salary) : null
-      if (defaultBasicSalary !== null && Number.isNaN(defaultBasicSalary)) {
-        failed++; errors.push(`Grade "${name}": Default Basic Salary must be a number`); continue
-      }
+      if (!name)  { failed++; errors.push('A row is missing the Grade Name'); continue }
+      if (!level) { failed++; errors.push(`Grade "${name}": Level is required`); continue }
+
+      const code = level.toUpperCase()
 
       try {
-        const existing = await (prisma as any).phedGrade.findFirst({
-          where: { companyId, code: { equals: code, mode: 'insensitive' } },
-        })
+        const existing = existingByCode.get(code.toLowerCase())
         if (existing) {
           await (prisma as any).phedGrade.update({
             where: { id: existing.id },
-            data: { name, category, levelOrder: level, defaultBasicSalary },
+            data: { name },
           })
           updated++
         } else {
-          await (prisma as any).phedGrade.create({
-            data: { companyId, name, code, category, levelOrder: level, defaultBasicSalary },
+          nextLevel += 1
+          const newGrade = await (prisma as any).phedGrade.create({
+            data: {
+              companyId,
+              name,
+              code,
+              category:           'REGULAR',
+              levelOrder:         nextLevel,
+              defaultBasicSalary: null,
+            },
           })
+          existingByCode.set(code.toLowerCase(), newGrade)
           created++
         }
       } catch (e: any) {

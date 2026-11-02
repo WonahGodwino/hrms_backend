@@ -19,11 +19,8 @@ export async function GET(req: NextRequest) {
 
     const buffer = await buildConfigTemplate({
       columns: [
-        { header: 'Grade Name *', note: 'Name of the grade (e.g. Officer IV, General Manager). One grade per row, starting at row 3.', width: 28 },
-        { header: 'Grade Code *', note: 'Unique grade code (e.g. GL06, GM).', width: 16 },
-        { header: 'Category *', note: 'REGULAR, CONTRACT or NYSC/IT.', width: 16, dropdown: ['REGULAR', 'CONTRACT', 'NYSC_IT'] },
-        { header: 'Level *', note: 'Grade level number (positive integer, e.g. 6, 9, 14).', width: 12 },
-        { header: 'Default Basic Salary', note: 'Optional default monthly basic salary in naira (e.g. 300000).', width: 22 },
+        { header: 'Grade Name *', note: 'Name of the grade (e.g. Officer IV). One grade per row, starting at row 3.', width: 30 },
+        { header: 'Level *', note: 'Grade level/step (e.g. GL06, GL14). This is the same "Level" field used when adding a grade individually.', width: 20 },
       ],
     })
 
