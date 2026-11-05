@@ -12,7 +12,7 @@
 import { prisma } from '@/app/lib/db'
 
 // ISO-style weekday numbering used by Company.workWeekPattern: 1=Monday ... 7=Sunday.
-function parseWorkWeekPattern(pattern: string | null | undefined): number[] {
+export function parseWorkWeekPattern(pattern: string | null | undefined): number[] {
   const defaultPattern = [1, 2, 3, 4, 5]
   if (!pattern) return defaultPattern
 
@@ -78,13 +78,6 @@ export function isWorkingDayInCalendar(calendar: CompanyCalendar, date: Date): b
   const dateString = date.toISOString().split('T')[0]
   const monthDay = `${date.getMonth() + 1}-${date.getDate()}`
   return !calendar.holidaySet.has(dateString) && !calendar.holidaySet.has(monthDay)
-}
-
-// One-off check for a single date (fetches the calendar itself — prefer
-// loadCompanyCalendar + isWorkingDayInCalendar when checking many dates).
-export async function isWorkingDay(companyId: string, date: Date): Promise<boolean> {
-  const calendar = await loadCompanyCalendar(companyId, date, date)
-  return isWorkingDayInCalendar(calendar, date)
 }
 
 // Every working day in [start, end], inclusive, as an array of Date objects

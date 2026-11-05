@@ -6,7 +6,7 @@
 // chain via the per-offer "Assign Approver" action (request-approval).
 import { prisma } from '@/app/lib/db'
 
-export interface WorkflowStep {
+interface WorkflowStep {
   order: number
   approverId: string
   approverName?: string | null
@@ -18,7 +18,7 @@ export interface ApprovalWorkflow {
 }
 
 /** Read + normalize a company's configured approval workflow (or null). */
-export async function getCompanyApprovalWorkflow(companyId: string): Promise<ApprovalWorkflow | null> {
+async function getCompanyApprovalWorkflow(companyId: string): Promise<ApprovalWorkflow | null> {
   const company = await (prisma as any).company.findUnique({
     where: { id: companyId },
     select: { offerApprovalWorkflow: true },

@@ -1,3 +1,4 @@
+import { assertTrialCapacity } from '@/app/lib/trial/guard'
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
@@ -52,6 +53,8 @@ export async function POST(req: NextRequest) {
 
     if (!name || !type || !authority)
       return withCors(ApiResponse.error('companyId, name, type, authority are required', 400), origin)
+
+    await assertTrialCapacity(cid, 'certificationTypes')
 
     const certType = await prisma.certificationType.create({
       data: { companyId: cid, name, type, authority, templateId: templateId ?? null, isActive: true, createdBy: user.userId },

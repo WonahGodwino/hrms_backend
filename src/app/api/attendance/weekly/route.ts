@@ -2,34 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/app/lib/auth";
 import { requireModuleAccess } from "@/app/lib/module-access";
 import { withCors, handleCorsOptions } from "@/app/lib/cors";
+import { canManageAttendance } from "@/app/lib/attendance/access";
+import { fillMissingAddresses, locationView } from "@/app/lib/attendance/clock-location";
+import { startOfBusinessWeek, endOfBusinessWeek, startOfBusinessDay, endOfBusinessDay, businessDateKey, isBusinessWeekday, addBusinessDays, BUSINESS_TIMEZONE } from "@/app/lib/attendance/business-day";
 
-// Helper functions to get start and end of week (Monday to Sunday)
-function startOfWeek(date: Date): Date {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
-  d.setDate(diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function endOfWeek(date: Date): Date {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = d.getDate() + (day === 0 ? 0 : 7 - day); // Adjust when day is Sunday
-  d.setDate(diff);
-  d.setHours(23, 59, 59, 999);
-  return d;
-}
+// Business-day-aware (Africa/Lagos, not server-local) — see business-day.ts.
+const startOfWeek = startOfBusinessWeek;
+const endOfWeek = endOfBusinessWeek;
 
 // Helper function to get start and end of week based on week offset
 function getWeekDates(weekOffset: number = 0): { start: Date; end: Date } {
-  const now = new Date();
-  const start = new Date(now);
-  start.setDate(start.getDate() + (weekOffset * 7));
+  const anchor = addBusinessDays(new Date(), weekOffset * 7);
   return {
-    start: startOfWeek(start),
-    end: endOfWeek(start)
+    start: startOfWeek(anchor),
+    end: endOfWeek(anchor)
   };
 }
 
@@ -86,11 +72,12 @@ export async function GET(req: NextRequest) {
     
     if (startDate && endDate) {
       // Use custom date range
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      start.setHours(0, 0, 0, 0);
-      end.setHours(23, 59, 59, 999);
-      
+      let start = new Date(startDate);
+      let end = new Date(endDate);
+
+      if (!isNaN(start.getTime())) start = startOfBusinessDay(start);
+      if (!isNaN(end.getTime())) end = endOfBusinessDay(end);
+
       if (isNaN(start.getTime()) || isNaN(end.getTime())) {
         const response = NextResponse.json({ 
           success: false, 
@@ -149,19 +136,22 @@ export async function GET(req: NextRequest) {
       ],
     });
 
+    // Make sure every clock-in / clock-out location shows a real address
+    await fillMissingAddresses(attendance);
+
     // Group attendance by day
     const attendanceByDay: Record<string, any[]> = {};
     const daysInRange = getDaysInRange(dateRange.start, dateRange.end);
     
     // Initialize empty arrays for each day
     daysInRange.forEach(day => {
-      const dateKey = day.toISOString().split('T')[0];
+      const dateKey = businessDateKey(day);
       attendanceByDay[dateKey] = [];
     });
 
     // Group attendance records by date
     attendance.forEach(record => {
-      const dateKey = record.date.toISOString().split('T')[0];
+      const dateKey = businessDateKey(record.date);
       if (!attendanceByDay[dateKey]) {
         attendanceByDay[dateKey] = [];
       }
@@ -174,15 +164,16 @@ export async function GET(req: NextRequest) {
         signInTime: record.signInTime,
         signOutTime: record.signOutTime,
         method: record.method,
+        location: locationView(record),
         recordedBy: record.recordedById,
       });
     });
 
     // Calculate daily statistics
     const dailyStats = daysInRange.map(day => {
-      const dateKey = day.toISOString().split('T')[0];
+      const dateKey = businessDateKey(day);
       const dayAttendance = attendanceByDay[dateKey] || [];
-      const dayName = day.toLocaleDateString('en-US', { weekday: 'long' });
+      const dayName = day.toLocaleDateString('en-US', { weekday: 'long', timeZone: BUSINESS_TIMEZONE });
       
       // Count unique staff who attended
       const attendedStaffIds = new Set(dayAttendance.map(a => a.staffId));
@@ -202,10 +193,7 @@ export async function GET(req: NextRequest) {
 
     // Calculate weekly summary
     const totalDays = daysInRange.length;
-    const totalBusinessDays = daysInRange.filter(day => {
-      const dayOfWeek = day.getDay();
-      return dayOfWeek !== 0 && dayOfWeek !== 6; // Exclude weekends
-    }).length;
+    const totalBusinessDays = daysInRange.filter(isBusinessWeekday).length;
 
     const totalAttended = dailyStats.reduce((sum, day) => sum + day.attended, 0);
     const totalAbsent = dailyStats.reduce((sum, day) => sum + day.absent, 0);
@@ -250,6 +238,7 @@ export async function GET(req: NextRequest) {
           signInTime: record.signInTime,
           signOutTime: record.signOutTime,
           method: record.method,
+          location: locationView(record),
           recordedBy: record.recordedById,
           staff: record.staffRecord,
         })),
@@ -346,7 +335,7 @@ async function calculateStaffAttendanceStats(
   // Calculate statistics for each staff
   return allStaff.map(staff => {
     const staffAttendance = attendanceByStaff.get(staff.id) || [];
-    const attendedDays = new Set(staffAttendance.map(a => a.date.toISOString().split('T')[0])).size;
+    const attendedDays = new Set(staffAttendance.map(a => businessDateKey(a.date))).size;
     const absentDays = Math.max(0, businessDays - attendedDays);
     const attendancePercentage = businessDays > 0 ? (attendedDays / businessDays) * 100 : 0;
 
@@ -392,42 +381,20 @@ async function calculateStaffAttendanceStats(
 // Helper function to count business days (Monday-Friday)
 function getBusinessDaysCount(startDate: Date, endDate: Date): number {
   let count = 0;
-  const current = new Date(startDate);
+  let current = new Date(startDate);
   const end = new Date(endDate);
 
   while (current <= end) {
-    const dayOfWeek = current.getDay();
-    // 0 = Sunday, 6 = Saturday
-    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-      count++;
-    }
-    current.setDate(current.getDate() + 1);
+    if (isBusinessWeekday(current)) count++;
+    current = addBusinessDays(current, 1);
   }
 
   return count;
 }
 
 async function validateCompanyAccess(user: any, companyId: string): Promise<boolean> {
-  const { prisma } = await import("@/app/lib/prisma");
-
-  if (user.role === 'SUPER_ADMIN') {
-    return true;
-  }
-
-  if (user.role === 'HR') {
-    return user.companyId === companyId;
-  }
-
-  if (user.role === 'ADMIN') {
-    const userCompany = await prisma.userCompany.findFirst({
-      where: {
-        userId: user.userId,
-        companyId,
-        role: { in: ['ADMIN', 'ALL'] }
-      }
-    });
-    return !!userCompany;
-  }
-
-  return false;
+  // One rule for the whole attendance module (lib/attendance/access.ts):
+  // company membership incl. multi-company HR/ADMIN + Attendance enabled
+  // for that company, so the company switcher scopes everything.
+  return canManageAttendance(user, companyId);
 }

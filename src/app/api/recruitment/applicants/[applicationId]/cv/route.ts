@@ -17,6 +17,24 @@ function sanitizeFilename(name: string) {
   return name.replace(/[^\w.\-() ]+/g, "_");
 }
 
+// Matches the `{type}_{slug(entity)}_{date}` convention already used for
+// generated reports (e.g. backend/src/app/api/recruitment/shortlist/report/route.ts)
+// instead of handing back the raw, often messy, originally-uploaded filename.
+const slug = (s: string) =>
+  String(s || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40);
+
+function buildCvFilename(candidateName: string, jobTitle: string, originalFileName: string) {
+  const ext = (originalFileName.match(/\.[a-z0-9]+$/i)?.[0] || "").toLowerCase();
+  const namePart = slug(candidateName) || "candidate";
+  const jobPart = slug(jobTitle);
+  const date = new Date().toISOString().split("T")[0];
+  return `cv_${namePart}${jobPart ? `_${jobPart}` : ""}_${date}${ext}`;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { applicationId: string } }
@@ -47,7 +65,12 @@ export async function GET(
     // Priority: application.cvFileId if you use it
     const application = await prisma.jobApplication.findFirst({
       where: { id: applicationId, companyId },
-      select: { id: true, cvFileId: true },
+      select: {
+        id: true,
+        cvFileId: true,
+        candidate: { select: { firstName: true, lastName: true } },
+        job: { select: { title: true } },
+      },
     });
 
     if (!application) {
@@ -76,7 +99,12 @@ export async function GET(
       return withCors(ApiResponse.error("CV file not found for this application", 404), origin);
     }
 
-    const filename = sanitizeFilename(file.fileName || "cv");
+    const candidateName = [application.candidate?.firstName, application.candidate?.lastName]
+      .filter(Boolean)
+      .join(" ");
+    const filename = sanitizeFilename(
+      buildCvFilename(candidateName, application.job?.title || "", file.fileName || "cv")
+    );
     const mimeType = file.mimeType || "application/octet-stream";
 
     // Support either inline preview or forced download.

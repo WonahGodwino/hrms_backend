@@ -2,15 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/app/lib/auth";
 import { requireModuleAccess } from "@/app/lib/module-access";
 import { withCors, handleCorsOptions } from "@/app/lib/cors";
+import { canManageAttendance } from "@/app/lib/attendance/access";
+import { fillMissingAddresses, locationView } from "@/app/lib/attendance/clock-location";
+import { startOfBusinessMonth, endOfBusinessMonth, isBusinessWeekday, addBusinessDays, businessDateParts } from "@/app/lib/attendance/business-day";
 
-// Helper functions to get start and end of month
-function startOfMonth(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
-}
-
-function endOfMonth(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
-}
+// Business-day-aware (Africa/Lagos, not server-local) — see business-day.ts.
+const startOfMonth = startOfBusinessMonth;
+const endOfMonth = endOfBusinessMonth;
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -65,7 +63,9 @@ export async function GET(req: NextRequest) {
       const yearNum = parseInt(year);
       const monthNum = parseInt(month) - 1; // JavaScript months are 0-indexed
       if (!isNaN(yearNum) && !isNaN(monthNum) && monthNum >= 0 && monthNum <= 11) {
-        targetDate = new Date(yearNum, monthNum, 1);
+        // Mid-month representative instant so the UTC+1 shift never crosses
+        // into an adjacent month before start/end-of-month resolve it.
+        targetDate = new Date(Date.UTC(yearNum, monthNum, 15));
       }
     }
 
@@ -107,6 +107,9 @@ export async function GET(req: NextRequest) {
         date: 'desc',
       },
     });
+
+    // Make sure every clock-in / clock-out location shows a real address
+    await fillMissingAddresses(attendance);
 
     // Calculate statistics
     const staffAttendanceMap = new Map<string, {
@@ -185,11 +188,12 @@ export async function GET(req: NextRequest) {
       ? (totalPresentDays / totalPossibleAttendanceDays) * 100 
       : 0;
 
+    const targetParts = businessDateParts(targetDate);
     const response = NextResponse.json({
       success: true,
       data: {
-        month: targetDate.getMonth() + 1,
-        year: targetDate.getFullYear(),
+        month: targetParts.month + 1,
+        year: targetParts.year,
         monthStart: startOfMonthDate.toISOString(),
         monthEnd: endOfMonthDate.toISOString(),
         statistics: {
@@ -207,6 +211,7 @@ export async function GET(req: NextRequest) {
           signInTime: record.signInTime,
           signOutTime: record.signOutTime,
           method: record.method,
+          location: locationView(record),
           recordedBy: record.recordedById,
           staff: record.staffRecord,
         })),
@@ -229,42 +234,20 @@ export async function GET(req: NextRequest) {
 // Helper function to count business days (Monday-Friday)
 function getBusinessDaysCount(startDate: Date, endDate: Date): number {
   let count = 0;
-  const current = new Date(startDate);
+  let current = new Date(startDate);
   const end = new Date(endDate);
 
   while (current <= end) {
-    const dayOfWeek = current.getDay();
-    // 0 = Sunday, 6 = Saturday
-    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-      count++;
-    }
-    current.setDate(current.getDate() + 1);
+    if (isBusinessWeekday(current)) count++;
+    current = addBusinessDays(current, 1);
   }
 
   return count;
 }
 
 async function validateCompanyAccess(user: any, companyId: string): Promise<boolean> {
-  const { prisma } = await import("@/app/lib/prisma");
-
-  if (user.role === 'SUPER_ADMIN') {
-    return true;
-  }
-
-  if (user.role === 'HR') {
-    return user.companyId === companyId;
-  }
-
-  if (user.role === 'ADMIN') {
-    const userCompany = await prisma.userCompany.findFirst({
-      where: {
-        userId: user.userId,
-        companyId,
-        role: { in: ['ADMIN', 'ALL'] }
-      }
-    });
-    return !!userCompany;
-  }
-
-  return false;
+  // One rule for the whole attendance module (lib/attendance/access.ts):
+  // company membership incl. multi-company HR/ADMIN + Attendance enabled
+  // for that company, so the company switcher scopes everything.
+  return canManageAttendance(user, companyId);
 }

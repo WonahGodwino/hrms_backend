@@ -7,6 +7,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { attachmentDisposition, safeFileName } from '@/app/lib/excel/sheet-theme'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -157,14 +158,13 @@ export async function GET(request: NextRequest) {
 
     const buffer = await workbook.xlsx.writeBuffer()
     const responseBuffer = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer)
-    const safeName = companyName.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'company'
-    const filename = `${safeName}_offers_report_${new Date().toISOString().split('T')[0]}.xlsx`
+    const filename = `Offers Report (${safeFileName(companyName || 'Company')}) ${new Date().toISOString().split('T')[0]}.xlsx`
 
     const res = new NextResponse(responseBuffer, {
       status: 200,
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        'Content-Disposition': attachmentDisposition(filename),
         'Cache-Control': 'no-cache, no-store, must-revalidate',
       },
     })

@@ -108,10 +108,14 @@ export async function POST(request: NextRequest) {
         },
       })
 
-      // Onboarding record.
+      // Onboarding record. External hires skip the pre-offer readiness stage
+      // (there's no interview to clear) — the offer already exists and is
+      // ACCEPTED, so this onboarding starts linked to both the application
+      // and the offer from the outset.
       const onboarding = await tx.onboarding.create({
         data: {
           companyId,
+          applicationId: application!.id,
           offerId: offer.id,
           status: 'IN_PROGRESS',
           startDate: body.anticipatedStartDate ? new Date(body.anticipatedStartDate) : new Date(),

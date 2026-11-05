@@ -3,12 +3,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
-import { requireModuleAccess } from '@/app/lib/module-access'
+import { hasModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import fs from 'fs/promises'
 import path from 'path'
 import ExcelJS from 'exceljs'
+import { attachmentDisposition, buildSubtitle, confidentialFooter, safeFileName, toneCell, writeStyledTable } from '@/app/lib/excel/sheet-theme'
 
 type RouteParams = {
   params: {
@@ -47,41 +48,34 @@ async function generateFailedRecordsFile(
   fileName: string
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook()
+  workbook.creator = '24/7HR'
   const worksheet = workbook.addWorksheet('Failed Records')
 
-  // Add headers
-  worksheet.columns = [
-    { header: 'Error', key: 'error', width: 100 },
-    { header: 'Row Number', key: 'rowNumber', width: 15 },
-  ]
-
-  // Add error rows
+  const errorRows: { rowNumber: string | number; error: string }[] = []
   if (payrollUpload.errors && Array.isArray(payrollUpload.errors)) {
     payrollUpload.errors.forEach((error: string, index: number) => {
       // Parse row number from error message (assuming format "Row X: error message")
       const rowMatch = error.match(/Row (\d+):/)
-      const rowNumber = rowMatch ? rowMatch[1] : index + 1
-      const errorMessage = error.replace(/Row \d+: /, '')
-
-      worksheet.addRow({
-        error: errorMessage,
-        rowNumber: rowNumber,
+      errorRows.push({
+        rowNumber: rowMatch ? rowMatch[1] : index + 1,
+        error: error.replace(/Row \d+: /, ''),
       })
     })
   } else {
-    worksheet.addRow({
-      error: 'No detailed error information available',
-      rowNumber: 'N/A',
-    })
+    errorRows.push({ rowNumber: 'N/A', error: 'No detailed error information available' })
   }
 
-  const headerRow = worksheet.getRow(1)
-  headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
-  headerRow.fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FFDC3545' },
-  }
+  writeStyledTable(worksheet, {
+    title: 'Failed Payroll Records',
+    subtitle: buildSubtitle([fileName, `${errorRows.length} issue${errorRows.length === 1 ? '' : 's'}`]),
+    columns: [
+      { header: 'Row Number', key: 'rowNumber', width: 14, align: 'center' },
+      { header: 'Error', key: 'error', width: 100, align: 'left' },
+    ],
+    rows: errorRows,
+    onRow: (row) => toneCell(row.getCell(2), 'danger'),
+    footer: confidentialFooter(),
+  })
 
   const buffer = await workbook.xlsx.writeBuffer()
   return Buffer.from(buffer as any)
@@ -104,25 +98,20 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = await requireModuleAccess(token, 'PAYROLL', ['HR','SUPER_ADMIN','ADMIN'])
-
-    if (!user.companyId && user.role !== 'SUPER_ADMIN') {
-      return withCors(
-        ApiResponse.error('Company context missing for this user', 400),
-        origin
-      )
-    }
+    // Role check only here — module access is checked below against the
+    // upload's own company once it's known (see download-original/[id] for
+    // the same reasoning): requireModuleAccess would otherwise gate on the
+    // token's "current" company, not the one this specific upload belongs to.
+    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
     const { id } = params
 
-    // Find the payroll upload
-    const payrollUpload = await prisma.payrollUpload.findFirst({
-      where: {
-        id,
-        ...(user.role !== 'SUPER_ADMIN' && {
-          companyId: user.companyId as string,
-        }),
-      },
+    // Find the payroll upload by id first, then check access — a plain
+    // company-equality pre-filter here would 404 an ADMIN who has real
+    // UserCompany access to the upload's company but whose token's "current"
+    // companyId happens to be a different assigned company.
+    const payrollUpload = await prisma.payrollUpload.findUnique({
+      where: { id },
     })
 
     if (!payrollUpload) {
@@ -130,6 +119,40 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         ApiResponse.error('Payroll upload not found', 404),
         origin
       )
+    }
+
+    if (user.role === 'HR' && user.companyId !== payrollUpload.companyId) {
+      return withCors(
+        ApiResponse.error('You do not have access to this upload record', 403),
+        origin
+      )
+    }
+
+    if (user.role === 'ADMIN') {
+      const hasAccess = await prisma.userCompany.findFirst({
+        where: {
+          userId: user.userId,
+          companyId: payrollUpload.companyId,
+          role: { in: ['ADMIN', 'ALL'] }
+        }
+      })
+
+      if (!hasAccess) {
+        return withCors(
+          ApiResponse.error('You do not have access to this upload record', 403),
+          origin
+        )
+      }
+    }
+
+    if (user.role !== 'SUPER_ADMIN') {
+      const moduleEnabled = await hasModuleAccess(payrollUpload.companyId, 'PAYROLL')
+      if (!moduleEnabled) {
+        return withCors(
+          ApiResponse.error('Insufficient permissions: This module is not available for your organisation', 403),
+          origin
+        )
+      }
     }
 
     // The file path should be stored in processedFilePath
@@ -268,15 +291,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const uint8Array = new Uint8Array(fileBuffer)
     const blob = new Blob([uint8Array], { type: contentType })
 
-    const fileName = `failed-records-${payrollUpload.id}.xlsx`
+    const uploadCompany = await prisma.company.findUnique({ where: { id: payrollUpload.companyId }, select: { companyName: true } })
+    const fileName = `Failed Payroll Records (${safeFileName(uploadCompany?.companyName || 'Company')}).xlsx`
 
     const response = new NextResponse(blob, {
       status: 200,
       headers: {
         'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(
-          fileName
-        )}"`,
+        'Content-Disposition': attachmentDisposition(fileName),
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         Pragma: 'no-cache',
         Expires: '0',

@@ -7,6 +7,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { sanitizeOfferDefaults } from '@/app/lib/jobs/offer-defaults'
+import { parseSalaryAmount } from '@/app/lib/recruitment/job-salary'
 
 type UpdateJobBody = {
 	title?: string
@@ -18,7 +19,7 @@ type UpdateJobBody = {
 	employmentType?: string | null
 	workplaceType?: string | null
 	experienceLevel?: string | null
-	salaryRange?: string | null
+	salary?: number | string | null
 	locations?: unknown
 	status?: string
 	designationId?: string | null
@@ -233,7 +234,6 @@ export async function PUT(
 			'employmentType',
 			'workplaceType',
 			'experienceLevel',
-			'salaryRange',
 		]
 		for (const field of optionalStrings) {
 			const value = body[field]
@@ -242,11 +242,30 @@ export async function PUT(
 			}
 		}
 
+		// Single numeric salary; empty clears it. Also drops the legacy free-text
+		// range so the old value can't resurface as a fallback.
+		if (body.salary !== undefined) {
+			if (body.salary === null || String(body.salary).trim() === '') {
+				data.salary = null
+			} else {
+				const amount = parseSalaryAmount(body.salary)
+				if (amount === null) {
+					return withCors(ApiResponse.error('Salary must be a single numeric amount (no ranges).', 400), origin)
+				}
+				data.salary = amount
+			}
+			data.salaryRange = null
+		}
+
 		if (body.locations !== undefined) {
 			// Persist the postings array as-is (Json column); strip any UI-only keys.
 			if (Array.isArray(body.locations)) {
 				data.locations = body.locations
-					.map((loc: any) => ({ state: loc?.state ?? '', lga: loc?.lga ?? '' }))
+					.map((loc: any) => ({
+						state: loc?.state ?? '',
+						lga: loc?.lga ?? '',
+						...(loc?.city ? { city: String(loc.city) } : {}),
+					}))
 					.filter((loc: any) => loc.state || loc.lga)
 			} else {
 				data.locations = body.locations ?? null

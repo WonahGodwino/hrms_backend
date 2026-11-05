@@ -11,6 +11,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
 import ExcelJS from 'exceljs'
+import { writeStyledTable, buildSubtitle, confidentialFooter, toneCell, attachmentDisposition, safeFileName, addInstructionsSheet, findHeaderRow, XLSX_MIME } from '@/app/lib/excel/sheet-theme'
 import { buildOfferLetterFieldLabels, BASE_FIELD_KEYS } from '@/app/lib/offer-letters/variableLabels'
 
 export async function OPTIONS(request: NextRequest) {
@@ -69,41 +70,41 @@ export async function POST(request: NextRequest) {
     // on upload to identify which letter a row belongs to.
     const labels = buildOfferLetterFieldLabels([...BASE_FIELD_KEYS, ...variables])
     const columns = [
-      { header: 'letterId', key: 'letterId', width: 24 },
-      { header: labels.get('recipientName') as string, key: 'recipientName', width: 22 },
-      { header: labels.get('recipientEmail') as string, key: 'recipientEmail', width: 26 },
-      { header: labels.get('month') as string, key: 'month', width: 12 },
-      { header: labels.get('year') as string, key: 'year', width: 10 },
-      ...variables.map((v) => ({ header: labels.get(v) as string, key: v, width: 24 })),
+      { header: 'letterId', key: 'letterId', width: 26, align: 'left' as const },
+      { header: labels.get('recipientName') as string, key: 'recipientName', width: 24, align: 'left' as const },
+      { header: labels.get('recipientEmail') as string, key: 'recipientEmail', width: 28, align: 'left' as const },
+      { header: labels.get('month') as string, key: 'month', width: 12, align: 'left' as const },
+      { header: labels.get('year') as string, key: 'year', width: 10, align: 'left' as const },
+      ...variables.map((v) => ({ header: labels.get(v) as string, key: v, width: 24, align: 'left' as const })),
     ]
 
+    const company = await prisma.company.findUnique({ where: { id: companyId }, select: { companyName: true } })
+
     const workbook = new ExcelJS.Workbook()
+    workbook.creator = '24/7HR'
     const worksheet = workbook.addWorksheet('Offer Letters')
 
-    // Assigning .columns writes the header values straight into row 1 —
-    // nothing should be added to the sheet before this line.
-    worksheet.columns = columns
-
-    const headerRow = worksheet.getRow(1)
-    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 }
-    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
-    headerRow.alignment = { vertical: 'middle', horizontal: 'center' }
-
-    letters.forEach((letter, index) => {
-      const row = worksheet.getRow(2 + index)
-      row.getCell('letterId').value = letter.id
-      row.getCell('recipientName').value = letter.recipientName
-      row.getCell('recipientEmail').value = letter.recipientEmail
-      row.getCell('month').value = letter.month
-      row.getCell('year').value = letter.year
-      const values = (letter.variableValues as Record<string, string>) || {}
-      variables.forEach((v) => {
-        row.getCell(v).value = values[v] || ''
-      })
-      row.alignment = { vertical: 'middle', horizontal: 'left' }
-      if (index % 2 === 0) {
-        row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } }
-      }
+    // The header sits on row 4 under the title band; bulk-edit/upload finds it by the letterId column.
+    writeStyledTable(worksheet, {
+      title: `${template?.name || 'Offer Letters'}, Bulk Edit`,
+      subtitle: buildSubtitle([company?.companyName, `${letters.length} letter${letters.length === 1 ? '' : 's'}`, 'Do not change the letterId column']),
+      columns,
+      rows: letters.map((letter) => {
+        const values = (letter.variableValues as Record<string, string>) || {}
+        const row: Record<string, any> = {
+          letterId: letter.id,
+          recipientName: letter.recipientName,
+          recipientEmail: letter.recipientEmail,
+          month: letter.month,
+          year: letter.year,
+        }
+        variables.forEach((v) => {
+          row[v] = values[v] || ''
+        })
+        return row
+      }),
+      autoFilter: false,
+      footer: confidentialFooter(company?.companyName),
     })
 
     const buffer = await workbook.xlsx.writeBuffer()
@@ -112,8 +113,8 @@ export async function POST(request: NextRequest) {
       new NextResponse(buffer as any, {
         status: 200,
         headers: {
-          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition': 'attachment; filename="offer-letters-bulk-edit.xlsx"',
+          'Content-Type': XLSX_MIME,
+          'Content-Disposition': attachmentDisposition(`Offer Letters Bulk Edit (${safeFileName(company?.companyName || 'Company')}).xlsx`),
           'Cache-Control': 'no-cache',
         },
       }),

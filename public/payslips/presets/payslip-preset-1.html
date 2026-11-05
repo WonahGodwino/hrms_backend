@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{{payslipTitle}}</title>
+<style>
+  /* 247HR payslip preset. Design rules locked for this document:
+     - Radius system: 12px on all containers.
+     - Accent: navy #16243d (brand). Green/red are SEMANTIC only
+       (earnings vs deductions), never decorative.
+     - Type scale: single tracking ladder (2px labels, 1.5px headers).
+     - Figures use tabular numerals so money columns align. */
+  @page { size: A4; margin: 0; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    color: #1f2937;
+    background: #ffffff;
+    padding: 32px 40px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  /* ===== Header banner ===== */
+  .header {
+    background: #16243d;
+    color: #ffffff;
+    border-radius: 12px;
+    padding: 22px 26px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .header .company { font-size: 22px; font-weight: bold; letter-spacing: 0.3px; }
+  /* Company logo replaces the company name when one is set. Height-capped
+     so the header block keeps the same footprint either way. */
+  .header .logo {
+    max-height: 44px;
+    max-width: 220px;
+    object-fit: contain;
+    object-position: left;
+    display: block;
+  }
+  .header .tagline { font-size: 10px; letter-spacing: 2px; color: #9db2d0; margin-top: 6px; }
+  .header .title { font-size: 15px; font-weight: bold; text-align: right; }
+  .header .period { font-size: 11px; color: #9db2d0; margin-top: 6px; text-align: right; }
+  .header .location { font-size: 11px; color: #c6d3e6; margin-top: 10px; }
+
+  /* ===== Details grid ===== */
+  .details {
+    margin-top: 18px;
+    background: #f5f7fa;
+    border-radius: 12px;
+    padding: 18px 22px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 48px;
+    row-gap: 12px;
+  }
+  .detail { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
+  .detail .label { font-size: 9.5px; font-weight: bold; letter-spacing: 2px; color: #64748b; white-space: nowrap; }
+  .detail .value { font-size: 11.5px; font-weight: bold; color: #111827; text-align: right; }
+
+  /* ===== Earnings / Deductions columns ===== */
+  .columns { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; column-gap: 22px; }
+  .panel { border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; }
+  .panel h2 { font-size: 12px; letter-spacing: 1.5px; margin-bottom: 10px; }
+  .earnings h2 { color: #2e7d4f; }
+  .deductions h2 { color: #a03737; }
+  .panel .lines { flex: 1; }
+  .line { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px dashed #eef1f5; }
+  .line .label { color: #374151; }
+  .line .amount { font-weight: bold; color: #111827; white-space: nowrap; }
+  /* Total row: always pinned to the bottom of its panel, separated from the
+     item lines above it. */
+  .line.total { border-bottom: none; margin-top: auto; padding-top: 8px; border-top: 2px solid #e2e8f0; }
+  .earnings .line.total .label { font-weight: bold; color: #2e7d4f; }
+  .earnings .line.total .amount { color: #2e7d4f; }
+  .deductions .line.total .label { font-weight: bold; color: #a03737; }
+  .deductions .line.total .amount { color: #a03737; }
+  /* Empty state: when a panel has no line items at all. */
+  .panel .empty { color: #94a3b8; font-size: 10.5px; font-style: italic; padding: 8px 0; }
+
+  /* ===== Net salary box ===== */
+  .net {
+    margin-top: 20px;
+    background: #16243d;
+    color: #ffffff;
+    border-radius: 12px;
+    padding: 20px 26px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .net .label { font-size: 13px; font-weight: bold; letter-spacing: 2px; }
+  .net .amount { font-size: 24px; font-weight: bold; }
+  .net .breakdown { text-align: right; font-size: 10.5px; color: #9db2d0; line-height: 1.7; }
+  .net .breakdown b { color: #e5ecf7; }
+
+  /* ===== Footer ===== */
+  .footer {
+    margin-top: 26px;
+    padding-top: 12px;
+    border-top: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    font-size: 9.5px;
+    color: #94a3b8;
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      {{#if hasCompanyLogo}}<img class="logo" src="{{companyLogo}}" alt="{{companyName}}">{{else}}<div class="company">{{companyName}}</div>{{/if}}
+      {{#if companyTagline}}<div class="tagline">{{companyTagline}}</div>{{/if}}
+      <div class="location">{{companyFooter}}</div>
+    </div>
+    <div>
+      <div class="title">{{payslipTitle}}</div>
+      <div class="period">{{payPeriod}}</div>
+    </div>
+  </div>
+
+  <div class="details">
+    <div class="detail"><span class="label">STAFF NAME</span><span class="value">{{staffName}}</span></div>
+    <div class="detail"><span class="label">PAY PERIOD</span><span class="value">{{payPeriod}}</span></div>
+    {{#if staffId}}<div class="detail"><span class="label">STAFF ID</span><span class="value">{{staffId}}</span></div>{{/if}}
+    <div class="detail"><span class="label">GENERATED</span><span class="value">{{generatedDate}}</span></div>
+    {{#if position}}<div class="detail"><span class="label">POSITION</span><span class="value">{{position}}</span></div>{{/if}}
+    {{#if hasDays}}<div class="detail"><span class="label">DAYS WORKED</span><span class="value">{{daysRange}}</span></div>{{/if}}
+    {{#if department}}<div class="detail"><span class="label">DEPARTMENT</span><span class="value">{{department}}</span></div>{{/if}}
+    {{#if bankName}}<div class="detail"><span class="label">BANK NAME</span><span class="value">{{bankName}}</span></div>{{/if}}
+    {{#if accountNumber}}<div class="detail"><span class="label">ACCOUNT NUMBER</span><span class="value">{{accountNumber}}</span></div>{{/if}}
+    {{#if pfa}}<div class="detail"><span class="label">PFA</span><span class="value">{{pfa}}</span></div>{{/if}}
+    {{#if rsaPin}}<div class="detail"><span class="label">RSA PIN</span><span class="value">{{rsaPin}}</span></div>{{/if}}
+    {{#if taxId}}<div class="detail"><span class="label">TAX-ID</span><span class="value">{{taxId}}</span></div>{{/if}}
+  </div>
+
+  <div class="columns">
+    <div class="panel earnings">
+      <h2>EARNINGS</h2>
+      <div class="lines">
+        {{#earnings}}<div class="line"><span class="label">{{label}}</span><span class="amount">{{amount}}</span></div>{{/earnings}}
+        {{#if hasEarnings}}{{else}}<div class="empty">No earnings recorded for this period.</div>{{/if}}
+      </div>
+      <div class="line total"><span class="label">Gross salary</span><span class="amount">{{grossWithSymbol}}</span></div>
+    </div>
+    <div class="panel deductions">
+      <h2>DEDUCTIONS</h2>
+      <div class="lines">
+        {{#deductions}}<div class="line"><span class="label">{{label}}</span><span class="amount">{{amount}}</span></div>{{/deductions}}
+        {{#if hasDeductions}}{{else}}<div class="empty">No deductions for this period.</div>{{/if}}
+      </div>
+      <div class="line total"><span class="label">Total deductions</span><span class="amount">{{totalDeductionsSymbol}}</span></div>
+    </div>
+  </div>
+
+  <div class="net">
+    <div>
+      <div class="label">NET SALARY</div>
+      <div class="amount">{{netSalaryWithSymbol}}</div>
+    </div>
+    <div class="breakdown">
+      Gross salary <b>{{grossWithSymbol}}</b><br>
+      Total deductions <b>{{totalDeductionsSymbol}}</b>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>{{companyFooter}}</span>
+    <span>Computer-generated document - no signature required</span>
+  </div>
+</body>
+</html>

@@ -1,6 +1,5 @@
-// src/app/lib/services/grade-level.service.ts
 import { prisma } from '@/app/lib/db'
-import { GradeStatus } from '@prisma/client'
+const db = prisma as any;
 
 export interface GradeLevelFilters {
   search?: string
@@ -43,38 +42,26 @@ export class GradeLevelService {
       ]
     }
 
-    const [grades, total] = await Promise.all([
-      prisma.gradeLevel.findMany({
-        where,
-        include: {
-          steps: {
-            orderBy: { stepNumber: 'asc' }
-          },
-          designations: {
-            select: {
-              id: true,
-              title: true,
-              code: true,
-              staffCount: true
-            }
-          }
-        },
-        orderBy: { rank: 'asc' },
+    const [designations, total] = await Promise.all([
+      (prisma as any).designation.findMany({
+        where: { companyId: this.companyId },
+        orderBy: [{ rank: 'asc' }, { title: 'asc' }],
         skip,
-        take: limit
+        take: limit,
       }),
-      prisma.gradeLevel.count({ where })
+      (prisma as any).designation.count({ where: { companyId: this.companyId } }),
     ])
 
-    const data = grades.map(grade => ({
-      id: grade.id,
-      name: grade.name,
-      rank: grade.rank,
-      steps: grade.totalSteps,
-      staffCount: grade.designations.reduce((sum, d) => sum + d.staffCount, 0),
-      status: grade.status,
-      basePay: grade.basePay,
-      basePayFrequency: grade.basePayFrequency
+    const data = designations.map((d: any) => ({
+      id: d.id,
+      name: d.seniorityBand ? `${d.title} (${d.seniorityBand})` : d.title,
+      rank: d.rank ?? 1,
+      seniorityBand: d.seniorityBand,
+      steps: 1,
+      staffCount: d.staffCount || 0,
+      status: d.status,
+      basePay: d.basePay,
+      basePayFrequency: d.basePayFrequency,
     }))
 
     return {
@@ -89,7 +76,7 @@ export class GradeLevelService {
   }
 
   async getGradeById(id: string) {
-    const grade = await prisma.gradeLevel.findFirst({
+    const grade = await db.gradeLevel.findFirst({
       where: {
         id,
         companyId: this.companyId
@@ -121,7 +108,7 @@ export class GradeLevelService {
     this.validateAccess()
     
     // Check for duplicate rank within company
-    const existingRank = await prisma.gradeLevel.findFirst({
+    const existingRank = await db.gradeLevel.findFirst({
       where: {
         companyId: this.companyId,
         rank: data.rank
@@ -133,7 +120,7 @@ export class GradeLevelService {
     }
     
     // Check for duplicate name within company
-    const existingName = await prisma.gradeLevel.findFirst({
+    const existingName = await db.gradeLevel.findFirst({
       where: {
         companyId: this.companyId,
         name: data.name
@@ -144,7 +131,7 @@ export class GradeLevelService {
       throw new Error(`Grade level name "${data.name}" already exists in this company`)
     }
     
-    return prisma.gradeLevel.create({
+    return db.gradeLevel.create({
       data: {
         name: data.name,
         rank: data.rank,
@@ -172,7 +159,7 @@ export class GradeLevelService {
     
     // Check rank uniqueness if updating
     if (data.rank && data.rank !== grade.rank) {
-      const existingRank = await prisma.gradeLevel.findFirst({
+      const existingRank = await db.gradeLevel.findFirst({
         where: {
           companyId: this.companyId,
           rank: data.rank,
@@ -186,7 +173,7 @@ export class GradeLevelService {
     
     // Check name uniqueness if updating
     if (data.name && data.name !== grade.name) {
-      const existingName = await prisma.gradeLevel.findFirst({
+      const existingName = await db.gradeLevel.findFirst({
         where: {
           companyId: this.companyId,
           name: data.name,
@@ -210,7 +197,7 @@ export class GradeLevelService {
     
     const { benefits, ...updateData } = data
     
-    return prisma.gradeLevel.update({
+    return db.gradeLevel.update({
       where: { id },
       data: {
         ...updateData,
@@ -235,7 +222,7 @@ export class GradeLevelService {
     }
     
     // Update in transaction
-    return prisma.$transaction(async (tx) => {
+    return db.$transaction(async (tx: any) => {
       await tx.gradeStep.deleteMany({
         where: { gradeLevelId: id }
       })
@@ -251,14 +238,19 @@ export class GradeLevelService {
         }
       })
       
+      // stepConfiguration items use the legacy field names the frontend
+      // actually sends (step/percentage/computedPay — see
+      // ConfigureStepsDrawer.jsx), not the GradeStep column names. Reading
+      // step.incrementPercent/step.calculatedPay here was always undefined,
+      // silently saving every step with null pay data.
       const steps = await Promise.all(
         data.stepConfiguration.map((step: any) =>
           tx.gradeStep.create({
             data: {
               gradeLevelId: id,
               stepNumber: step.step,
-              incrementPercent: step.incrementPercent,
-              calculatedPay: step.calculatedPay
+              incrementPercent: step.percentage,
+              calculatedPay: step.computedPay
             }
           })
         )
@@ -292,7 +284,7 @@ export class GradeLevelService {
     }
     
     if (transferTo) {
-      const targetGrade = await prisma.gradeLevel.findFirst({
+      const targetGrade = await db.gradeLevel.findFirst({
         where: {
           id: transferTo,
           companyId: this.companyId
@@ -308,13 +300,13 @@ export class GradeLevelService {
       }
       
       // Transfer designations to target grade
-      await prisma.designation.updateMany({
+      await db.designation.updateMany({
         where: { gradeLevelId: id },
         data: { gradeLevelId: transferTo }
       })
     }
     
-    return prisma.gradeLevel.update({
+    return db.gradeLevel.update({
       where: { id },
       data: { status: 'Inactive' }
     })
@@ -329,7 +321,7 @@ export class GradeLevelService {
       throw new Error('Grade level is already active')
     }
     
-    return prisma.gradeLevel.update({
+    return db.gradeLevel.update({
       where: { id },
       data: { status: 'Active' }
     })
@@ -338,14 +330,14 @@ export class GradeLevelService {
   async getUtilization(id: string) {
     const grade = await this.getGradeById(id)
     
-    const totalStaffAssigned = grade.designations.reduce(
-      (sum, des) => sum + des.staffCount,
+    const totalStaffAssigned = (grade.designations || []).reduce(
+      (sum: number, des: any) => sum + (des.staffCount || 0),
       0
     )
     
     return {
       totalStaffAssigned,
-      mappedDesignations: grade.designations.map(des => ({
+      mappedDesignations: (grade.designations || []).map((des: any) => ({
         id: des.id,
         title: des.title,
         code: des.code,
@@ -356,13 +348,13 @@ export class GradeLevelService {
 
   async getStats() {
     const [totalActiveGrades, allGrades] = await Promise.all([
-      prisma.gradeLevel.count({
+      db.gradeLevel.count({
         where: {
           companyId: this.companyId,
           status: 'Active'
         }
       }),
-      prisma.gradeLevel.findMany({
+      db.gradeLevel.findMany({
         where: { companyId: this.companyId },
         include: {
           designations: {
@@ -372,16 +364,16 @@ export class GradeLevelService {
       })
     ])
     
-    const totalStaffMapped = allGrades.reduce(
-      (sum, grade) => sum + grade.designations.reduce(
-        (desSum, des) => desSum + des.staffCount,
+    const totalStaffMapped = (allGrades as any[]).reduce(
+      (sum: number, grade: any) => sum + (grade.designations || []).reduce(
+        (desSum: number, des: any) => desSum + (des.staffCount || 0),
         0
       ),
       0
     )
     
-    const unmappedGrades = allGrades.filter(
-      grade => grade.designations.length === 0
+    const unmappedGrades = (allGrades as any[]).filter(
+      (grade: any) => (grade.designations || []).length === 0
     ).length
     
     return {

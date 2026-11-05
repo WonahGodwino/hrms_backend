@@ -15,10 +15,10 @@ export interface ScopedOnboarding {
 export async function loadScopedOnboarding(id: string, companyId: string): Promise<ScopedOnboarding | null> {
   const onboarding = await prisma.onboarding.findFirst({
     where: { id, companyId },
-    include: { offer: { include: { candidate: { select: { firstName: true, lastName: true } } } } },
+    include: { application: { include: { candidate: { select: { firstName: true, lastName: true } } } } },
   })
   if (!onboarding) return null
-  const c = (onboarding as any).offer?.candidate
+  const c = (onboarding as any).application?.candidate
   const candidateName = c ? `${c.firstName || ''} ${c.lastName || ''}`.trim() : ''
   return { id: onboarding.id, staffRecordId: onboarding.staffRecordId || null, candidateName }
 }

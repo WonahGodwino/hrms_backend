@@ -8,7 +8,7 @@ import { prisma } from '@/app/lib/db'
 import { sendEmail } from '@/app/lib/email'
 import { signUnsubscribeToken } from '@/app/lib/talent-pool/token'
 
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://247hr.co.uk'
+const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk'
 
 type JobForAdvert = {
   id: string

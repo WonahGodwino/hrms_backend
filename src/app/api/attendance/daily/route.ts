@@ -3,17 +3,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/app/lib/auth";
 import { requireModuleAccess } from "@/app/lib/module-access";
 import { withCors, handleCorsOptions } from "@/app/lib/cors";
+import { canManageAttendance } from "@/app/lib/attendance/access";
+import { startOfBusinessDay, businessDateKey, addBusinessDays } from "@/app/lib/attendance/business-day";
+import { ensureHolidayAttendance, HOLIDAY_METHOD, getWorkSettings, checkClockOutWindow } from "@/app/lib/attendance/work-calendar";
+import { fillMissingAddresses, parseClockLocation, signInLocationData, signOutLocationData, locationView, LOCATION_REQUIRED_MESSAGE } from "@/app/lib/attendance/clock-location";
+import { isLate } from "@/app/lib/attendance/lateness";
 
-// Utility function to get the start of the day
-function startOfDay(date = new Date()) {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function toDateKey(date: Date): string {
-  return startOfDay(date).toISOString().split("T")[0];
-}
+// Business-day-aware (Africa/Lagos, not server-local) — see business-day.ts.
+const startOfDay = startOfBusinessDay;
+const toDateKey = businessDateKey;
 
 type AttendanceStatus = "PRESENT" | "LATE" | "PARTIAL" | "ABSENT";
 
@@ -124,6 +122,9 @@ export async function POST(req: NextRequest) {
     const today = startOfDay();
     const now = new Date();
 
+    // Holidays: everyone is clocked in/out automatically (work-calendar.ts).
+    await ensureHolidayAttendance(companyId, now);
+
     // 7. Check for existing attendance record today
     const existingAttendance = await prisma.attendance.findFirst({
       where: {
@@ -136,12 +137,51 @@ export async function POST(req: NextRequest) {
       }
     });
 
+    // Already a full in/out today (or a holiday auto-entry) — creating another
+    // row would violate the companyId+staffId+date unique key.
+    if (existingAttendance?.signOutTime) {
+      const isHoliday = existingAttendance.method === HOLIDAY_METHOD;
+      const response = NextResponse.json(
+        {
+          success: false,
+          code: isHoliday ? 'HOLIDAY' : 'ALREADY_COMPLETE',
+          message: isHoliday
+            ? `Today is a holiday (${existingAttendance.notes?.replace(/^Holiday:\s*/, '') || 'holiday'}). ${staff.firstName} ${staff.lastName} was clocked in and out automatically.`
+            : `${staff.firstName} ${staff.lastName} has already signed in and out today`,
+        },
+        { status: 409 }
+      );
+      return withCors(response, origin);
+    }
+
+    // Compliance: the recorder's device location is saved with every entry;
+    // without one the action is refused (clock-location.ts).
+    const location = parseClockLocation(body);
+    if (!location) {
+      const response = NextResponse.json({ success: false, code: 'LOCATION_REQUIRED', message: LOCATION_REQUIRED_MESSAGE }, { status: 400 });
+      return withCors(response, origin);
+    }
+
     let attendanceRecord;
     let action: 'SIGN_IN' | 'SIGN_OUT';
     let message: string;
+    const settings = await getWorkSettings(companyId);
 
     if (existingAttendance && existingAttendance.signInTime && !existingAttendance.signOutTime) {
-      // 8. Staff is signing OUT (already signed in today)
+      // 8. Staff is signing OUT (already signed in today) — only allowed
+      // from closing time onward, not before.
+      const windowCheck = checkClockOutWindow(settings, now);
+      if (!windowCheck.allowed) {
+        const response = NextResponse.json(
+          {
+            success: false,
+            code: 'BEFORE_CLOSING',
+            message: `${staff.firstName} ${staff.lastName} can't be clocked out before closing time (${windowCheck.closesAt})`,
+          },
+          { status: 403 }
+        );
+        return withCors(response, origin);
+      }
       attendanceRecord = await prisma.attendance.update({
         where: { id: existingAttendance.id },
         data: {
@@ -150,14 +190,18 @@ export async function POST(req: NextRequest) {
           recordedByRole: adminUser.role,
           method,
           updatedAt: now,
+          ...(await signOutLocationData(location)),
         },
       });
       action = 'SIGN_OUT';
       message = `${staff.firstName} ${staff.lastName} signed out successfully`;
       
     } else {
-      // 9. Staff is signing IN (no sign-in today or already signed out)
-      
+      // 9. Staff is signing IN (no sign-in today or already signed out).
+      // No time restriction here — early or late is always accepted, but a
+      // sign-in past the grace period is recorded as LATE.
+      const late = isLate({ standardStartTime: settings.startTime, lateGraceMinutes: settings.lateGraceMinutes }, now);
+
       // Check if there was a sign-in today but staff forgot to sign out yesterday
       const previousDayAttendance = await prisma.attendance.findFirst({
         where: {
@@ -190,10 +234,14 @@ export async function POST(req: NextRequest) {
           recordedById: adminUser.userId,
           recordedByRole: adminUser.role,
           method,
+          status: late ? 'LATE' : 'PRESENT',
+          ...(await signInLocationData(location)),
         },
       });
       action = 'SIGN_IN';
-      message = `${staff.firstName} ${staff.lastName} signed in successfully`;
+      message = late
+        ? `${staff.firstName} ${staff.lastName} signed in successfully (recorded as late)`
+        : `${staff.firstName} ${staff.lastName} signed in successfully`;
     }
 
     // 10. Return success response
@@ -212,6 +260,7 @@ export async function POST(req: NextRequest) {
           status: deriveAttendanceStatus(attendanceRecord),
           rawStatus: attendanceRecord.status,
           notes: attendanceRecord.notes,
+          location: locationView(attendanceRecord),
           createdAt: attendanceRecord.createdAt,
           updatedAt: attendanceRecord.updatedAt,
         },
@@ -306,6 +355,9 @@ export async function GET(req: NextRequest) {
     }
 
     const targetDate = startOfDay(new Date(date));
+
+    // Holiday auto-attendance for the day being viewed (no-op otherwise).
+    await ensureHolidayAttendance(companyId, targetDate);
     
     // Get attendance for the day
     const attendance = await prisma.attendance.findMany({
@@ -338,6 +390,9 @@ export async function GET(req: NextRequest) {
       }
     });
 
+    // Make sure every clock-in / clock-out location shows a real address
+    await fillMissingAddresses(attendance);
+
     const signedInToday = attendance.filter(a => a.signInTime && !a.signOutTime).length;
     const signedOutToday = attendance.filter(a => a.signOutTime).length;
 
@@ -356,6 +411,7 @@ export async function GET(req: NextRequest) {
           signInAt: record.signInTime,
           signOutAt: record.signOutTime,
           method: record.method,
+          location: locationView(record),
           staff: record.staffRecord,
         }))
       }
@@ -401,29 +457,10 @@ function buildIdentifierQuery(identifier: string, method: string) {
 
 // Helper function to validate company access
 async function validateCompanyAccess(user: any, companyId: string): Promise<boolean> {
-  const { prisma } = await import("@/app/lib/prisma");
-  
-  if (user.role === 'SUPER_ADMIN') {
-    return true;
-  }
-  
-  if (user.role === 'HR') {
-    return user.companyId === companyId;
-  }
-  
-  if (user.role === 'ADMIN') {
-    // Check if admin has access to this company
-    const userCompany = await prisma.userCompany.findFirst({
-      where: {
-        userId: user.userId,
-        companyId,
-        role: { in: ['ADMIN', 'ALL'] }
-      }
-    });
-    return !!userCompany;
-  }
-  
-  return false;
+  // One rule for the whole attendance module (lib/attendance/access.ts):
+  // company membership incl. multi-company HR/ADMIN + Attendance enabled
+  // for that company, so the company switcher scopes everything.
+  return canManageAttendance(user, companyId);
 }
 
 // Helper function to suggest similar staff

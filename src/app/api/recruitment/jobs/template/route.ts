@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
       'employmentType',
       'workplaceType',
       'experienceLevel',
-      'salaryRange',
+      'salary',
       'locations',
       'expirationDate',
       'status'
@@ -54,8 +54,8 @@ export async function GET(request: NextRequest) {
       'Full-time',
       'Hybrid',
       'Senior',
-      'N500,000 - N800,000',
-      'Lagos:Ikeja,Abuja:Wuse',
+      500000,
+      'Lagos:Ikeja:Ikeja GRA,Abuja:Abuja Municipal:Wuse',
       '2026-05-30',
       'ACTIVE'
     ])
@@ -71,7 +71,8 @@ export async function GET(request: NextRequest) {
     sheet.addRow(['    • Leave a blank line between paragraphs.'])
     sheet.addRow(['    • Start a line with "-" for a bullet point.'])
     sheet.addRow(['    • Formatting is applied automatically when the file is imported.'])
-    sheet.addRow(['- locations: format "State:LGA" separated by commas'])
+    sheet.addRow(['- locations: "State:LGA" or "State:LGA:City" separated by commas (City is optional)'])
+    sheet.addRow(['- salary: one numeric amount, e.g. 500000 (no ranges)'])
     sheet.addRow(['- employmentType: Full-time, Part-time, Contract, Internship, Temporary'])
     sheet.addRow(['- workplaceType: On-site, Hybrid, Remote'])
     sheet.addRow(['- experienceLevel: Entry-level, Mid-level, Senior, Lead, Executive'])

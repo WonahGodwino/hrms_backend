@@ -72,7 +72,7 @@ function fold(line: string): string {
  * Build a complete .ics document string. Returns null if `start` is invalid
  * (an all-day/unscheduled event should not produce a calendar invite).
  */
-export function buildIcs(o: IcsOptions): string | null {
+function buildIcs(o: IcsOptions): string | null {
   if (!o.start || isNaN(o.start.getTime())) return null
 
   const method = o.method || 'REQUEST'

@@ -300,7 +300,7 @@ export const apiDocs: ApiDoc[] = [
     path: '/api/payroll/template/dynamic',
     title: 'Create dynamic payroll template',
     description:
-      'Creates a new custom payroll template for a company. Supports sections: STAFF_DETAILS, FIXED_EARNINGS, FIXED_VALUE, EARNINGS, DEDUCTIONS. Each section can have multiple fields with custom properties.',
+      'Creates a new custom payroll template for a company. Supports sections: STAFF_DETAILS, FIXED_EARNINGS, FIXED_VALUES, EARNINGS, DEDUCTIONS. Each section can have multiple fields with custom properties.',
     auth: 'Authorization: Bearer <HR | SUPER_ADMIN | ADMIN token>',
     input: 'JSON body with template structure',
     output:

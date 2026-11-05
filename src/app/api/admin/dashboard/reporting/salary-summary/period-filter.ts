@@ -63,7 +63,7 @@ export function getQuarterRange(quarter: number): { start: number; end: number }
   return { start: 10, end: 12 }
 }
 
-export function getMonthQueryCandidates(monthNumber: number): string[] {
+function getMonthQueryCandidates(monthNumber: number): string[] {
   const monthName = getMonthName(monthNumber)
   const monthAbbrev = monthName.slice(0, 3)
   const asNumber = String(monthNumber)

@@ -1,11 +1,13 @@
 // POST /api/business-units/import/confirm  { sessionId }
 // Creates the Business Units validated under the given session. Returns
 // { created, skipped }. The session is consumed (single-use).
+import { assertTrialCapacity, trialErrorBody } from '@/app/lib/trial/guard'
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { logRecordChange, logBulkChange } from '@/app/lib/core-setup/audit'
 import { resolveBUCompanyId } from '@/app/lib/business-units/bu-utils'
 import { verifyImportToken } from '@/app/lib/business-units/import-token'
 
@@ -52,6 +54,7 @@ export async function POST(req: NextRequest) {
         })
         if (dup) { skipped++; continue }
 
+        await assertTrialCapacity(companyId, 'businessUnits')
         await (prisma as any).businessUnit.create({
           data: {
             companyId,
@@ -65,10 +68,14 @@ export async function POST(req: NextRequest) {
           },
         })
         created++
-      } catch {
+      } catch (err) {
+        // Trial limit: stop the import and say why rather than silently skipping.
+        if (trialErrorBody(err)) throw err
         skipped++
       }
     }
+
+    if (created || skipped) await logBulkChange(req, user, { companyId, label: 'Business unit import', created, skipped, area: 'org' })
 
     return withCors(ApiResponse.success({ created, skipped }, 'Import processed successfully'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }

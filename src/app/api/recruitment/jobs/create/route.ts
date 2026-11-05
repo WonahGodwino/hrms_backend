@@ -1,4 +1,5 @@
 // src/app/api/jobs/create/route.ts
+import { assertTrialCapacity, trialErrorBody } from '@/app/lib/trial/guard'
 import { NextRequest } from "next/server";
 import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
@@ -7,6 +8,7 @@ import { ApiResponse, formatError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { sanitizeOfferDefaults } from "@/app/lib/jobs/offer-defaults";
 import { notifyTalentPoolOfJob } from "@/app/lib/talent-pool/notify";
+import { formatJobSalary, parseSalaryAmount } from "@/app/lib/recruitment/job-salary";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -15,6 +17,7 @@ export async function OPTIONS(request: NextRequest) {
 type Location = {
   state: string;
   lga: string;
+  city?: string;
 };
 
 type CreateJobBody = {
@@ -25,7 +28,7 @@ type CreateJobBody = {
   employmentType?: string;
   workplaceType?: string;
   experienceLevel?: string;
-  salaryRange?: string;
+  salary?: number | string | null;
   benefits?: string[];
   locations?: Location[];
   expirationDate?: string | null;
@@ -120,7 +123,7 @@ export async function POST(request: NextRequest) {
         id: companyId,
         archived: 0
       },
-      select: { id: true, companyName: true }
+      select: { id: true, companyName: true, baseCurrency: true }
     });
 
     if (!company) {
@@ -190,6 +193,15 @@ export async function POST(request: NextRequest) {
 
     const status = normalizeStatus(body.status) ?? "ACTIVE";
 
+    // Single numeric salary (company base currency); a range is not accepted.
+    let salary: number | null = null;
+    if (body.salary !== undefined && body.salary !== null && String(body.salary).trim() !== "") {
+      salary = parseSalaryAmount(body.salary);
+      if (salary === null) {
+        return withCors(ApiResponse.error("Salary must be a single numeric amount (no ranges).", 400), origin);
+      }
+    }
+
     // Prepare benefits and locations as JSON
     const benefits = body.benefits && body.benefits.length > 0 ? body.benefits : undefined;
     const locations = body.locations && body.locations.length > 0 ? body.locations : undefined;
@@ -219,6 +231,8 @@ export async function POST(request: NextRequest) {
 
     const offerDefaults = sanitizeOfferDefaults(body.offerDefaults);
 
+    await assertTrialCapacity(companyId, 'openJobs')
+
     // Create the job with all fields
     const job = await prisma.job.create({
       data: {
@@ -232,7 +246,7 @@ export async function POST(request: NextRequest) {
         employmentType: body.employmentType,
         workplaceType: body.workplaceType,
         experienceLevel: body.experienceLevel,
-        salaryRange: body.salaryRange,
+        ...(salary !== null ? { salary } : {}),
         benefits: benefits ? JSON.parse(JSON.stringify(benefits)) : undefined,
         locations: locations ? JSON.parse(JSON.stringify(locations)) : undefined,
         ...(offerDefaults ? { offerDefaults } : {}),
@@ -257,13 +271,22 @@ export async function POST(request: NextRequest) {
           position: job.position,
           employmentType: job.employmentType,
           workplaceType: job.workplaceType,
-          salaryRange: job.salaryRange,
+          salaryRange: formatJobSalary({ salary }, company.baseCurrency),
           companyId: companyId!,
         },
         company.companyName,
       )
         .then((r) => console.log(`[JOB_CREATE] Talent-pool advert for ${job.id}:`, r))
         .catch((err) => console.error(`[JOB_CREATE] Talent-pool advert failed for ${job.id}:`, err));
+
+      // Audit trail only — the external distribution feed is pull-based
+      // (see lib/recruitment/job-feed.ts), this just marks when the job
+      // became available to it.
+      void prisma.jobBoardDeliveryLog
+        .create({
+          data: { companyId: companyId!, jobId: job.id, channel: 'FEED_PULL', event: 'PUBLISHED', status: 'SENT' },
+        })
+        .catch(() => {});
     }
 
     return withCors(
@@ -279,6 +302,8 @@ export async function POST(request: NextRequest) {
     );
 
   } catch (error) {
+    const trial = trialErrorBody(error)
+    if (trial) return withCors(ApiResponse.error(trial.message, trial.status, undefined, { trialCode: trial.code }), origin)
     console.error("[JOB_CREATE] Error:", error);
     return withCors(ApiResponse.error(formatError(error), 500), origin);
   }

@@ -5,7 +5,7 @@
 import { prisma } from '@/app/lib/db'
 
 // Higher number = more privilege. Used so an elevation only ever UPGRADES.
-export const ROLE_RANK: Record<string, number> = {
+const ROLE_RANK: Record<string, number> = {
   SUPER_ADMIN: 4,
   ADMIN: 3,
   HR: 2,
@@ -16,9 +16,6 @@ export const ROLE_RANK: Record<string, number> = {
 export function rankOf(role?: string | null): number {
   return ROLE_RANK[String(role || '').toUpperCase()] ?? 0
 }
-
-// Roles that can be temporarily granted.
-export const GRANTABLE_ROLES = ['ADMIN', 'HR'] as const
 
 // Who may GRANT which elevated role:
 //   ADMIN / SUPER_ADMIN → may grant ADMIN or HR
@@ -40,11 +37,6 @@ export function canManageRole(actorRole: string, elevatedRole: string): boolean 
   if (a === 'SUPER_ADMIN' || a === 'ADMIN') return true
   if (a === 'HR') return t === 'HR'
   return false
-}
-
-// The roles a given actor is allowed to grant (for the UI to filter options).
-export function grantableRolesFor(actorRole: string): string[] {
-  return GRANTABLE_ROLES.filter((r) => canGrantRole(actorRole, r))
 }
 
 // The elevated role currently in force for a staff member in a company, or null.

@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
       prisma.certificationRecord.count({ where: { companyId, status: 'Valid' } }),
       prisma.certificationRecord.count({ where: { companyId, status: 'Expiring Soon' } }),
       prisma.certificationRecord.count({ where: { companyId, status: 'Expired' } }),
-      prisma.assessment.count({ where: { companyId, deletedAt: null } }),
+      prisma.assessment.count({ where: { companyId, deletedAt: null, name: { not: '__QUESTION_BANK__' } } }),
       prisma.assessmentAttempt.count({ where: { companyId, outcome: 'Passed' } }),
       prisma.assessmentAttempt.count({ where: { companyId, outcome: 'Failed' } }),
       prisma.trainingAuditLog.findMany({

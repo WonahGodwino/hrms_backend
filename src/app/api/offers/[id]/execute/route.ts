@@ -9,6 +9,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { OFFER_DISPLAY_STATUS, readOfferMetadata, readPdfUpload } from '@/app/lib/offers/ad-hoc-helpers'
+import { promoteCandidateToStaff, PromoteCandidateError } from '@/app/lib/staff/promote-candidate-to-staff'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -81,21 +82,40 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         },
       })
 
-      // Reflect acceptance on the application
-      await tx.jobApplication.update({
-        where: { id: offer.applicationId },
-        data: { status: 'HIRED', updatedBy: actor },
-      })
-
-      // If onboarding was requested, prepare the handoff record (idempotent)
-      if (initiateOnboarding) {
-        await tx.onboarding.upsert({
-          where: { offerId: offer.id },
-          update: {},
-          create: { companyId, offerId: offer.id, status: 'IN_PROGRESS', createdBy: actor },
+      // When the caller doesn't want onboarding/staff creation triggered here,
+      // at least keep the pipeline status aligned. When it does, promotion
+      // (below, after the transaction) sets HIRED itself.
+      if (!initiateOnboarding) {
+        await tx.jobApplication.update({
+          where: { id: offer.applicationId },
+          data: { status: 'HIRED', updatedBy: actor },
         })
       }
     })
+
+    // This ad-hoc offer path doesn't require the structured pre-offer
+    // onboarding gate (it's used outside the normal interview pipeline), so
+    // find-or-create the onboarding record now, already linked to the offer,
+    // then promote straight to staff.
+    let staffRecordId: string | null = null
+    let staffId: string | null = null
+    if (initiateOnboarding) {
+      const onboarding = await prisma.onboarding.upsert({
+        where: { offerId: offer.id },
+        update: {},
+        create: { companyId, applicationId: offer.applicationId, offerId: offer.id, status: 'IN_PROGRESS', createdBy: actor },
+      })
+      try {
+        const result = await promoteCandidateToStaff({ onboardingId: onboarding.id, companyId, actor })
+        staffRecordId = result.staffRecordId
+        staffId = result.staffId
+      } catch (promoteError) {
+        if (promoteError instanceof PromoteCandidateError) {
+          return withCors(ApiResponse.error(promoteError.message, promoteError.status), origin)
+        }
+        throw promoteError
+      }
+    }
 
     return withCors(
       ApiResponse.success(
@@ -104,10 +124,12 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
           status: OFFER_DISPLAY_STATUS.ACCEPTED,
           executedDocument,
           initiateOnboarding,
-          nextStep: initiateOnboarding ? 'onboarding_ready' : 'completed',
+          staffRecordId,
+          staffId,
+          nextStep: initiateOnboarding ? 'promoted_to_staff' : 'completed',
         },
         initiateOnboarding
-          ? 'Executed contract uploaded. Ready for Core HR Onboarding.'
+          ? 'Executed contract uploaded. The employee has been added to staff records.'
           : 'Executed contract uploaded. Workflow loop closed.'
       ),
       origin

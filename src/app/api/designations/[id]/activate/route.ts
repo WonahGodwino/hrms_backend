@@ -3,6 +3,7 @@ import { prisma } from '@/app/lib/db'
 import { getUserFromToken } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { logRecordChange, logBulkChange } from '@/app/lib/core-setup/audit'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -23,6 +24,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const staffCount = await prisma.staffRecord.count({ where: { designationId: id } })
     await (prisma as any).designation.update({ where: { id }, data: { status: 'Active', staffCount } })
+
+    await logRecordChange(req, user, { companyId: existing.companyId, noun: 'Designation', type: 'designation', before: { id, title: existing.title, status: existing.status }, after: { id, title: existing.title, status: 'Active' } })
 
     return withCors(ApiResponse.success({ id, status: 'Active', staffCount }, 'Designation activated'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }

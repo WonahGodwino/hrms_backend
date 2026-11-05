@@ -7,6 +7,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { decimalToNumber } from '@/app/lib/prisma-utils'
+import { getActionableRequestIds, getManagedDepartmentIds } from "@/app/lib/leave/approval-chain"
 
 // Define types for team members
 interface TeamMember {
@@ -37,8 +38,8 @@ export async function GET(request: NextRequest) {
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
       return withCors(
-        ApiResponse.error('Authorization header missing', 401),
-        origin
+          ApiResponse.error('Authorization header missing', 401),
+          origin
       )
     }
 
@@ -52,7 +53,7 @@ export async function GET(request: NextRequest) {
     const year = searchParams.get('year')
     const month = searchParams.get('month')
     const leaveTypeId = searchParams.get('leaveTypeId')
-    
+
     // For managers to view their team's pending approvals
     const viewTeamApprovals = searchParams.get('viewTeamApprovals') === 'true'
     const specificTeamMemberId = searchParams.get('staffId') // View specific team member's leaves
@@ -61,9 +62,9 @@ export async function GET(request: NextRequest) {
 
     // ============ GET CURRENT USER'S STAFF RECORD ============
     const currentStaff = await prisma.staffRecord.findFirst({
-      where: { 
-        email: user.email, 
-        isActive: true 
+      where: {
+        email: user.email,
+        isActive: true
       },
       include: {
         company: {
@@ -72,9 +73,24 @@ export async function GET(request: NextRequest) {
             companyName: true
           }
         },
-        // Get all staff who report to this user (directReports)
-        directReports: {
-          select: { 
+      }
+    })
+
+    if (!currentStaff) {
+      return withCors(
+          ApiResponse.error('Staff record not found', 404),
+          origin
+      )
+    }
+
+    // A line manager sits on a department's ladder; their "team" is the staff of
+    // those departments (leave approval no longer uses staff.managerId).
+    const managedDepartmentIds = await getManagedDepartmentIds(prisma, currentStaff.id)
+    const isManager = managedDepartmentIds.length > 0
+    const teamStaff = isManager
+      ? await prisma.staffRecord.findMany({
+          where: { departmentId: { in: managedDepartmentIds }, isActive: true, id: { not: currentStaff.id } },
+          select: {
             id: true,
             staffId: true,
             firstName: true,
@@ -83,53 +99,31 @@ export async function GET(request: NextRequest) {
             position: true,
             email: true
           },
-          orderBy: {
-            firstName: 'asc'
-          }
-        }
-      }
-    })
-
-    if (!currentStaff) {
-      return withCors(
-        ApiResponse.error('Staff record not found', 404),
-        origin
-      )
-    }
-
-    // Determine if user is a manager (has people reporting to them)
-    const directReportsCount = currentStaff.directReports.length
-    const isManager = directReportsCount > 0
+          orderBy: { firstName: 'asc' }
+        })
+      : []
+    // Requests currently waiting on this person (their ladder level is up)
+    const actionableIds = isManager ? await getActionableRequestIds(prisma, currentStaff.id) : []
 
     // ============ BUILD WHERE CLAUSE BASED ON ACCESS LEVEL ============
     let where: any = {}
 
     // CASE 1: Viewing team approvals (manager view)
     if (viewTeamApprovals && isManager) {
-      // Get leaves for all direct reports
-      const teamMemberIds = currentStaff.directReports.map(dr => dr.id)
-      
-      where = {
-        staffRecordId: { in: teamMemberIds },
-        // Only show pending leaves that need manager approval
-        status: 'PENDING',
-        currentStep: 'MANAGER',
-        // Ensure this manager is the designated approver
-        managerApproverId: currentStaff.id
-      }
-    } 
+      where = { id: { in: actionableIds } }
+    }
     // CASE 2: Viewing specific team member's leaves
     else if (specificTeamMemberId && isManager) {
-      // Verify this team member is actually a direct report
-      const isDirectReport = currentStaff.directReports.some(dr => dr.id === specificTeamMemberId)
-      
-      if (!isDirectReport) {
+      // Verify this team member is in a department this user manages
+      const isTeamMember = teamStaff.some(dr => dr.id === specificTeamMemberId)
+
+      if (!isTeamMember) {
         return withCors(
-          ApiResponse.error('You are not authorized to view this staff member\'s leaves', 403),
-          origin
+            ApiResponse.error('You are not authorized to view this staff member\'s leaves', 403),
+            origin
         )
       }
-      
+
       where = {
         staffRecordId: specificTeamMemberId,
         // Show all leaves for this team member (not just pending)
@@ -147,7 +141,7 @@ export async function GET(request: NextRequest) {
     if (leaveTypeId) {
       where.leaveTypeId = leaveTypeId
     }
-    
+
     if (year) {
       const yearNum = parseInt(year)
       where.startDate = {
@@ -155,7 +149,7 @@ export async function GET(request: NextRequest) {
         lt: new Date(yearNum + 1, 0, 1)
       }
     }
-    
+
     if (month) {
       const monthNum = parseInt(month)
       const yearNum = parseInt(year || new Date().getFullYear().toString())
@@ -269,76 +263,73 @@ export async function GET(request: NextRequest) {
 
     if (isManager) {
       // Count all pending leaves from direct reports that need this manager's approval
-      pendingApprovalsCount = await prisma.leaveRequest.count({
-        where: {
-          staffRecordId: { in: currentStaff.directReports.map(dr => dr.id) },
-          status: 'PENDING',
-          currentStep: 'MANAGER',
-          managerApproverId: currentStaff.id
-        }
-      })
-      
-      // Get all team members with pending approval counts
+      pendingApprovalsCount = actionableIds.length
+
+      // Team members (staff of the departments this user manages) with the
+      // number of their requests currently waiting on this user
+      const pendingByStaff = new Map<string, number>()
+      if (actionableIds.length > 0) {
+        const grouped = await prisma.leaveRequest.groupBy({
+          by: ['staffRecordId'],
+          where: { id: { in: actionableIds } },
+          _count: { _all: true }
+        })
+        grouped.forEach((g) => pendingByStaff.set(g.staffRecordId, g._count._all))
+      }
+
       teamMembers = await Promise.all(
-        currentStaff.directReports.map(async (member) => {
-          const pendingCount = await prisma.leaveRequest.count({
-            where: {
-              staffRecordId: member.id,
-              status: 'PENDING',
-              currentStep: 'MANAGER',
-              managerApproverId: currentStaff.id
+          teamStaff.map(async (member) => {
+            const pendingCount = pendingByStaff.get(member.id) || 0
+
+            return {
+              id: member.id,
+              staffId: member.staffId,
+              firstName: member.firstName,
+              lastName: member.lastName,
+              department: member.department,
+              position: member.position,
+              email: member.email,
+              pendingApprovals: pendingCount
             }
           })
-          
-          return {
-            id: member.id,
-            staffId: member.staffId,
-            firstName: member.firstName,
-            lastName: member.lastName,
-            department: member.department,
-            position: member.position,
-            email: member.email,
-            pendingApprovals: pendingCount
-          }
-        })
       )
     }
 
     return withCors(
-      ApiResponse.success({
-        leaves: formattedLeaves,
-        balances: formattedBalances,
-        staffInfo: {
-          id: currentStaff.id,
-          staffId: currentStaff.staffId,
-          name: `${currentStaff.firstName} ${currentStaff.lastName}`,
-          email: currentStaff.email,
-          department: currentStaff.department,
-          position: currentStaff.position,
-          company: currentStaff.company,
-          isManager,
-          directReportsCount,
-        },
-        managerInfo: isManager ? {
-          pendingApprovalsCount,
-          teamMembers,
-          viewMode: viewTeamApprovals ? 'team' : 'own'
-        } : null,
-        managerDirectReportsCount: directReportsCount,
-        pagination: {
-          page,
-          limit,
-          totalCount,
-          totalPages: Math.ceil(totalCount / limit)
-        }
-      }),
-      origin
+        ApiResponse.success({
+          leaves: formattedLeaves,
+          balances: formattedBalances,
+          staffInfo: {
+            id: currentStaff.id,
+            staffId: currentStaff.staffId,
+            name: `${currentStaff.firstName} ${currentStaff.lastName}`,
+            email: currentStaff.email,
+            department: currentStaff.department,
+            position: currentStaff.position,
+            company: currentStaff.company,
+            isManager,
+            directReportsCount: teamStaff.length,
+          },
+          managerInfo: isManager ? {
+            pendingApprovalsCount,
+            teamMembers,
+            viewMode: viewTeamApprovals ? 'team' : 'own'
+          } : null,
+          managerDirectReportsCount: teamStaff.length,
+          pagination: {
+            page,
+            limit,
+            totalCount,
+            totalPages: Math.ceil(totalCount / limit)
+          }
+        }),
+        origin
     )
 
   } catch (error) {
     return withCors(
-      handleApiError(error),
-      origin
+        handleApiError(error),
+        origin
     )
   }
 }

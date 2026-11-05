@@ -8,7 +8,7 @@ import { prisma } from '@/app/lib/db'
 import { sendEmail } from '@/app/lib/email'
 import { buildIcsAttachment } from '@/app/lib/calendar/ics'
 
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://247hr.co.uk'
+const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk'
 
 const INTERVIEW_TYPE_LABEL: Record<string, string> = {
   VIDEO: 'Video call',

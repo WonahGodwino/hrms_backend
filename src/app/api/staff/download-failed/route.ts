@@ -4,6 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import ExcelJS from 'exceljs'
+import { writeStyledTable, buildSubtitle, confidentialFooter, safeFileName, attachmentDisposition, toneCell, XLSX_MIME } from '@/app/lib/excel/sheet-theme'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 export async function OPTIONS(request: NextRequest) {
@@ -55,8 +56,31 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Enforce company scoping (SUPER_ADMIN can see all; others only their company)
-    if (user.role !== 'SUPER_ADMIN') {
+    // Enforce company scoping. SUPER_ADMIN sees all; HR/MANAGER are scoped to
+    // their single current company; ADMIN is checked against every company
+    // they're actually assigned to via UserCompany — a plain companyId
+    // equality check (the old behavior) incorrectly blocked an ADMIN
+    // downloading records for a company they have real access to but that
+    // isn't their token's "current" company.
+    if (user.role === 'ADMIN') {
+      const hasAccess = await prisma.userCompany.findFirst({
+        where: {
+          userId: user.userId,
+          companyId: upload.companyId,
+          role: { in: ['ADMIN', 'ALL'] }
+        }
+      })
+
+      if (!hasAccess) {
+        return withCors(
+          ApiResponse.error(
+            'You are not authorized to download failed records for this upload',
+            403
+          ),
+          origin
+        )
+      }
+    } else if (user.role !== 'SUPER_ADMIN') {
       if (!user.companyId) {
         return withCors(
           ApiResponse.error('No company assigned for this user', 400),
@@ -121,36 +145,30 @@ export async function GET(request: NextRequest) {
       })
 
     // Build Excel file with S/N, Staff ID, Error Message
+    const company = await prisma.company.findUnique({ where: { id: upload.companyId }, select: { companyName: true } })
     const workbook = new ExcelJS.Workbook()
+    workbook.creator = '24/7HR'
     const worksheet = workbook.addWorksheet('Failed Staff Records')
 
-    worksheet.columns = [
-      { header: 'S/N', key: 'sn', width: 10 },
-      { header: 'Staff ID', key: 'staffId', width: 25 },
-      { header: 'Error Message', key: 'error', width: 80 },
-    ]
-
-    errorEntries.forEach((entry, index) => {
-      worksheet.addRow({
-        sn: index + 1,
-        staffId: entry.staffId || '',
-        error: entry.error,
-      })
+    writeStyledTable(worksheet, {
+      title: 'Failed Staff Records',
+      subtitle: buildSubtitle([company?.companyName, upload.fileName, `${errorEntries.length} failed`]),
+      columns: [
+        { header: 'S/N', key: 'sn', width: 8, align: 'center' },
+        { header: 'Staff ID', key: 'staffId', width: 26, align: 'left' },
+        { header: 'Error Message', key: 'error', width: 80, align: 'left' },
+      ],
+      rows: errorEntries.map((entry, index) => ({ sn: index + 1, staffId: entry.staffId || '', error: entry.error })),
+      onRow: (row) => toneCell(row.getCell(3), 'danger'),
+      footer: confidentialFooter(company?.companyName),
     })
-
-    // Style header row
-    const headerRow = worksheet.getRow(1)
-    headerRow.font = { bold: true }
-    headerRow.alignment = { vertical: 'middle', horizontal: 'center' }
 
     const buffer = await workbook.xlsx.writeBuffer()
 
     const response = new NextResponse(buffer as any, {
       headers: {
-        'Content-Type':
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition':
-          `attachment; filename="staff-failed-records-${uploadId}.xlsx"`,
+        'Content-Type': XLSX_MIME,
+        'Content-Disposition': attachmentDisposition(`Failed Staff Records (${safeFileName(company?.companyName || 'Company')}).xlsx`),
         'Cache-Control': 'no-cache',
       },
     })

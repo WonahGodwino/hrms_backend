@@ -5,6 +5,7 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { getDepartmentWithAccess, logDepartmentAction } from '@/app/lib/departments/department-utils'
+import { sanitizeDepartmentName } from '@/app/lib/departments/department-sync'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -70,8 +71,18 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
         updatedFields.push(key)
       }
     }
-    
+
     updateData.updatedAt = new Date()
+
+    // Title-cased so a rename never produces a casing-only duplicate of an
+    // auto-sync-created department (see department-sync.ts).
+    if (updateData.name !== undefined) {
+      const sanitizedName = sanitizeDepartmentName(updateData.name)
+      if (!sanitizedName) {
+        return withCors(ApiResponse.error('Name cannot be empty', 400), origin)
+      }
+      updateData.name = sanitizedName
+    }
 
     // Enforce per-company, case-insensitive name uniqueness with a friendly
     // message (a rename to an existing name — regardless of case — would
@@ -116,6 +127,16 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
         assistantHead: { select: { id: true, firstName: true, lastName: true } }
       }
     })
+
+    // A rename also updates every currently-linked staff's free-text
+    // `department` column, so it doesn't reopen the drift the
+    // Staff Management sync closes on its side.
+    if (updateData.name !== undefined) {
+      await prisma.staffRecord.updateMany({
+        where: { departmentId: params.id },
+        data: { department: updateData.name }
+      })
+    }
 
     // Fetch user's name for audit log
     const userRecord = await prisma.staffRecord.findUnique({

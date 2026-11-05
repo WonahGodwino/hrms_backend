@@ -1,36 +1,31 @@
+// src/app/api/staff-loans-benefits/policies/benefits/route.ts
+//
+// GET  — list a company's benefit policies (catalog). STAFF only sees active
+//        PUBLISHED ones; HR/ADMIN/SUPER_ADMIN see everything for Policy
+//        Setup. Optional `designationId`/`jobId` filters mirror the old
+//        module's scoping-preview query params.
+// POST — create a new benefit policy, starting as a DRAFT.
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { requireRole } from '@/app/lib/auth'
+import { requireModuleAccess, hasModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { resolveScopedCompanyIds } from '../../_helpers'
+import { validateApprovalWorkflow } from '@/app/lib/staff-loans-benefits/types'
+import { canAccessPage } from '@/app/lib/staff-loans-benefits/page-access'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-// Validate & normalise the optional designation/grade scope. A grade level can
-// only be set together with a designation. Returns cleaned ids or an error.
-async function validateScope(
-  companyId: string,
-  designationId: unknown,
-  gradeLevelId: unknown,
-): Promise<{ designationId: string | null; gradeLevelId: string | null; error?: string }> {
-  const desId = designationId ? String(designationId).trim() : ''
-  const gradeId = gradeLevelId ? String(gradeLevelId).trim() : ''
-
-  if (gradeId && !desId) {
-    return { designationId: null, gradeLevelId: null, error: 'A grade level can only be scoped together with a designation' }
+async function assertDesignationStepsAllowed(companyId: string, workflow: { approverKind: string }[]) {
+  const hasDesignationStep = workflow.some((s) => s.approverKind === 'DESIGNATION')
+  if (!hasDesignationStep) return
+  const enabled = await hasModuleAccess(companyId, 'CORE_SETUP')
+  if (!enabled) {
+    throw new Error(
+      'This approval chain uses a Designation-based step, which requires the Core Setup module to be enabled for this company.'
+    )
   }
-  if (desId) {
-    const des = await (prisma as any).designation.findFirst({ where: { id: desId, companyId }, select: { id: true } })
-    if (!des) return { designationId: null, gradeLevelId: null, error: 'Selected designation not found for this company' }
-  }
-  if (gradeId) {
-    const grade = await prisma.gradeLevel.findFirst({ where: { id: gradeId, companyId }, select: { id: true } })
-    if (!grade) return { designationId: null, gradeLevelId: null, error: 'Selected grade level not found for this company' }
-  }
-  return { designationId: desId || null, gradeLevelId: gradeId || null }
 }
 
 export async function GET(request: NextRequest) {
@@ -38,126 +33,32 @@ export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader) return withCors(ApiResponse.error('Authorization header missing', 401), origin)
-
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR', 'STAFF'])
+    const user = await requireModuleAccess(token, 'STAFF_LOANS_BENEFITS', ['SUPER_ADMIN', 'ADMIN', 'HR', 'STAFF'])
+    if (!user.companyId) return withCors(ApiResponse.success({ policies: [] }), origin)
 
     const { searchParams } = new URL(request.url)
-    const requestedCompanyId = searchParams.get('companyId')
-    const showInactive = searchParams.get('showInactive') === 'true'
-    const jobId = searchParams.get('jobId')
-
-    const scopedCompanyIds = await resolveScopedCompanyIds(user)
-    if (scopedCompanyIds.length === 0) return withCors(ApiResponse.success([], 'No company access'), origin)
-
-    let companyFilter = scopedCompanyIds
-    if (requestedCompanyId && scopedCompanyIds.includes(requestedCompanyId)) {
-      companyFilter = [requestedCompanyId]
-    }
-
-    const designationFilter = searchParams.get('designationId')
-    const andConds: any[] = []
-
-    // When a job is supplied, benefits MUST be scoped to THAT job's company —
-    // otherwise "all-roles" (jobId=null) benefits from other companies the caller
-    // can access would leak onto the job. Return role-specific + all-roles
-    // benefits, but only within the job's own company.
-    if (jobId) {
-      const job = await prisma.job.findUnique({ where: { id: jobId }, select: { companyId: true } })
-      if (!job || !companyFilter.includes(job.companyId)) {
-        return withCors(ApiResponse.success([], 'No benefits for this job'), origin)
-      }
-      companyFilter = [job.companyId]
-      andConds.push({ OR: [{ jobId: null }, { jobId }] })
-    }
-
-    const where: any = { companyId: { in: companyFilter } }
-    if (!showInactive && !['ADMIN', 'SUPER_ADMIN', 'HR'].includes(user.role)) {
+    // Full-catalog access is governed purely by BENEFIT_POLICY_CONFIG page
+    // access (SUPER_ADMIN always passes via canAccessPage) — role no longer
+    // gates it. Anyone without access degrades to the same PUBLISHED-only
+    // view a STAFF caller gets — this GET is also used by AvailableBenefits.jsx
+    // and BenefitAllocation.jsx's policy picker, both of which only ever
+    // need published policies anyway.
+    const isManager = await canAccessPage('BENEFIT_POLICY_CONFIG', user)
+    const where: any = { companyId: user.companyId }
+    if (!isManager) {
+      where.status = 'PUBLISHED'
       where.isActive = true
     }
-    // Management view may filter by a specific designation.
-    if (designationFilter && user.role !== 'STAFF') {
-      andConds.push({ OR: [{ designationId: null }, { designationId: designationFilter }] })
-    }
+    const designationId = searchParams.get('designationId')
+    if (designationId) where.designationId = designationId
+    const jobId = searchParams.get('jobId')
+    if (jobId) where.jobId = jobId
 
-    // For STAFF, resolve their designation + current grade and scope the query so
-    // they ONLY see benefits that apply to them (their designation, and grade
-    // level when the benefit is grade-scoped). Out-of-scope benefits are hidden.
-    let staffRecord: any = null
-    if (user.role === 'STAFF') {
-      staffRecord = await prisma.staffRecord.findFirst({
-        where: { email: user.email, isActive: true, companyId: { in: companyFilter } },
-        select: { id: true, createdAt: true, designationId: true, currentGradeId: true } as any,
-      })
-      const desId = staffRecord?.designationId ?? null
-      const gradeId = staffRecord?.currentGradeId ?? null
-      // designation: benefit is company-wide (null) OR matches the staff's designation
-      andConds.push({ OR: [{ designationId: null }, { designationId: desId ?? '__no_designation__' }] })
-      // grade: benefit is grade-agnostic (null) OR matches the staff's grade
-      andConds.push({ OR: [{ gradeLevelId: null }, { gradeLevelId: gradeId ?? '__no_grade__' }] })
-    }
-
-    if (andConds.length) where.AND = andConds
-
-    const policies = await (prisma as any).benefitPolicy.findMany({
-      where,
-      orderBy: { category: 'asc' },
-    })
-
-    // Tenure for STAFF eligibility messaging.
-    let monthsEmployed = 0
-    if (user.role === 'STAFF' && staffRecord) {
-      monthsEmployed = Math.floor((Date.now() - new Date(staffRecord.createdAt).getTime()) / (1000 * 60 * 60 * 24 * 30.44))
-    }
-
-    // Attach designation/grade names for the management view (ADMIN/HR).
-    let designationNames: Record<string, string> = {}
-    let gradeNames: Record<string, string> = {}
-    if (user.role !== 'STAFF') {
-      const desIds = Array.from(new Set(policies.map((p: any) => p.designationId).filter(Boolean))) as string[]
-      const gradeIds = Array.from(new Set(policies.map((p: any) => p.gradeLevelId).filter(Boolean))) as string[]
-      if (desIds.length) {
-        const rows = await (prisma as any).designation.findMany({ where: { id: { in: desIds } }, select: { id: true, title: true } })
-        designationNames = Object.fromEntries(rows.map((r: any) => [r.id, r.title]))
-      }
-      if (gradeIds.length) {
-        const rows = await prisma.gradeLevel.findMany({ where: { id: { in: gradeIds } }, select: { id: true, name: true } })
-        gradeNames = Object.fromEntries(rows.map((r) => [r.id, r.name]))
-      }
-    }
-
-    const result = policies.map((policy: any) => {
-      const item: any = {
-        ...policy,
-        designationName: policy.designationId ? (designationNames[policy.designationId] || null) : null,
-        gradeLevelName: policy.gradeLevelId ? (gradeNames[policy.gradeLevelId] || null) : null,
-      }
-      if (user.role === 'STAFF') {
-        // Only in-scope policies reach here; remaining check is tenure.
-        if (policy.eligibilityRule) {
-          try {
-            const rule = JSON.parse(policy.eligibilityRule)
-            if (rule.minServiceMonths) {
-              item.isEligible = monthsEmployed >= rule.minServiceMonths
-              if (!item.isEligible) {
-                item.eligibilityReason = `Requires ${rule.minServiceMonths} months of service (you have ${monthsEmployed})`
-              }
-            } else {
-              item.isEligible = true
-            }
-          } catch {
-            item.isEligible = true
-          }
-        } else {
-          item.isEligible = true
-        }
-      }
-      return item
-    })
-
-    return withCors(ApiResponse.success(result, 'Benefit policies fetched successfully'), origin)
-  } catch (err) {
-    return withCors(handleApiError(err), origin)
+    const policies = await prisma.benefitPolicy.findMany({ where, orderBy: { createdAt: 'desc' } })
+    return withCors(ApiResponse.success({ policies }), origin)
+  } catch (error) {
+    return withCors(handleApiError(error), origin)
   }
 }
 
@@ -166,110 +67,69 @@ export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader) return withCors(ApiResponse.error('Authorization header missing', 401), origin)
-
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR'])
+    // STAFF included: BENEFIT_POLICY_CONFIG access is now decided purely by
+    // the canAccessPage check below, not by platform role — see decision #1.
+    const user = await requireModuleAccess(token, 'STAFF_LOANS_BENEFITS', ['SUPER_ADMIN', 'ADMIN', 'HR', 'STAFF'])
+    if (!user.companyId) return withCors(ApiResponse.error('No company context', 400), origin)
+    if (!(await canAccessPage('BENEFIT_POLICY_CONFIG', user))) {
+      return withCors(ApiResponse.error('You do not have access to Benefit Policy Configuration', 403), origin)
+    }
 
     const body = await request.json()
-    const { companyId, name, category, description, monetaryValue, keyValue, eligibilityRule, isActive, jobId, designationId, gradeLevelId } = body
-
-    if (!companyId || !name || !category) {
-      return withCors(ApiResponse.error('companyId, name, and category are required', 400), origin)
+    if (!body?.name || typeof body.name !== 'string') {
+      return withCors(ApiResponse.error('name is required', 400), origin)
+    }
+    if (!body?.category || typeof body.category !== 'string') {
+      return withCors(ApiResponse.error('category is required', 400), origin)
     }
 
-    const scopedCompanyIds = await resolveScopedCompanyIds(user)
-    if (!scopedCompanyIds.includes(companyId)) {
-      return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
+    let requestApprovalWorkflow
+    let claimApprovalWorkflow
+    try {
+      requestApprovalWorkflow = validateApprovalWorkflow(body.requestApprovalWorkflow)
+      await assertDesignationStepsAllowed(user.companyId, requestApprovalWorkflow)
+      if (body.claimApprovalWorkflow) {
+        claimApprovalWorkflow = validateApprovalWorkflow(body.claimApprovalWorkflow)
+        await assertDesignationStepsAllowed(user.companyId, claimApprovalWorkflow)
+      }
+    } catch (e: any) {
+      return withCors(ApiResponse.error(e.message || 'Invalid approval workflow', 400), origin)
     }
 
-    // Validate the optional designation/grade scope belongs to the company.
-    const scope = await validateScope(companyId, designationId, gradeLevelId)
-    if (scope.error) return withCors(ApiResponse.error(scope.error, 400), origin)
-
-    const policy = await (prisma as any).benefitPolicy.create({
+    const policy = await prisma.benefitPolicy.create({
       data: {
-        companyId,
-        name,
-        category,
-        description: description ?? null,
-        monetaryValue: monetaryValue ?? null,
-        keyValue: keyValue ?? null,
-        eligibilityRule: eligibilityRule ?? null,
-        isActive: isActive ?? true,
-        // Optional job scope (null/blank = applies to all roles).
-        ...(jobId ? { jobId } : {}),
-        designationId: scope.designationId,
-        gradeLevelId: scope.gradeLevelId,
+        companyId: user.companyId,
+        name: body.name,
+        category: body.category,
+        benefitType: body.benefitType ?? 'FIXED_AMOUNT',
+        description: body.description ?? undefined,
+        monetaryValue: body.monetaryValue ?? undefined,
+        keyValue: body.keyValue ?? undefined,
+        status: 'DRAFT',
+        version: 1,
+        eligibilityRules: body.eligibilityRules ?? undefined,
+        jobId: body.jobId ?? undefined,
+        designationId: body.designationId ?? undefined,
+        usageLimitAmount: body.usageLimitAmount ?? undefined,
+        usageFrequency: body.usageFrequency ?? undefined,
+        rollingValidityMonths: body.rollingValidityMonths ?? undefined,
+        maxUsagePerEmployee: body.maxUsagePerEmployee ?? undefined,
+        maxClaimAmount: body.maxClaimAmount ?? undefined,
+        carryOverAllowed: body.carryOverAllowed ?? false,
+        requiresClaimSubmission: body.requiresClaimSubmission ?? false,
+        requiresClaimApproval: body.requiresClaimApproval ?? true,
+        requestApprovalWorkflow,
+        claimApprovalWorkflow: claimApprovalWorkflow ?? undefined,
+        totalAllocatedBudget: body.totalAllocatedBudget ?? undefined,
+        perEmployeeCap: body.perEmployeeCap ?? undefined,
+        departmentalCaps: body.departmentalCaps ?? undefined,
+        createdBy: user.userId,
       },
     })
 
-    return withCors(ApiResponse.success(policy, 'Benefit policy created successfully'), origin)
-  } catch (err) {
-    return withCors(handleApiError(err), origin)
-  }
-}
-
-export async function PUT(request: NextRequest) {
-  const origin = request.headers.get('origin')
-  try {
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader) return withCors(ApiResponse.error('Authorization header missing', 401), origin)
-
-    const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR'])
-
-    const body = await request.json()
-    const { id, ...updates } = body
-    if (!id) return withCors(ApiResponse.error('Policy id is required', 400), origin)
-
-    const existing = await prisma.benefitPolicy.findUnique({ where: { id } })
-    if (!existing) return withCors(ApiResponse.error('Benefit policy not found', 404), origin)
-
-    const scopedCompanyIds = await resolveScopedCompanyIds(user)
-    if (!scopedCompanyIds.includes(existing.companyId)) {
-      return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
-    }
-
-    // When either scope field is present in the payload, validate & normalise both
-    // together (they are interdependent).
-    if ('designationId' in updates || 'gradeLevelId' in updates) {
-      const scope = await validateScope(existing.companyId, updates.designationId, updates.gradeLevelId)
-      if (scope.error) return withCors(ApiResponse.error(scope.error, 400), origin)
-      updates.designationId = scope.designationId
-      updates.gradeLevelId = scope.gradeLevelId
-    }
-
-    const policy = await (prisma as any).benefitPolicy.update({ where: { id }, data: updates })
-    return withCors(ApiResponse.success(policy, 'Benefit policy updated successfully'), origin)
-  } catch (err) {
-    return withCors(handleApiError(err), origin)
-  }
-}
-
-export async function DELETE(request: NextRequest) {
-  const origin = request.headers.get('origin')
-  try {
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader) return withCors(ApiResponse.error('Authorization header missing', 401), origin)
-
-    const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR'])
-
-    const { searchParams } = new URL(request.url)
-    const id = searchParams.get('id')
-    if (!id) return withCors(ApiResponse.error('Policy id is required', 400), origin)
-
-    const existing = await prisma.benefitPolicy.findUnique({ where: { id } })
-    if (!existing) return withCors(ApiResponse.error('Benefit policy not found', 404), origin)
-
-    const scopedCompanyIds = await resolveScopedCompanyIds(user)
-    if (!scopedCompanyIds.includes(existing.companyId)) {
-      return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
-    }
-
-    await prisma.benefitPolicy.delete({ where: { id } })
-    return withCors(ApiResponse.success(null, 'Benefit policy deleted successfully'), origin)
-  } catch (err) {
-    return withCors(handleApiError(err), origin)
+    return withCors(ApiResponse.success(policy, 'Benefit policy created'), origin)
+  } catch (error) {
+    return withCors(handleApiError(error), origin)
   }
 }

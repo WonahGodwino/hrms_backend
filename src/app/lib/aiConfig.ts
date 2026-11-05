@@ -1,6 +1,6 @@
 // src/app/lib/aiConfig.ts
 
-export interface AIServiceConfig {
+interface AIServiceConfig {
   enabled: boolean;
   defaultModel: string;
   fallbackModel?: string;
@@ -68,20 +68,8 @@ export const aiConfig = {
   } as ServiceConfigs
 } as const;
 
-export function getDefaultAIOptions() {
-  return {
-    useAI: aiConfig.services.openai.enabled,
-    aiService: aiConfig.defaultService,
-    aiModel: aiConfig.defaultModel,
-    aiTemperature: 0.2,
-    includeCulturalFit: true,
-    includeGrowthPotential: true,
-    strictness: 'medium'
-  };
-}
-
 // Helper functions
-export function getServiceConfig(service: string) {
+function getServiceConfig(service: string) {
   return aiConfig.services[service as keyof typeof aiConfig.services];
 }
 
@@ -119,7 +107,3 @@ export function getDefaultModel(service: string): string {
   return _cachedDefaultModel || config?.defaultModel || aiConfig.defaultModel;
 }
 
-export function isServiceEnabled(service: string): boolean {
-  const config = getServiceConfig(service);
-  return config?.enabled || false;
-}

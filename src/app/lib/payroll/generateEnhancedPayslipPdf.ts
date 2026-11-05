@@ -4,68 +4,22 @@ import path from 'path';
 import PDFDocument from 'pdfkit';
 import { normalizeCurrencyCode } from '@/app/lib/currency';
 
-const fontkit = require('fontkit') as {
-	openSync: (filePath: string) => { hasGlyphForCodePoint: (codePoint: number) => boolean };
-};
-
-function formatCurrency(n: number, currencyCode: string): string {
+function formatAmount(n: number): string {
 	const safe = Number.isFinite(n) ? n : 0;
-	const code = normalizeCurrencyCode(currencyCode || 'NGN');
-	return new Intl.NumberFormat('en', {
-		style: 'currency',
-		currency: code,
-		currencyDisplay: 'symbol',
+	return safe.toLocaleString('en-US', {
 		minimumFractionDigits: 2,
 		maximumFractionDigits: 2,
-	}).format(safe);
+	});
 }
 
-function drawNairaSymbol(doc: PDFKit.PDFDocument, x: number, y: number, size: number, color: string) {
-	// Adjust these parameters for better rendering
-	const symbolHeight = Math.max(size, 10);
-	const symbolWidth = symbolHeight * 0.6; // Slightly narrower for better proportions
-	const lineWidth = Math.max(1.2, symbolHeight * 0.1); // Slightly thicker lines
-	const barWidth = symbolWidth * 1.4; // Longer horizontal bars
-	const barY1 = y + symbolHeight * 0.35; // First bar position
-	const barY2 = y + symbolHeight * 0.65; // Second bar position
-
-	// Center the symbol vertically relative to text
-	const centerY = y + (size - symbolHeight) / 2;
-
-	doc.save();
-	doc.strokeColor(color);
-	doc.lineWidth(lineWidth);
-	doc.lineCap('butt'); // Use butt caps for cleaner lines
-
-	// Draw the two vertical lines (the "N" shape)
-	doc
-		.moveTo(x, centerY)
-		.lineTo(x, centerY + symbolHeight)
-		.stroke();
-
-	doc
-		.moveTo(x + symbolWidth, centerY)
-		.lineTo(x + symbolWidth, centerY + symbolHeight)
-		.stroke();
-
-	// Draw the diagonal line connecting them
-	doc
-		.moveTo(x, centerY + symbolHeight)
-		.lineTo(x + symbolWidth, centerY)
-		.stroke();
-
-	// Draw the two horizontal bars (the double lines through the N)
-	doc
-		.moveTo(x - barWidth * 0.2, barY1)
-		.lineTo(x + symbolWidth + barWidth * 0.2, barY1)
-		.stroke();
-
-	doc
-		.moveTo(x - barWidth * 0.2, barY2)
-		.lineTo(x + symbolWidth + barWidth * 0.2, barY2)
-		.stroke();
-
-	doc.restore();
+// Amounts print as "NGN 430,976.38" — the company's ISO currency code, a
+// small gap, then the formatted amount. The code is deliberate: it is
+// unambiguous, renders identically in every PDF font, and follows the
+// company's currency setting dynamically, so changing a company's
+// currency changes what newly generated payslips show.
+function formatCurrency(n: number, currencyCode: string): string {
+	const code = normalizeCurrencyCode(currencyCode || 'NGN');
+	return `${code} ${formatAmount(n)}`;
 }
 
 // function drawCurrency(
@@ -116,31 +70,15 @@ function drawCurrency(
 		currencyCode?: string;
 	}
 ) {
-	const formatted = formatCurrency(amount, options.currencyCode || 'NGN');
+	const text = formatCurrency(amount, options.currencyCode || 'NGN');
 
 	doc.font(options.font).fontSize(options.fontSize).fillColor(options.color);
-
 	if (options.align === 'right' && options.width) {
-		// For right alignment, calculate position
-		const textWidth = doc.widthOfString(formatted);
+		const textWidth = doc.widthOfString(text);
 		const textX = x + options.width - textWidth;
-		doc.text(formatted, textX, y, {
-			lineBreak: false,
-		});
+		doc.text(text, textX, y, { lineBreak: false });
 	} else {
-		// Left alignment
-		doc.text(formatted, x, y, {
-			lineBreak: false,
-		});
-	}
-}
-
-function fontHasNairaGlyph(fontPath: string): boolean {
-	try {
-		const font = fontkit.openSync(fontPath);
-		return !!font.hasGlyphForCodePoint(0x20a6);
-	} catch {
-		return false;
+		doc.text(text, x, y, { lineBreak: false });
 	}
 }
 
@@ -173,6 +111,12 @@ export interface GeneratePayslipInput {
 		companyLogo?: string;
 		companyTaxId?: string;
 		baseCurrency?: string;
+		// Preset-only tokens ({{bankName}}, {{accountNumber}}, {{pfa}}) consumed
+		// by the company Payslip Preset renderer; ignored by this generator.
+		bankName?: string;
+		accountNumber?: string;
+		pfa?: string;
+		rsaPin?: string;
 	};
 	payroll: {
 		rowNumber: number;
@@ -262,7 +206,6 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 
 			let regularFont = 'Helvetica';
 			let boldFont = 'Helvetica-Bold';
-			let useTextNairaSymbol = false;
 
 			const regularCandidates = [
 				path.join(process.cwd(), 'public', 'payslips', 'fonts', 'LiberationSans-Regular.ttf'),
@@ -281,7 +224,6 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 				doc.registerFont('PayslipBold', boldFontPath);
 				regularFont = 'PayslipRegular';
 				boldFont = 'PayslipBold';
-				useTextNairaSymbol = fontHasNairaGlyph(regularFontPath) && fontHasNairaGlyph(boldFontPath);
 			}
 
 			const chunks: Buffer[] = [];
@@ -296,19 +238,45 @@ export async function generateEnhancedPayslipPdf(input: GeneratePayslipInput): P
 				});
 			});
 
-			doc.on('error', reject);
-
-			// ===== HEADER SECTION =====
+			doc.on('error', reject);			// ===== HEADER SECTION =====
 			doc.rect(0, 0, doc.page.width, 100).fill('#1e3a5f');
 
-			// Company Name
-			doc
-				.fillColor('#ffffff')
-				.fontSize(20)
-				.font(boldFont)
-				.text(companyInfo?.name || staff.companyName || 'COMPANY NAME LTD', 40, 25);
+			// Company logo replaces the company name when one is set.
+			// Fail-open: a malformed/unreadable logo must never crash payslip
+			// generation — fall back to the text name below.
+			const logoDataUri = companyInfo?.logo || staff.companyLogo || '';
+			let logoDrawn = false;
+			if (logoDataUri) {
+				try {
+					const match = /^data:(image\/(png|jpeg|jpg));base64,(.+)$/i.exec(logoDataUri.trim());
+					if (match) {
+						const logoBuffer = Buffer.from(match[3], 'base64');
+						if (logoBuffer.length > 0) {
+							// fit preserves aspect ratio inside the 150x56 box, which
+							// keeps the logo inside the 100px navy header band.
+							doc.image(logoBuffer, 40, 22, { fit: [150, 56] });
+							logoDrawn = true;
+						}
+					}
+				} catch {
+					logoDrawn = false;
+				}
+			}
 
-			doc.fontSize(14).font(regularFont).text('PAYSLIP', 40, 55);
+			// Company Name (only when no logo was drawn)
+			if (!logoDrawn) {
+				doc
+					.fillColor('#ffffff')
+					.fontSize(20)
+					.font(boldFont)
+					.text(companyInfo?.name || staff.companyName || 'COMPANY NAME LTD', 40, 25);
+
+				// "PAYSLIP" beneath the name (logo variant draws it to the right
+				// of the logo below, so they never overlap).
+				doc.fontSize(14).font(regularFont).text('PAYSLIP', 40, 55);
+			} else {
+				doc.fontSize(14).font(regularFont).text('PAYSLIP', 202, 45);
+			}
 
 			// Right side info
 			doc

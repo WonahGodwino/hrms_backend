@@ -54,7 +54,7 @@ export function invalidateOfferLetterSentFolderCache(companyId: string) {
 // "Sent" mailbox that doesn't exist failed silently (the error was only
 // console.error'd, never surfaced), so sent mail never appeared in Hostinger's
 // actual Sent folder even though the SMTP send itself succeeded.
-export async function resolveSentFolderPath(client: InstanceType<typeof ImapFlow>): Promise<string> {
+async function resolveSentFolderPath(client: InstanceType<typeof ImapFlow>): Promise<string> {
 	const mailboxes = await client.list()
 	const bySpecialUse = mailboxes.find((mailbox) => mailbox.specialUse === '\\Sent')
 	if (bySpecialUse) return bySpecialUse.path

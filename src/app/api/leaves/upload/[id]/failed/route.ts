@@ -5,6 +5,7 @@ import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { prisma } from '@/app/lib/prisma'
+import { attachmentDisposition, safeFileName } from '@/app/lib/excel/sheet-theme'
 
 
 // OPTIONS - CORS preflight
@@ -350,7 +351,7 @@ export async function GET(
         status: 200,
         headers: {
           'Content-Type': 'application/json',
-          'Content-Disposition': `attachment; filename="failed-upload-${id}.json"`,
+          'Content-Disposition': attachmentDisposition(`Failed Leave Upload (${safeFileName(uploadRecord.companies?.companyName || 'Company')}).json`),
           'Access-Control-Allow-Origin': origin || '*',
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
           'Access-Control-Allow-Headers': 'Authorization, Content-Type'
@@ -380,7 +381,7 @@ export async function GET(
         status: 200,
         headers: {
           'Content-Type': 'text/csv',
-          'Content-Disposition': `attachment; filename="failed-upload-${id}.csv"`,
+          'Content-Disposition': attachmentDisposition(`Failed Leave Upload (${safeFileName(uploadRecord.companies?.companyName || 'Company')}).csv`),
           'Access-Control-Allow-Origin': origin || '*',
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
           'Access-Control-Allow-Headers': 'Authorization, Content-Type'
@@ -410,7 +411,7 @@ export async function GET(
         status: 200,
         headers: {
           'Content-Type': 'application/vnd.ms-excel',
-          'Content-Disposition': `attachment; filename="failed-upload-${id}.xls"`,
+          'Content-Disposition': attachmentDisposition(`Failed Leave Upload (${safeFileName(uploadRecord.companies?.companyName || 'Company')}).xls`),
           'Access-Control-Allow-Origin': origin || '*',
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
           'Access-Control-Allow-Headers': 'Authorization, Content-Type'

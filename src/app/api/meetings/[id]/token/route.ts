@@ -24,6 +24,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { id } = await params
     const body = await req.json().catch(() => ({}))
     const accessToken = body?.token || new URL(req.url).searchParams.get('token')
+    // Optional name the participant chose on the pre-join screen.
+    const preferredName = typeof body?.displayName === 'string'
+      ? body.displayName.replace(/s+/g, ' ').trim().slice(0, 60)
+      : ''
     const accessEmail = body?.email ? String(body.email).trim().toLowerCase() : ''
 
     const provider = getMeetingProvider()
@@ -99,6 +103,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       displayName = (await staffName(user.userId)) || user.email || 'Staff'
       isHost = (participant?.role === 'HOST') || privileged || meeting.createdBy === user.userId
     }
+
+    if (preferredName) displayName = preferredName
 
     // Lobby: only unauthenticated guests wait; staff/hosts join directly.
     const waiting = !!meeting.lobbyEnabled && viaAccessToken && !isHost

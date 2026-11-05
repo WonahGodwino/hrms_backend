@@ -56,35 +56,6 @@ export function parseMonthFromString(monthInput: string): number {
 }
 
 /**
- * Extract year from month string:
- * - "September 2025" -> 2025
- * - "2025-09-01" -> 2025
- * - "09/2025" -> 2025
- */
-export function extractYearFromMonthString(monthInput: string): number {
-  if (!monthInput) return new Date().getFullYear()
-  
-  const normalized = monthInput.toString().trim()
-  
-  // Look for 4-digit year
-  const yearMatch = normalized.match(/\b(20\d{2})\b/)
-  if (yearMatch) {
-    return parseInt(yearMatch[1], 10)
-  }
-  
-  // Try to parse as date
-  try {
-    const date = new Date(normalized)
-    if (!isNaN(date.getTime())) {
-      return date.getFullYear()
-    }
-  } catch {}
-  
-  // Default to current year
-  return new Date().getFullYear()
-}
-
-/**
  * Get month name from month number
  */
 export function getMonthName(monthNumber: number): string {

@@ -33,7 +33,7 @@ const MONTH_ABBR = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep
  * hyperlink cells ({text, hyperlink}), and rich-text cells ({richText: [...]})
  * instead of a plain primitive. Recursively unwrap down to the real value.
  */
-export function unwrapCellValue(v: any): any {
+function unwrapCellValue(v: any): any {
   if (v === null || v === undefined) return v
   if (v instanceof Date) return v
   if (typeof v !== 'object') return v
@@ -47,7 +47,7 @@ export function unwrapCellValue(v: any): any {
   return v
 }
 
-export function isEmptyValue(raw: any): boolean {
+function isEmptyValue(raw: any): boolean {
   const v = unwrapCellValue(raw)
   return v === null || v === undefined || String(v).trim() === ''
 }
@@ -65,7 +65,7 @@ export function isEmptyValue(raw: any): boolean {
  * opposed to `0`, which is a real, distinct value that must not be confused
  * with "couldn't parse this".
  */
-export function parseNumericValue(raw: any): number | null {
+function parseNumericValue(raw: any): number | null {
   const v = unwrapCellValue(raw)
   if (v === null || v === undefined) return null
   if (typeof v === 'boolean') return null
@@ -147,7 +147,7 @@ export function toNumberOrZero(raw: any): number {
  * back to the JS `Date` constructor. Returns `null` rather than an
  * "Invalid Date" or a silently-wrong today's-date guess.
  */
-export function parseFlexibleDate(raw: any): Date | null {
+function parseFlexibleDate(raw: any): Date | null {
   const v = unwrapCellValue(raw)
   if (v === null || v === undefined) return null
   if (v instanceof Date) return isNaN(v.getTime()) ? null : v
@@ -245,12 +245,6 @@ export function getMonthNameFromNumber(monthNumber: number): string {
   return names[monthNumber - 1] || names[new Date().getMonth()]
 }
 
-export function parseMonthYear(raw: any): { monthName: string; year: number; periodMonth: number } {
-  const periodMonth = monthNameToNumber(raw) || new Date().getMonth() + 1
-  const year = extractYearFromValue(raw)
-  return { monthName: getMonthNameFromNumber(periodMonth), year, periodMonth }
-}
-
 // Control characters (excluding \t \n \r) and stray BOM/replacement
 // characters that sometimes leak in from badly-encoded source files.
 // eslint-disable-next-line no-control-regex
@@ -303,7 +297,7 @@ const FORMULA_INJECTION_PREFIX = /^[=+@]|^-(?!\s*[\d.,])/
  * is completely benign once stored as literal text instead of a live
  * formula.
  */
-export function neutralizeSpreadsheetFormula(raw: any): any {
+function neutralizeSpreadsheetFormula(raw: any): any {
   if (typeof raw !== 'string') return raw
   if (FORMULA_INJECTION_PREFIX.test(raw.trimStart())) {
     return `'${raw}`

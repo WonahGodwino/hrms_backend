@@ -1,5 +1,6 @@
 // src/app/lib/payroll/templates/isurf-standard.ts
 import ExcelJS from 'exceljs'
+import { findHeaderRow } from '@/app/lib/excel/sheet-theme'
 import { prisma } from '@/app/lib/db'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
 import { generatePayslipPdf } from '@/app/lib/payroll/generatePayslipPdf'
@@ -11,6 +12,8 @@ import {
   monthNameToNumber,
   detectMaliciousMarkup,
 } from '../utils/valueParsing'
+import { isUploadCancelled } from './utils'
+import { buildStaffIndex, matchStaff } from '../utils/staff-matching'
 
 function normalizeHeader(h: string) {
   return h
@@ -73,7 +76,8 @@ export const processIsurfStandardTemplate = {
     companyId: string,
     user: any,
     sendEmails: boolean,
-    overwriteExisting: boolean = false
+    overwriteExisting: boolean = false,
+    uploadId?: string
   ) {
     const templateConfig = PAYROLL_TEMPLATES.ISURF_STANDARD
     const canonicalMap = templateConfig.canonicalHeaders
@@ -83,6 +87,7 @@ export const processIsurfStandardTemplate = {
       failed: 0,
       payslipsGenerated: 0,
       payslipsUpdated: 0,
+      duplicatesSkipped: 0,
       emailsSent: 0,
       emailAttempts: 0,
       emailFailures: [] as Array<{
@@ -94,6 +99,7 @@ export const processIsurfStandardTemplate = {
       }>,
       processedRecords: [] as any[],
       failedRecords: [] as any[],
+      skippedRecords: [] as any[],
       errors: [] as string[],
     }
 
@@ -130,14 +136,16 @@ export const processIsurfStandardTemplate = {
         const worksheet = workbook.worksheets[0]
         if (!worksheet) throw new Error('No worksheet found in Excel file')
 
-        const headerRow = worksheet.getRow(1)
+        // The styled template carries a title banner, so find the real header row.
+        const headerRowNumber = findHeaderRow(worksheet, ['name', 'email'])
+        const headerRow = worksheet.getRow(headerRowNumber)
         const headers: string[] = []
         headerRow.eachCell((cell, col) => {
           const h = String(cell.value || '').trim()
           headers[col - 1] = canonicalMap[normalizeHeader(h)] || h
         })
 
-        const row2 = worksheet.getRow(2)
+        const row2 = worksheet.getRow(headerRowNumber + 1)
         const row2Obj: any = {}
         row2.eachCell((cell, col) => {
           const header = headers[col - 1]
@@ -146,8 +154,8 @@ export const processIsurfStandardTemplate = {
         const skipRow2 = looksLikePercentageRow(row2Obj, canonicalMap)
 
         worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-          if (rowNumber === 1) return
-          if (skipRow2 && rowNumber === 2) return
+          if (rowNumber <= headerRowNumber || row.getCell(1).isMerged) return
+          if (skipRow2 && rowNumber === headerRowNumber + 1) return
 
           const rowData: any = {}
           row.eachCell((cell, colNumber) => {
@@ -187,17 +195,33 @@ export const processIsurfStandardTemplate = {
       }
     })
 
+    // Load all active staff for the company ONCE; match rows in memory.
+    const staffIndex = await buildStaffIndex(companyId)
+
+    // Guard against two rows in the same upload resolving to the same staff &
+    // period: process the first, skip the rest. Key = staffRecordId|month|year.
+    const processedKeys = new Set<string>()
+
     for (let index = 0; index < data.length; index++) {
+      // Check if upload was cancelled before processing each row
+      if (uploadId && isUploadCancelled(uploadId)) {
+        console.log('[ISURF_STANDARD] Upload cancelled, stopping at row', index)
+        throw new Error('PAYROLL_CANCELLED')
+      }
       const row = data[index]
       const displayRowNumber = index + 3
-      
+
       // Declare variables at the loop level so they're accessible in both try and catch blocks
       let rawName = ''
       let rawEmail = ''
-      
+      let staffId = ''
+
       try {
         rawName = getCell(row, 'Name', canonicalMap)?.toString().trim() || ''
         rawEmail = getCell(row, 'EMAIL', canonicalMap)?.toString().trim() || ''
+        // The ISURF template has no Staff ID column by default, but honor one if
+        // present so staffId takes priority over email (matches Blueridge/Dynamic).
+        staffId = getCell(row, 'Staff ID', canonicalMap)?.toString().trim() || ''
 
         const nameCheck = detectMaliciousMarkup(rawName)
         if (nameCheck.isMalicious) {
@@ -233,48 +257,11 @@ export const processIsurfStandardTemplate = {
           throw new Error('Net Salary cannot be negative')
         }
 
-        let staffRecord = null
-        
-        if (rawEmail) {
-          staffRecord = await prisma.staffRecord.findUnique({
-            where: {
-              email_companyId: {
-                email: rawEmail,
-                companyId: companyId,
-              },
-            },
-          })
-        }
-
-        if (!staffRecord && rawName) {
-          const parts = rawName.split(' ').filter(Boolean)
-          const firstName = parts[0]
-          const lastName = parts.slice(1).join(' ') || parts[0]
-
-          staffRecord = await prisma.staffRecord.findFirst({
-            where: {
-              companyId: companyId,
-              isActive: true,
-              OR: [
-                {
-                  AND: [
-                    { firstName: { contains: firstName, mode: 'insensitive' } },
-                    { lastName: { contains: lastName, mode: 'insensitive' } },
-                  ],
-                },
-                {
-                  AND: [
-                    { lastName: { contains: firstName, mode: 'insensitive' } },
-                    { firstName: { contains: lastName, mode: 'insensitive' } },
-                  ],
-                },
-              ],
-            },
-          })
-        }
+        // Match by staffId first, then email (case-insensitive). Never by name.
+        const staffRecord = matchStaff(staffIndex, { staffId, email: rawEmail })
 
         if (!staffRecord) {
-          throw new Error(`Staff record not found for ${rawName || rawEmail}`)
+          throw new Error(`Staff record not found for ${staffId || rawEmail || rawName}`)
         }
 
         const monthName = getCell(row, 'Month', canonicalMap)?.toString() || 
@@ -287,6 +274,25 @@ export const processIsurfStandardTemplate = {
           10
         )
         const periodMonth = monthNameToNumber(monthName)
+
+        // Skip a second row in this upload that resolves to the same staff &
+        // period — it would otherwise create a duplicate payslip.
+        const dedupeKey = `${staffRecord.id}|${monthName}|${year}`
+        if (processedKeys.has(dedupeKey)) {
+          results.duplicatesSkipped++
+          results.skippedRecords.push({
+            rowNumber: displayRowNumber,
+            staffId: staffRecord.staffId,
+            staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
+            email: staffRecord.email,
+            month: monthName,
+            year,
+            reason: 'Duplicate of an earlier row for the same staff & pay period',
+          })
+          console.warn(`[ISURF_PROCESSOR] Row ${displayRowNumber}: skipped duplicate for ${staffRecord.staffId} ${monthName} ${year}`)
+          continue
+        }
+        processedKeys.add(dedupeKey)
 
         const payrollData = {
           companyId: companyId,
@@ -311,6 +317,8 @@ export const processIsurfStandardTemplate = {
           medicalContribution: num(getCell(row, 'Medical Contribution', canonicalMap)),
           employerPension: num(getCell(row, 'Employer Pension', canonicalMap)),
           nsitf: num(getCell(row, 'NSITF', canonicalMap)),
+          itf: num(getCell(row, 'ITF', canonicalMap)),
+          nhf: num(getCell(row, 'NHF', canonicalMap)),
           // Note: 'Prorated Sub Total Invoice' field doesn't exist in model - removed
           managementFee: num(getCell(row, 'Mgt Fee', canonicalMap)),
           vatOnManagementFee: num(getCell(row, 'Vat on Management Fee @7.5%', canonicalMap)),
@@ -318,22 +326,28 @@ export const processIsurfStandardTemplate = {
           status: 'PROCESSED',
           uploadedBy: user.userId,
           templateType: 'ISURF_STANDARD',
+          // Trace back to the PayrollUpload that created/updated this row so
+          // per-upload reports (Bank Schedule) can scope to exactly one upload.
+          payrollUploadId: uploadId || null,
+          pensionRsaPinSnapshot: staffRecord.rsaPin,
+          pensionPfaCodeSnapshot: staffRecord.pfaCode,
+          pensionEmployerCodeSnapshot: staffRecord.pensionEmployerCode,
+          pensionSnapshotAt: new Date(),
         }
 
+        // Always update an existing payroll for this (staff, month, year) in
+        // place rather than creating a duplicate — regardless of
+        // overwriteExisting — so re-uploads stay idempotent per pay period.
         let payrollRecord
-        if (overwriteExisting) {
-          const existingPayroll = await prisma.payroll.findFirst({
-            where: { staffRecordId: staffRecord.id, month: monthName, year, companyId: companyId },
-            orderBy: { createdAt: 'desc' },
+        const existingPayroll = await prisma.payroll.findFirst({
+          where: { staffRecordId: staffRecord.id, month: monthName, year, companyId: companyId },
+          orderBy: { createdAt: 'desc' },
+        })
+        if (existingPayroll) {
+          payrollRecord = await prisma.payroll.update({
+            where: { id: existingPayroll.id },
+            data: { ...payrollData, updatedAt: new Date() },
           })
-          if (existingPayroll) {
-            payrollRecord = await prisma.payroll.update({
-              where: { id: existingPayroll.id },
-              data: { ...payrollData, updatedAt: new Date() },
-            })
-          } else {
-            payrollRecord = await prisma.payroll.create({ data: payrollData })
-          }
         } else {
           payrollRecord = await prisma.payroll.create({ data: payrollData })
         }
@@ -405,43 +419,30 @@ export const processIsurfStandardTemplate = {
           draft: !sendEmails,
         }
 
-        if (overwriteExisting) {
-          const existingPayslip = await prisma.payslip.findFirst({
-            where: {
-              staffRecordId: staffRecord.id,
-              month: monthName,
-              year,
-              companyId: companyId,
-            },
-            orderBy: { createdAt: 'desc' },
+        // Always update an existing payslip for this (staff, month, year) in
+        // place rather than creating a duplicate — regardless of
+        // overwriteExisting — so re-uploads stay idempotent per pay period.
+        const existingPayslip = await prisma.payslip.findFirst({
+          where: {
+            staffRecordId: staffRecord.id,
+            month: monthName,
+            year,
+            companyId: companyId,
+          },
+          orderBy: { createdAt: 'desc' },
+        })
+        if (existingPayslip) {
+          isUpdate = true
+          payslipId = existingPayslip.id
+          // payrollId is intentionally omitted here: the existing payslip
+          // for this staff/period already points at the payroll record for
+          // that same period (payrollRecord, updated in place above), so it
+          // never needs to change on an update.
+          await prisma.payslip.update({
+            where: { id: existingPayslip.id },
+            data: { ...payslipData, updatedBy: user.userId, updatedAt: new Date() },
           })
-          if (existingPayslip) {
-            isUpdate = true
-            payslipId = existingPayslip.id
-            // payrollId is intentionally omitted here: the existing payslip
-            // for this staff/period already points at the payroll record for
-            // that same period (payrollRecord, updated in place above), so it
-            // never needs to change on an update.
-            await prisma.payslip.update({
-              where: { id: existingPayslip.id },
-              data: { ...payslipData, updatedBy: user.userId, updatedAt: new Date() },
-            })
-            results.payslipsUpdated++
-          } else {
-            const newPayslip = await prisma.payslip.create({
-              data: {
-                ...payslipData,
-                payrollId: payrollRecord.id,
-                staffRecordId: staffRecord.id,
-                companyId: companyId,
-                month: monthName,
-                year,
-                createdBy: user.userId,
-                updatedBy: user.userId,
-              },
-            })
-            payslipId = newPayslip.id
-          }
+          results.payslipsUpdated++
         } else {
           const newPayslip = await prisma.payslip.create({
             data: {

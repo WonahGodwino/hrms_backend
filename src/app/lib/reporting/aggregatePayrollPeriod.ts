@@ -34,12 +34,13 @@ export type AggregatedSalaryRow = {
   templateType: string
   employerPension: number
   nsitf: number
+  itf: number
+  nhf: number
   medicalContribution: number
 }
 
 type StaffMeta = {
   departmentId: string | null
-  currentGradeId: string | null
   designationId: string | null
   bankName: string | null
   accountNumber: string | null
@@ -108,7 +109,6 @@ export async function aggregatePayrollPeriod(params: AggregatePayrollPeriodParam
           department: true,
           departmentId: true,
           position: true,
-          currentGradeId: true,
           designationId: true,
           bankName: true,
           accountNumber: true
@@ -127,6 +127,8 @@ export async function aggregatePayrollPeriod(params: AggregatePayrollPeriodParam
           bonusKPI: true,
           employerPension: true,
           nsitf: true,
+          itf: true,
+          nhf: true,
           medicalContribution: true
         }
       }
@@ -202,13 +204,14 @@ export async function aggregatePayrollPeriod(params: AggregatePayrollPeriodParam
       templateType,
       employerPension: toNumber(payslip.payroll?.employerPension),
       nsitf: toNumber(payslip.payroll?.nsitf),
+      itf: toNumber(payslip.payroll?.itf),
+      nhf: toNumber(payslip.payroll?.nhf),
       medicalContribution: toNumber(payslip.payroll?.medicalContribution)
     })
 
     if (!staffMetaMap.has(payslip.staffRecordId)) {
       staffMetaMap.set(payslip.staffRecordId, {
         departmentId: payslip.staffRecord?.departmentId || null,
-        currentGradeId: payslip.staffRecord?.currentGradeId || null,
         designationId: payslip.staffRecord?.designationId || null,
         bankName: payslip.staffRecord?.bankName || null,
         accountNumber: payslip.staffRecord?.accountNumber || null
@@ -251,6 +254,7 @@ export async function aggregatePayrollPeriod(params: AggregatePayrollPeriodParam
       department: row.department,
       position: row.position,
       monthsPaid: 0,
+      paidMonths: [] as string[],
       totalBasePay: 0,
       totalGrossPay: 0,
       totalNetSalary: 0,
@@ -260,6 +264,8 @@ export async function aggregatePayrollPeriod(params: AggregatePayrollPeriodParam
     }
 
     staffEntry.monthsPaid += 1
+    const paidLabel = `${row.month} ${row.year}`
+    if (!staffEntry.paidMonths.includes(paidLabel)) staffEntry.paidMonths.push(paidLabel)
     staffEntry.totalBasePay += row.basePay
     staffEntry.totalGrossPay += row.grossPay
     staffEntry.totalNetSalary += row.netPay
@@ -277,21 +283,17 @@ export async function aggregatePayrollPeriod(params: AggregatePayrollPeriodParam
     a.staffName.localeCompare(b.staffName)
   )
 
-  // Department/business-unit/grade/designation breakdowns — none of these
+  // Department/business-unit/designation breakdowns — none of these
   // dimensions live on Payroll directly, only on StaffRecord, so resolve
   // them via a small batch of lookups against the distinct ids collected
   // while building `rows` above, then aggregate in memory alongside the
   // per-month/per-staff totals rather than re-querying Payroll per group.
   const departmentIds = Array.from(new Set(Array.from(staffMetaMap.values()).map((m) => m.departmentId).filter(Boolean))) as string[]
-  const gradeIds = Array.from(new Set(Array.from(staffMetaMap.values()).map((m) => m.currentGradeId).filter(Boolean))) as string[]
   const designationIds = Array.from(new Set(Array.from(staffMetaMap.values()).map((m) => m.designationId).filter(Boolean))) as string[]
 
-  const [departments, grades, designations] = await Promise.all([
+  const [departments, designations] = await Promise.all([
     departmentIds.length
       ? prisma.department.findMany({ where: { id: { in: departmentIds } }, select: { id: true, name: true, businessUnit: true } })
-      : Promise.resolve([]),
-    gradeIds.length
-      ? (prisma as any).gradeLevel.findMany({ where: { id: { in: gradeIds } }, select: { id: true, name: true } })
       : Promise.resolve([]),
     designationIds.length
       ? (prisma as any).designation.findMany({ where: { id: { in: designationIds } }, select: { id: true, title: true } })
@@ -299,7 +301,6 @@ export async function aggregatePayrollPeriod(params: AggregatePayrollPeriodParam
   ])
 
   const departmentById = new Map(departments.map((d) => [d.id, d]))
-  const gradeNameById = new Map((grades as Array<{ id: string; name: string }>).map((g) => [g.id, g.name]))
   const designationTitleById = new Map((designations as Array<{ id: string; title: string }>).map((d) => [d.id, d.title]))
 
   function accumulateBreakdown(map: Map<string, any>, key: string, row: AggregatedSalaryRow) {
@@ -315,7 +316,6 @@ export async function aggregatePayrollPeriod(params: AggregatePayrollPeriodParam
 
   const byDepartmentMap = new Map<string, any>()
   const byBusinessUnitMap = new Map<string, any>()
-  const byGradeMap = new Map<string, any>()
   const byDesignationMap = new Map<string, any>()
 
   for (const row of rows) {
@@ -323,7 +323,6 @@ export async function aggregatePayrollPeriod(params: AggregatePayrollPeriodParam
     const department = meta?.departmentId ? departmentById.get(meta.departmentId) : null
     accumulateBreakdown(byDepartmentMap, department?.name || row.department || 'Unassigned', row)
     accumulateBreakdown(byBusinessUnitMap, department?.businessUnit || 'Unassigned', row)
-    accumulateBreakdown(byGradeMap, (meta?.currentGradeId && gradeNameById.get(meta.currentGradeId)) || 'Ungraded', row)
     accumulateBreakdown(byDesignationMap, (meta?.designationId && designationTitleById.get(meta.designationId)) || row.position || 'Unassigned', row)
   }
 
@@ -335,7 +334,6 @@ export async function aggregatePayrollPeriod(params: AggregatePayrollPeriodParam
   const breakdowns = {
     byDepartment: finalizeBreakdown(byDepartmentMap),
     byBusinessUnit: finalizeBreakdown(byBusinessUnitMap),
-    byGrade: finalizeBreakdown(byGradeMap),
     byDesignation: finalizeBreakdown(byDesignationMap)
   }
 
@@ -347,10 +345,12 @@ export async function aggregatePayrollPeriod(params: AggregatePayrollPeriodParam
       acc.pensionEmployee += row.pension
       acc.pensionEmployer += row.employerPension
       acc.nsitf += row.nsitf
+      acc.itf += row.itf
+      acc.nhf += row.nhf
       acc.medicalContribution += row.medicalContribution
       return acc
     },
-    { paye: 0, pensionEmployee: 0, pensionEmployer: 0, nsitf: 0, medicalContribution: 0 }
+    { paye: 0, pensionEmployee: 0, pensionEmployer: 0, nsitf: 0, itf: 0, nhf: 0, medicalContribution: 0 }
   )
 
   // Bank payment schedule — one row per staff, net pay totalled across the

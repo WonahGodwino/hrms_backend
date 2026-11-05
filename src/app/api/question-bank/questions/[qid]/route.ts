@@ -1,0 +1,67 @@
+import { NextRequest } from 'next/server'
+import { prisma } from '@/app/lib/db'
+import { requireModuleAccess } from '@/app/lib/module-access'
+import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
+import { getOrCreateQuestionBankAssessment } from '@/app/lib/training/question-bank'
+import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import { handleCorsOptions, withCors } from '@/app/lib/cors'
+
+export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
+
+// DELETE /api/question-bank/questions/[qid]?companyId=
+export async function DELETE(req: NextRequest, { params }: { params: { qid: string } }) {
+  const origin = req.headers.get('origin')
+  try {
+    const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
+    const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+
+    const resolved = await resolveRequestCompanyId(user, new URL(req.url).searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+    const { companyId } = resolved
+
+    const bankId = await getOrCreateQuestionBankAssessment(companyId)
+    const question = await prisma.question.findFirst({ where: { id: params.qid, assessmentId: bankId } })
+    if (!question) return withCors(ApiResponse.error('Question not found in bank', 404), origin)
+
+    await prisma.question.delete({ where: { id: params.qid } })
+    return withCors(ApiResponse.success(null, 'Question deleted from bank'), origin)
+  } catch (e) { return withCors(handleApiError(e), origin) }
+}
+
+// PUT /api/question-bank/questions/[qid]?companyId= — edit a bank question.
+export async function PUT(req: NextRequest, { params }: { params: { qid: string } }) {
+  const origin = req.headers.get('origin')
+  try {
+    const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
+    const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+
+    const body = await req.json()
+    const resolved = await resolveRequestCompanyId(user, body.companyId ?? new URL(req.url).searchParams.get('companyId'))
+    if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
+    const { companyId } = resolved
+
+    const bankId = await getOrCreateQuestionBankAssessment(companyId)
+    const question = await prisma.question.findFirst({ where: { id: params.qid, assessmentId: bankId } })
+    if (!question) return withCors(ApiResponse.error('Question not found in bank', 404), origin)
+
+    const updated = await prisma.question.update({
+      where: { id: params.qid },
+      data: {
+        ...(body.title              !== undefined && { title:              body.title }),
+        ...(body.type               !== undefined && { type:               body.type }),
+        ...(body.prompt             !== undefined && { prompt:             body.prompt }),
+        ...(body.options            !== undefined && { options:            body.options }),
+        ...(body.correctOptionId    !== undefined && { correctOptionId:    body.correctOptionId }),
+        ...(body.correctBoolean     !== undefined && { correctBoolean:     body.correctBoolean }),
+        ...(body.explanation        !== undefined && { explanation:        body.explanation }),
+        ...(body.points             !== undefined && { points:             Number(body.points) }),
+        ...(body.difficulty         !== undefined && { difficulty:         body.difficulty }),
+        ...(body.tags               !== undefined && { tags:               body.tags }),
+        ...(body.required           !== undefined && { required:           body.required }),
+        ...(body.shuffleAnswers     !== undefined && { shuffleAnswers:     body.shuffleAnswers }),
+        ...(body.multipleSelections !== undefined && { multipleSelections: body.multipleSelections }),
+      },
+    })
+    return withCors(ApiResponse.success({ ...updated, bankAssessmentId: bankId }, 'Question updated'), origin)
+  } catch (e) { return withCors(handleApiError(e), origin) }
+}

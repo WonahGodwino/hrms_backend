@@ -3,10 +3,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import validator from 'validator';
 
 import { requireRole } from '@/app/lib/auth';
+import { actorFor, changeSourceOf, diffFields, recordCoreSetupEvent } from '@/app/lib/core-setup/audit';
 import { withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
+import { reconcileStaffDepartmentLink } from '@/app/lib/departments/department-sync';
+import { getUserDisplayName } from '@/app/lib/departments/department-utils';
+import { reconcileStaffDesignationLink } from '@/app/lib/designations/designation-sync';
+import { syncUserCompanyForRole } from '@/app/lib/access/user-company-role';
+import {
+    describeIdentifierCollision, findIdentifierHolder
+} from '@/app/lib/staff/identifierCollision';
 import { ApiResponse, formatError } from '@/app/lib/utils';
-import { findIdentifierHolder, describeIdentifierCollision } from '@/app/lib/staff/identifierCollision';
+import { assertTrialCapacity, trialErrorBody } from '@/app/lib/trial/guard';
+import { isValidRsaPin, loadActivePfaCodes, normalizeRsaPin, MANUAL_PENSION_CAPTURE_SYSTEM_FIELDS } from '@/app/lib/staff/pension-fields';
 
 type RouteParams = {
 	params: {
@@ -19,6 +28,10 @@ function sanitizeString(input: string | null): string | null {
 	if (!input) return null;
 	// Remove HTML tags and limit length
 	return validator.escape(validator.stripLow(input.trim()));
+}
+
+function isOptionalZero(value: unknown): boolean {
+	return value === 0 || value === '0';
 }
 
 function sanitizeEmail(email: string): string {
@@ -111,20 +124,47 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 				lastName: true,
 				department: true,
 				position: true,
+				designationId: true,
+				designation: { select: { id: true, title: true } },
 				phone: true,
 				bankName: true,
 				accountNumber: true,
 				bvn: true,
+				rsaPin: true,
+				pfaCode: true,
+				pensionContributionType: true,
+				pensionEmployerCode: true,
+				voluntaryPensionEmployee: true,
+				voluntaryPensionEmployer: true,
+				otherPensionContribution: true,
 				isRegistered: true,
 				role: true,
 				isActive: true,
+				hireDate: true,
+				middleName: true,
+				gender: true,
+				dateOfBirth: true,
+				maritalStatus: true,
+				stateOfOrigin: true,
+				lgaOfOrigin: true,
+				townOfOrigin: true,
+				alternatePhone: true,
+				nin: true,
+				stateOfIssuance: true,
+				residentialAddress: true,
+				numberOfPrimaryDependants: true,
+				isBlocked: true,
+				blockReason: true,
 				encodedId: true,
 				companyId: true,
+				managerId: true,
+				manager: { select: { id: true, firstName: true, lastName: true } },
 				company: {
 					select: {
 						id: true,
 						companyName: true,
 						email: true,
+						baseCurrency: true,
 					},
 				},
 				createdAt: true,
@@ -145,6 +185,47 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 			}
 		}
 
+		// Pension capture fields (contribution type, voluntary EE/ER, other
+		// contribution) are now set at payroll generation/upload time, not in
+		// Staff Management — this profile view shows whatever the most recent
+		// payroll run captured, read straight off that Payroll row's
+		// customFields rather than StaffRecord (see pension-fields.ts's
+		// MANUAL_PENSION_CAPTURE_FIELDS for why the key names are fixed).
+		const latestPayroll = await prisma.payroll.findFirst({
+			where: { staffRecordId: staffRecord.id },
+			orderBy: [{ year: 'desc' }, { month: 'desc' }],
+			select: { month: true, year: true, customFields: true },
+		});
+		const latestPayrollFields = (latestPayroll?.customFields as Record<string, { value?: unknown }> | null) || null;
+		const hasAnyPensionCapture = latestPayrollFields
+			? MANUAL_PENSION_CAPTURE_SYSTEM_FIELDS.some((key) => latestPayrollFields[key]?.value !== undefined && latestPayrollFields[key]?.value !== null && latestPayrollFields[key]?.value !== '')
+			: false;
+		const pensionManual = hasAnyPensionCapture
+			? {
+					contributionType: (latestPayrollFields!.pensionContributionType?.value as string) || null,
+					voluntaryPensionEmployee: latestPayrollFields!.voluntaryPensionEmployee?.value != null ? Number(latestPayrollFields!.voluntaryPensionEmployee.value) : null,
+					voluntaryPensionEmployer: latestPayrollFields!.voluntaryPensionEmployer?.value != null ? Number(latestPayrollFields!.voluntaryPensionEmployer.value) : null,
+					otherPensionContribution: latestPayrollFields!.otherPensionContribution?.value != null ? Number(latestPayrollFields!.otherPensionContribution.value) : null,
+					asOfMonth: latestPayroll!.month,
+					asOfYear: latestPayroll!.year,
+				}
+			: null;
+
+		// createdBy stores the creating user's StaffRecord id (no FK/relation
+		// declared on it), so resolve it to a display name the same way
+		// getUserDisplayName does for the authenticated user - falls back to the
+		// raw value if it doesn't resolve to a known staff record (e.g. a
+		// non-staff actor string from a system/seed process).
+		let createdByName: string | null = null;
+		if (staffRecord.createdBy) {
+			const creator = await prisma.staffRecord.findUnique({
+				where: { id: staffRecord.createdBy },
+				select: { firstName: true, lastName: true, email: true },
+			});
+			const fullName = creator ? `${creator.firstName || ''} ${creator.lastName || ''}`.trim() : '';
+			createdByName = fullName || creator?.email || staffRecord.createdBy;
+		}
+
 		// Escape output data to prevent XSS in API responses
 		const sanitizedResponse = {
 			...staffRecord,
@@ -157,6 +238,26 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 			bankName: staffRecord.bankName ? validator.escape(staffRecord.bankName) : null,
 			accountNumber: staffRecord.accountNumber ? validator.escape(staffRecord.accountNumber) : null,
 			bvn: staffRecord.bvn ? '***' + staffRecord.bvn.slice(-4) : null, // Mask BVN for security
+			rsaPin: staffRecord.rsaPin ? validator.escape(staffRecord.rsaPin) : null,
+			pfaCode: staffRecord.pfaCode ? validator.escape(staffRecord.pfaCode) : null,
+			pensionContributionType: staffRecord.pensionContributionType || null,
+			pensionEmployerCode: staffRecord.pensionEmployerCode ? validator.escape(staffRecord.pensionEmployerCode) : null,
+			voluntaryPensionEmployee: staffRecord.voluntaryPensionEmployee !== null ? Number(staffRecord.voluntaryPensionEmployee) : null,
+			voluntaryPensionEmployer: staffRecord.voluntaryPensionEmployer !== null ? Number(staffRecord.voluntaryPensionEmployer) : null,
+			otherPensionContribution: staffRecord.otherPensionContribution !== null ? Number(staffRecord.otherPensionContribution) : null,
+			pensionManual,
+			middleName: staffRecord.middleName ? validator.escape(staffRecord.middleName) : null,
+			gender: staffRecord.gender || null,
+			dateOfBirth: staffRecord.dateOfBirth,
+			maritalStatus: staffRecord.maritalStatus || null,
+			stateOfOrigin: staffRecord.stateOfOrigin || null,
+			lgaOfOrigin: staffRecord.lgaOfOrigin ? validator.escape(staffRecord.lgaOfOrigin) : null,
+			townOfOrigin: staffRecord.townOfOrigin ? validator.escape(staffRecord.townOfOrigin) : null,
+			alternatePhone: staffRecord.alternatePhone ? validator.escape(staffRecord.alternatePhone) : null,
+			nin: staffRecord.nin ? validator.escape(staffRecord.nin) : null,
+			stateOfIssuance: staffRecord.stateOfIssuance || null,
+			residentialAddress: staffRecord.residentialAddress ? validator.escape(staffRecord.residentialAddress) : null,
+			numberOfPrimaryDependants: staffRecord.numberOfPrimaryDependants,
 			encodedId: staffRecord.encodedId ? validator.escape(staffRecord.encodedId) : null,
 			company: staffRecord.company
 				? {
@@ -166,6 +267,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 				  }
 				: null,
 			createdBy: staffRecord.createdBy ? validator.escape(staffRecord.createdBy) : null,
+			createdByName: createdByName ? validator.escape(createdByName) : null,
 		};
 
 		return withCors(ApiResponse.success(sanitizedResponse, 'Staff record retrieved successfully'), origin);
@@ -210,8 +312,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 			select: {
 				id: true,
 				companyId: true,
+				role: true,
 				email: true,
 				staffId: true,
+				departmentId: true,
+				position: true,
+				designationId: true,
+				designation: { select: { id: true, title: true } },
 			},
 		});
 
@@ -235,14 +342,33 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 			lastName,
 			department,
 			position,
+			designationId,
 			phone,
 			bankName,
 			accountNumber,
 			bvn,
+			rsaPin,
+			pfaCode,
+			pensionEmployerCode,
 			isRegistered,
 			role,
 			isActive,
 			encodedId,
+			hireDate,
+			managerId,
+			requirePasswordChange,
+			middleName,
+			gender,
+			dateOfBirth,
+			maritalStatus,
+			stateOfOrigin,
+			lgaOfOrigin,
+			townOfOrigin,
+			alternatePhone,
+			nin,
+			stateOfIssuance,
+			residentialAddress,
+			numberOfPrimaryDependants,
 			// Explicitly exclude these fields
 			password,
 			companyId,
@@ -257,14 +383,33 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 			'lastName',
 			'department',
 			'position',
+			'designationId',
 			'phone',
 			'bankName',
 			'accountNumber',
 			'bvn',
+			'rsaPin',
+			'pfaCode',
+			'pensionEmployerCode',
 			'isRegistered',
 			'role',
 			'isActive',
 			'encodedId',
+			'hireDate',
+			'managerId',
+			'requirePasswordChange',
+			'middleName',
+			'gender',
+			'dateOfBirth',
+			'maritalStatus',
+			'stateOfOrigin',
+			'lgaOfOrigin',
+			'townOfOrigin',
+			'alternatePhone',
+			'nin',
+			'stateOfIssuance',
+			'residentialAddress',
+			'numberOfPrimaryDependants',
 		];
 
 		// Check for invalid fields
@@ -350,19 +495,39 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 			updateData.position = sanitizedPosition;
 		}
 
+		if (designationId !== undefined) {
+			if (designationId !== null && typeof designationId !== 'string') {
+				return withCors(ApiResponse.error('Designation must be a valid ID', 400), origin);
+			}
+			if (!designationId) {
+				updateData.designationId = null;
+			}
+			if (designationId) {
+				const designation = await prisma.designation.findFirst({
+					where: { id: designationId, companyId: existingStaff.companyId, status: 'Active' },
+					select: { id: true, title: true },
+				});
+				if (!designation) {
+					return withCors(ApiResponse.error('Designation not found or inactive for this company', 400), origin);
+				}
+				updateData.designationId = designation.id;
+				updateData.position = designation.title;
+			}
+		}
+
 		if (phone !== undefined) {
-			if (phone !== null && typeof phone !== 'string') {
+			if (phone !== null && !isOptionalZero(phone) && typeof phone !== 'string') {
 				return withCors(ApiResponse.error('Phone must be a string or null', 400), origin);
 			}
-			const sanitizedPhone = sanitizePhone(phone);
+			const sanitizedPhone = isOptionalZero(phone) ? null : sanitizePhone(phone);
 			updateData.phone = sanitizedPhone;
 		}
 
 		if (bankName !== undefined) {
-			if (bankName !== null && typeof bankName !== 'string') {
+			if (bankName !== null && !isOptionalZero(bankName) && typeof bankName !== 'string') {
 				return withCors(ApiResponse.error('Bank name must be a string or null', 400), origin);
 			}
-			const sanitizedBankName = sanitizeString(bankName);
+			const sanitizedBankName = isOptionalZero(bankName) ? null : sanitizeString(bankName);
 			if (sanitizedBankName && !validator.isLength(sanitizedBankName, { max: 100 })) {
 				return withCors(ApiResponse.error('Bank name must be less than 100 characters', 400), origin);
 			}
@@ -370,25 +535,69 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 		}
 
 		if (accountNumber !== undefined) {
-			if (accountNumber !== null && typeof accountNumber !== 'string') {
+			if (accountNumber !== null && !isOptionalZero(accountNumber) && typeof accountNumber !== 'string') {
 				return withCors(ApiResponse.error('Account number must be a string or null', 400), origin);
 			}
-			const sanitizedAccountNumber = sanitizeBankAccount(accountNumber);
-			if (sanitizedAccountNumber === null && accountNumber !== null) {
+			const sanitizedAccountNumber = isOptionalZero(accountNumber) ? null : sanitizeBankAccount(accountNumber);
+			if (sanitizedAccountNumber === null && accountNumber !== null && !isOptionalZero(accountNumber)) {
 				return withCors(ApiResponse.error('Invalid account number format', 400), origin);
 			}
 			updateData.accountNumber = sanitizedAccountNumber;
 		}
 
 		if (bvn !== undefined) {
-			if (bvn !== null && typeof bvn !== 'string') {
+			if (bvn !== null && !isOptionalZero(bvn) && typeof bvn !== 'string') {
 				return withCors(ApiResponse.error('BVN must be a string or null', 400), origin);
 			}
-			const sanitizedBVN = sanitizeBVN(bvn);
-			if (sanitizedBVN === null && bvn !== null) {
+			const sanitizedBVN = isOptionalZero(bvn) ? null : sanitizeBVN(bvn);
+			if (sanitizedBVN === null && bvn !== null && !isOptionalZero(bvn)) {
 				return withCors(ApiResponse.error('BVN must be 11 digits', 400), origin);
 			}
 			updateData.bvn = sanitizedBVN;
+		}
+
+		if (rsaPin !== undefined) {
+			if (rsaPin !== null && !isOptionalZero(rsaPin) && typeof rsaPin !== 'string') {
+				return withCors(ApiResponse.error('RSA PIN must be a string or null', 400), origin);
+			}
+			const sanitizedRsaPin = isOptionalZero(rsaPin) ? null : sanitizeString(rsaPin);
+			if (sanitizedRsaPin && !validator.isLength(sanitizedRsaPin, { max: 50 })) {
+				return withCors(ApiResponse.error('RSA PIN must be less than 50 characters', 400), origin);
+			}
+			const normalizedRsaPin = sanitizedRsaPin ? normalizeRsaPin(sanitizedRsaPin) : null;
+			if (normalizedRsaPin && !isValidRsaPin(normalizedRsaPin)) {
+				return withCors(ApiResponse.error('RSA PIN must start with PEN followed by digits (e.g. PEN100123456789)', 400), origin);
+			}
+			updateData.rsaPin = normalizedRsaPin;
+		}
+
+		if (pfaCode !== undefined) {
+			if (pfaCode !== null && !isOptionalZero(pfaCode) && typeof pfaCode !== 'string') {
+				return withCors(ApiResponse.error('PFA Code must be a string or null', 400), origin);
+			}
+			const sanitizedPfaCode = isOptionalZero(pfaCode) ? null : sanitizeString(pfaCode);
+			if (sanitizedPfaCode && !validator.isLength(sanitizedPfaCode, { max: 50 })) {
+				return withCors(ApiResponse.error('PFA Code must be less than 50 characters', 400), origin);
+			}
+			const normalizedPfaCode = sanitizedPfaCode ? sanitizedPfaCode.toUpperCase() : null;
+			if (normalizedPfaCode) {
+				const activePfaCodes = await loadActivePfaCodes(existingStaff.companyId);
+				if (!activePfaCodes.has(normalizedPfaCode)) {
+					return withCors(ApiResponse.error(`PFA Code must be one of: ${Array.from(activePfaCodes).sort().join(', ')}`, 400), origin);
+				}
+			}
+			updateData.pfaCode = normalizedPfaCode;
+		}
+
+		if (pensionEmployerCode !== undefined) {
+			if (pensionEmployerCode !== null && !isOptionalZero(pensionEmployerCode) && typeof pensionEmployerCode !== 'string') {
+				return withCors(ApiResponse.error('Employer Code must be a string or null', 400), origin);
+			}
+			const sanitizedEmployerCode = isOptionalZero(pensionEmployerCode) ? null : sanitizeString(pensionEmployerCode);
+			if (sanitizedEmployerCode && !validator.isLength(sanitizedEmployerCode, { max: 50 })) {
+				return withCors(ApiResponse.error('Employer Code must be less than 50 characters', 400), origin);
+			}
+			updateData.pensionEmployerCode = sanitizedEmployerCode;
 		}
 
 		if (isRegistered !== undefined) {
@@ -406,6 +615,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 			const allowedRoles = ['STAFF', 'HR', 'ADMIN', 'SUPER_ADMIN'];
 			if (!sanitizedRole || !allowedRoles.includes(sanitizedRole)) {
 				return withCors(ApiResponse.error(`Role must be one of: ${allowedRoles.join(', ')}`, 400), origin);
+			}
+			// Free trial: promoting someone to admin or HR counts toward the 2-user cap.
+			if (['ADMIN', 'HR'].includes(sanitizedRole) && !['ADMIN', 'HR'].includes(existingStaff.role)) {
+				await assertTrialCapacity(existingStaff.companyId, 'adminUsers');
 			}
 			updateData.role = sanitizedRole;
 		}
@@ -426,6 +639,135 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 				return withCors(ApiResponse.error('Encoded ID must be less than 100 characters', 400), origin);
 			}
 			updateData.encodedId = sanitizedEncodedId;
+		}
+
+		if (hireDate !== undefined) {
+			if (hireDate === null || hireDate === '') {
+				updateData.hireDate = null;
+			} else {
+				const parsedHireDate = new Date(hireDate);
+				if (Number.isNaN(parsedHireDate.getTime())) {
+					return withCors(ApiResponse.error('Start date must be a valid date', 400), origin);
+				}
+				updateData.hireDate = parsedHireDate;
+			}
+		}
+
+		if (managerId !== undefined) {
+			if (managerId === null || managerId === '') {
+				updateData.managerId = null;
+			} else {
+				if (typeof managerId !== 'string') {
+					return withCors(ApiResponse.error('Manager must be a valid staff ID', 400), origin);
+				}
+				if (managerId === sanitizedId) {
+					return withCors(ApiResponse.error('A staff member cannot be their own manager', 400), origin);
+				}
+				const manager = await prisma.staffRecord.findFirst({
+					where: { id: managerId, companyId: existingStaff.companyId },
+					select: { id: true },
+				});
+				if (!manager) {
+					return withCors(ApiResponse.error('Manager not found in this company', 400), origin);
+				}
+				updateData.managerId = manager.id;
+			}
+		}
+
+		if (requirePasswordChange !== undefined) {
+			if (typeof requirePasswordChange !== 'boolean') {
+				return withCors(ApiResponse.error('requirePasswordChange must be a boolean', 400), origin);
+			}
+			updateData.requirePasswordChange = requirePasswordChange;
+		}
+
+		// NSITF Employees' Schedule of Payments identity fields — all optional,
+		// never enforced. Simple string fields are sanitized/length-capped the
+		// same way the existing optional strings above are; none of them block
+		// a save when left blank.
+		for (const [field, value] of [
+			['middleName', middleName],
+			['stateOfOrigin', stateOfOrigin],
+			['lgaOfOrigin', lgaOfOrigin],
+			['townOfOrigin', townOfOrigin],
+			['stateOfIssuance', stateOfIssuance],
+		] as const) {
+			if (value === undefined) continue;
+			if (value !== null && !isOptionalZero(value) && typeof value !== 'string') {
+				return withCors(ApiResponse.error(`${field} must be a string or null`, 400), origin);
+			}
+			const sanitized = isOptionalZero(value) ? null : sanitizeString(value as string | null);
+			if (sanitized && !validator.isLength(sanitized, { max: 100 })) {
+				return withCors(ApiResponse.error(`${field} must be less than 100 characters`, 400), origin);
+			}
+			updateData[field] = sanitized;
+		}
+
+		if (gender !== undefined) {
+			if (gender !== null && !isOptionalZero(gender) && typeof gender !== 'string') {
+				return withCors(ApiResponse.error('Gender must be a string or null', 400), origin);
+			}
+			updateData.gender = isOptionalZero(gender) ? null : sanitizeString(gender);
+		}
+
+		if (maritalStatus !== undefined) {
+			if (maritalStatus !== null && !isOptionalZero(maritalStatus) && typeof maritalStatus !== 'string') {
+				return withCors(ApiResponse.error('Marital status must be a string or null', 400), origin);
+			}
+			updateData.maritalStatus = isOptionalZero(maritalStatus) ? null : sanitizeString(maritalStatus);
+		}
+
+		if (alternatePhone !== undefined) {
+			if (alternatePhone !== null && !isOptionalZero(alternatePhone) && typeof alternatePhone !== 'string') {
+				return withCors(ApiResponse.error('Alternate phone must be a string or null', 400), origin);
+			}
+			updateData.alternatePhone = isOptionalZero(alternatePhone) ? null : sanitizePhone(alternatePhone) || sanitizeString(alternatePhone);
+		}
+
+		if (nin !== undefined) {
+			if (nin !== null && !isOptionalZero(nin) && typeof nin !== 'string') {
+				return withCors(ApiResponse.error('NIN must be a string or null', 400), origin);
+			}
+			const sanitizedNin = isOptionalZero(nin) ? null : sanitizeString(nin);
+			if (sanitizedNin && !validator.isLength(sanitizedNin, { max: 20 })) {
+				return withCors(ApiResponse.error('NIN must be less than 20 characters', 400), origin);
+			}
+			updateData.nin = sanitizedNin;
+		}
+
+		if (residentialAddress !== undefined) {
+			if (residentialAddress !== null && !isOptionalZero(residentialAddress) && typeof residentialAddress !== 'string') {
+				return withCors(ApiResponse.error('Residential address must be a string or null', 400), origin);
+			}
+			const sanitizedAddress = isOptionalZero(residentialAddress) ? null : sanitizeString(residentialAddress);
+			if (sanitizedAddress && !validator.isLength(sanitizedAddress, { max: 250 })) {
+				return withCors(ApiResponse.error('Residential address must be less than 250 characters', 400), origin);
+			}
+			updateData.residentialAddress = sanitizedAddress;
+		}
+
+		if (dateOfBirth !== undefined) {
+			if (dateOfBirth === null || dateOfBirth === '') {
+				updateData.dateOfBirth = null;
+			} else {
+				const parsedDob = new Date(dateOfBirth);
+				if (Number.isNaN(parsedDob.getTime())) {
+					return withCors(ApiResponse.error('Date of birth must be a valid date', 400), origin);
+				}
+				updateData.dateOfBirth = parsedDob;
+			}
+		}
+
+		if (numberOfPrimaryDependants !== undefined) {
+			if (numberOfPrimaryDependants === null || numberOfPrimaryDependants === '') {
+				updateData.numberOfPrimaryDependants = null;
+			} else {
+				const parsedDependants = Number(numberOfPrimaryDependants);
+				if (!Number.isFinite(parsedDependants) || parsedDependants < 0) {
+					return withCors(ApiResponse.error('Number of primary dependants must be a non-negative number', 400), origin);
+				}
+				updateData.numberOfPrimaryDependants = Math.trunc(parsedDependants);
+			}
 		}
 
 		// If no valid fields to update
@@ -449,14 +791,38 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 				lastName: true,
 				department: true,
 				position: true,
+				designationId: true,
+				designation: { select: { id: true, title: true } },
 				phone: true,
 				bankName: true,
 				accountNumber: true,
 				bvn: true,
+				rsaPin: true,
+				pfaCode: true,
+				pensionContributionType: true,
+				pensionEmployerCode: true,
+				voluntaryPensionEmployee: true,
+				voluntaryPensionEmployer: true,
+				otherPensionContribution: true,
 				isRegistered: true,
 				role: true,
 				isActive: true,
 				encodedId: true,
+				hireDate: true,
+				managerId: true,
+				requirePasswordChange: true,
+				middleName: true,
+				gender: true,
+				dateOfBirth: true,
+				maritalStatus: true,
+				stateOfOrigin: true,
+				lgaOfOrigin: true,
+				townOfOrigin: true,
+				alternatePhone: true,
+				nin: true,
+				stateOfIssuance: true,
+				residentialAddress: true,
+				numberOfPrimaryDependants: true,
 				companyId: true,
 				company: {
 					select: {
@@ -472,6 +838,51 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 		// Log the update
 		console.log(`Staff record ${sanitizedId} updated by ${currentUser.role} (${currentUser.email})`);
 
+		// Role → company-access sync. Making a staff HR/ADMIN must grant the
+		// UserCompany link that elevated access is resolved from (and demoting
+		// removes it); without this an "HR" staff logs in but sees nothing.
+		if (updateData.role !== undefined) {
+			try {
+				await syncUserCompanyForRole(prisma, {
+					userId: updatedStaff.id,
+					companyId: updatedStaff.companyId,
+					role: updatedStaff.role,
+					actorEmail: currentUser.email,
+				});
+			} catch (err) {
+				console.error(`Failed to sync company access for staff ${sanitizedId}:`, err);
+			}
+		}
+
+		// Staff Management is the source of truth for department — only
+		// reconcile when this edit actually changed it. A sync hiccup must
+		// never fail the edit itself.
+		if (updateData.department !== undefined || updateData.position !== undefined) {
+			try {
+				const performedByName = await getUserDisplayName(currentUser);
+				if (updateData.department !== undefined) {
+					await reconcileStaffDepartmentLink(
+						sanitizedId,
+						existingStaff.companyId,
+						updateData.department,
+						existingStaff.departmentId,
+						updateData.position || existingStaff.position,
+						currentUser.userId,
+						performedByName
+					);
+				}
+				await reconcileStaffDesignationLink({
+					staffId: sanitizedId,
+					companyId: existingStaff.companyId,
+					rawPosition: updateData.position || existingStaff.position,
+					currentDesignationId: existingStaff.designationId,
+					explicitDesignationId: updateData.designationId || null,
+				});
+			} catch (syncError) {
+				console.error('[STAFF_EDIT] Department/designation sync error:', syncError);
+			}
+		}
+
 		// Sanitize response data
 		const sanitizedResponse = {
 			...updatedStaff,
@@ -484,6 +895,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 			bankName: updatedStaff.bankName ? validator.escape(updatedStaff.bankName) : null,
 			accountNumber: updatedStaff.accountNumber ? '***' + updatedStaff.accountNumber?.slice(-4) : null, // Mask account number
 			bvn: updatedStaff.bvn ? '***' + updatedStaff.bvn.slice(-4) : null, // Mask BVN
+			rsaPin: updatedStaff.rsaPin ? validator.escape(updatedStaff.rsaPin) : null,
+			pfaCode: updatedStaff.pfaCode ? validator.escape(updatedStaff.pfaCode) : null,
+			pensionContributionType: updatedStaff.pensionContributionType || null,
+			pensionEmployerCode: updatedStaff.pensionEmployerCode ? validator.escape(updatedStaff.pensionEmployerCode) : null,
+			voluntaryPensionEmployee: updatedStaff.voluntaryPensionEmployee !== null ? Number(updatedStaff.voluntaryPensionEmployee) : null,
+			voluntaryPensionEmployer: updatedStaff.voluntaryPensionEmployer !== null ? Number(updatedStaff.voluntaryPensionEmployer) : null,
+			otherPensionContribution: updatedStaff.otherPensionContribution !== null ? Number(updatedStaff.otherPensionContribution) : null,
 			encodedId: updatedStaff.encodedId ? validator.escape(updatedStaff.encodedId) : null,
 			company: updatedStaff.company
 				? {
@@ -494,8 +912,37 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 			updatedBy: updatedStaff.updatedBy ? validator.escape(updatedStaff.updatedBy) : null,
 		};
 
+		// Activity Log entry for the change. Never blocks the save.
+		try {
+			const before = existingStaff as Record<string, unknown>;
+			const after = { ...before, ...(updateData as Record<string, unknown>) };
+			const changes = diffFields(before, after, ['updatedAt', 'updatedBy']);
+			if (changes.length) {
+				const name = `${updatedStaff.firstName} ${updatedStaff.lastName}`.trim();
+				const via = changeSourceOf(request);
+				await recordCoreSetupEvent(prisma, {
+					companyId: existingStaff.companyId,
+					actor: await actorFor(currentUser),
+					kind: 'record',
+					area: 'staff',
+					via,
+					action: 'Staff record updated',
+					changeType: 'updated',
+					object: name,
+					summary: `${name}: ${changes.slice(0, 3).map((c) => `${c.field} ${c.previousValue} to ${c.newValue}`).join(', ')}${changes.length > 3 ? ` and ${changes.length - 3} more` : ''}.`,
+					status: 'success',
+					fieldChanges: changes,
+					related: [{ type: 'staff', name, identifier: sanitizedId, status: 'Active', relationship: 'Changed' }],
+				});
+			}
+		} catch (auditError) {
+			console.error('Core Setup audit (staff edit) failed:', auditError);
+		}
+
 		return withCors(ApiResponse.success(sanitizedResponse, 'Staff record updated successfully'), origin);
 	} catch (error) {
+		const trial = trialErrorBody(error);
+		if (trial) return withCors(ApiResponse.error(trial.message, trial.status, undefined, { trialCode: trial.code }), origin);
 		const message = formatError(error);
 		console.error('Error updating staff record:', error);
 

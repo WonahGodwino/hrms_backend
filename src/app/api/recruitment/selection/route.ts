@@ -63,7 +63,6 @@ export async function POST(request: NextRequest) {
     // (token-cost-config table). If not set, falls back to env vars.
     await resolveDefaultAiFromDb();
     const effectiveService = getDefaultAiService();
-    const effectiveModel = getDefaultModel(effectiveService);
 
     const {
       jobIds,
@@ -71,7 +70,7 @@ export async function POST(request: NextRequest) {
       autoShortlist = false, 
       threshold = 70,
       aiService = effectiveService,
-      aiModel = effectiveModel,
+      aiModel,
       aiTemperature = 0.2,
       includeCulturalFit = true,
       includeGrowthPotential = true,

@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
     const onboardings = offerIds.length
       ? await prisma.onboarding.findMany({
           where: { offerId: { in: offerIds }, archived: 0 },
-          select: { id: true, offerId: true, status: true },
+          select: { id: true, offerId: true, status: true, staffRecordId: true },
         })
       : []
     const onboardingByOffer = new Map(onboardings.map((ob) => [ob.offerId, ob]))
@@ -114,6 +114,7 @@ export async function GET(request: NextRequest) {
         approval,
         onboardingId: ob?.id || null,
         onboardingStatus: ob?.status || null,
+        staffRecordId: ob?.staffRecordId || null,
         createdAt: o.createdAt.toISOString(),
         updatedAt: o.updatedAt.toISOString(),
       }

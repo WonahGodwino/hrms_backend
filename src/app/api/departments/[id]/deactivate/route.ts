@@ -65,7 +65,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       for (const staff of staffToTransfer) {
         await prisma.staffRecord.update({
           where: { id: staff.id },
-          data: { departmentId: body.transferToDepartmentId }
+          // Free-text `department` follows the transfer too, same reasoning
+          // as transferAllStaff() in department-utils.ts.
+          data: { departmentId: body.transferToDepartmentId, department: targetDepartment.name }
         })
         
         await logStaffDepartmentChange(

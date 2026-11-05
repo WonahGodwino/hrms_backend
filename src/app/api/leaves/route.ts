@@ -7,6 +7,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { decimalToNumber } from '@/app/lib/prisma-utils'
+import { getActionableRequestIds, getTeamStaffIds } from '@/app/lib/leave/approval-chain'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -76,18 +77,11 @@ export async function GET(request: NextRequest) {
       }
       
       if (forManagerApproval) {
-        // Get pending leaves where user is the manager approver
-        where.managerApproverId = staffRecord.id
-        where.status = 'PENDING'
-        where.currentStep = 'MANAGER'
+        // Requests currently waiting on this line manager (their ladder level is up)
+        where.id = { in: await getActionableRequestIds(prisma, staffRecord.id) }
       } else {
-        // Get leaves for user's direct reports + their own
-        const directReportIds = await prisma.staffRecord.findMany({
-          where: { managerId: staffRecord.id, isActive: true },
-          select: { id: true }
-        })
-        
-        const teamIds = [staffRecord.id, ...directReportIds.map(dr => dr.id)]
+        // Leaves of the departments this user manages + their own
+        const teamIds = await getTeamStaffIds(staffRecord.id)
         where.staffRecordId = { in: teamIds }
       }
     }
@@ -105,8 +99,8 @@ export async function GET(request: NextRequest) {
       }
       
       if (forHRApproval) {
-        // Get leaves pending HR approval
-        where.status = 'MANAGER_APPROVED'
+        // Leaves waiting on HR (after the ladder, or straight to HR when no manager applies)
+        where.status = { in: ['PENDING', 'MANAGER_APPROVED'] }
         where.currentStep = 'HR'
         
         if (accessibleCompanyIds.length > 0 && user.role !== 'SUPER_ADMIN') {
@@ -310,20 +304,14 @@ async function calculateLeaveStatistics(user: any, year: number) {
     })
     
     if (staffRecord) {
-      pendingManagerApprovals = await prisma.leaveRequest.count({
-        where: {
-          managerApproverId: staffRecord.id,
-          status: 'PENDING',
-          currentStep: 'MANAGER'
-        }
-      })
+      pendingManagerApprovals = (await getActionableRequestIds(prisma, staffRecord.id)).length
     }
   }
   
   if (['HR', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
     // Build where clause for HR approvals
     const whereClause: any = {
-      status: 'MANAGER_APPROVED',
+      status: { in: ['PENDING', 'MANAGER_APPROVED'] },
       currentStep: 'HR'
     }
     
@@ -398,13 +386,7 @@ async function calculateLeaveStatistics(user: any, year: number) {
     })
     
     if (staffRecord) {
-      const directReportIds = await prisma.staffRecord.findMany({
-        where: { managerId: staffRecord.id, isActive: true },
-        select: { id: true }
-      })
-      
-      const teamIds = [staffRecord.id, ...directReportIds.map(dr => dr.id)]
-      teamOnLeaveWhere.staffRecordId = { in: teamIds }
+      teamOnLeaveWhere.staffRecordId = { in: await getTeamStaffIds(staffRecord.id) }
     }
   } else if (['HR', 'ADMIN', 'SUPER_ADMIN'].includes(user.role) && user.role !== 'SUPER_ADMIN') {
     const accessibleStaffIds = await getAccessibleStaffIds(user)

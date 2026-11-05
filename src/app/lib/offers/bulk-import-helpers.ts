@@ -22,7 +22,7 @@ export const OFFER_IMPORT_COLUMNS = [
   { key: 'requiresApproval', header: 'Requires Approval', note: 'Enter Yes/True/1 if this offer must pass through the approval workflow before dispatch. Leave blank or enter No/False/0 to skip approval (default for already-hired candidates).' },
 ] as const
 
-export type OfferImportKey = (typeof OFFER_IMPORT_COLUMNS)[number]['key']
+type OfferImportKey = (typeof OFFER_IMPORT_COLUMNS)[number]['key']
 
 export interface OfferImportRow {
   country: string
@@ -89,7 +89,7 @@ function headerToKey(raw: string): string | null {
 
 // Converts assorted date inputs (Excel serial number, JS Date, ISO string,
 // DD/MM/YYYY, MM/DD/YYYY) into an ISO string, or null when unparseable/empty.
-export function parseImportDate(value: unknown): string | null {
+function parseImportDate(value: unknown): string | null {
   if (value == null || value === '') return null
   if (value instanceof Date && !isNaN(value.getTime())) return value.toISOString()
 

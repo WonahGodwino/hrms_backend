@@ -1,10 +1,10 @@
 // PATCH /api/recruitment/onboarding/:id
 // Updates a hire's handoff details (expected start date, job title, department,
 // assigned line manager). Start date persists on the onboarding row; the job
-// title / department / manager are stored as an overrides blob on the offer's
-// metadata (no schema change). When the hire has already been promoted to a
-// StaffRecord, the chosen manager is also written to StaffRecord.managerId so
-// the reporting line is live immediately.
+// title / department / manager are stored as an overrides blob on the
+// onboarding's own metadata (works whether or not an Offer exists yet). When
+// the hire has already been promoted to a StaffRecord, the chosen manager is
+// also written to StaffRecord.managerId so the reporting line is live immediately.
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
@@ -29,10 +29,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
     const actor = user.userId || user.email || 'system'
 
-    const onboarding = await prisma.onboarding.findFirst({
-      where: { id, companyId },
-      include: { offer: { select: { id: true, metadata: true } } },
-    })
+    const onboarding = await prisma.onboarding.findFirst({ where: { id, companyId } })
     if (!onboarding) return withCors(ApiResponse.error('Onboarding not found', 404), origin)
 
     const body = await request.json().catch(() => ({}))
@@ -41,6 +38,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const managerId = typeof body.managerId === 'string' ? body.managerId.trim() : undefined
     const managerName = typeof body.managerName === 'string' ? body.managerName.trim() : undefined
     const startDate = 'startDate' in body ? parseDate(body.startDate) : undefined
+    // Name of a checklist template just applied in the Onboarding Checklist UI,
+    // stored as the single applied template (no stacking) so "Applied Template"
+    // survives a reopen instead of resetting to "None".
+    const appliedTemplateName = typeof body.appliedTemplateName === 'string' ? body.appliedTemplateName.trim() : undefined
 
     // If a manager id was supplied, ensure it points to a real staff record in this company.
     if (managerId) {
@@ -56,10 +57,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       })
     }
 
-    // 2) Merge the handoff overrides into the offer metadata blob.
-    if (onboarding.offer && (jobTitle !== undefined || department !== undefined || managerId !== undefined || managerName !== undefined)) {
-      const existingMeta = (onboarding.offer.metadata && typeof onboarding.offer.metadata === 'object')
-        ? onboarding.offer.metadata as Record<string, any> : {}
+    // 2) Merge the handoff overrides into the onboarding's own metadata blob.
+    if (jobTitle !== undefined || department !== undefined || managerId !== undefined || managerName !== undefined || appliedTemplateName !== undefined) {
+      const existingMeta = (onboarding.metadata && typeof onboarding.metadata === 'object')
+        ? onboarding.metadata as Record<string, any> : {}
       const existingHandoff = (existingMeta.handoff && typeof existingMeta.handoff === 'object')
         ? existingMeta.handoff as Record<string, any> : {}
       const handoff = {
@@ -68,9 +69,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         ...(department !== undefined ? { department } : {}),
         ...(managerId !== undefined ? { managerId } : {}),
         ...(managerName !== undefined ? { managerName } : {}),
+        ...(appliedTemplateName
+          ? { appliedTemplateNames: [appliedTemplateName] }
+          : {}),
       }
-      await prisma.offer.update({
-        where: { id: onboarding.offer.id },
+      await prisma.onboarding.update({
+        where: { id },
         data: { metadata: { ...existingMeta, handoff } as any, updatedBy: actor },
       })
     }

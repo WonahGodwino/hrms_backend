@@ -1,7 +1,7 @@
 // src/app/api/staff/transfer/route.ts
 //
 // POST body, single staff: { staffRecordId, toCompanyId, newDepartmentId?,
-// newGradeId?, newDesignationId?, newLocationId?, reason?, dryRun? }.
+// newDesignationId?, newLocationId?, reason?, dryRun? }.
 // POST body, bulk (from Staff Management's multi-select toolbar): same shape
 // but with staffRecordIds: string[] instead of staffRecordId — the same
 // destination/placement is applied to every staff member, each with its own
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
 		const user = requireRole(token, ['ADMIN', 'SUPER_ADMIN']);
 
 		const body = await request.json();
-		const { staffRecordId, staffRecordIds, toCompanyId, newDepartmentId, newGradeId, newDesignationId, newLocationId, reason, dryRun } = body;
+		const { staffRecordId, staffRecordIds, toCompanyId, newDepartmentId, newDesignationId, newLocationId, reason, dryRun } = body;
 
 		if (!toCompanyId) {
 			return withCors(ApiResponse.error('toCompanyId is required', 400), origin);
@@ -52,12 +52,12 @@ export async function POST(request: NextRequest) {
 		const actingUser = { userId: user.userId, role: user.role };
 
 		if (Array.isArray(staffRecordIds) && staffRecordIds.length > 0) {
-			const bulkInput = { staffRecordIds, toCompanyId, newDepartmentId, newGradeId, newDesignationId, newLocationId, reason };
+			const bulkInput = { staffRecordIds, toCompanyId, newDepartmentId, newDesignationId, newLocationId, reason };
 			const result = dryRun ? await previewBulkStaffTransfer(actingUser, bulkInput) : await executeBulkStaffTransfer(actingUser, bulkInput);
 			return withCors(ApiResponse.success(result, dryRun ? 'Bulk transfer preview generated' : 'Bulk transfer completed'), origin);
 		}
 
-		const input = { staffRecordId, toCompanyId, newDepartmentId, newGradeId, newDesignationId, newLocationId, reason };
+		const input = { staffRecordId, toCompanyId, newDepartmentId, newDesignationId, newLocationId, reason };
 
 		if (dryRun) {
 			const preview = await previewStaffTransfer(actingUser, input);

@@ -11,8 +11,9 @@ import { resolveOfferLetter } from '@/app/lib/offers/offer-letter'
 import { htmlToPdf } from '@/app/lib/offers/offer-letter-pdf'
 import { signOfferResponseToken } from '@/app/lib/offers/response-token'
 import { OFFER_RESPONSE_DAYS } from '@/app/lib/offers/response-window'
+import { watermarkPdfIfTrial } from '@/app/lib/trial/watermark'
 
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://247hr.co.uk'
+const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk'
 
 export interface DispatchResult {
   offerId: string
@@ -27,16 +28,16 @@ export interface DispatchResult {
 }
 
 export async function dispatchOfferLetter(
-  offerId: string,
-  opts: {
-    companyId?: string
-    role?: string
-    userId: string
-    templateId?: string | null
-    cc?: string | string[]
-    message?: string
-    subject?: string
-  },
+    offerId: string,
+    opts: {
+      companyId?: string
+      role?: string
+      userId: string
+      templateId?: string | null
+      cc?: string | string[]
+      message?: string
+      subject?: string
+    },
 ): Promise<DispatchResult> {
   const letter = await resolveOfferLetter(offerId, {
     companyId: opts.companyId,
@@ -51,13 +52,13 @@ export async function dispatchOfferLetter(
 
   const companyName = letter.company?.companyName || 'the company'
   const subject = (typeof opts.subject === 'string' && opts.subject.trim())
-    ? opts.subject.trim()
-    : `Letter of Employment — ${companyName}`
+      ? opts.subject.trim()
+      : `Letter of Employment — ${companyName}`
 
   // Generate the PDF attachment (must succeed before we email/log).
   let pdf: Buffer
   try {
-    pdf = await htmlToPdf(letter.fullHtml)
+    pdf = Buffer.from(await watermarkPdfIfTrial(letter.offer.companyId, await htmlToPdf(letter.fullHtml)))
   } catch (pdfErr: any) {
     return { offerId, success: false, candidateName, error: `Failed to generate offer PDF: ${pdfErr?.message || 'unknown error'}`, code: 500 }
   }
@@ -65,11 +66,11 @@ export async function dispatchOfferLetter(
   const now = new Date()
   // Per-company response window (multi-tenant), falling back to the default.
   const companyCfg = await (prisma as any).company
-    .findUnique({ where: { id: letter.offer.companyId }, select: { offerResponseDays: true } })
-    .catch(() => null)
+      .findUnique({ where: { id: letter.offer.companyId }, select: { offerResponseDays: true } })
+      .catch(() => null)
   const days = companyCfg?.offerResponseDays && companyCfg.offerResponseDays > 0
-    ? companyCfg.offerResponseDays
-    : OFFER_RESPONSE_DAYS
+      ? companyCfg.offerResponseDays
+      : OFFER_RESPONSE_DAYS
   const deadline = new Date(now.getTime() + days * 24 * 60 * 60 * 1000)
   const deadlineText = deadline.toLocaleDateString('en-GB', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
@@ -83,8 +84,8 @@ export async function dispatchOfferLetter(
   const responseLink = `${FRONTEND_URL}/offer/respond?token=${encodeURIComponent(responseToken)}`
 
   const introMessage = typeof opts.message === 'string' && opts.message.trim()
-    ? `<p>${opts.message}</p>`
-    : `<p>Dear ${candidateName || 'Candidate'},</p>
+      ? `<p>${opts.message}</p>`
+      : `<p>Dear ${candidateName || 'Candidate'},</p>
        <p>Congratulations! Please find attached your Letter of Employment from ${companyName}.
        Kindly review the details in the attached letter.</p>`
 

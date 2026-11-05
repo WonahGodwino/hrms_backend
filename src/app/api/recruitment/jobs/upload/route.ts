@@ -1,4 +1,5 @@
 // src/app/api/recruitment/jobs/upload/route.ts
+import { assertTrialCapacity } from '@/app/lib/trial/guard'
 import { NextRequest } from "next/server";
 import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
@@ -6,6 +7,7 @@ import { requireModuleAccess } from "@/app/lib/module-access";
 import { ApiResponse, formatError } from "@/app/lib/utils";
 import ExcelJS from "exceljs";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
+import { parseSalaryAmount } from "@/app/lib/recruitment/job-salary";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -21,8 +23,8 @@ type ValidatedJobRow = {
   employmentType?: string;
   workplaceType?: string;
   experienceLevel?: string;
-  salaryRange?: string;
-  locations?: { state: string; lga: string }[];
+  salary?: number;
+  locations?: { state: string; lga: string; city?: string }[];
   expirationDate: Date | null;
   status: "DRAFT" | "ACTIVE" | "CLOSED" | "EXPIRED" | null;
 };
@@ -113,18 +115,20 @@ function parseJobStatus(raw: unknown): "DRAFT" | "ACTIVE" | "CLOSED" | "EXPIRED"
   return null;
 }
 
-function parseLocations(raw: unknown): { state: string; lga: string }[] {
+// "State:LGA" or "State:LGA:City", comma-separated (same fields as the job form).
+function parseLocations(raw: unknown): { state: string; lga: string; city?: string }[] {
   if (!raw) return [];
   const str = String(raw).trim();
   if (!str) return [];
-  
+
   return str.split(',').map(loc => {
     const parts = loc.split(':');
-    if (parts.length === 2) {
-      return { state: parts[0].trim(), lga: parts[1].trim() };
+    if (parts.length === 2 || parts.length === 3) {
+      const city = (parts[2] || '').trim();
+      return { state: parts[0].trim(), lga: parts[1].trim(), ...(city ? { city } : {}) };
     }
     return null;
-  }).filter(loc => loc !== null) as { state: string; lga: string }[];
+  }).filter(loc => loc !== null) as { state: string; lga: string; city?: string }[];
 }
 
 // True when the text contains a recognised HTML tag (not just a stray "<"/">"
@@ -235,8 +239,14 @@ function validateRow(row: RawRow) {
   const employmentType = getStringValue(row, ["employmentType", "employment_type", "employment type"]);
   const workplaceType = getStringValue(row, ["workplaceType", "workplace_type", "workplace type"]);
   const experienceLevel = getStringValue(row, ["experienceLevel", "experience_level", "experience level"]);
-  const salaryRange = getStringValue(row, ["salaryRange", "salary_range", "salary range"]);
-  
+  // Single numeric salary in the company's base currency (no ranges), same as
+  // the job form. Legacy "salaryRange" headers are still read but must be one figure.
+  const salaryRaw = getStringValue(row, ["salary", "salaryRange", "salary_range", "salary range"]);
+  const salary = salaryRaw ? parseSalaryAmount(salaryRaw) : null;
+  if (salaryRaw && salary === null) {
+    rowErrors.push("Invalid salary (enter one numeric amount, e.g. 500000 — ranges are not allowed)");
+  }
+
   const locationsRaw = row["locations"];
 
   const locations = parseLocations(locationsRaw);
@@ -267,7 +277,7 @@ function validateRow(row: RawRow) {
       employmentType: employmentType || undefined,
       workplaceType: workplaceType || undefined,
       experienceLevel: experienceLevel || undefined,
-      salaryRange: salaryRange || undefined,
+      salary: salary ?? undefined,
       locations: locations.length > 0 ? locations : undefined,
       expirationDate: expirationDate ?? null,
       status: status ?? null,
@@ -481,7 +491,7 @@ export async function POST(request: NextRequest) {
       employmentType: getStringValue(row, ["employmentType", "employment_type", "employment type"]) || "",
       workplaceType: getStringValue(row, ["workplaceType", "workplace_type", "workplace type"]) || "",
       experienceLevel: getStringValue(row, ["experienceLevel", "experience_level", "experience level"]) || "",
-      salaryRange: getStringValue(row, ["salaryRange", "salary_range", "salary range"]) || "",
+      salary: getStringValue(row, ["salary", "salaryRange", "salary_range", "salary range"]) || "",
       locations: row["locations"] == null ? "" : String(row["locations"]),
       expirationDate: String(row["expirationDate"] ?? row["expiration date"] ?? row["expirationdate"] ?? ""),
       status: row["status"] == null ? "" : String(row["status"]),
@@ -547,11 +557,12 @@ export async function POST(request: NextRequest) {
         if (jobData.employmentType) createData.employmentType = jobData.employmentType;
         if (jobData.workplaceType) createData.workplaceType = jobData.workplaceType;
         if (jobData.experienceLevel) createData.experienceLevel = jobData.experienceLevel;
-        if (jobData.salaryRange) createData.salaryRange = jobData.salaryRange;
+        if (jobData.salary !== undefined) createData.salary = jobData.salary;
         if (jobData.locations && jobData.locations.length > 0) {
           createData.locations = JSON.parse(JSON.stringify(jobData.locations));
         }
 
+        await assertTrialCapacity(companyId, 'openJobs');
         await prisma.job.create({ data: createData });
         results.successful++;
       } catch (error) {

@@ -86,7 +86,14 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     })
     const submitted = allScorecards.filter((s) => s.submittedAt !== null).length
 
-    let isRoundComplete = requiredInterviewers.length > 0 && submitted >= requiredInterviewers.length
+    // When no specific panel was assigned to this round, there's no fixed
+    // headcount to wait for — the first final submission completes it.
+    // Without this fallback, a round with an empty/unset requiredInterviewers
+    // list could never complete (0 > 0 is always false), leaving the
+    // candidate stuck at SCHEDULED forever regardless of recommendation.
+    let isRoundComplete = requiredInterviewers.length > 0
+      ? submitted >= requiredInterviewers.length
+      : submitted >= 1
 
     // Deadline bypass: if round has evaluationDeadlineHours set and assessment
     // was scheduled, check whether the deadline has passed.

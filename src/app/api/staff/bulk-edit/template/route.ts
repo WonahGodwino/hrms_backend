@@ -13,6 +13,9 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import ExcelJS from 'exceljs'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { STAFF_PENSION_COLUMNS, addPfaDropdown } from '@/app/lib/staff/pension-fields'
+import { NSITF_IDENTITY_COLUMNS, STAFF_HIRE_DATE_COLUMN } from '@/app/lib/staff/nsitf-identity-fields'
+import { writeStyledTable, buildSubtitle, confidentialFooter, attachmentDisposition, safeFileName } from '@/app/lib/excel/sheet-theme'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -29,6 +32,9 @@ const TEMPLATE_COLUMNS = [
   { header: 'bankName', key: 'bankName', width: 20 },
   { header: 'accountNumber', key: 'accountNumber', width: 20 },
   { header: 'bvn', key: 'bvn', width: 15 },
+  ...STAFF_PENSION_COLUMNS,
+  STAFF_HIRE_DATE_COLUMN,
+  ...NSITF_IDENTITY_COLUMNS,
 ]
 
 export async function POST(request: NextRequest) {
@@ -70,7 +76,7 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('At least one staff member must be selected', 400), origin)
     }
 
-    const company = await prisma.company.findFirst({ where: { id: companyId, archived: 0 }, select: { id: true } })
+    const company = await prisma.company.findFirst({ where: { id: companyId, archived: 0 }, select: { id: true, companyName: true } })
     if (!company) {
       return withCors(ApiResponse.error('Company not found or is archived', 404), origin)
     }
@@ -86,33 +92,31 @@ export async function POST(request: NextRequest) {
     }
 
     const workbook = new ExcelJS.Workbook()
+    workbook.creator = '24/7HR'
     const worksheet = workbook.addWorksheet('Staff Bulk Edit')
 
-    // Assigning .columns writes the header values straight into row 1 —
-    // nothing should be added to the sheet before this line.
-    worksheet.columns = TEMPLATE_COLUMNS
-
-    const headerRow = worksheet.getRow(1)
-    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 }
-    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
-    headerRow.alignment = { vertical: 'middle', horizontal: 'center' }
-
-    staff.forEach((s, index) => {
-      const row = worksheet.getRow(2 + index)
-      row.getCell('staffId').value = s.staffId
-      row.getCell('email').value = s.email
-      row.alignment = { vertical: 'middle', horizontal: 'left' }
-      if (index % 2 === 0) {
-        row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } }
-      }
+    // Header on row 4 under the title band; bulk-edit/upload finds it by scanning for staffId.
+    const columns = TEMPLATE_COLUMNS.map((c) => ({ ...c, align: 'left' as const }))
+    const { firstDataRow, lastDataRow } = writeStyledTable(worksheet, {
+      title: 'Staff Bulk Edit',
+      subtitle: buildSubtitle([company.companyName, `${staff.length} staff selected`, 'Fill only the columns you want to change']),
+      columns,
+      rows: staff.map((s) => ({ staffId: s.staffId, email: s.email })),
+      autoFilter: false,
+      footer: confidentialFooter(),
     })
+
+    const pfaColumn = columns.findIndex((c) => c.key === 'pfaCode') + 1
+    if (pfaColumn > 0 && lastDataRow >= firstDataRow) {
+      await addPfaDropdown(workbook, worksheet, { column: pfaColumn, firstRow: firstDataRow, lastRow: lastDataRow, companyId })
+    }
 
     const buffer = await workbook.xlsx.writeBuffer()
 
     const response = new NextResponse(buffer as any, {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': 'attachment; filename="staff-bulk-edit.xlsx"',
+        'Content-Disposition': attachmentDisposition(`Staff Bulk Edit (${safeFileName(company.companyName)}).xlsx`),
         'Cache-Control': 'no-cache',
       },
     })

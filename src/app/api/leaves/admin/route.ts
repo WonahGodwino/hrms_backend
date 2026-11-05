@@ -10,6 +10,9 @@ import { LeaveStatusEnum, ApprovalStepEnum } from '@/app/lib/types/leave'
 // Define a type for the API response that matches what we return
 interface LeaveRequestAdminResponse {
   id: string;
+  // The viewer's own request — they can't action it (no self-approval), so the
+  // "to review" queue hides these even though the full list still shows them.
+  isOwn?: boolean;
   referenceNumber: string | null;
   staffRecordId: string;
   leaveTypeId: string;
@@ -242,7 +245,8 @@ export async function GET(request: NextRequest) {
     }
     
     if (pendingHRApproval) {
-      where.status = LeaveStatusEnum.MANAGER_APPROVED
+      // After the ladder (MANAGER_APPROVED) or straight to HR when no manager applies (PENDING)
+      where.status = { in: [LeaveStatusEnum.PENDING, LeaveStatusEnum.MANAGER_APPROVED] }
       where.currentStep = ApprovalStepEnum.HR
     }
 
@@ -410,6 +414,7 @@ export async function GET(request: NextRequest) {
     // Format leaves with decimal conversion - properly typed
     const formattedLeaves: LeaveRequestAdminResponse[] = leaves.map(leave => ({
       ...leave,
+      isOwn: leave.staffRecordId === staffRecord.id,
       totalDays: decimalToNumber(leave.totalDays),
       staffRecord: {
         ...leave.staffRecord,
@@ -434,7 +439,7 @@ export async function GET(request: NextRequest) {
       prisma.leaveRequest.count({
         where: {
           staffRecordId: { in: accessibleStaffIds },
-          status: LeaveStatusEnum.MANAGER_APPROVED,
+          status: { in: [LeaveStatusEnum.PENDING, LeaveStatusEnum.MANAGER_APPROVED] },
           currentStep: ApprovalStepEnum.HR
         }
       }),

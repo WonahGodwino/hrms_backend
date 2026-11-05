@@ -4,6 +4,14 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { decimalToNumber } from '@/app/lib/prisma-utils'
+import {
+  canActOnStep,
+  currentStepOf,
+  getActorStaff,
+  isHrRole,
+  loadSteps,
+  serializeSteps
+} from '@/app/lib/leave/approval-chain'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -125,7 +133,14 @@ export async function GET(
         )
       }
 
-      if (leave.staffRecordId !== currentStaff.id) {
+      // Visible to the applicant and to anyone on the request's approval chain
+      const onChain =
+        leave.staffRecordId === currentStaff.id ||
+        (await prisma.leaveApprovalStep.count({
+          where: { leaveRequestId: leave.id, approverStaffId: currentStaff.id }
+        })) > 0
+
+      if (!onChain) {
         return withCors(
           ApiResponse.error('You are not authorized to view this leave request', 403),
           origin
@@ -146,6 +161,26 @@ export async function GET(
           origin
         )
       }
+    }
+
+    // Approval chain (department line managers, then HR) + whether the viewer may act now
+    const approvalSteps = await loadSteps(prisma, leave.id)
+    const open = ['PENDING', 'MANAGER_APPROVED'].includes(leave.status)
+    const pendingStep = open ? currentStepOf(approvalSteps) : null
+    const viewerStaff = await getActorStaff(user, leave.companyId)
+    const viewer = viewerStaff
+      ? { id: viewerStaff.id, role: isHrRole(user.role) ? user.role : viewerStaff.role }
+      : isHrRole(user.role)
+        ? { id: user.userId, role: user.role }
+        : null
+    const canAct = canActOnStep(viewer, leave, pendingStep)
+    // Why the viewer can't act — so the UI can explain it instead of just
+    // hiding the buttons with no reason.
+    let canActReason: 'OWN_REQUEST' | 'NOT_CURRENT_APPROVER' | 'NOT_OPEN' | null = null
+    if (!canAct) {
+      if (!open) canActReason = 'NOT_OPEN'
+      else if (viewer && viewer.id === leave.staffRecordId && viewer.role !== 'SUPER_ADMIN') canActReason = 'OWN_REQUEST'
+      else canActReason = 'NOT_CURRENT_APPROVER'
     }
 
     const employeeName = `${leave.staffRecord.firstName} ${leave.staffRecord.lastName}`.trim()
@@ -194,7 +229,12 @@ export async function GET(
       attachmentMimeType: leave.attachmentMimeType,
       attachmentSize: leave.attachmentSize,
       staffRecord: leave.staffRecord,
-      leaveTypeDetails: leave.leaveType
+      leaveTypeDetails: leave.leaveType,
+      approvalSteps: serializeSteps(approvalSteps),
+      currentLevel: leave.currentLevel,
+      currentApprovalKind: pendingStep?.kind ?? null,
+      canAct,
+      canActReason
     }
 
     return withCors(

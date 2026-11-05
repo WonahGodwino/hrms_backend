@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
 		if (!authHeader) return withCors(ApiResponse.error('Authorization header missing', 401), origin)
 
 		const token = authHeader.replace('Bearer ', '')
-		const user = await requireModuleAccess(token, 'PAYROLL_NAME_VERIFIER', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+		const user = await requireModuleAccess(token, 'PAYROLL', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
 		let body: { companyId?: string }
 		try {

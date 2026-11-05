@@ -34,7 +34,7 @@ export const BASE_FIELD_KEYS = ['recipientName', 'recipientEmail', 'month', 'yea
 // Columns that always pass through as literal keys, never variables to
 // humanize: letterId is a system identifier, row/error are the failure
 // report's own bookkeeping columns.
-export const PASSTHROUGH_COLUMN_KEYS = ['letterId', 'row', 'error']
+const PASSTHROUGH_COLUMN_KEYS = ['letterId', 'row', 'error']
 
 const KNOWN_ACRONYMS = new Set(['hr', 'id', 'kpi', 'vat', 'url', 'ceo', 'cfo', 'coo', 'cto'])
 
@@ -99,7 +99,7 @@ export function buildOfferLetterFieldLabels(keys: string[]): Map<string, string>
 }
 
 /** slug(label) -> key, for lenient matching of whatever text actually appears in an uploaded sheet's header row. */
-export function buildSlugToKeyMap(keys: string[]): Map<string, string> {
+function buildSlugToKeyMap(keys: string[]): Map<string, string> {
 	const labels = buildOfferLetterFieldLabels(keys)
 	const map = new Map<string, string>()
 	for (const [key, label] of labels.entries()) {

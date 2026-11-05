@@ -11,11 +11,11 @@ import {
 } from '@prisma/client';
 
 // Base types from Prisma models
-export interface StaffRecord extends Omit<PrismaStaffRecord, 'password'> {
+interface StaffRecord extends Omit<PrismaStaffRecord, 'password'> {
   // Remove password field for security
 }
 
-export interface LeaveRequest extends PrismaLeaveRequest {
+interface LeaveRequest extends PrismaLeaveRequest {
   // Relations
   staffRecord?: StaffRecord;
   leaveType?: LeaveType;
@@ -23,28 +23,28 @@ export interface LeaveRequest extends PrismaLeaveRequest {
   handoverStaff?: StaffRecord;
 }
 
-export interface LeaveType extends PrismaLeaveType {
+interface LeaveType extends PrismaLeaveType {
   // Relations
   policy?: LeavePolicy;
 }
 
-export interface LeavePolicy extends PrismaLeavePolicy {
+interface LeavePolicy extends PrismaLeavePolicy {
   // Relations
   leaveTypes?: LeaveType[];
 }
 
-export interface StaffLeaveBalance extends PrismaStaffLeaveBalance {
+interface StaffLeaveBalance extends PrismaStaffLeaveBalance {
   // Relations
   staffRecord?: StaffRecord;
   leaveType?: LeaveType;
 }
 
-export interface PublicHoliday extends PrismaPublicHoliday {
+interface PublicHoliday extends PrismaPublicHoliday {
   // Add any additional fields if needed
 }
 
 // Extended types for API responses
-export interface LeaveApplicationResponse {
+interface LeaveApplicationResponse {
   success: boolean;
   message: string;
   data: {
@@ -112,7 +112,7 @@ export interface LeaveApplicationResponse {
 }
 
 // Request types
-export interface LeaveApplicationRequest {
+interface LeaveApplicationRequest {
   leaveTypeId: string;
   startDate: string; // YYYY-MM-DD format
   endDate: string; // YYYY-MM-DD format
@@ -130,14 +130,14 @@ export interface LeaveApplicationRequest {
   medicalCertificateIssuer?: string;
 }
 
-export interface LeaveStatusUpdateRequest {
+interface LeaveStatusUpdateRequest {
   leaveRequestId: string;
   action: 'APPROVE' | 'REJECT' | 'CANCEL';
   comments?: string;
 }
 
 // Notification types
-export interface LeaveNotification {
+interface LeaveNotification {
   id: string;
   userId: string;
   type: string;
@@ -150,7 +150,7 @@ export interface LeaveNotification {
 }
 
 // Work week configuration
-export interface WorkWeekConfig {
+interface WorkWeekConfig {
   companyId: string;
   workWeekPattern: string;
   workDays: number[];
@@ -158,7 +158,7 @@ export interface WorkWeekConfig {
 }
 
 // Leave statistics
-export interface LeaveStats {
+interface LeaveStats {
   totalRequests: number;
   approved: number;
   pending: number;
@@ -170,7 +170,7 @@ export interface LeaveStats {
 }
 
 // Calendar event for leave
-export interface LeaveCalendarEvent {
+interface LeaveCalendarEvent {
   id: string;
   title: string;
   start: Date;
@@ -187,7 +187,7 @@ export interface LeaveCalendarEvent {
 }
 
 // Approval workflow
-export interface LeaveApprovalWorkflow {
+interface LeaveApprovalWorkflow {
   currentStep: 'MANAGER' | 'HR' | 'COMPLETED' | 'REJECTED' | 'CANCELLED';
   managerApproved: boolean;
   hrApproved: boolean;
@@ -198,44 +198,12 @@ export interface LeaveApprovalWorkflow {
 }
 
 // Extended leave request with full relations
-export interface LeaveRequestWithDetails extends LeaveRequest {
+interface LeaveRequestWithDetails extends LeaveRequest {
   staffRecord: StaffRecord;
   leaveType: LeaveType & { policy?: LeavePolicy };
   managerApprover?: StaffRecord;
   handoverStaff?: StaffRecord;
   notifications?: LeaveNotification[];
-}
-
-// Type guards and helpers
-export function isLeaveRequestApproved(leaveRequest: LeaveRequest): boolean {
-  return leaveRequest.status === 'APPROVED' || 
-         leaveRequest.status === 'MANAGER_APPROVED' || 
-         leaveRequest.status === 'HR_APPROVED';
-}
-
-export function isLeaveRequestPending(leaveRequest: LeaveRequest): boolean {
-  return leaveRequest.status === 'PENDING' || 
-         leaveRequest.currentStep === 'MANAGER' || 
-         leaveRequest.currentStep === 'HR';
-}
-
-export function getLeaveRequestColor(status: string): string {
-  switch (status) {
-    case 'APPROVED':
-      return 'green';
-    case 'PENDING':
-      return 'yellow';
-    case 'MANAGER_APPROVED':
-      return 'blue';
-    case 'HR_APPROVED':
-      return 'purple';
-    case 'REJECTED':
-      return 'red';
-    case 'CANCELLED':
-      return 'gray';
-    default:
-      return 'gray';
-  }
 }
 
 // Enum types for better type safety
@@ -245,30 +213,26 @@ export enum LeaveStatusEnum {
   HR_APPROVED = 'HR_APPROVED',
   APPROVED = 'APPROVED',
   REJECTED = 'REJECTED',
-  CANCELLED = 'CANCELLED'
-}
+  }
 
 export enum ApprovalStepEnum {
   MANAGER = 'MANAGER',
   HR = 'HR',
-  COMPLETED = 'COMPLETED',
-  REJECTED = 'REJECTED',
-  CANCELLED = 'CANCELLED'
-}
+  }
 
-export enum HalfDayPartEnum {
+enum HalfDayPartEnum {
   FIRST_HALF = 'FIRST_HALF',
   SECOND_HALF = 'SECOND_HALF'
 }
 
-export enum ApprovalWorkflowEnum {
+enum ApprovalWorkflowEnum {
   MANAGER_ONLY = 'MANAGER_ONLY',
   HR_ONLY = 'HR_ONLY',
   MANAGER_THEN_HR = 'MANAGER_THEN_HR'
 }
 
 // Validation result type
-export interface LeaveValidationResult {
+interface LeaveValidationResult {
   isValid: boolean;
   errors: string[];
   warnings: string[];

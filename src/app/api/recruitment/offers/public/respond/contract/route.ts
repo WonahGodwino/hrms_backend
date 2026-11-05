@@ -1,8 +1,8 @@
 // PUBLIC candidate upload of the signed offer letter (no login).
-//   POST (multipart)  { token, file }  → stores the signed PDF and completes the
-//   acceptance. Only allowed for an ACCEPTED offer that hasn't expired; a
-//   declined offer can never upload. Completing this creates the onboarding
-//   record so the hire flows into the Command Center.
+//   POST (multipart)  { token, file }  → stores the signed PDF. Only allowed
+//   for an ACCEPTED offer that hasn't expired; a declined offer can never
+//   upload. The candidate was already promoted to staff at acceptance time
+//   (see offers/public/respond) — this just attaches the signed copy.
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
@@ -91,27 +91,11 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Create (or reuse) the onboarding record now that acceptance is complete.
-    let onboardingId: string | null = null
-    const existing = await prisma.onboarding.findUnique({ where: { offerId: offer.id } }).catch(() => null)
-    if (existing) {
-      onboardingId = existing.id
-    } else {
-      const onboarding = await prisma.onboarding.create({
-        data: {
-          companyId: offer.companyId,
-          offerId: offer.id,
-          status: 'IN_PROGRESS',
-          startDate: offer.proposedStartDate || now,
-          createdBy: 'candidate',
-        },
-      })
-      onboardingId = onboarding.id
-    }
+    const onboarding = await prisma.onboarding.findUnique({ where: { offerId: offer.id }, select: { id: true } })
 
     return withCors(ApiResponse.success(
-      { complete: true, onboardingId },
-      'Thank you — your signed offer letter has been received and your acceptance is complete. The team will be in touch about your onboarding.',
+      { complete: true, onboardingId: onboarding?.id || null },
+      'Thank you — your signed offer letter has been received. Welcome aboard!',
     ), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }
 }

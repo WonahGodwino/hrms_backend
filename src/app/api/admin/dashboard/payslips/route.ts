@@ -7,6 +7,8 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 interface AdminPayslipItem {
   id: string;
+  payrollId: string;
+  staffRecordId: string;
   month: string;
   year: number;
   grossPay: string | null;
@@ -16,6 +18,10 @@ interface AdminPayslipItem {
   fileName: string;
   downloadUrl: string;
   companyId: string;
+  // 'UPLOAD' (manual payroll upload) or 'GENERATED' (Payroll Generation) —
+  // GENERATED payslips are edited from their generation run instead of the
+  // generic in-place editor (see PATCH /api/payslips/[id]).
+  source: string;
   staffRecord: {
     id: string;
     staffId: string;
@@ -43,8 +49,8 @@ export async function GET(request: NextRequest) {
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
       return withCors(
-        ApiResponse.error('Authorization header missing', 401),
-        origin
+          ApiResponse.error('Authorization header missing', 401),
+          origin
       )
     }
 
@@ -61,14 +67,14 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '50')
     const showOnlyMine = searchParams.get('showOnlyMine') === 'true'
-    
+
     const skip = (page - 1) * limit
 
     // Get user's assigned companies from UserCompany table
     let userAssignedCompanyIds: string[] = []
     let ownStaffRecordId: string | null = null
     let ownCompanyId: string | null = null
-    
+
     if (user.role === 'HR' || user.role === 'ADMIN') {
       const userAssignments = await prisma.userCompany.findMany({
         where: {
@@ -77,7 +83,7 @@ export async function GET(request: NextRequest) {
         },
         select: { companyId: true }
       })
-      
+
       userAssignedCompanyIds = userAssignments.map(a => a.companyId)
 
       // Keep an own-record fallback so HR/ADMIN can still see only their own payslip
@@ -115,8 +121,8 @@ export async function GET(request: NextRequest) {
 
       if (visibilityOr.length === 0) {
         return withCors(
-          ApiResponse.error('No payslip access scope configured for this user', 403),
-          origin
+            ApiResponse.error('No payslip access scope configured for this user', 403),
+            origin
         )
       }
 
@@ -133,8 +139,8 @@ export async function GET(request: NextRequest) {
 
         if (!hasAssignedAccess && !isOwnCompany) {
           return withCors(
-            ApiResponse.error(`You don't have access to company ${requestedCompanyId}`, 403),
-            origin
+              ApiResponse.error(`You don't have access to company ${requestedCompanyId}`, 403),
+              origin
           )
         }
 
@@ -159,26 +165,26 @@ export async function GET(request: NextRequest) {
           where: { id: staffRecordId },
           select: { id: true, companyId: true }
         })
-        
+
         if (!staffRecord) {
           return withCors(
-            ApiResponse.error('Staff record not found', 404),
-            origin
+              ApiResponse.error('Staff record not found', 404),
+              origin
           )
         }
 
         const canAccessRequestedStaff =
-          userAssignedCompanyIds.includes(staffRecord.companyId) ||
-          (ownStaffRecordId !== null && staffRecord.id === ownStaffRecordId)
+            userAssignedCompanyIds.includes(staffRecord.companyId) ||
+            (ownStaffRecordId !== null && staffRecord.id === ownStaffRecordId)
 
         if (!canAccessRequestedStaff) {
           return withCors(
-            ApiResponse.error('You do not have access to this staff member', 403),
-            origin
+              ApiResponse.error('You do not have access to this staff member', 403),
+              origin
           )
         }
       }
-      
+
       whereClause.staffRecordId = staffRecordId
     } else if (search) {
       // Search staff by staffId, name, or email (partial, case-insensitive).
@@ -212,6 +218,14 @@ export async function GET(request: NextRequest) {
       where: whereClause,
     })
 
+    // Gross/net totals across the whole filtered set (not just the current
+    // page) — the summary cards on the list page reflect the full month,
+    // so they need the aggregate, not a sum over `take: limit` rows.
+    const totals = await prisma.payslip.aggregate({
+      where: whereClause,
+      _sum: { grossPay: true, netPay: true },
+    })
+
     // Fetch payslips with staff information
     const payslips = await prisma.payslip.findMany({
       where: whereClause,
@@ -234,13 +248,16 @@ export async function GET(request: NextRequest) {
             position: true,
             companyId: true,
           }
-        }
+        },
+        payroll: { select: { source: true } }
       },
     })
 
     // Transform the data with companyId included
     const items: AdminPayslipItem[] = payslips.map((p) => ({
       id: p.id,
+      payrollId: p.payrollId,
+      staffRecordId: p.staffRecordId,
       month: p.month,
       year: p.year,
       grossPay: p.grossPay ? p.grossPay.toString() : null,
@@ -250,6 +267,7 @@ export async function GET(request: NextRequest) {
       fileName: p.fileName,
       downloadUrl: `/api/payslips/${p.id}/download`,
       companyId: p.companyId,
+      source: p.payroll.source,
       staffRecord: {
         id: p.staffRecord.id,
         staffId: p.staffRecord.staffId,
@@ -263,7 +281,7 @@ export async function GET(request: NextRequest) {
 
     // Get unique companies for filter dropdown
     let companies: CompanyInfo[] = [];
-    
+
     if (user.role === 'SUPER_ADMIN') {
       companies = await prisma.company.findMany({
         where: {
@@ -278,10 +296,10 @@ export async function GET(request: NextRequest) {
     } else if (user.role === 'HR' || user.role === 'ADMIN') {
       // HR/ADMIN company filter list = assigned companies + own company fallback
       const visibleCompanyIds = Array.from(
-        new Set([
-          ...userAssignedCompanyIds,
-          ...(ownCompanyId ? [ownCompanyId] : [])
-        ])
+          new Set([
+            ...userAssignedCompanyIds,
+            ...(ownCompanyId ? [ownCompanyId] : [])
+          ])
       )
 
       if (visibleCompanyIds.length > 0) {
@@ -300,29 +318,34 @@ export async function GET(request: NextRequest) {
     }
 
     return withCors(
-      ApiResponse.success(
-        {
-          payslips: items,
-          companies,
-          pagination: {
-            total: totalCount,
-            page,
-            limit,
-            totalPages: Math.ceil(totalCount / limit),
-          },
-          filter: {
-            showOnlyMine,
-          }
-        },
-        'Payslips fetched successfully'
-      ),
-      origin
+        ApiResponse.success(
+            {
+              payslips: items,
+              companies,
+              summary: {
+                totalStaff: totalCount,
+                totalGross: totals._sum.grossPay ? totals._sum.grossPay.toString() : '0',
+                totalNet: totals._sum.netPay ? totals._sum.netPay.toString() : '0',
+              },
+              pagination: {
+                total: totalCount,
+                page,
+                limit,
+                totalPages: Math.ceil(totalCount / limit),
+              },
+              filter: {
+                showOnlyMine,
+              }
+            },
+            'Payslips fetched successfully'
+        ),
+        origin
     )
   } catch (error) {
     console.error('[ADMIN_PAYSLIPS] Error:', error)
     return withCors(
-      handleApiError(error),
-      origin
+        handleApiError(error),
+        origin
     )
   }
 }

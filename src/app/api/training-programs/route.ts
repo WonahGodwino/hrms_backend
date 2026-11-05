@@ -1,3 +1,4 @@
+import { assertTrialCapacity } from '@/app/lib/trial/guard'
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
@@ -89,6 +90,8 @@ export async function POST(req: NextRequest) {
     if (due > end)    return withCors(ApiResponse.error('dueDate must be on or before endDate', 422), origin)
 
     const slug = programName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '-' + Date.now()
+
+    await assertTrialCapacity(cid, 'courses')
 
     const program = await prisma.trainingProgram.create({
       data: {

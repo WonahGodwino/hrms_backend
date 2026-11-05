@@ -1,10 +1,10 @@
-﻿-- Create DeductionType enum if it doesn't exist
-DO clear 
+-- Create DeductionType enum if it doesn't exist
+DO $$ 
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'DeductionType') THEN
         CREATE TYPE "DeductionType" AS ENUM ('UNION_DUES', 'COOPERATIVE', 'LOAN', 'SALARY_ADVANCE', 'OTHER');
     END IF;
-END clear;
+END $$;
 
 -- Create deduction_entries table
 CREATE TABLE IF NOT EXISTS "deduction_entries" (
@@ -27,7 +27,7 @@ CREATE INDEX IF NOT EXISTS "deduction_entries_companyId_idx" ON "deduction_entri
 CREATE INDEX IF NOT EXISTS "deduction_entries_sourceFileId_idx" ON "deduction_entries"("sourceFileId");
 
 -- Add foreign keys
-DO clear 
+DO $$ 
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'deduction_entries_staffId_fkey') THEN
         ALTER TABLE "deduction_entries" ADD CONSTRAINT "deduction_entries_staffId_fkey" 
@@ -38,4 +38,4 @@ BEGIN
         ALTER TABLE "deduction_entries" ADD CONSTRAINT "deduction_entries_companyId_fkey" 
             FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE;
     END IF;
-END clear;
+END $$;

@@ -25,11 +25,13 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 		const body = await request.json();
 		const validated = UploadHandoverSchema.parse(body);
 
-		if (!validated.companyId) {
+		// The token's company wins; the body value is only a legacy fallback.
+		const companyId = user.companyId || validated.companyId;
+		if (!companyId) {
 			return withCors(ApiResponse.error('Company context required', 400), origin);
 		}
 
-		const offboarding = await OffboardingService.uploadHandover(params.id, validated.companyId, user.userId, validated.handoverDocument);
+		const offboarding = await OffboardingService.uploadHandover(params.id, companyId, user.userId, validated.handoverDocument);
 
 		return withCors(ApiResponse.success(offboarding, 'Handover document uploaded successfully'), origin);
 	} catch (error) {

@@ -25,12 +25,13 @@ export async function GET(req: NextRequest) {
 
     const existingModules = await (prisma as any).platformModule.findMany({
       orderBy: { name: 'asc' },
-      select: { id: true, key: true, name: true, description: true, createdAt: true },
+      select: { id: true, key: true, name: true, description: true, archived: true, navIcon: true, createdAt: true },
     })
 
     const existingKeys = new Set(existingModules.map((m: any) => m.key))
 
-    // Find available modules not yet created
+    // Find available modules not yet created — archived ones are still
+    // "registered" (re-registering = un-archiving), so exclude them too.
     const availableOptions = AVAILABLE_MODULE_OPTIONS.filter(
       (opt) => !existingKeys.has(opt.key)
     )
@@ -57,13 +58,27 @@ export async function POST(req: NextRequest) {
       return withCors(ApiResponse.error('key and name are required', 400), origin)
     }
 
-    // Check if module with this key already exists
+    // Check if module with this key already exists. Re-registering an
+    // ARCHIVED module un-archives it (that's the documented re-registration
+    // path); only a live duplicate is a conflict.
     const existing = await (prisma as any).platformModule.findUnique({
       where: { key },
     })
 
     if (existing) {
-      return withCors(ApiResponse.error(`Module with key "${key}" already exists`, 409), origin)
+      if (!existing.archived) {
+        return withCors(ApiResponse.error(`Module with key "${key}" already exists`, 409), origin)
+      }
+      const revived = await (prisma as any).platformModule.update({
+        where: { key },
+        data: { archived: false, ...(name ? { name } : {}), ...(description ? { description } : {}) },
+      })
+      // Ensure every company has an access row for it again.
+      const { created } = await syncModuleAccess()
+      return withCors(ApiResponse.success({
+        module: revived,
+        accessRowsCreated: created,
+      }, `Module "${revived.name}" re-registered (un-archived) with ${created} company access rows refreshed`), origin)
     }
 
     // Create the module

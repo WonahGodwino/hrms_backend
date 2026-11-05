@@ -7,6 +7,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { promoteCandidateToStaff, PromoteCandidateError } from '@/app/lib/staff/promote-candidate-to-staff'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -46,17 +47,42 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       },
     })
 
-    // Keep the pipeline application status aligned with the offer outcome.
-    if (offer.applicationId) {
+    // Decline keeps the pipeline application status in step. Acceptance's
+    // status transition (HIRED) happens inside promoteCandidateToStaff below,
+    // alongside the actual StaffRecord creation.
+    if (decision === 'DECLINED' && offer.applicationId) {
       await prisma.jobApplication.update({
         where: { id: offer.applicationId },
-        data: { status: decision === 'ACCEPTED' ? 'HIRED' : 'REJECTED', updatedBy: user.userId },
+        data: { status: 'REJECTED', updatedBy: user.userId },
       }).catch(() => {})
     }
 
+    let staffRecordId: string | null = null
+    let staffId: string | null = null
+    if (decision === 'ACCEPTED') {
+      const onboarding = await prisma.onboarding.findUnique({ where: { offerId: offer.id } })
+      if (!onboarding) {
+        return withCors(ApiResponse.error('No pre-offer onboarding record found for this offer — cannot complete hire.', 409), origin)
+      }
+      try {
+        const result = await promoteCandidateToStaff({
+          onboardingId: onboarding.id,
+          companyId,
+          actor: user.userId || user.email || 'system',
+        })
+        staffRecordId = result.staffRecordId
+        staffId = result.staffId
+      } catch (promoteError) {
+        if (promoteError instanceof PromoteCandidateError) {
+          return withCors(ApiResponse.error(promoteError.message, promoteError.status), origin)
+        }
+        throw promoteError
+      }
+    }
+
     return withCors(ApiResponse.success(
-      { offerId: id, status: decision },
-      decision === 'ACCEPTED' ? 'Offer marked as accepted.' : 'Offer marked as declined.',
+      { offerId: id, status: decision, staffRecordId, staffId },
+      decision === 'ACCEPTED' ? 'Offer marked as accepted. The employee has been added to staff records.' : 'Offer marked as declined.',
     ), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }
 }

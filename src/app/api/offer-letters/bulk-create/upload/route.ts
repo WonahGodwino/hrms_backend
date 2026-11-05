@@ -13,6 +13,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
 import ExcelJS from 'exceljs'
+import { findHeaderRow } from '@/app/lib/excel/sheet-theme'
 import {
   getActiveOfferLetterBulkJob,
   createPendingOfferLetterBulkJob,
@@ -89,11 +90,6 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('No worksheet found in the Excel file', 400), origin)
     }
 
-    const rawHeaders: string[] = []
-    worksheet.getRow(1).eachCell((cell, colNumber) => {
-      rawHeaders[colNumber - 1] = cellToString(cell)
-    })
-
     // The sheet shows human-readable column labels ("Effective Date")
     // instead of the raw {{dotted.path}} variable name — resolve them back
     // to the exact keys renderDocx expects, matched leniently against
@@ -102,8 +98,19 @@ export async function POST(request: NextRequest) {
     // still resolves correctly as long as its column header reads right).
     const templateVariables = (template.variables as string[]) || []
     const allKeys = [...BASE_FIELD_KEYS, ...templateVariables]
+    const headerLabels = buildOfferLetterFieldLabels(allKeys)
+
+    // The downloaded sheet carries a title banner above the header row, so find the
+    // header by the recipient columns instead of assuming row 1.
+    const headerRowNumber = findHeaderRow(worksheet, [headerLabels.get('recipientName') as string, headerLabels.get('recipientEmail') as string])
+
+    const rawHeaders: string[] = []
+    worksheet.getRow(headerRowNumber).eachCell((cell, colNumber) => {
+      rawHeaders[colNumber - 1] = cellToString(cell)
+    })
+
     const headers = resolveHeaderLabelsToKeys(rawHeaders, allKeys)
-    const dataStartRow = 2
+    const dataStartRow = headerRowNumber + 1
 
     // Check every column the template actually needs resolved — not just
     // the base fields — before touching a single row. A variable whose
@@ -123,7 +130,7 @@ export async function POST(request: NextRequest) {
 
     const rows: Record<string, any>[] = []
     worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-      if (rowNumber < dataStartRow) return
+      if (rowNumber < dataStartRow || row.getCell(1).isMerged) return
       const rowData: Record<string, any> = {}
       row.eachCell((cell, colNumber) => {
         const header = headers[colNumber - 1]

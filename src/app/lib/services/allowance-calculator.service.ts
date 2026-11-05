@@ -31,37 +31,44 @@ export class AllowanceCalculatorService {
    * Calculate all allowances for a staff member based on company rules
    */
   async calculateAllowances(context: AllowanceCalculationContext): Promise<AllowanceResult[]> {
+    const db = prisma as any;
     // Get company allowance rules
-    const companyRules = await prisma.companyAllowanceRule.findMany({
-      where: {
-        companyId: this.companyId,
-        isActive: true,
-        OR: [
-          { gradeLevelId: null },
-          { gradeLevelId: context.gradeLevelId }
-        ]
-      },
-      orderBy: {
-        priority: 'asc'
-      }
-    })
+    const companyRules = db.companyAllowanceRule
+      ? await db.companyAllowanceRule.findMany({
+          where: {
+            companyId: this.companyId,
+            isActive: true,
+            OR: [
+              { gradeLevelId: null },
+              { gradeLevelId: context.gradeLevelId }
+            ]
+          },
+          orderBy: {
+            priority: 'asc'
+          }
+        })
+      : []
 
     // Get grade-specific step allowances
-    const stepAllowances = await prisma.gradeStepAllowance.findMany({
-      where: {
-        companyId: this.companyId,
-        gradeLevelId: context.gradeLevelId,
-        stepNumber: context.stepNumber
-      }
-    })
+    const stepAllowances = db.gradeStepAllowance
+      ? await db.gradeStepAllowance.findMany({
+          where: {
+            companyId: this.companyId,
+            gradeLevelId: context.gradeLevelId,
+            stepNumber: context.stepNumber
+          }
+        })
+      : []
 
     // Get grade allowance templates
-    const gradeTemplates = await prisma.gradeAllowanceTemplate.findMany({
-      where: {
-        companyId: this.companyId,
-        gradeLevelId: context.gradeLevelId
-      }
-    })
+    const gradeTemplates = db.gradeAllowanceTemplate
+      ? await db.gradeAllowanceTemplate.findMany({
+          where: {
+            companyId: this.companyId,
+            gradeLevelId: context.gradeLevelId
+          }
+        })
+      : []
 
     // Combine all rules (company rules override grade rules, step allowances override all)
     const allRules = this.mergeAllowanceRules(companyRules, gradeTemplates, stepAllowances)

@@ -8,6 +8,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { verifyToken } from '@/app/lib/auth'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { seedModuleAccessForCompany } from '@/app/lib/module-access'
+import { seedDefaultPayslipPreset } from '@/app/lib/payroll/seed-default-payslip-preset'
 import { deriveLocationPrefix } from '@/app/lib/companies/location-utils'
 
 export async function OPTIONS(request: NextRequest) {
@@ -114,6 +115,7 @@ export async function POST(request: NextRequest) {
       address,
       logo,
       baseCurrency,
+      pensionEmployerCode,
       locations,
       departments,
       admins,
@@ -132,6 +134,10 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('A valid company email is required', 400), origin)
     }
     const cleanTaxId = taxId ? String(taxId).trim() : null
+    const cleanPensionEmployerCode = pensionEmployerCode ? String(pensionEmployerCode).trim() : null
+    if (cleanPensionEmployerCode && cleanPensionEmployerCode.length > 50) {
+      return withCors(ApiResponse.error('Pension Employer Code must be less than 50 characters', 400), origin)
+    }
 
     const normalizedBaseCurrency = baseCurrency ? String(baseCurrency).trim().toUpperCase() : 'NGN'
     if (!isValidCurrencyCode(normalizedBaseCurrency)) {
@@ -240,6 +246,7 @@ export async function POST(request: NextRequest) {
           email: cleanEmail,
           logo: logo ? String(logo).trim() : null,
           taxId: cleanTaxId,
+          pensionEmployerCode: cleanPensionEmployerCode,
           baseCurrency: normalizeCurrencyCode(normalizedBaseCurrency),
           createdBy: actor,
           archived: 0,
@@ -339,6 +346,12 @@ export async function POST(request: NextRequest) {
       await seedModuleAccessForCompany(result.id)
     } catch (moduleError) {
       console.warn('⚠️ Could not seed module access:', moduleError)
+    }
+
+    try {
+      await seedDefaultPayslipPreset(result.id, actor)
+    } catch (presetError) {
+      console.warn('⚠️ Could not seed default payslip preset:', presetError)
     }
 
     // 9. Respond

@@ -32,6 +32,15 @@ export interface RowResult {
 // number + bank code. Returns the literal strings "INVALID_ACCOUNT" /
 // "API_ERROR" on failure (never throws) so callers can treat the return
 // value uniformly as "either a name, or one of these two sentinels".
+//
+// The two sentinels mean different things and must not be conflated:
+// INVALID_ACCOUNT is Flutterwave genuinely saying "no such account" (a data
+// problem — bad account number). API_ERROR is everything else that stops us
+// from getting a real answer (bad/revoked/test-mode key, rate limiting,
+// Flutterwave downtime, network/timeout) — an infrastructure problem that
+// will misreport as "invalid" for every account until fixed. Collapsing both
+// into INVALID_ACCOUNT previously made a misconfigured key indistinguishable
+// from bad data in the UI.
 export async function resolveAccountName(accountNo: string, bankCode: string): Promise<string> {
   const secretKey = process.env.FLW_SECRET_KEY
   if (!secretKey) {
@@ -53,6 +62,16 @@ export async function resolveAccountName(accountNo: string, bankCode: string): P
 
     if (res.ok && data?.status === 'success') {
       return data.data?.account_name || 'INVALID_ACCOUNT'
+    }
+
+    // Auth failures (401/403), rate limiting (429), and Flutterwave-side
+    // errors (5xx) are never "this account doesn't exist" — surfacing them
+    // as INVALID_ACCOUNT would silently mislabel every row as bad data
+    // while the real cause (e.g. a test-mode key, or Flutterwave being
+    // down) goes unnoticed.
+    if (res.status === 401 || res.status === 403 || res.status === 429 || res.status >= 500) {
+      console.error('[PAYROLL_VERIFIER] Account resolution infrastructure error:', res.status, data?.message || res.statusText)
+      return 'API_ERROR'
     }
 
     console.warn('[PAYROLL_VERIFIER] Account resolution failed:', data?.message || res.statusText)
@@ -117,7 +136,7 @@ export function compareNames(excelName: string, bankName: string): { status: Ver
   return { status, score }
 }
 
-export interface ExtractedRowFields {
+interface ExtractedRowFields {
   excelName: string
   accountNo: string
   rawBank: string
@@ -125,7 +144,7 @@ export interface ExtractedRowFields {
 
 // Fuzzy column detection — payroll spreadsheets never use consistent
 // headers, so we match by substring rather than exact column name.
-export function extractRowFields(row: Record<string, any>): ExtractedRowFields {
+function extractRowFields(row: Record<string, any>): ExtractedRowFields {
   const n: Record<string, any> = {}
   for (const [key, value] of Object.entries(row || {})) {
     n[key.toLowerCase().trim()] = value

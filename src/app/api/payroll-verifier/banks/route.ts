@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 		if (!companyId) return withCors(ApiResponse.error('Company selection is required', 400), origin)
 
 		const token = authHeader.replace('Bearer ', '')
-		const user = await requireModuleAccess(token, 'PAYROLL_NAME_VERIFIER', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+		const user = await requireModuleAccess(token, 'PAYROLL', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 		const hasAccess = await validatePayrollVerifierCompanyAccess(user, companyId)
 		if (!hasAccess) return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
 

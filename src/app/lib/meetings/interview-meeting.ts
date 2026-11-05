@@ -14,7 +14,7 @@ import { randomUUID } from 'crypto'
 import { signMeetingAccessToken } from '@/app/lib/meetings/meeting-token'
 import { getMeetingProvider } from '@/app/lib/meetings/provider'
 
-const FRONTEND_URL = (process.env.FRONTEND_URL || 'https://247hr.co.uk').replace(/\/$/, '')
+const FRONTEND_URL = (process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk').replace(/\/$/, '')
 
 export interface InterviewMeetingResult {
   meetingId: string

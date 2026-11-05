@@ -12,7 +12,9 @@ const getNotificationsSchema = z.object({
   read: z.enum(['true', 'false', 'all']).optional().default('all'),
   type: z.string().optional(),
   startDate: z.string().optional(),
-  endDate: z.string().optional()
+  endDate: z.string().optional(),
+  // Free-text search over title + message (case-insensitive).
+  search: z.string().trim().max(200).optional()
 })
 
 const markAsReadSchema = z.object({
@@ -29,11 +31,19 @@ const createNotificationSchema = z.object({
   companyId: z.string().cuid()
 })
 
-// Helper function to get manager's team staff IDs
+// Helper function to get a line manager's team staff IDs: the staff of every
+// department where they sit on the leave line-manager ladder
 async function getManagedStaffIds(managerId: string, companyId: string) {
+  const departments = await prisma.departmentLineManager.findMany({
+    where: { staffId: managerId, companyId },
+    select: { departmentId: true }
+  })
+  if (departments.length === 0) return []
+
   const managedStaff = await prisma.staffRecord.findMany({
     where: {
-      managerId,
+      departmentId: { in: departments.map(d => d.departmentId) },
+      id: { not: managerId },
       companyId,
       isActive: true
     },
@@ -59,6 +69,21 @@ async function getHRAdminStaffIds(companyId: string) {
 
 // ==================== HELPER FUNCTIONS ====================
 
+// Adds the free-text search as an AND clause, so it never clobbers a
+// where.OR the role-specific builders already set (manager / HR scopes).
+function applySearch(where: any, search?: string) {
+  if (!search) return
+  where.AND = [
+    ...(where.AND ?? []),
+    {
+      OR: [
+        { title: { contains: search, mode: 'insensitive' } },
+        { message: { contains: search, mode: 'insensitive' } },
+      ],
+    },
+  ]
+}
+
 async function getUserNotificationsData(userId: string, companyId: string, filters: any) {
   const { page = 1, limit = 20, read = 'all', type, startDate, endDate } = filters
   
@@ -74,6 +99,8 @@ async function getUserNotificationsData(userId: string, companyId: string, filte
   if (type) {
     where.type = type
   }
+
+  applySearch(where, filters.search)
   
   if (startDate || endDate) {
     where.createdAt = {}
@@ -142,6 +169,8 @@ async function getManagerNotificationsData(managerId: string, companyId: string,
   if (filters.type) {
     where.type = filters.type
   }
+
+  applySearch(where, filters.search)
   
   const skip = (filters.page - 1) * filters.limit
   
@@ -223,6 +252,8 @@ async function getHRNotificationsData(companyId: string, filters: any) {
   if (filters.type) {
     where.type = filters.type
   }
+
+  applySearch(where, filters.search)
   
   const skip = (filters.page - 1) * filters.limit
   
@@ -286,6 +317,8 @@ async function getAdminNotificationsData(companyId: string, filters: any) {
   if (filters.type) {
     where.type = filters.type
   }
+
+  applySearch(where, filters.search)
   
   if (filters.userId) {
     where.userId = filters.userId

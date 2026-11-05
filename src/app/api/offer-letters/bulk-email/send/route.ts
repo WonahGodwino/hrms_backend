@@ -24,6 +24,7 @@ import {
 } from '@/app/lib/offer-letters/bulkJobStatus'
 import { sendOfferLetterEmail } from '@/app/lib/offer-letters/email/sendEmail'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import { consumeTrialQuota } from '@/app/lib/trial/guard'
 
 // Politeness delay between sends on the one pooled SMTP connection for this
 // company's mailbox — sending dozens of emails back-to-back with zero gap
@@ -84,6 +85,9 @@ export async function POST(request: NextRequest) {
     }
 
     const validLetterIds = letters.map((l) => l.id)
+
+    // Free trial: offer letters sent are a lifetime quota.
+    await consumeTrialQuota(companyId, 'offerLetters', validLetterIds)
 
     const job = await createPendingOfferLetterBulkJob(companyId, 'EMAIL_SEND', null, null, user.userId, validLetterIds.length, {
       letterIds: validLetterIds,

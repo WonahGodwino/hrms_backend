@@ -12,6 +12,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
 import ExcelJS from 'exceljs'
+import { writeStyledTable, buildSubtitle, confidentialFooter, toneCell, attachmentDisposition, safeFileName, addInstructionsSheet, findHeaderRow, XLSX_MIME } from '@/app/lib/excel/sheet-theme'
 import { buildOfferLetterFieldLabels, BASE_FIELD_KEYS } from '@/app/lib/offer-letters/variableLabels'
 
 export async function OPTIONS(request: NextRequest) {
@@ -49,29 +50,49 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const variables: string[] = (template.variables as string[]) || []
     const allKeys = [...BASE_FIELD_KEYS, ...variables]
     const labels = buildOfferLetterFieldLabels(allKeys)
-    const columns = allKeys.map((k) => ({ header: labels.get(k) as string, key: k, width: 24 }))
+    const columns = allKeys.map((k) => ({ header: labels.get(k) as string, key: k, width: 24, align: 'left' as const }))
+
+    const company = await prisma.company.findUnique({ where: { id: companyId }, select: { companyName: true } })
 
     const workbook = new ExcelJS.Workbook()
+    workbook.creator = '24/7HR'
     const worksheet = workbook.addWorksheet('Offer Letters')
 
-    // Assigning .columns writes the header values straight into row 1 —
-    // nothing should be added to the sheet before this line.
-    worksheet.columns = columns
+    // The header sits on row 4 under the title band and the sheet is left blank for data, so the
+    // bulk-create upload finds the header by its column labels. Notes live on their own sheet so
+    // they never sit in the rows people type into.
+    writeStyledTable(worksheet, {
+      title: `${template.name}, Offer Letters Sheet`,
+      subtitle: buildSubtitle([company?.companyName, 'One row per letter, starting on row 5']),
+      columns,
+      rows: [],
+      autoFilter: false,
+    })
 
-    const headerRow = worksheet.getRow(1)
-    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 }
-    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } }
-    headerRow.alignment = { vertical: 'middle', horizontal: 'center' }
+    addInstructionsSheet(workbook, {
+      title: 'Offer Letters Sheet Instructions',
+      subtitle: buildSubtitle([company?.companyName, template.name]),
+      sections: [
+        {
+          heading: 'How to fill this sheet',
+          lines: [
+            'One row creates one offer letter.',
+            'Start on row 5, directly under the column headings. Do not rename or reorder the columns.',
+            'Every column is used to fill the matching placeholder in the offer letter template.',
+            'Upload the completed sheet from the Offer Letters bulk create screen.',
+          ],
+        },
+      ],
+    })
 
     const buffer = await workbook.xlsx.writeBuffer()
-    const safeTemplateName = template.name.replace(/[^a-zA-Z0-9]+/g, '_')
 
     return withCors(
       new NextResponse(buffer as any, {
         status: 200,
         headers: {
-          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition': `attachment; filename="${safeTemplateName}-offer-letters-sheet.xlsx"`,
+          'Content-Type': XLSX_MIME,
+          'Content-Disposition': attachmentDisposition(`Offer Letters Sheet (${safeFileName(template.name)}).xlsx`),
           'Cache-Control': 'no-cache',
         },
       }),

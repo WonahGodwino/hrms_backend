@@ -14,6 +14,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
 import ExcelJS from 'exceljs'
+import { findHeaderRow } from '@/app/lib/excel/sheet-theme'
 import {
   getActiveOfferLetterBulkJob,
   createPendingOfferLetterBulkJob,
@@ -81,8 +82,10 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('No worksheet found in the Excel file', 400), origin)
     }
 
+    // The downloaded sheet carries a title banner above the header row, so find it by letterId.
+    const headerRowNumber = findHeaderRow(worksheet, ['letterId'])
     const rawHeaders: string[] = []
-    worksheet.getRow(1).eachCell((cell, colNumber) => {
+    worksheet.getRow(headerRowNumber).eachCell((cell, colNumber) => {
       rawHeaders[colNumber - 1] = cellToString(cell)
     })
 
@@ -94,7 +97,7 @@ export async function POST(request: NextRequest) {
 
     const rawRows: Record<string, any>[] = []
     worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-      if (rowNumber === 1) return
+      if (rowNumber <= headerRowNumber || row.getCell(1).isMerged) return
       const rowData: Record<string, any> = {}
       row.eachCell((cell, colNumber) => {
         const header = rawHeaders[colNumber - 1]

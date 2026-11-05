@@ -8,6 +8,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import { consumeTrialQuota } from '@/app/lib/trial/guard'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
 import { sendOfferLetterEmail } from '@/app/lib/offer-letters/email/sendEmail'
@@ -31,6 +32,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const hasAccess = await validateOfferLetterCompanyAccess(user, letter.companyId)
     if (!hasAccess) return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
+
+    // Free trial: offer letters sent are a lifetime quota.
+    await consumeTrialQuota(letter.companyId, 'offerLetters', [id])
 
     const formData = await request.formData()
     const templateId = (formData.get('templateId') as string) || null

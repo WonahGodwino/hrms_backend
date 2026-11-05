@@ -12,8 +12,10 @@
 //  - "Year" figures (utilization, exhaustion/carry-over risk, seasonal
 //    clustering) are scoped by `year` alone, independent of month/quarter
 //    granularity, because StaffLeaveBalance itself is an annual bucket.
-//  - Blackout-period overlaps are a standing compliance check, not scoped to
-//    either — a violation from three months ago is still a violation today.
+//
+// Blackout periods and public holidays were removed from the leave module, so
+// the former "blackout-period overlap" compliance check no longer has a
+// managed source to check against and has been dropped from this aggregate.
 import { prisma } from '@/app/lib/db'
 import { decimalToNumber } from '@/app/lib/prisma-utils'
 import { loadCompanyCalendar, isWorkingDayInCalendar, type CompanyCalendar } from '@/app/lib/reporting/workingDays'
@@ -56,7 +58,6 @@ export type LeavePeriodAggregate = {
   exhaustionRisk: Array<{ staffRecordId: string; staffName: string; staffId: string; leaveType: string; usedDays: number; totalDays: number; projectedRemaining: number }>
   highCarryOverRisk: Array<{ staffRecordId: string; staffName: string; staffId: string; leaveType: string; remainingDays: number; totalDays: number }>
   seasonalClustering: Array<{ month: string; daysTaken: number }>
-  blackoutOverlaps: Array<{ leaveRequestId: string; staffRecordId: string; staffName: string; staffId: string; blackoutName: string; startDate: string; endDate: string }>
 }
 
 export async function aggregateLeavePeriod(targetCompanyIds: string[], start: Date, end: Date, year: number): Promise<LeavePeriodAggregate> {
@@ -90,12 +91,11 @@ export async function aggregateLeavePeriod(targetCompanyIds: string[], start: Da
       byDepartment: [],
       exhaustionRisk: [],
       highCarryOverRisk: [],
-      seasonalClustering: MONTH_LABELS.map((label) => ({ month: label, daysTaken: 0 })),
-      blackoutOverlaps: []
+      seasonalClustering: MONTH_LABELS.map((label) => ({ month: label, daysTaken: 0 }))
     }
   }
 
-  const [periodRequests, pendingManager, pendingHR, balances, seasonalRequests, blackoutPeriods] = await Promise.all([
+  const [periodRequests, pendingManager, pendingHR, balances, seasonalRequests] = await Promise.all([
     prisma.leaveRequest.findMany({
       where: { staffRecordId: { in: staffIds }, startDate: { gte: start, lt: end } },
       select: {
@@ -134,10 +134,6 @@ export async function aggregateLeavePeriod(targetCompanyIds: string[], start: Da
         startDate: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) }
       },
       select: { startDate: true, totalDays: true }
-    }),
-    prisma.leave_blackout_periods.findMany({
-      where: { companyId: { in: targetCompanyIds } },
-      select: { id: true, companyId: true, name: true, startDate: true, endDate: true }
     })
   ])
 
@@ -280,37 +276,6 @@ export async function aggregateLeavePeriod(targetCompanyIds: string[], start: Da
   }
   const seasonalClustering = MONTH_LABELS.map((label, i) => ({ month: label, daysTaken: Number(monthTotals[i].toFixed(1)) }))
 
-  // ---------- Standing: blackout-period compliance gap ----------
-  const blackoutOverlapResults = await Promise.all(
-    blackoutPeriods.map((bp) =>
-      prisma.leaveRequest.findMany({
-        where: {
-          companyId: bp.companyId,
-          staffRecordId: { in: staffIds },
-          status: { in: APPROVED_STATUSES },
-          startDate: { lte: bp.endDate },
-          endDate: { gte: bp.startDate }
-        },
-        select: { id: true, staffRecordId: true, startDate: true, endDate: true }
-      }).then((requests) => requests.map((r) => ({ ...r, blackoutName: bp.name })))
-    )
-  )
-  const blackoutOverlaps: LeavePeriodAggregate['blackoutOverlaps'] = blackoutOverlapResults
-    .flat()
-    .map((r) => {
-      const s = staffById.get(r.staffRecordId)
-      return {
-        leaveRequestId: r.id,
-        staffRecordId: r.staffRecordId,
-        staffName: s ? `${s.firstName} ${s.lastName}`.trim() : 'Unknown',
-        staffId: s?.staffId || '',
-        blackoutName: r.blackoutName,
-        startDate: r.startDate.toISOString().split('T')[0],
-        endDate: r.endDate.toISOString().split('T')[0]
-      }
-    })
-    .slice(0, 25)
-
   return {
     totalRequests: periodRequests.length,
     totalDaysTaken: Number(totalDaysTaken.toFixed(1)),
@@ -326,7 +291,6 @@ export async function aggregateLeavePeriod(targetCompanyIds: string[], start: Da
     byDepartment,
     exhaustionRisk: exhaustionRisk.slice(0, 25),
     highCarryOverRisk: highCarryOverRisk.slice(0, 25),
-    seasonalClustering,
-    blackoutOverlaps
+    seasonalClustering
   }
 }

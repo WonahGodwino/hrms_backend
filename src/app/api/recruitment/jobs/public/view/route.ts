@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/app/lib/db";
 import { ApiResponse, formatError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
+import { formatJobSalary } from "@/app/lib/recruitment/job-salary";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -18,7 +19,7 @@ const toLocationLabel = (locations: any, workplaceType?: string | null): string 
   }
   if (Array.isArray(list) && list.length > 0) {
     const first = list[0] || {};
-    const loc = [first.lga, first.state].filter(Boolean).join(", ");
+    const loc = [first.city, first.lga, first.state].filter(Boolean).join(", ");
     if (loc) parts.push(loc);
     if (list.length > 1) parts.push(`+${list.length - 1} more`);
   }
@@ -90,6 +91,7 @@ export async function GET(request: NextRequest) {
           employmentType: true,
           workplaceType: true,
           experienceLevel: true,
+          salary: true,
           salaryRange: true,
           locations: true,
           createdAt: true,
@@ -97,6 +99,7 @@ export async function GET(request: NextRequest) {
           company: {
             select: {
               companyName: true,
+              baseCurrency: true,
             },
           },
         },
@@ -115,7 +118,7 @@ export async function GET(request: NextRequest) {
       employmentType: job.employmentType ?? null,
       workplaceType: job.workplaceType ?? null,
       experienceLevel: job.experienceLevel ?? null,
-      salary: job.salaryRange ?? null,
+      salary: formatJobSalary(job, job.company?.baseCurrency),
       location: toLocationLabel(job.locations, job.workplaceType),
       companyName: job.company?.companyName ?? null,
       publishedAt: job.createdAt,

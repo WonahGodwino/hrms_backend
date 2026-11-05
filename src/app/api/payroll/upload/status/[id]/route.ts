@@ -51,6 +51,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       )
     }
 
+    if (upload.status === 'CANCELLED') {
+      return withCors(
+        ApiResponse.success(
+          { uploadId: upload.id, status: 'CANCELLED', failureReason: upload.failureReason || 'Cancelled by user' },
+          'Payroll upload was cancelled'
+        ),
+        origin
+      )
+    }
+
     if (upload.status === 'FAILED') {
       return withCors(
         ApiResponse.success(

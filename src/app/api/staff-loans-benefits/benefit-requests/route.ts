@@ -1,12 +1,18 @@
+// src/app/api/staff-loans-benefits/benefit-requests/route.ts
+//
+// POST — staff requests/enrolls in a catalog benefit (AvailableBenefits.jsx).
+//        Snapshots the policy's requestApprovalWorkflow and enters the
+//        approval chain immediately (no guarantor concept for benefits).
+// GET   — list: self (own) for STAFF, org-wide for HR/Admin/Super Admin.
 import { NextRequest } from 'next/server'
-import { requireRole } from '@/app/lib/auth'
+import { prisma } from '@/app/lib/db'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { extractBearerToken, findStaffByEmail, findStaffByEmailAndCompany, findStaffById, resolveScopedCompanyIds } from '@/app/api/staff-loans-benefits/_helpers'
-import { prisma } from '@/app/lib/db'
-import { matchesBenefitScope, scopeIneligibilityReason } from '@/app/lib/benefits/eligibility'
-
-const MIN_REASON_LENGTH = 8
+import { matchesBenefitScope } from '@/app/lib/staff-loans-benefits/benefit-eligibility'
+import { enterApprovalChain, resolveApproverStaffIds } from '@/app/lib/staff-loans-benefits/approval-engine'
+import { logStaffActivity } from '@/app/lib/device/device-utils'
+import { createNotification, NOTIFICATION_TYPES } from '@/app/lib/notifications/helpers'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -14,150 +20,116 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin')
-
   try {
-    // Extract and validate token
-    const token = extractBearerToken(request.headers.get('authorization'))
-    if (!token) {
-      return withCors(ApiResponse.error('Authorization header missing', 401), origin)
-    }
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader) return withCors(ApiResponse.error('Authorization header missing', 401), origin)
+    const token = authHeader.replace('Bearer ', '')
+    const user = await requireModuleAccess(token, 'STAFF_LOANS_BENEFITS', ['SUPER_ADMIN', 'ADMIN', 'HR', 'STAFF'])
 
-    // Authenticate user
-    const user = await requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER', 'STAFF'])
-    
-    // Parse and validate request body
     const body = await request.json()
+    const { benefitPolicyId, requestedAmount, expectedStartDate, reason } = body || {}
+    if (!benefitPolicyId) return withCors(ApiResponse.error('benefitPolicyId is required', 400), origin)
 
-    const benefitId = String(body.benefitId || '').trim()
-    const benefitName = String(body.benefitName || '').trim()
-    const reason = String(body.reason || '').trim()
-    const requestedCompanyId = body.companyId ? String(body.companyId).trim() : null
-    const targetStaffId = body.targetStaffId ? String(body.targetStaffId).trim() : null
-
-    // Validate required fields
-    if (!benefitId) {
-      return withCors(ApiResponse.error('benefitId is required', 400), origin)
+    const [staff, policy] = await Promise.all([
+      prisma.staffRecord.findUnique({ where: { id: user.userId }, select: { id: true, companyId: true, firstName: true, lastName: true, designationId: true } }),
+      prisma.benefitPolicy.findUnique({ where: { id: benefitPolicyId } }),
+    ])
+    if (!staff) return withCors(ApiResponse.error('Staff record not found', 404), origin)
+    if (!policy || policy.companyId !== staff.companyId || policy.status !== 'PUBLISHED' || !policy.isActive) {
+      return withCors(ApiResponse.error('Benefit policy not found or not available', 404), origin)
+    }
+    if (!matchesBenefitScope(policy, staff)) {
+      return withCors(ApiResponse.error('You are not eligible for this benefit', 400), origin)
     }
 
-    if (!benefitName) {
-      return withCors(ApiResponse.error('benefitName is required', 400), origin)
-    }
-
-    if (!reason || reason.length < MIN_REASON_LENGTH) {
-      return withCors(
-        ApiResponse.error(
-          `reason must be at least ${MIN_REASON_LENGTH} characters`,
-          400
-        ),
-        origin
-      )
-    }
-
-    // Resolve actor staff — scoped to the selected company when provided so that
-    // ADMIN/SUPER_ADMIN requests are attributed to the company they are operating in.
-    const actorStaff = requestedCompanyId
-      ? await findStaffByEmailAndCompany(user.email, requestedCompanyId)
-      : await findStaffByEmail(user.email)
-
-    if (!actorStaff) {
-      const msg = requestedCompanyId
-        ? `You don't have a staff record in the selected company. Ask HR to create one, or use the on-behalf-of flow to submit for another staff member.`
-        : 'Staff record not found'
-      return withCors(ApiResponse.error(msg, 404), origin)
-    }
-
-    let requesterStaff = actorStaff
-
-    // Handle on-behalf submission for admin/HR
-    if (targetStaffId) {
-      if (!['SUPER_ADMIN', 'ADMIN', 'HR'].includes(user.role)) {
-        return withCors(
-          ApiResponse.error('Only SUPER_ADMIN, ADMIN, or HR can submit requests for other staff', 403),
-          origin
-        )
-      }
-
-      const targetStaff = await findStaffById(targetStaffId)
-      if (!targetStaff || !targetStaff.isActive) {
-        return withCors(ApiResponse.error('Target staff not found or inactive', 404), origin)
-      }
-
-      requesterStaff = {
-        ...targetStaff,
-        role: targetStaff.role || 'STAFF',
-      }
-    }
-
-    // Verify company access
-    const scopedCompanyIds = await resolveScopedCompanyIds(user)
-    if (!scopedCompanyIds.includes(requesterStaff.companyId)) {
-      return withCors(
-        ApiResponse.error('You do not have access to this staff company', 403),
-        origin
-      )
-    }
-
-    // Enforce designation/grade scope: the benefit must apply to the requester's
-    // designation (and grade level when the benefit is grade-scoped). This blocks
-    // requesting a benefit the staff member isn't entitled to.
-    const policy = await (prisma as any).benefitPolicy.findFirst({
-      where: { id: benefitId, companyId: requesterStaff.companyId },
-      select: { designationId: true, gradeLevelId: true },
+    const existing = await prisma.benefitRequest.findFirst({
+      where: { staffId: staff.id, benefitPolicyId, status: { in: ['PENDING_APPROVAL'] } },
     })
-    if (policy && (policy.designationId || policy.gradeLevelId)) {
-      const staffScope = await prisma.staffRecord.findFirst({
-        where: { id: requesterStaff.id },
-        select: { designationId: true, currentGradeId: true } as any,
-      }) as any
-      if (!matchesBenefitScope(policy, staffScope || {})) {
-        const reason = scopeIneligibilityReason(policy, staffScope || {}) || 'Not eligible for this benefit'
-        return withCors(ApiResponse.error(`${reason}. This benefit is restricted to a specific designation/grade.`, 403), origin)
-      }
-    }
+    if (existing) return withCors(ApiResponse.error('You already have a pending request for this benefit', 400), origin)
 
-    // Create benefit request
+    const company = await prisma.company.findUnique({ where: { id: staff.companyId }, select: { baseCurrency: true } })
+    const currencyCode = company?.baseCurrency || 'NGN'
+    const workflow = policy.requestApprovalWorkflow as any
+
     const benefitRequest = await prisma.benefitRequest.create({
       data: {
-        companyId: requesterStaff.companyId,
-        staffId: requesterStaff.id,
-        benefitId,
-        benefitName,
-        reason,
-        status: 'PENDING',
+        companyId: staff.companyId,
+        staffId: staff.id,
+        benefitPolicyId: policy.id,
+        benefitPolicyVersion: policy.version,
+        benefitName: policy.name,
+        requestedAmount: requestedAmount ?? undefined,
+        currencyCode,
+        expectedStartDate: expectedStartDate ? new Date(expectedStartDate) : undefined,
+        reason: reason ?? undefined,
+        approvalWorkflow: workflow,
         createdBy: user.userId,
-      },
-      select: {
-        id: true,
-        companyId: true,
-        staffId: true,
-        benefitId: true,
-        benefitName: true,
-        reason: true,
-        status: true,
-        createdAt: true,
       },
     })
 
-    return withCors(
-      ApiResponse.success(
-        {
-          id: benefitRequest.id,
-          companyId: benefitRequest.companyId,
-          staffId: benefitRequest.staffId,
-          benefitId: benefitRequest.benefitId,
-          benefitName: benefitRequest.benefitName,
-          reason: benefitRequest.reason,
-          status: benefitRequest.status,
-          createdAt: benefitRequest.createdAt,
-        },
-        'Benefit request submitted successfully',
-        201
-      ),
-      origin
+    const entry = await enterApprovalChain({
+      companyId: staff.companyId,
+      requestingStaffId: staff.id,
+      requestType: 'BENEFIT_REQUEST',
+      requestId: benefitRequest.id,
+      workflow,
+    })
+    const updated = await prisma.benefitRequest.update({ where: { id: benefitRequest.id }, data: entry })
+
+    const approverIds = await resolveApproverStaffIds({ ...entry, companyId: staff.companyId })
+    await Promise.all(
+      approverIds.map((id) =>
+        createNotification(
+          id,
+          NOTIFICATION_TYPES.APPROVAL_ACTION_NEEDED,
+          'A benefit request needs your approval',
+          `${staff.firstName} ${staff.lastName} has requested ${policy.name}.`,
+          { benefitRequestId: benefitRequest.id },
+          staff.companyId
+        )
+      )
     )
+
+    await logStaffActivity({
+      staffRecordId: staff.id,
+      companyId: staff.companyId,
+      action: 'BENEFIT_REQUESTED',
+      performedById: staff.id,
+      performedByName: `${staff.firstName} ${staff.lastName}`,
+      performedByRole: user.role,
+      details: { benefitRequestId: benefitRequest.id, benefitName: policy.name },
+    })
+
+    return withCors(ApiResponse.success(updated, 'Benefit request submitted'), origin)
   } catch (error) {
-    console.error('[BenefitRequests POST]', error)
     return withCors(handleApiError(error), origin)
   }
 }
 
+export async function GET(request: NextRequest) {
+  const origin = request.headers.get('origin')
+  try {
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader) return withCors(ApiResponse.error('Authorization header missing', 401), origin)
+    const token = authHeader.replace('Bearer ', '')
+    const user = await requireModuleAccess(token, 'STAFF_LOANS_BENEFITS', ['SUPER_ADMIN', 'ADMIN', 'HR', 'STAFF'])
+
+    const { searchParams } = new URL(request.url)
+    const isManager = ['SUPER_ADMIN', 'ADMIN', 'HR'].includes(user.role)
+    const status = searchParams.get('status')
+
+    const where: any = isManager ? { companyId: user.companyId } : { staffId: user.userId }
+    if (status) where.status = status
+    if (!user.companyId && isManager) return withCors(ApiResponse.success({ requests: [] }), origin)
+
+    const requests = await prisma.benefitRequest.findMany({
+      where,
+      include: { staff: { select: { id: true, firstName: true, lastName: true, department: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    })
+    return withCors(ApiResponse.success({ requests }), origin)
+  } catch (error) {
+    return withCors(handleApiError(error), origin)
+  }
+}

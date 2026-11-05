@@ -1,10 +1,12 @@
 // src/app/api/departments/create/route.ts
+import { assertTrialCapacity } from '@/app/lib/trial/guard'
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validateCompanyAccess, logDepartmentAction } from '@/app/lib/departments/department-utils'
+import { sanitizeDepartmentName } from '@/app/lib/departments/department-sync'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -22,17 +24,20 @@ export async function POST(request: NextRequest) {
     const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
     const body = await request.json()
     
-    const { name, code, businessUnit, companyId, headId, assistantHeadId } = body
-    
+    const { name: rawName, code, businessUnit, companyId, headId, assistantHeadId } = body
+    // Title-cased so manually-created departments never differ from
+    // auto-sync-created ones by casing alone (see department-sync.ts).
+    const name = sanitizeDepartmentName(rawName)
+
     if (!name || !code || !companyId) {
       return withCors(ApiResponse.error('Missing required fields: name, code, companyId', 400), origin)
     }
-    
+
     const hasAccess = await validateCompanyAccess(user, companyId)
     if (!hasAccess && user.role !== 'SUPER_ADMIN') {
       return withCors(ApiResponse.error('Forbidden: No access to this company', 403), origin)
     }
-    
+
     const existingDepartment = await prisma.department.findFirst({
       where: { companyId, code }
     })
@@ -69,6 +74,8 @@ export async function POST(request: NextRequest) {
       }
     }
     
+    await assertTrialCapacity(companyId || user.companyId, 'departments')
+
     const department = await prisma.department.create({
       data: {
         name,

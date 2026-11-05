@@ -1,6 +1,7 @@
 // POST /api/business-units/create
 // Creates a Business Unit for the selected company.
 // Body: { name, code?, costCenter?, description?, headId?, assistantHeadId?, companyId? }
+import { assertTrialCapacity } from '@/app/lib/trial/guard'
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
@@ -51,6 +52,8 @@ export async function POST(req: NextRequest) {
 
     const headId = await validStaffId(body.headId, companyId)
     const assistantHeadId = await validStaffId(body.assistantHeadId, companyId)
+
+    await assertTrialCapacity(companyId, 'businessUnits')
 
     const created = await (prisma as any).businessUnit.create({
       data: {

@@ -9,6 +9,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import ExcelJS from 'exceljs'
+import { buildSubtitle, confidentialFooter, writeStyledTable } from '@/app/lib/excel/sheet-theme'
 import {
   PayrollTemplateType,
   isFixedTemplate,
@@ -24,9 +25,12 @@ import {
   completePayrollUploadRecord,
   failPayrollUploadRecord,
   validatePayrollCompanyAccess,
+  isUploadCancelled,
+  clearUploadCancelled,
 } from '@/app/lib/payroll/templates/utils'
 import { neutralizeRowForSpreadsheet } from '@/app/lib/payroll/utils/valueParsing'
 import type { ProcessingResult } from '@/app/lib/payroll/templates/types'
+import { findCompanyDisabledCodesInUse } from '@/app/lib/staff/pension-fields'
 
 function getRelativePath(absolutePath: string): string {
   const projectRoot = process.cwd()
@@ -54,6 +58,7 @@ async function generateFailedRecordsFile(
   if (failedRecords.length === 0) return null
 
   const failedWorkbook = new ExcelJS.Workbook()
+  failedWorkbook.creator = '24/7HR'
   const failedWorksheet = failedWorkbook.addWorksheet('Failed Records')
 
   // Get all unique headers from failed records
@@ -63,30 +68,21 @@ async function generateFailedRecordsFile(
   })
 
   const headers = Array.from(headersSet)
-  failedWorksheet.columns = headers.map((h) => ({
-    header: h,
-    key: h,
-    width: 25,
-  }))
 
   // Raw uploaded cell values are written verbatim into this brand-new
   // spreadsheet for download. Neutralize any value that would be
   // interpreted as a live formula (CSV/Excel "formula injection") when the
   // report is opened, so re-exporting failed rows can never execute
-  // anything — this never changes the data used for actual payroll
-  // processing, only the copy written into this report.
-  failedRecords.forEach((record) => {
-    failedWorksheet.addRow(neutralizeRowForSpreadsheet(record))
+  // anything - this never changes the data used for actual payroll
+  // processing, only the copy written into this report. The header sits on
+  // row 4 under the title band; the payroll processors find it by field name.
+  writeStyledTable(failedWorksheet, {
+    title: 'Failed Payroll Records',
+    subtitle: buildSubtitle([`${failedRecords.length} failed row${failedRecords.length === 1 ? '' : 's'}`, 'Correct the errors and re-upload']),
+    columns: headers.map((h) => ({ header: h, key: h, width: 25, align: 'left' as const })),
+    rows: failedRecords.map((record) => neutralizeRowForSpreadsheet(record) as Record<string, any>),
+    footer: confidentialFooter(),
   })
-
-  // Style the header row
-  const headerRow = failedWorksheet.getRow(1)
-  headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
-  headerRow.fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FFDC3545' },
-  }
 
   const failedFileName = `failed-payroll-${Date.now()}.xlsx`
   const failedFilePath = path.join(payrollDir, failedFileName)
@@ -226,6 +222,23 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Block company-wide if any active staff member currently holds a PFA
+    // code this company has since disabled — server-side mirror of the UI
+    // block, so a direct API call can't bypass it.
+    const disabledPfaGroups = await findCompanyDisabledCodesInUse(companyId)
+    if (disabledPfaGroups.length > 0) {
+      const affected = disabledPfaGroups.flatMap((g) => g.staff)
+      return withCors(
+        ApiResponse.error(
+          `${affected.length} staff member${affected.length === 1 ? '' : 's'} currently use a PFA code this company has disabled. Update their PFA code before uploading payroll.`,
+          409,
+          undefined,
+          { disabledPfaInUse: affected }
+        ),
+        origin
+      )
+    }
+
     // Validate file
     if (!file) {
       return withCors(
@@ -342,7 +355,20 @@ async function processPayrollUploadInBackground({
   payrollDir: string
 }) {
   const startTime = Date.now()
-  let results: ProcessingResult
+  let results: ProcessingResult = {
+    successful: 0,
+    failed: 0,
+    payslipsGenerated: 0,
+    payslipsUpdated: 0,
+    duplicatesSkipped: 0,
+    emailsSent: 0,
+    emailAttempts: 0,
+    emailFailures: [],
+    processedRecords: [],
+    failedRecords: [],
+    skippedRecords: [],
+    errors: [],
+  }
 
   try {
     if (templateType === 'ISURF_STANDARD') {
@@ -353,7 +379,8 @@ async function processPayrollUploadInBackground({
         companyId,
         user,
         sendEmails,
-        overwriteExisting
+        overwriteExisting,
+        uploadId
       )
     } else if (templateType === 'BLUERIDGE') {
       console.log('[PAYROLL_UPLOAD] Processing BLUERIDGE template', { uploadId })
@@ -363,7 +390,8 @@ async function processPayrollUploadInBackground({
         companyId,
         user,
         sendEmails,
-        overwriteExisting
+        overwriteExisting,
+        uploadId
       )
     } else if (templateType === 'DYNAMIC') {
       console.log('[PAYROLL_UPLOAD] Processing DYNAMIC template', { uploadId })
@@ -374,7 +402,8 @@ async function processPayrollUploadInBackground({
         user,
         sendEmails,
         templateId || undefined,
-        overwriteExisting
+        overwriteExisting,
+        uploadId
       )
     } else {
       throw new Error(`Unsupported template type: ${templateType}`)
@@ -389,9 +418,55 @@ async function processPayrollUploadInBackground({
       payslipsGenerated: results.payslipsGenerated,
     })
   } catch (processingError: any) {
-    console.error('[PAYROLL_UPLOAD] Processing error:', { uploadId, error: processingError })
-    await failPayrollUploadRecord(uploadId, processingError.message || 'Unknown processing error')
+    // Check if this was a cancellation (processor threw after detecting cancel flag)
+    // Also check the error message string as a fallback in case the flag wasn't set yet
+    if (isUploadCancelled(uploadId) || processingError?.message === 'PAYROLL_CANCELLED') {
+      console.log('[PAYROLL_UPLOAD] Processing was cancelled', { uploadId })
+    } else {
+      console.error('[PAYROLL_UPLOAD] Processing error:', { uploadId, error: processingError })
+      await failPayrollUploadRecord(uploadId, processingError.message || 'Unknown processing error')
+      return
+    }
+  }
+
+  // Check if the upload was cancelled during processing
+  if (isUploadCancelled(uploadId)) {
+    console.log('[PAYROLL_UPLOAD] Upload was cancelled, cleaning up payslips', { uploadId })
+    // Delete any payslips whose Payroll records were created during this upload
+    const stalePayrolls = await prisma.payroll.findMany({
+      where: {
+        companyId,
+        createdAt: { gte: new Date(startTime) },
+      },
+      select: { id: true },
+    })
+    const stalePayrollIds = stalePayrolls.map(p => p.id)
+    const deletedPayslips = stalePayrollIds.length > 0
+      ? await prisma.payslip.deleteMany({ where: { payrollId: { in: stalePayrollIds } } })
+      : { count: 0 }
+    console.log(`[PAYROLL_UPLOAD] Cleaned up ${deletedPayslips.count} payslip(s) from cancelled upload`)
+    clearUploadCancelled(uploadId)
     return
+  }
+
+  // Surface rows skipped as same-upload duplicates (a second row resolving to
+  // the same staff & pay period). No payslip is created for them, so include
+  // them in the downloadable report and the upload's error summary alongside
+  // genuinely-failed rows so HR can see exactly which rows were dropped.
+  if (results.duplicatesSkipped > 0) {
+    results.errors.push(
+      `${results.duplicatesSkipped} row(s) skipped as duplicates of an earlier row for the same staff & pay period.`
+    )
+    for (const skipped of results.skippedRecords) {
+      results.failedRecords.push({
+        ROW_NUMBER: skipped.rowNumber ?? '',
+        ERROR_MESSAGE: skipped.reason || 'Duplicate row (same staff & pay period)',
+        STAFF_NAME: skipped.staffName || '',
+        STAFF_ID: skipped.staffId || '',
+        STAFF_EMAIL: skipped.email || '',
+        MONTH_VALUE: skipped.month ? `${skipped.month} ${skipped.year ?? ''}`.trim() : '',
+      })
+    }
   }
 
   let processedFilePath: string | null = null

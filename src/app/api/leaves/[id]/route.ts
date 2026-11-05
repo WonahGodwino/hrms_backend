@@ -4,6 +4,14 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { decimalToNumber } from '@/app/lib/prisma-utils'
+import {
+  canActOnStep,
+  currentStepOf,
+  getActorStaff,
+  isHrRole,
+  loadSteps,
+  serializeSteps
+} from '@/app/lib/leave/approval-chain'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -123,7 +131,14 @@ export async function GET(
         )
       }
 
-      if (leave.staffRecordId !== currentStaff.id) {
+      // Visible to the applicant and to anyone on the request's approval chain
+      const onChain =
+        leave.staffRecordId === currentStaff.id ||
+        (await prisma.leaveApprovalStep.count({
+          where: { leaveRequestId: leave.id, approverStaffId: currentStaff.id }
+        })) > 0
+
+      if (!onChain) {
         return withCors(
           ApiResponse.error('You are not authorized to view this leave request', 403),
           origin
@@ -145,6 +160,18 @@ export async function GET(
         )
       }
     }
+
+    // Approval chain (department line managers, then HR) + whether the viewer may act now
+    const approvalSteps = await loadSteps(prisma, leave.id)
+    const open = ['PENDING', 'MANAGER_APPROVED'].includes(leave.status)
+    const pendingStep = open ? currentStepOf(approvalSteps) : null
+    const viewerStaff = await getActorStaff(user, leave.companyId)
+    const viewer = viewerStaff
+      ? { id: viewerStaff.id, role: isHrRole(user.role) ? user.role : viewerStaff.role }
+      : isHrRole(user.role)
+        ? { id: user.userId, role: user.role }
+        : null
+    const canAct = canActOnStep(viewer, leave, pendingStep)
 
     const employeeName = `${leave.staffRecord.firstName} ${leave.staffRecord.lastName}`.trim()
     const managerName = leave.managerApprover
@@ -189,7 +216,11 @@ export async function GET(
       attachmentUrl: leave.attachmentUrl,
       fileName: leave.fileName,
       staffRecord: leave.staffRecord,
-      leaveTypeDetails: leave.leaveType
+      leaveTypeDetails: leave.leaveType,
+      approvalSteps: serializeSteps(approvalSteps),
+      currentLevel: leave.currentLevel,
+      currentApprovalKind: pendingStep?.kind ?? null,
+      canAct
     }
 
     return withCors(

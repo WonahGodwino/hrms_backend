@@ -1,10 +1,10 @@
 // src/app/api/auth/me/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { requireAuth } from '@/app/lib/auth'
+import { assertSessionValid, requireAuth } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { getEnabledModules } from '@/app/lib/module-access'
+import { getEnabledModules, getArchivedModuleKeys } from '@/app/lib/module-access'
 import { getActiveElevatedRole } from '@/app/lib/role-elevation'
 
 export async function OPTIONS(request: NextRequest) {
@@ -27,23 +27,38 @@ export async function GET(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const decoded = requireAuth(token) // { userId, email, role, companyId? }
 
+    // Device Management — a valid signature alone isn't enough anymore:
+    // reject if the account was deactivated/blocked or this specific device's
+    // session was cleared/evicted since the token was issued.
+    const sessionCheck = await assertSessionValid(decoded)
+    if (!sessionCheck.valid) {
+      return withCors(
+        ApiResponse.error('Your session is no longer valid.', 401, [], { code: sessionCheck.code }),
+        origin
+      )
+    }
+
     // using StaffRecord
     const staff = await prisma.staffRecord.findFirst({
       where: {
         id: decoded.userId,
         ...(decoded.companyId ? { companyId: decoded.companyId } : {}),
       },
-      include: { company: { select: { id: true, companyName: true, email: true, phone: true, address: true } } },
+      include: {
+        company: { select: { id: true, companyName: true, email: true, phone: true, address: true } },
+        designation: { select: { id: true, title: true, code: true } },
+      },
     })
 
     if (!staff) {
       return withCors(ApiResponse.error('User not found', 404), origin)
     }
 
-    const [enabledModules, phedRoleGrant, elevatedRole] = await Promise.all([
+    const [enabledModules, archivedModules, phedRoleGrant, elevatedRole] = await Promise.all([
       decoded.role === 'SUPER_ADMIN'
         ? getEnabledModules(undefined)
         : getEnabledModules(staff.companyId),
+      getArchivedModuleKeys(),
       prisma.phedStaffAccessRole.findUnique({
         where: { staffRecordId: staff.id },
         select: { accessRole: true },
@@ -64,6 +79,8 @@ export async function GET(request: NextRequest) {
           companyId: staff.companyId,
           department: staff.department,
           position: staff.position,
+          designation: staff.designation?.title || staff.position || null,
+          designationCode: staff.designation?.code || null,
           isActive: staff.isActive,
           staffId: staff.staffId,
           phone: staff.phone,
@@ -79,6 +96,7 @@ export async function GET(request: NextRequest) {
             }
           : null,
         enabledModules,
+        archivedModules,
       }),
       origin
     )

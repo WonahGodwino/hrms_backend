@@ -5,7 +5,7 @@ import { NextRequest } from 'next/server'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { extractBearerToken, resolveScopedCompanyIds } from '@/app/api/staff-loans-benefits/_helpers'
+import { extractBearerToken, resolveScopedCompanyIds } from '@/app/lib/staff-access'
 import { VARIABLE_CATALOG } from '@/app/lib/offers/template-variables'
 import { DEFAULT_OFFER_TEMPLATE_HTML, DEFAULT_OFFER_TEMPLATE_NAME } from '@/app/lib/offers/default-offer-template'
 

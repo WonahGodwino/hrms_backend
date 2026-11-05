@@ -96,71 +96,28 @@ export async function getAccessibleCompanyIds(
 }
 
 /**
- * Get all accessible staff IDs for a user based on company access
+ * Get a user's StaffRecord id from their email.
+ * Used to resolve the acting STAFF/MANAGER's own staff record when an
+ * endpoint needs to scope data to "the current user" rather than an
+ * arbitrary staffRecordId passed in the request.
  */
-export async function getAccessibleStaffIds(
-  user: UserContext
-): Promise<string[]> {
-  const companyIds = await getAccessibleCompanyIds(user)
-  
-  if (companyIds.length === 0) {
-    return []
-  }
-
-  const staffRecords = await prisma.staffRecord.findMany({
+export async function getStaffRecordIdFromEmail(email: string): Promise<string | null> {
+  const staffRecord = await prisma.staffRecord.findFirst({
     where: {
-      companyId: { in: companyIds },
+      email,
       isActive: true
     },
     select: { id: true }
   })
-
-  return staffRecords.map(s => s.id)
-}
-
-/**
- * Verify if a user can access a specific staff record
- */
-export async function verifyStaffRecordAccess(
-  user: UserContext,
-  staffRecordId: string
-): Promise<boolean> {
-  // SUPER_ADMIN: unrestricted
-  if (user.role === 'SUPER_ADMIN') {
-    return true
-  }
-
-  // HR/ADMIN: Check if staff is in accessible companies
-  if (['HR', 'ADMIN'].includes(user.role)) {
-    const accessibleStaffIds = await getAccessibleStaffIds(user)
-    return accessibleStaffIds.includes(staffRecordId)
-  }
-
-  // MANAGER/STAFF: Only their own record
-  if (['MANAGER', 'STAFF'].includes(user.role)) {
-    const staffRecord = await prisma.staffRecord.findFirst({
-      where: {
-        email: user.email,
-        isActive: true
-      },
-      select: { id: true }
-    })
-    return staffRecord?.id === staffRecordId
-  }
-
-  return false
-}
-
-/**
- * Get user's staff record ID from email
- */
-export async function getStaffRecordIdFromEmail(email: string): Promise<string | null> {
-  const staffRecord = await prisma.staffRecord.findFirst({
-    where: { 
-      email, 
-      isActive: true 
-    },
-    select: { id: true }
-  })
   return staffRecord?.id || null
+}
+
+// /src/app/lib/access-control.ts (append)
+export async function resolveActorStaffId(user: UserContext, companyId: string): Promise<string | null> {
+  const byId = await prisma.staffRecord.findFirst({ where: { id: user.userId, companyId }, select: { id: true } })
+  if (byId) return byId.id
+  const byEmail = await prisma.staffRecord.findFirst({
+    where: { email: user.email, companyId, isActive: true }, select: { id: true },
+  })
+  return byEmail?.id ?? null
 }

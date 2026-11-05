@@ -4,7 +4,7 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { PLATFORM_MODULES } from '@/app/lib/modules'
-import { syncModuleAccess } from '@/app/lib/module-access'
+import { syncModuleAccess, seedNavPlacement } from '@/app/lib/module-access'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -35,9 +35,14 @@ export async function POST(req: NextRequest) {
     // Step 2: Create missing (company × module) access rows
     const { created } = await syncModuleAccess()
 
+    // Step 3: Seed default nav sections + assign default sidebar placement
+    const nav = await seedNavPlacement()
+
     return withCors(ApiResponse.success({
       modulesUpserted: PLATFORM_MODULES.length,
       accessRowsCreated: created,
+      navSectionsSeeded: nav.sectionsSeeded,
+      navModulesAssigned: nav.modulesAssigned,
     }, `Sync complete — ${PLATFORM_MODULES.length} modules registered, ${created} new access rows created`), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }

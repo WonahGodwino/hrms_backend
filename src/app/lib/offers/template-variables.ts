@@ -4,7 +4,7 @@
 // company-specific value is resolved at render time from company/candidate/job/
 // offer data, so a single template serves every company in the system.
 
-export type VariableCategory = 'company' | 'candidate' | 'job' | 'offer' | 'terms' | 'comp'
+type VariableCategory = 'company' | 'candidate' | 'job' | 'offer' | 'terms' | 'comp'
 
 export interface VariableDef {
   key: string          // token used in templates, e.g. "company.secondedCompany"
@@ -68,13 +68,13 @@ export const VARIABLE_CATALOG: VariableDef[] = [
 
 // ---------- formatting helpers ----------
 
-export function formatMoney(amount: unknown, currency = 'NGN'): string {
+function formatMoney(amount: unknown, currency = 'NGN'): string {
   const n = typeof amount === 'string' ? Number(amount.replace(/[^0-9.-]/g, '')) : Number(amount)
   if (amount == null || isNaN(n)) return ''
   return `${currency} ${n.toLocaleString('en-NG')}`
 }
 
-export function formatLongDate(value: unknown): string {
+function formatLongDate(value: unknown): string {
   if (!value) return ''
   const d = value instanceof Date ? value : new Date(String(value))
   if (isNaN(d.getTime())) return String(value)

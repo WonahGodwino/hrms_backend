@@ -10,6 +10,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import rateLimit from '@/app/lib/rateLimiter'
 import { verifyOfferResponseToken } from '@/app/lib/offers/response-token'
 import { getResponseDeadline, isResponseExpired, OFFER_RESPONSE_DAYS } from '@/app/lib/offers/response-window'
+import { promoteCandidateToStaff, PromoteCandidateError } from '@/app/lib/staff/promote-candidate-to-staff'
 
 const ipLimiter = rateLimit({ interval: 60 * 1000, uniqueTokenPerInterval: 5000 })
 
@@ -155,39 +156,47 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Keep the pipeline application status in step with the candidate's decision.
-    if (offer.applicationId) {
+    // Decline keeps the pipeline application status in step with the candidate's
+    // decision. Acceptance's status transition (HIRED) happens inside
+    // promoteCandidateToStaff below, alongside the actual StaffRecord creation.
+    if (decision === 'DECLINED' && offer.applicationId) {
       await prisma.jobApplication.update({
         where: { id: offer.applicationId },
-        data: { status: decision === 'ACCEPTED' ? 'HIRED' : 'REJECTED', updatedBy: 'candidate' },
+        data: { status: 'REJECTED', updatedBy: 'candidate' },
       }).catch(() => {})
     }
 
-    // Begin onboarding immediately upon acceptance so the candidate's subsequent
-    // document uploads are part of the onboarding process from day one.
-    let onboardingId: string | null = null
+    // Accepting the offer is the hire trigger: the candidate already completed
+    // pre-offer onboarding (handbook + agreement + checklist) before this offer
+    // could even be generated, so acceptance converts them straight to staff.
+    let staffRecordId: string | null = null
+    let staffId: string | null = null
     if (decision === 'ACCEPTED') {
-      const existing = await prisma.onboarding.findUnique({ where: { offerId: offer.id } }).catch(() => null)
-      if (existing) {
-        onboardingId = existing.id
-      } else {
-        const onboarding = await prisma.onboarding.create({
-          data: {
-            companyId: offer.companyId,
-            offerId: offer.id,
-            status: 'IN_PROGRESS',
-            startDate: offer.proposedStartDate || now,
-            createdBy: 'candidate',
-          },
+      const onboarding = await prisma.onboarding.findUnique({ where: { offerId: offer.id } })
+      if (!onboarding) {
+        return withCors(ApiResponse.error('No pre-offer onboarding record found for this offer — cannot complete hire.', 409), origin)
+      }
+      try {
+        const result = await promoteCandidateToStaff({
+          onboardingId: onboarding.id,
+          companyId: offer.companyId,
+          actor: 'candidate',
+          performedByName: 'Candidate (self-service acceptance)',
         })
-        onboardingId = onboarding.id
+        staffRecordId = result.staffRecordId
+        staffId = result.staffId
+      } catch (promoteError) {
+        if (promoteError instanceof PromoteCandidateError) {
+          return withCors(ApiResponse.error(promoteError.message, promoteError.status), origin)
+        }
+        throw promoteError
       }
     }
 
     return withCors(ApiResponse.success(
-      { decision, canUpload: decision === 'ACCEPTED', onboardingId },
+      { decision, staffRecordId, staffId },
       decision === 'ACCEPTED'
-        ? 'Offer accepted. Your onboarding has been started. Please upload your signed offer letter and required documents below.'
+        ? 'Offer accepted. Welcome aboard — your staff profile has been created.'
         : 'Your response has been recorded. Thank you for letting us know.',
     ), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }

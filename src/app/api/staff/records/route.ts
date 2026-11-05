@@ -28,6 +28,11 @@ export async function GET(request: NextRequest) {
 		const department = searchParams.get('department');
 		const search = searchParams.get('search');
 		const includeInactive = searchParams.get('includeInactive') === 'true';
+		// Revamp staff-management filters: employment status and access status.
+		// employmentStatus: 'active' | 'inactive' (default: active only, unless
+		// includeInactive=true which returns both); accessStatus: 'enabled' | 'blocked'.
+		const employmentStatus = searchParams.get('employmentStatus');
+		const accessStatus = searchParams.get('accessStatus');
 
 		// ✅ CHANGE THIS: Get companyId from query param instead of token
 		const companyId = searchParams.get('companyId');
@@ -38,7 +43,9 @@ export async function GET(request: NextRequest) {
 		// staff from other companies (that an ADMIN/SUPER_ADMIN can otherwise access)
 		// never leak into the results.
 		const where: any = {
-			isActive: includeInactive ? undefined : true,
+			// Employment filtering is resolved below from employmentStatus/
+			// includeInactive; default here is active-only (legacy behaviour).
+			isActive: true,
 			company: { archived: 0 },
 		};
 
@@ -72,6 +79,20 @@ export async function GET(request: NextRequest) {
 			where.department = { contains: department, mode: 'insensitive' };
 		}
 
+		// Employment status filter (revamp staff-management).
+		if (employmentStatus === 'active') {
+			where.isActive = true;
+		} else if (employmentStatus === 'inactive') {
+			where.isActive = false;
+		} else if (!includeInactive) {
+			// Legacy default: active only.
+			where.isActive = true;
+		}
+
+		// Access status filter (revamp staff-management).
+		if (accessStatus === 'blocked') where.isBlocked = true;
+		if (accessStatus === 'enabled') where.isBlocked = false;
+
 		// Search functionality
 		if (search) {
 			where.OR = [
@@ -100,8 +121,13 @@ export async function GET(request: NextRequest) {
 					position: true,
 					phone: true,
 					isActive: true,
+					isBlocked: true,
+					updatedAt: true,
 					createdAt: true,
 					companyId: true,
+					designation: {
+						select: { title: true, code: true },
+					},
 					company: {
 						select: {
 							id: true,
@@ -156,10 +182,16 @@ export async function GET(request: NextRequest) {
 				firstName: record.firstName,
 				lastName: record.lastName,
 				fullName: `${record.firstName} ${record.lastName}`,
+				role: record.role,
 				department: record.department,
 				position: record.position,
 				phone: record.phone,
 				isActive: record.isActive,
+				isBlocked: record.isBlocked,
+				accessStatus: record.isBlocked ? 'blocked' : 'enabled',
+				designation: record.designation?.title || record.position || '—',
+				designationCode: record.designation?.code || null,
+				lastUpdated: record.updatedAt,
 				createdAt: record.createdAt,
 				companyId: record.companyId,
 				companyName: record.company?.companyName || 'Unknown',

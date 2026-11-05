@@ -16,6 +16,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
 import ExcelJS from 'exceljs'
+import { writeStyledTable, buildSubtitle, confidentialFooter, toneCell, attachmentDisposition, safeFileName, addInstructionsSheet, findHeaderRow, XLSX_MIME } from '@/app/lib/excel/sheet-theme'
 import { buildOfferLetterFieldLabels, BASE_FIELD_KEYS } from '@/app/lib/offer-letters/variableLabels'
 
 export async function OPTIONS(request: NextRequest) {
@@ -66,26 +67,31 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const dataColumns = Array.from(dataKeys)
     const columns = ['row', 'error', ...dataColumns]
 
+    const company = await prisma.company.findUnique({ where: { id: job.companyId }, select: { companyName: true } })
+
     const workbook = new ExcelJS.Workbook()
+    workbook.creator = '24/7HR'
     const worksheet = workbook.addWorksheet('Failed Rows')
-    worksheet.columns = columns.map((c) => {
-      if (c === 'row') return { header: 'Row', key: c, width: 10 }
-      if (c === 'error') return { header: 'Error', key: c, width: 44 }
-      if (c === 'letterId') return { header: 'letterId', key: c, width: 24 }
-      return { header: labels.get(c) || c, key: c, width: 24 }
-    })
 
-    const headerRow = worksheet.getRow(1)
-    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
-    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDC3545' } }
-
-    errors.forEach((e, index) => {
-      const row = worksheet.getRow(2 + index)
-      row.getCell('row').value = e.row
-      row.getCell('error').value = e.message
-      Object.entries(e.data || {}).forEach(([k, v]) => {
-        row.getCell(k).value = v === null || v === undefined ? '' : String(v)
-      })
+    // The header sits on row 4 under the title band; the bulk-create upload finds it by column label.
+    writeStyledTable(worksheet, {
+      title: `Offer Letters ${job.jobType === 'EDIT' ? 'Bulk Edit' : 'Bulk Create'}, Failed Rows`,
+      subtitle: buildSubtitle([company?.companyName, `${errors.length} failed row${errors.length === 1 ? '' : 's'}`, 'Correct the errors and re-upload']),
+      columns: columns.map((c) => {
+        if (c === 'row') return { header: 'Row', key: c, width: 10, align: 'center' as const }
+        if (c === 'error') return { header: 'Error', key: c, width: 50, align: 'left' as const }
+        if (c === 'letterId') return { header: 'letterId', key: c, width: 26, align: 'left' as const }
+        return { header: labels.get(c) || c, key: c, width: 24, align: 'left' as const }
+      }),
+      rows: errors.map((e) => {
+        const row: Record<string, any> = { row: e.row, error: e.message }
+        Object.entries(e.data || {}).forEach(([k, v]) => {
+          row[k] = v === null || v === undefined ? '' : String(v)
+        })
+        return row
+      }),
+      onRow: (row) => toneCell(row.getCell(2), 'danger'),
+      footer: confidentialFooter(company?.companyName),
     })
 
     const buffer = await workbook.xlsx.writeBuffer()
@@ -94,8 +100,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       new NextResponse(buffer as any, {
         status: 200,
         headers: {
-          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition': `attachment; filename="offer-letters-${job.jobType.toLowerCase()}-failures.xlsx"`,
+          'Content-Type': XLSX_MIME,
+          'Content-Disposition': attachmentDisposition(`Offer Letters ${job.jobType === 'EDIT' ? 'Bulk Edit' : 'Bulk Create'} Failures (${safeFileName(company?.companyName || 'Company')}).xlsx`),
           'Cache-Control': 'no-cache',
         },
       }),

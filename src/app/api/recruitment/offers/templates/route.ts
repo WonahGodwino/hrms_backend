@@ -9,7 +9,7 @@ import {
   extractBearerToken,
   findStaffByEmail,
   resolveScopedCompanyIds,
-} from '@/app/api/staff-loans-benefits/_helpers'
+} from '@/app/lib/staff-access'
 import { extractUsedVariables } from '@/app/lib/offers/template-variables'
 import { DEFAULT_OFFER_TEMPLATE_HTML } from '@/app/lib/offers/default-offer-template'
 

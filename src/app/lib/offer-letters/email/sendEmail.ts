@@ -13,7 +13,7 @@ import { appendOfferLetterToSent } from './mailbox';
 import { substituteEmailVariables } from './templateSubstitution';
 import { getOfferLetterSenderIdentity, getOfferLetterSmtpTransport } from './transport';
 
-export interface OfferLetterEmailAttachmentInput {
+interface OfferLetterEmailAttachmentInput {
 	fileName: string;
 	mimeType: string;
 	data: Buffer;

@@ -17,6 +17,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
+import { consumeTrialQuota } from '@/app/lib/trial/guard'
 import {
   getActivePayslipBulkSend,
   createPendingPayslipBulkSend,
@@ -88,6 +89,13 @@ export async function POST(request: NextRequest) {
         origin
       )
     }
+
+    // Free trial: payslips sent are a lifetime quota, counted by recipient.
+    const draftRecipients = await prisma.payslip.findMany({
+      where: { companyId, month, year: yearNumber, draft: true },
+      select: { staffRecordId: true },
+    })
+    await consumeTrialQuota(companyId, 'payslips', draftRecipients.map((p) => p.staffRecordId))
 
     const job = await createPendingPayslipBulkSend(companyId, month, yearNumber, user.userId, draftCount)
 

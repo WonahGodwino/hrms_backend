@@ -186,26 +186,32 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Deactivate all existing pay dates for this company
-    await prisma.companyPayDate.updateMany({
-      where: { companyId },
-      data: { isActive: false }
-    })
-
-    // Create new pay dates
+    // Additive: each incoming date is upserted on the (companyId, paymentDate)
+    // unique key rather than wiping the company's existing schedule first.
+    // Re-submitting a date that was previously soft-deleted (isActive: false)
+    // reactivates it with the newly submitted cycle/description instead of
+    // erroring on the unique constraint or silently doing nothing.
     const createdPayDates = []
     for (const payDate of payDates) {
-      const created = await prisma.companyPayDate.create({
-        data: {
+      const paymentDate = new Date(payDate.paymentDate)
+      const upserted = await prisma.companyPayDate.upsert({
+        where: { companyId_paymentDate: { companyId, paymentDate } },
+        create: {
           companyId,
-          paymentDate: new Date(payDate.paymentDate),
+          paymentDate,
           paymentCycle: payDate.paymentCycle,
           description: payDate.description || null,
           isActive: true,
           createdBy: user.userId
+        },
+        update: {
+          paymentCycle: payDate.paymentCycle,
+          description: payDate.description || null,
+          isActive: true,
+          updatedBy: user.userId
         }
       })
-      createdPayDates.push(created)
+      createdPayDates.push(upserted)
     }
 
     return withCors(
@@ -256,9 +262,12 @@ export async function DELETE(request: NextRequest) {
       return withCors(ApiResponse.error('Pay date not found', 404), origin)
     }
 
-    // Verify access
+    // Verify access — same multi-company-aware check as GET/POST, not just a
+    // single user.companyId equality (that broke access for HR/ADMIN users
+    // whose assignment lives in companyIds rather than a singular companyId).
     if (user.role !== 'SUPER_ADMIN') {
-      if (!user.companyId || payDate.companyId !== user.companyId) {
+      const userCompanyIds = user.companyIds || (user.companyId ? [user.companyId] : [])
+      if (!userCompanyIds.includes(payDate.companyId)) {
         return withCors(ApiResponse.error('Access denied', 403), origin)
       }
     }
@@ -276,6 +285,92 @@ export async function DELETE(request: NextRequest) {
 
   } catch (error) {
     console.error('Error deleting pay date:', error)
+    return withCors(handleApiError(error), origin)
+  }
+}
+
+// PATCH: Edit an existing pay date's cycle/description (and optionally its
+// date, subject to the same (companyId, paymentDate) uniqueness POST enforces)
+export async function PATCH(request: NextRequest) {
+  const origin = request.headers.get('origin')
+
+  try {
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader) {
+      return withCors(ApiResponse.error('Authorization header missing', 401), origin)
+    }
+
+    const token = authHeader.replace('Bearer ', '')
+    const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+
+    const body = await request.json()
+    const { id, paymentDate, paymentCycle, description } = body
+
+    if (!id) {
+      return withCors(ApiResponse.error('Pay date ID is required', 400), origin)
+    }
+
+    const existing = await prisma.companyPayDate.findUnique({ where: { id } })
+    if (!existing) {
+      return withCors(ApiResponse.error('Pay date not found', 404), origin)
+    }
+
+    if (user.role !== 'SUPER_ADMIN') {
+      const userCompanyIds = user.companyIds || (user.companyId ? [user.companyId] : [])
+      if (!userCompanyIds.includes(existing.companyId)) {
+        return withCors(ApiResponse.error('Access denied', 403), origin)
+      }
+    }
+
+    const updateData: { paymentDate?: Date; paymentCycle?: 'WEEKLY' | 'BI_WEEKLY' | 'MONTHLY'; description?: string | null; updatedBy: string } = {
+      updatedBy: user.userId
+    }
+
+    if (paymentCycle !== undefined) {
+      if (!['WEEKLY', 'BI_WEEKLY', 'MONTHLY'].includes(paymentCycle)) {
+        return withCors(ApiResponse.error('Invalid payment cycle. Must be WEEKLY, BI_WEEKLY, or MONTHLY', 400), origin)
+      }
+      updateData.paymentCycle = paymentCycle
+    }
+
+    if (description !== undefined) {
+      updateData.description = description || null
+    }
+
+    if (paymentDate !== undefined) {
+      const parsedDate = new Date(paymentDate)
+      if (isNaN(parsedDate.getTime())) {
+        return withCors(ApiResponse.error('Invalid payment date format', 400), origin)
+      }
+      const clash = await prisma.companyPayDate.findFirst({
+        where: { companyId: existing.companyId, paymentDate: parsedDate, NOT: { id } }
+      })
+      if (clash) {
+        return withCors(ApiResponse.error('A pay date already exists for this date', 400), origin)
+      }
+      updateData.paymentDate = parsedDate
+    }
+
+    const updated = await prisma.companyPayDate.update({
+      where: { id },
+      data: updateData
+    })
+
+    return withCors(
+      ApiResponse.success(
+        {
+          id: updated.id,
+          paymentDate: updated.paymentDate.toISOString(),
+          paymentCycle: updated.paymentCycle,
+          description: updated.description,
+          isActive: updated.isActive
+        },
+        'Pay date updated successfully'
+      ),
+      origin
+    )
+  } catch (error) {
+    console.error('Error updating pay date:', error)
     return withCors(handleApiError(error), origin)
   }
 }

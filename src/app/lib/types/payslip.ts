@@ -1,7 +1,7 @@
 // src/app/lib/types/payslip.ts
 
 // Existing interface - maintained for backward compatibility
-export interface PayslipItem {
+interface PayslipItem {
   id: string;
   month: string;
   year: number;
@@ -62,7 +62,7 @@ export interface StaffRecordInfo {
 }
 
 // Extended staff record info with additional fields
-export interface ExtendedStaffRecordInfo extends StaffRecordInfo {
+interface ExtendedStaffRecordInfo extends StaffRecordInfo {
   bankName?: string;
   accountNumber?: string;
   phone?: string;
@@ -83,7 +83,7 @@ export interface CompanyInfo {
   taxId?: string;
 }
 
-export interface StaffItem {
+interface StaffItem {
   id: string;
   staffId: string;
   name: string;
@@ -100,7 +100,7 @@ export interface StaffItem {
 }
 
 // Extended staff item with more details
-export interface ExtendedStaffItem extends StaffItem {
+interface ExtendedStaffItem extends StaffItem {
   phone?: string;
   bankName?: string;
   accountNumber?: string;
@@ -110,7 +110,7 @@ export interface ExtendedStaffItem extends StaffItem {
 }
 
 // Payslip summary statistics
-export interface PayslipSummary {
+interface PayslipSummary {
   totalPayslips: number;
   totalGrossPay: number;
   totalNetPay: number;
@@ -123,7 +123,7 @@ export interface PayslipSummary {
 }
 
 // Payslip filter options
-export interface PayslipFilters {
+interface PayslipFilters {
   year?: number;
   month?: string;
   startDate?: Date;
@@ -135,7 +135,7 @@ export interface PayslipFilters {
 }
 
 // Payslip paginated response
-export interface PaginatedPayslipResponse {
+interface PaginatedPayslipResponse {
   staff: StaffRecordInfo;
   payslips: PayslipItem[] | ExtendedPayslipItem[];
   summary: PayslipSummary;

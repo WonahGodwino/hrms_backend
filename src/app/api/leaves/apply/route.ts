@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { prisma } from '@/app/lib/db'
 import { sendLeaveNotificationEmail } from '@/app/lib/email'
 import { ensureStaffLeaveBalances } from '@/app/lib/leaves/balance-engine'
+import { startChain, notifyNextApprover } from '@/app/lib/leave/approval-chain'
 import { 
   createLeaveNotification, 
   NOTIFICATION_TYPES,
@@ -145,6 +146,17 @@ async function calculateWorkingDays(
   return count
 }
 
+// The date a staff member's employment is measured from for leave eligibility
+// and accrual. Prefer the actual hire date; fall back to the record's created
+// date only when no hire date was captured (e.g. older/imported records).
+function resolveEmploymentDate(staff: any): Date {
+  return staff.hireDate ? new Date(staff.hireDate) : new Date(staff.createdAt)
+}
+
+function formatEmploymentDate(date: Date): string {
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+}
+
 // Validate against company's leave policy
 async function validateAgainstCompanyPolicy(
   policy: any,
@@ -197,40 +209,51 @@ async function validateAgainstCompanyPolicy(
   }
 
   if (policy.minEmploymentMonths > 0) {
-    const employmentDate = new Date(staff.createdAt)
-    const monthsEmployed = (today.getFullYear() - employmentDate.getFullYear()) * 12 + 
+    const employmentDate = resolveEmploymentDate(staff)
+    const monthsEmployed = (today.getFullYear() - employmentDate.getFullYear()) * 12 +
                          (today.getMonth() - employmentDate.getMonth())
-    
+
     if (monthsEmployed < policy.minEmploymentMonths) {
       errors.push(
         `${policy.minEmploymentMonths} months of employment required for ${leaveType.name}. ` +
-        `You have ${monthsEmployed} months.`
+        `You have ${monthsEmployed} months (employment date: ${formatEmploymentDate(employmentDate)}).`
       )
     }
   }
 
   if (policy.documentationRequired) {
-    const hasDocumentation = medicalData.medicalCertificateNumber && 
-                           medicalData.medicalCertificateDate && 
+    const hasDocumentation = medicalData.medicalCertificateNumber &&
+                           medicalData.medicalCertificateDate &&
                            medicalData.medicalCertificateIssuer
-    
+
     if (!hasDocumentation) {
-      errors.push(
-        `${leaveType.name} requires supporting documentation. ` +
-        `Please provide medical certificate number, date, and issuer.`
-      )
+      // AFTER_LEAVE policies (e.g. sick leave): the document often doesn't
+      // exist yet at application time (you get the medical report after seeing
+      // a doctor), so don't block — apply now, submit the document later. Only
+      // AT_APPLICATION policies hard-require it upfront.
+      if (policy.documentationTiming === 'AFTER_LEAVE') {
+        warnings.push(
+          `${leaveType.name} requires supporting documentation. ` +
+          `You can apply now and submit it after your leave (e.g. a medical report).`
+        )
+      } else {
+        errors.push(
+          `${leaveType.name} requires supporting documentation. ` +
+          `Please provide medical certificate number, date, and issuer.`
+        )
+      }
     }
   }
 
   if (policy.accrualRate && policy.accrualRate > 0) {
-    const employmentDate = new Date(staff.createdAt)
-    const totalMonths = (today.getFullYear() - employmentDate.getFullYear()) * 12 + 
+    const employmentDate = resolveEmploymentDate(staff)
+    const totalMonths = (today.getFullYear() - employmentDate.getFullYear()) * 12 +
                        (today.getMonth() - employmentDate.getMonth())
     const accruedDays = totalMonths * policy.accrualRate
     
     if (requestedDays > accruedDays) {
       warnings.push(
-        `Based on accrual rate of ${policy.accrualRate} days/month, ` +
+        `Based on accrual rate of ${policy.accrualRate} days/month since ${formatEmploymentDate(employmentDate)}, ` +
         `you have approximately ${accruedDays.toFixed(1)} accrued days.`
       )
     }
@@ -268,13 +291,8 @@ function getNextSteps(status: string, currentStep: string, policy: any): string[
   }
   
   if (currentStep === 'MANAGER') {
-    if (policy.approvalWorkflow === 'MANAGER_ONLY') {
-      steps.push('⏳ Waiting for manager approval')
-      steps.push('• Manager will review your request')
-    } else if (policy.approvalWorkflow === 'MANAGER_THEN_HR') {
-      steps.push('⏳ Waiting for manager approval (first step)')
-      steps.push('• After manager approval, request moves to HR')
-    }
+    steps.push('⏳ Waiting for your department line manager(s)')
+    steps.push('• Each line manager approves in order, then the request moves to HR')
   }
   
   if (currentStep === 'HR') {
@@ -478,10 +496,12 @@ export async function POST(request: NextRequest) {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
-    // Basic date validation
-    if (startDate >= endDate) {
+    // Basic date validation. A half day is a single day, so start == end is
+    // valid for it; a full-day request still needs end after start.
+    const invalidRange = data.isHalfDay ? startDate > endDate : startDate >= endDate
+    if (invalidRange) {
       const response = NextResponse.json(
-        { success: false, message: 'End date must be after start date' },
+        { success: false, message: data.isHalfDay ? 'For a half day, start and end must be the same day' : 'End date must be after start date' },
         { status: 400 }
       )
       return withCors(response, origin)
@@ -716,19 +736,14 @@ export async function POST(request: NextRequest) {
         }
       })
 
-      // Determine approval status based on POLICY
+      // Approval is the department line-manager ladder, then HR (see
+      // lib/leave/approval-chain). Only a policy that needs no approval auto-approves.
       let status = 'PENDING'
       let currentStep = 'MANAGER'
-      
+
       if (!policy.requiresApproval) {
         status = 'APPROVED'
         currentStep = 'COMPLETED'
-      } else if (policy.approvalWorkflow === 'HR_ONLY') {
-        currentStep = 'HR'
-      } else if (policy.approvalWorkflow === 'MANAGER_ONLY') {
-        currentStep = 'MANAGER'
-      } else if (policy.approvalWorkflow === 'MANAGER_THEN_HR') {
-        currentStep = 'MANAGER'
       }
 
       // Create leave request
@@ -752,7 +767,6 @@ export async function POST(request: NextRequest) {
         hasAttachment: !!attachmentBuffer,
         status,
         currentStep,
-        managerApproverId: staff.manager?.id || null,
         createdBy: data.staffRecordId || user.userId,
         updatedBy: user.userId
       }
@@ -775,9 +789,28 @@ export async function POST(request: NextRequest) {
 
       // Generate and update reference number
       const referenceNumber = generateReferenceNumber(staff.companyId, leaveRequest.id)
+      // Snapshot the approval chain (department ladder above the applicant, then HR)
+      let chainState: Record<string, unknown> = {}
+      let firstApprover: { id: string; name: string; email: string } | null = null
+      if (status === 'PENDING') {
+        const chain = await startChain(tx, leaveRequest.id, {
+          id: staff.id,
+          departmentId: staff.departmentId ?? null
+        })
+        chainState = chain.state
+        const first = chain.planned[0]
+        if (first.kind === 'LINE_MANAGER' && first.approverStaffId) {
+          const m = await tx.staffRecord.findUnique({
+            where: { id: first.approverStaffId },
+            select: { id: true, firstName: true, lastName: true, email: true }
+          })
+          if (m) firstApprover = { id: m.id, name: `${m.firstName} ${m.lastName}`, email: m.email }
+        }
+      }
+
       const updatedLeaveRequest = await tx.leaveRequest.update({
         where: { id: leaveRequest.id },
-        data: { referenceNumber }
+        data: { referenceNumber, ...chainState }
       })
 
       // Handle auto-approval
@@ -797,7 +830,7 @@ export async function POST(request: NextRequest) {
         policy,
         leaveType,
         staff,
-        manager: staff.manager,
+        manager: firstApprover,
         warnings: policyValidation.warnings,
         policyDetails: policyValidation.policyDetails
       }
@@ -852,6 +885,11 @@ export async function POST(request: NextRequest) {
       console.error('Error sending notifications:', notificationError)
     }
 
+    // Tell whoever must act first: the Level 1 line manager, or HR when no manager applies
+    if (result.leaveRequest.status === 'PENDING') {
+      await notifyNextApprover(result.leaveRequest.id)
+    }
+
     // Get company work week pattern for response
     const company = await prisma.company.findUnique({
       where: { id: staff.companyId },
@@ -891,17 +929,13 @@ export async function POST(request: NextRequest) {
         },
         nextSteps: getNextSteps(result.leaveRequest.status, result.leaveRequest.currentStep, result.policy),
         approvers: {
-          manager: result.manager ? {
-            id: result.manager.id,
-            name: `${result.manager.firstName} ${result.manager.lastName}`,
-            email: result.manager.email
-          } : null,
-          hr: result.policy?.approvalWorkflow && result.policy.approvalWorkflow.includes('HR') ? 'Awaiting HR approval' : null
+          manager: result.manager,
+          hr: result.leaveRequest.status === 'PENDING' ? 'Final approval by HR' : null
         },
         notifications: {
           sentToApplicant: true,
           sentToManager: !!result.manager,
-          sentToHR: result.policy?.approvalWorkflow && result.policy.approvalWorkflow.includes('HR')
+          sentToHR: result.leaveRequest.status === 'PENDING' && !result.manager
         },
         warnings: result.warnings.length > 0 ? result.warnings : undefined,
         importantNotes: result.policy ? getImportantNotes(result.policy) : ['No policy details available'],

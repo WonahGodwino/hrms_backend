@@ -4,6 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { normalizeInterviewType } from '@/app/lib/recruitment/interviewType'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -28,6 +29,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!title?.trim() || !interviewType?.trim())
       return withCors(ApiResponse.error('Title and interview type are required', 400), origin)
 
+    const normalizedType = normalizeInterviewType(interviewType)
+    if ('error' in normalizedType) return withCors(ApiResponse.error(normalizedType.error, 400), origin)
+
     const maxOrder = await prisma.recruitmentAssessmentRound.findFirst({
       where: { planId: id },
       orderBy: { order: 'desc' },
@@ -38,7 +42,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const round = await prisma.recruitmentAssessmentRound.create({
       data: {
         planId: id, order: nextOrder,
-        title: title.trim(), interviewType: interviewType.trim(),
+        title: title.trim(), interviewType: normalizedType.value,
         duration: duration || 30,
       },
     })

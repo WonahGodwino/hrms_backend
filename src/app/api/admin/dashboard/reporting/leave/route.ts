@@ -2,9 +2,8 @@
 //
 // GET — Leave Reporting's Summary tab: utilization by leave type/department,
 // approval funnel + time-to-approve, notice-period compliance, sandwiching
-// detection, balance exhaustion/carry-over risk, seasonal clustering, and the
-// blackout-period compliance gap — all via the shared aggregateLeavePeriod
-// helper.
+// detection, balance exhaustion/carry-over risk, and seasonal clustering —
+// all via the shared aggregateLeavePeriod helper.
 import { NextRequest } from 'next/server'
 
 import { requireRole } from '@/app/lib/auth'

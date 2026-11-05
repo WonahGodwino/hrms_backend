@@ -30,7 +30,7 @@ export function raceWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Pro
 	});
 }
 
-export class AbortedError extends Error {
+class AbortedError extends Error {
 	constructor() {
 		super('Stopped by user');
 		this.name = 'AbortedError';

@@ -1,62 +1,15 @@
+// src/app/api/staff-loans-benefits/dashboard/route.ts
+// GET — financial cockpit. Self-scoped by default (own loans/benefits +
+// net salary); HR/ADMIN/SUPER_ADMIN may pass ?staffId= to view someone
+// else's, or omit it for an org-wide summary (AdminFinancialDashboard.jsx).
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { requireRole } from '@/app/lib/auth'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-
-type LoanStatus = 'ACTIVE' | 'OVERDUE' | 'DEFAULTED' | 'COMPLETED'
-type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH'
-
-type AggregatedLoan = {
-  id: string
-  staffId: string
-  employeeName: string
-  employeeEmail: string
-  loanType: string
-  amountIssued: number
-  amountRepaid: number
-  outstandingBalance: number
-  monthlyDeduction: number
-  nextPaymentDate: string
-  status: LoanStatus
-  riskLevel: RiskLevel
-  progressPercent: number
-}
-
-type ModuleRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
-
-type ModuleRequestRecord = {
-  id: string
-  requestType: 'LOAN' | 'BENEFIT' | 'ALLOCATION'
-  status: ModuleRequestStatus
-  employeeName: string
-  employeeEmail: string
-  title: string
-  amount?: number
-  tenureMonths?: number
-  benefitName?: string
-  createdAt: string
-  reviewedAt?: string | null
-  reviewerComment?: string | null
-}
-
-
-function toNaira(amount: number): string {
-  return `N${amount.toLocaleString('en-NG')}`
-}
-
-function deriveLoanStatus(ageInDays: number, progressPercent: number): LoanStatus {
-  if (progressPercent >= 100) return 'COMPLETED'
-  if (ageInDays > 270 && progressPercent < 55) return 'DEFAULTED'
-  if (ageInDays > 150 && progressPercent < 75) return 'OVERDUE'
-  return 'ACTIVE'
-}
-
-function deriveRiskLevel(status: LoanStatus, outstandingRatio: number): RiskLevel {
-  if (status === 'DEFAULTED' || outstandingRatio >= 0.7) return 'HIGH'
-  if (status === 'OVERDUE' || outstandingRatio >= 0.45) return 'MEDIUM'
-  return 'LOW'
-}
+import { checkStaffAccess } from '@/app/lib/staff-access'
+import { resolveStaffGrossSalary, resolveStaffNetSalary } from '@/app/lib/staff-loans-benefits/staff-finance'
+import { canAccessPage } from '@/app/lib/staff-loans-benefits/page-access'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -64,662 +17,173 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
-
   try {
     const authHeader = request.headers.get('authorization')
-    if (!authHeader) {
-      return withCors(ApiResponse.error('Authorization header missing', 401), origin)
-    }
-
+    if (!authHeader) return withCors(ApiResponse.error('Authorization header missing', 401), origin)
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER', 'STAFF'])
+    const user = await requireModuleAccess(token, 'STAFF_LOANS_BENEFITS', ['SUPER_ADMIN', 'ADMIN', 'HR', 'STAFF'])
 
     const { searchParams } = new URL(request.url)
-    const requestedCompanyId = searchParams.get('companyId')
-    const personalScope = searchParams.get('personalScope') === 'true'
+    // Viewing another staff member's dashboard by ?staffId= stays
+    // role-based (ADMIN/HR/SUPER_ADMIN) — unrelated to the FINANCIAL_DASHBOARD
+    // page-access gate below, which governs the org-wide summary only.
+    const isPrivilegedRole = ['SUPER_ADMIN', 'ADMIN', 'HR'].includes(user.role)
+    const staffIdParam = searchParams.get('staffId')
+    // Org-wide access is governed purely by FINANCIAL_DASHBOARD page access
+    // (SUPER_ADMIN always passes via canAccessPage) — role no longer gates
+    // it. Anyone without access degrades to their own personal view rather
+    // than being 403'd, since this route doubles as the self-service dashboard.
+    const orgWide = !staffIdParam && (await canAccessPage('FINANCIAL_DASHBOARD', user))
 
-    let scopedCompanyIds: string[] = []
+    if (orgWide) {
+      if (!user.companyId) return withCors(ApiResponse.success({ orgWide: true, loans: [], benefits: [] }), origin)
 
-    // Personal scope: ADMIN/HR view their own staff_record company loans, not the operational company
-    if (personalScope && (user.role === 'ADMIN' || user.role === 'HR')) {
-      const ownStaffRecord = await prisma.staffRecord.findFirst({
-        where: { email: user.email, isActive: true },
-        select: { companyId: true },
-      })
-      if (ownStaffRecord) {
-        scopedCompanyIds = [ownStaffRecord.companyId]
-      } else {
-        // HR/ADMIN may not have a staff record — fall back to assigned companies
-        const assignments = await prisma.userCompany.findMany({
-          where: {
-            userId: user.userId,
-            company: { archived: 0 },
-          },
-          select: { companyId: true },
-        })
-        scopedCompanyIds = assignments.map((a) => a.companyId)
-      }
-    } else if (user.role === 'SUPER_ADMIN') {
-      if (requestedCompanyId) {
-        scopedCompanyIds = [requestedCompanyId]
-      } else {
-        const companies = await prisma.company.findMany({
-          where: { archived: 0 },
-          select: { id: true },
-        })
-        scopedCompanyIds = companies.map((company) => company.id)
-      }
-    } else if (user.role === 'ADMIN' || user.role === 'HR') {
-      const assignments = await prisma.userCompany.findMany({
-        where: {
-          userId: user.userId,
-          company: { archived: 0 },
-        },
-        select: { companyId: true },
-      })
+      const [loans, benefitAllocations, benefitRequests] = await Promise.all([
+        prisma.loanRequest.findMany({ where: { companyId: user.companyId }, select: { status: true, requestedAmount: true, approvedAmount: true, monthlyRepayment: true, remainingBalance: true } }),
+        prisma.benefitAllocation.findMany({ where: { companyId: user.companyId }, select: { status: true, allocationAmount: true } }),
+        prisma.benefitRequest.findMany({ where: { companyId: user.companyId }, select: { status: true } }),
+      ])
 
-      const assignedIds = assignments.map((assignment) => assignment.companyId)
-      if (requestedCompanyId) {
-        if (!assignedIds.includes(requestedCompanyId)) {
-          return withCors(ApiResponse.error('You do not have access to that company', 403), origin)
-        }
-        scopedCompanyIds = [requestedCompanyId]
-      } else {
-        scopedCompanyIds = assignedIds
-      }
-    } else {
-      const staffRecord = await prisma.staffRecord.findFirst({
-        where: { email: user.email, isActive: true },
-        select: { id: true, companyId: true },
-      })
+      // A loan with a zero balance is fully repaid regardless of whether its
+      // status row has flipped to REPAID yet — it must not count toward
+      // outstanding/active/monthly-deduction figures.
+      const isActive = (l: { status: string; remainingBalance: unknown }) => l.status === 'DISBURSED' && Number(l.remainingBalance ?? 0) > 0
+      const totalIssued = loans.reduce((s, l) => s + (l.status === 'DISBURSED' || l.status === 'REPAID' ? Number(l.approvedAmount ?? l.requestedAmount) : 0), 0)
+      const totalOutstanding = loans.reduce((s, l) => s + (isActive(l) ? Number(l.remainingBalance ?? 0) : 0), 0)
+      const activeCount = loans.filter(isActive).length
+      const pendingCount = loans.filter((l) => l.status === 'PENDING_GUARANTOR' || l.status === 'PENDING_APPROVAL').length
 
-      if (!staffRecord) {
-        return withCors(ApiResponse.error('Staff record not found', 404), origin)
-      }
-
-      if (requestedCompanyId && staffRecord.companyId !== requestedCompanyId) {
-        return withCors(ApiResponse.error('You do not have access to that company', 403), origin)
-      }
-
-      scopedCompanyIds = [staffRecord.companyId]
-    }
-
-    // Fetch company currency
-    const companyCurrencies = await prisma.company.findMany({
-      where: { id: { in: scopedCompanyIds } },
-      select: { id: true, baseCurrency: true },
-    })
-    const defaultCurrency = companyCurrencies[0]?.baseCurrency || 'NGN'
-
-    if (scopedCompanyIds.length === 0) {
       return withCors(
-        ApiResponse.success(
-          {
-            companyContext: {
-              role: user.role,
-              scopedCompanyIds: [],
-              baseCurrency: 'NGN',
-            },
-            kpis: {
-              totalLoansIssued: 0,
-              totalOutstanding: 0,
-              activeLoans: 0,
-              overdueLoans: 0,
-              defaultedLoans: 0,
-              pendingRequests: 0,
-              recoveryRatePercent: 0,
-            },
-            loans: [],
-            myLoans: [],
-            loanTerms: [],
-            benefitsCatalog: [],
-            loanRequests: [],
-            benefitRequests: [],
-            benefitAllocations: [],
-            alerts: [],
-            insights: [],
-            departmentDistribution: [],
+        ApiResponse.success({
+          orgWide: true,
+          loanKpis: { totalIssued, totalOutstanding, activeCount, pendingCount, totalLoans: loans.length },
+          benefitKpis: {
+            totalAllocated: benefitAllocations.reduce((s, b) => s + Number(b.allocationAmount), 0),
+            activeAllocations: benefitAllocations.filter((b) => b.status === 'ACTIVE').length,
+            pendingRequests: benefitRequests.filter((r) => r.status === 'PENDING_APPROVAL').length,
           },
-          'Staff loans and benefits dashboard data fetched successfully'
-        ),
+        }),
         origin
       )
     }
 
-    // Fetch data in parallel
-    const [loanEntries, activeStaffCount, loanRequestsData, benefitRequestsData, benefitAllocationsData, loanPolicies, benefitPolicies] = await Promise.all([
-      prisma.deductionEntry.findMany({
-        where: {
-          companyId: { in: scopedCompanyIds },
-          deductionType: { in: ['LOAN', 'SALARY_ADVANCE'] },
-        },
-        include: {
-          staff: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-              department: true,
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-      }),
-      prisma.staffRecord.count({
-        where: {
-          companyId: { in: scopedCompanyIds },
-          isActive: true,
-        },
-      }),
-      prisma.loanRequest.findMany({
-        where: {
-          companyId: { in: scopedCompanyIds },
-        },
-        include: {
-          staff: {
-            select: {
-              firstName: true,
-              lastName: true,
-              email: true,
-              department: true,
-            },
-          },
-          approver: {
-            select: {
-              firstName: true,
-              lastName: true,
-              email: true,
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
-      }),
-      prisma.benefitRequest.findMany({
-        where: {
-          companyId: { in: scopedCompanyIds },
-        },
-        include: {
-          staff: {
-            select: {
-              firstName: true,
-              lastName: true,
-              email: true,
-              department: true,
-            },
-          },
-          approver: {
-            select: {
-              firstName: true,
-              lastName: true,
-              email: true,
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
-      }),
-      prisma.benefitAllocation.findMany({
-        where: {
-          companyId: { in: scopedCompanyIds },
-        },
-        include: {
-          staff: {
-            select: {
-              firstName: true,
-              lastName: true,
-              email: true,
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-      }),
-      prisma.loanPolicy.findMany({
-        where: { companyId: { in: scopedCompanyIds }, isActive: true },
-        orderBy: { name: 'asc' },
-      }),
-      prisma.benefitPolicy.findMany({
-        where: { companyId: { in: scopedCompanyIds }, isActive: true },
-        orderBy: { category: 'asc' },
-      }),
+    const targetStaffId = staffIdParam && isPrivilegedRole ? staffIdParam : user.userId
+    if (staffIdParam && isPrivilegedRole) {
+      const target = await prisma.staffRecord.findUnique({ where: { id: staffIdParam }, select: { companyId: true } })
+      if (!target || !(await checkStaffAccess(user, target.companyId))) {
+        return withCors(ApiResponse.error('You do not have access to this staff record', 403), origin)
+      }
+    }
+
+    const [grossSalary, netSalary, loans, benefitAllocations, benefitRequests, benefitAllocationHistory] = await Promise.all([
+      resolveStaffGrossSalary(targetStaffId),
+      resolveStaffNetSalary(targetStaffId),
+      prisma.loanRequest.findMany({ where: { staffId: targetStaffId }, orderBy: { createdAt: 'desc' }, take: 10 }),
+      prisma.benefitAllocation.findMany({ where: { staffId: targetStaffId, status: 'ACTIVE' } }),
+      prisma.benefitRequest.findMany({ where: { staffId: targetStaffId }, orderBy: { createdAt: 'desc' }, take: 10 }),
+      // Allocation history (not just still-ACTIVE rows) feeds Recent Activity:
+      // an allocation that was used up / expired should still appear as an
+      // activity item, alongside its timestamp.
+      prisma.benefitAllocation.findMany({ where: { staffId: targetStaffId }, orderBy: { createdAt: 'desc' }, take: 10 }),
     ])
 
-    const aggregatedByLoan = new Map<string, AggregatedLoan>()
+    // Active = still disbursed AND still owes money. A zero-balance loan is
+    // fully repaid — it must drop out of Monthly Deductions, Total
+    // Outstanding, Active Loans, and the next-deduction banner.
+    const activeLoans = loans.filter((l) => l.status === 'DISBURSED' && Number(l.remainingBalance ?? 0) > 0)
+    const totalOutstanding = activeLoans.reduce((s, l) => s + Number(l.remainingBalance ?? 0), 0)
+    const totalMonthlyDeduction = activeLoans.reduce((s, l) => s + Number(l.monthlyRepayment ?? 0), 0)
 
-    loanEntries.forEach((entry) => {
-      const staffName = `${entry.staff.firstName} ${entry.staff.lastName}`.trim()
-      const deductionAmount = Number(entry.amount || 0)
-      const loanKey = `${entry.staffId}:${entry.deductionType}`
-
-      const existing = aggregatedByLoan.get(loanKey)
-      if (!existing) {
-        const impliedAmountIssued = deductionAmount * 12
-        const ageInDays = Math.max(
-          1,
-          Math.round((Date.now() - new Date(entry.createdAt).getTime()) / (1000 * 60 * 60 * 24))
-        )
-        const progressPercent = Math.min(100, Math.round((deductionAmount / Math.max(impliedAmountIssued, 1)) * 100))
-        const status = deriveLoanStatus(ageInDays, progressPercent)
-        const outstanding = Math.max(0, impliedAmountIssued - deductionAmount)
-        const outstandingRatio = impliedAmountIssued === 0 ? 0 : outstanding / impliedAmountIssued
-
-        aggregatedByLoan.set(loanKey, {
-          id: `LN-${entry.staffId.slice(-4)}-${entry.id.slice(-4)}`,
-          staffId: entry.staffId,
-          employeeName: staffName,
-          employeeEmail: entry.staff.email,
-          loanType: entry.deductionType === 'LOAN' ? 'Loan Repayment' : 'Salary Advance',
-          amountIssued: impliedAmountIssued,
-          amountRepaid: deductionAmount,
-          outstandingBalance: outstanding,
-          monthlyDeduction: deductionAmount,
-          nextPaymentDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
-          status,
-          riskLevel: deriveRiskLevel(status, outstandingRatio),
-          progressPercent,
+    // Per-loan display helpers, mirroring the loan-requests list endpoint:
+    // earliest unpaid installment per loan ("next deduction") + repayment
+    // progress (money repaid vs totalRepayable).
+    const loanIds = loans.map((l) => l.id)
+    const openInstallments = loanIds.length
+      ? await prisma.loanInstallment.findMany({
+          where: { loanRequestId: { in: loanIds }, status: { notIn: ['PAID', 'WAIVED'] } },
+          orderBy: { dueDate: 'asc' },
+          select: { loanRequestId: true, dueDate: true },
         })
-        return
-      }
-
-      existing.amountRepaid += deductionAmount
-      existing.monthlyDeduction = Math.max(existing.monthlyDeduction, deductionAmount)
-      existing.outstandingBalance = Math.max(0, existing.amountIssued - existing.amountRepaid)
-      existing.progressPercent = Math.min(100, Math.round((existing.amountRepaid / Math.max(existing.amountIssued, 1)) * 100))
-      existing.status = deriveLoanStatus(120, existing.progressPercent)
-      existing.riskLevel = deriveRiskLevel(
-        existing.status,
-        existing.amountIssued === 0 ? 0 : existing.outstandingBalance / existing.amountIssued
-      )
-    })
-
-    // STAFF (and ADMIN/HR in personalScope) only ever see their OWN data — never
-    // company-wide aggregates. Every figure below is sourced from the user's own
-    // records when in personal scope.
-    const isPersonalScope = personalScope || user.role === 'STAFF'
-
-    const loans = isPersonalScope
-      ? Array.from(aggregatedByLoan.values()).filter((l) => l.employeeEmail === user.email)
-      : Array.from(aggregatedByLoan.values())
-
-    // KPIs computed from LoanRequest table (accurate principal, rate, tenure, status).
-    // In personal scope the source set is narrowed to the user's own requests so
-    // every KPI reflects the individual, not the company.
-    const kpiLoanRequests = isPersonalScope
-      ? loanRequestsData.filter((lr) => lr.staff.email === user.email)
-      : loanRequestsData
-
-    const approvedLoanRequests = kpiLoanRequests.filter((lr) =>
-      ['APPROVED', 'DISBURSED'].includes(lr.status as string)
-    )
-
-    const activeLoans = approvedLoanRequests.length
-    const defaultedLoans = kpiLoanRequests.filter((lr) => lr.status === 'DEFAULTED').length
-    const overdueLoans = defaultedLoans // LoanRequest has no OVERDUE status yet; use DEFAULTED
-
-    const totalIssued = approvedLoanRequests.reduce((s, lr) => s + Number(lr.requestedAmount), 0)
-
-    // Outstanding balance: amortize each loan from its approval date
-    const totalOutstanding = approvedLoanRequests.reduce((s, lr) => {
-      const P = Number(lr.requestedAmount)
-      const rate = Number(lr.interestRate ?? 0) / 100 / 12
-      const n = lr.tenureMonths ?? 12
-      const monthly =
-        Number(lr.monthlyRepayment ?? 0) ||
-        (rate > 0 ? (P * rate * Math.pow(1 + rate, n)) / (Math.pow(1 + rate, n) - 1) : P / n)
-      const startDate = lr.approvedAt ?? lr.createdAt
-      const monthsElapsed = Math.min(n, Math.max(0, Math.floor((Date.now() - new Date(startDate).getTime()) / (30.44 * 86400000))))
-      let balance = P
-      for (let i = 0; i < monthsElapsed; i++) {
-        const interest = balance * rate
-        balance = Math.max(0, balance - (monthly - interest))
-      }
-      return s + balance
-    }, 0)
-
-    const totalMonthlyRepayment = approvedLoanRequests.reduce(
-      (s, lr) => s + Number(lr.monthlyRepayment ?? 0), 0
-    )
-
-    const totalRepaid = totalIssued - totalOutstanding
-    const recoveryRatePercent = totalIssued > 0 ? Number(((totalRepaid / totalIssued) * 100).toFixed(1)) : 0
-
-    // myLoans for STAFF personal scope: derive from LoanRequest (accurate, same as my-loans endpoint)
-    const myLoans = (user.role === 'STAFF' || personalScope)
-      ? loanRequestsData
-          .filter((lr) => lr.staff.email === user.email)
-          .map((lr) => {
-            const P = Number(lr.requestedAmount)
-            const rate = Number(lr.interestRate ?? 0) / 100 / 12
-            const n = lr.tenureMonths ?? 12
-            const monthly =
-              Number(lr.monthlyRepayment ?? 0) ||
-              (rate > 0 ? (P * rate * Math.pow(1 + rate, n)) / (Math.pow(1 + rate, n) - 1) : P / n)
-            const startDate = lr.approvedAt ?? lr.createdAt
-            const monthsElapsed = Math.min(n, Math.max(0, Math.floor((Date.now() - new Date(startDate).getTime()) / (30.44 * 86400000))))
-            let balance = P
-            for (let i = 0; i < monthsElapsed; i++) {
-              const interest = balance * rate
-              balance = Math.max(0, balance - (monthly - interest))
-            }
-            const pctPaid = P > 0 ? Math.min(100, Math.round(((P - balance) / P) * 100)) : 0
-            const displayStatus =
-              lr.status === 'APPROVED' || lr.status === 'DISBURSED' ? 'ACTIVE'
-              : lr.status === 'REPAID' ? 'COMPLETED'
-              : lr.status === 'DEFAULTED' ? 'DEFAULTED'
-              : (lr.status as string)
-            return {
-              id: lr.id,
-              staffId: lr.staffId,
-              employeeName: `${lr.staff.firstName} ${lr.staff.lastName}`.trim(),
-              employeeEmail: lr.staff.email,
-              loanType: lr.loanType,
-              amountIssued: P,
-              amountRepaid: P - balance,
-              outstandingBalance: balance,
-              monthlyDeduction: monthly,
-              progressPercent: pctPaid,
-              status: displayStatus,
-            }
-          })
       : []
-
-    // Fetch employee salary for STAFF users — sum of latest month's payrolls
-    // (Some companies split payments e.g. salary + bonus as separate payroll entries)
-    let employeeSalary = 0
-    let employeeNetSalary = 0
-    if (user.role === 'STAFF') {
-      const staffRecord = await prisma.staffRecord.findFirst({
-        where: { email: user.email, isActive: true },
-        select: { id: true },
-      })
-      if (staffRecord) {
-        // Find the latest month/year that has payroll records for this staff
-        const latestPayPeriod = await prisma.payroll.findFirst({
-          where: {
-            staffRecordId: staffRecord.id,
-            status: 'PROCESSED',
-          },
-          orderBy: [{ year: 'desc' }, { month: 'desc' }],
-          select: { year: true, month: true },
-        })
-
-        if (latestPayPeriod) {
-          // Get ALL payroll records from that same month (some companies split payments)
-          const monthPayrolls = await prisma.payroll.findMany({
-            where: {
-              staffRecordId: staffRecord.id,
-              status: 'PROCESSED',
-              year: latestPayPeriod.year,
-              month: latestPayPeriod.month,
-            },
-            select: {
-              netSalary: true,
-              grossPay: true,
-              customFields: true,
-              templateType: true,
-            },
-          })
-
-          if (monthPayrolls.length > 0) {
-            let totalNet = 0
-
-            for (const p of monthPayrolls) {
-              if (p.templateType && p.templateType !== 'ISURF_STANDARD' && p.customFields) {
-                const cf = p.customFields as Record<string, any>
-                let customNet = 0
-                for (const key of Object.keys(cf)) {
-                  const field = cf[key]
-                  if (field && typeof field === 'object' && 'value' in field) {
-                    const val = Number(field.value)
-                    if (!isNaN(val) && val > 0 &&
-                      (field.section === 'NET' || key === 'net_salary' || key === 'take_home' ||
-                        key === 'net_pay' || key.includes('net_salary') || key.includes('take_home'))) {
-                      customNet = val
-                      break
-                    }
-                  }
-                }
-                totalNet += customNet || Number(p.netSalary || p.grossPay || 0)
-              } else {
-                totalNet += Number(p.netSalary || 0)
-              }
-            }
-
-            employeeSalary = totalNet
-            employeeNetSalary = totalNet
-          }
-        }
-      }
+    const nextDueByLoan = new Map<string, Date>()
+    for (const inst of openInstallments) {
+      if (!nextDueByLoan.has(inst.loanRequestId)) nextDueByLoan.set(inst.loanRequestId, inst.dueDate)
     }
 
-    // Helper — map a LoanRequest DB record to the API shape
-    const mapLoanRequest = (lr: (typeof loanRequestsData)[number]) => ({
-      id: lr.id,
-      requestType: 'LOAN' as const,
-      status: lr.status as any,
-      employeeName: `${lr.staff.firstName} ${lr.staff.lastName}`.trim(),
-      employeeEmail: lr.staff.email,
-      title: `${lr.loanType} request`,
-      amount: Number(lr.requestedAmount),
-      tenureMonths: lr.tenureMonths,
-      interestRate: Number(lr.interestRate ?? 0),
-      monthlyRepayment: Number(lr.monthlyRepayment ?? 0),
-      createdAt: lr.createdAt.toISOString(),
-      reviewedAt: lr.approvedAt?.toISOString() || null,
-      reviewerComment: lr.approvalComment || lr.rejectionReason || null,
-      approverName: lr.approver ? `${lr.approver.firstName} ${lr.approver.lastName}`.trim() : null,
-      guarantorStatus: (lr as any).guarantorStatus || 'NOT_REQUIRED',
-      guarantorStaffId: (lr as any).guarantorStaffId || null,
-      disbursedAt: (lr as any).disbursedAt?.toISOString() || null,
-      disbursedBy: (lr as any).disbursedBy || null,
+    // Repayment activity for Recent Activity: actual PAID installments (the
+    // moments money left, whether via payroll deduction, force recovery or a
+    // manual payment), newest payment first, with their loan's display name.
+    // recentLoans rows only carry application/disbursement moments — without
+    // this, a staff member faithfully repaying every month shows zero activity.
+    const paidInstallments = loanIds.length
+      ? await prisma.loanInstallment.findMany({
+          where: { loanRequestId: { in: loanIds }, status: 'PAID' },
+          orderBy: { paidAt: 'desc' },
+          take: 10,
+          select: {
+            id: true,
+            loanRequestId: true,
+            installmentNumber: true,
+            totalDue: true,
+            amountPaid: true,
+            paidAt: true,
+            recoveryMethod: true,
+          },
+        })
+      : []
+    const loanNameById = new Map(loans.map((l) => [l.id, l.loanType || l.purpose || 'Loan']))
+    const repaymentActivities = paidInstallments.map((inst) => ({
+      id: `installment-${inst.id}`,
+      kind: 'LOAN_REPAYMENT' as const,
+      title: `Loan repayment — installment ${inst.installmentNumber} (${loanNameById.get(inst.loanRequestId) || 'Loan'})`,
+      createdAt: inst.paidAt,
+      amount: Number(inst.amountPaid ?? inst.totalDue ?? 0),
+      recoveryMethod: inst.recoveryMethod,
+      loanRequestId: inst.loanRequestId,
+      status: 'PAID' as const,
+    }))
+
+    const decoratedLoans = loans.map((l) => {
+      const totalRepayable = Number(l.totalRepayable ?? 0)
+      const remaining = Number(l.remainingBalance ?? 0)
+      const progressPercent =
+        (l.status === 'DISBURSED' || l.status === 'REPAID') && totalRepayable > 0
+          ? Math.min(100, Math.max(0, Math.round(((totalRepayable - remaining) / totalRepayable) * 100)))
+          : 0
+      const nextDue = nextDueByLoan.get(l.id)
+      return {
+        ...l,
+        outstandingBalance: remaining,
+        monthlyDeduction: Number(l.monthlyRepayment ?? 0),
+        progressPercent,
+        ...(nextDue ? { nextInstallmentDue: nextDue } : {}),
+      }
     })
-
-    // Process loan requests from new LoanRequest model
-    const loanRequests = isPersonalScope
-      ? loanRequestsData.filter((lr) => lr.staff.email === user.email).map(mapLoanRequest)
-      : loanRequestsData.map(mapLoanRequest)
-
-    // Process benefit requests from new BenefitRequest model
-    const benefitRequests = isPersonalScope
-      ? benefitRequestsData
-          .filter((br) => br.staff.email === user.email)
-          .map((br) => ({
-            id: br.id,
-            requestType: 'BENEFIT' as const,
-            status: br.status as any,
-            employeeName: `${br.staff.firstName} ${br.staff.lastName}`.trim(),
-            employeeEmail: br.staff.email,
-            title: `${br.benefitName} request`,
-            benefitName: br.benefitName,
-            createdAt: br.createdAt.toISOString(),
-            reviewedAt: br.approvedAt?.toISOString() || null,
-            reviewerComment: br.approvalComment || br.rejectionReason || null,
-            approverName: br.approver ? `${br.approver.firstName} ${br.approver.lastName}`.trim() : null,
-          }))
-      : benefitRequestsData.map((br) => ({
-        id: br.id,
-        requestType: 'BENEFIT' as const,
-        status: br.status as any,
-        employeeName: `${br.staff.firstName} ${br.staff.lastName}`.trim(),
-        employeeEmail: br.staff.email,
-        title: `${br.benefitName} request`,
-        benefitName: br.benefitName,
-        createdAt: br.createdAt.toISOString(),
-        reviewedAt: br.approvedAt?.toISOString() || null,
-        reviewerComment: br.approvalComment || br.rejectionReason || null,
-        approverName: br.approver ? `${br.approver.firstName} ${br.approver.lastName}`.trim() : null,
-      }))
-
-    // Process benefit allocations from new BenefitAllocation model
-    const benefitAllocations = isPersonalScope
-      ? benefitAllocationsData
-          .filter((ba) => ba.staff.email === user.email)
-          .map((ba) => ({
-            id: ba.id,
-            requestType: 'ALLOCATION' as const,
-            status: ba.status as any,
-            employeeName: `${ba.staff.firstName} ${ba.staff.lastName}`.trim(),
-            employeeEmail: ba.staff.email,
-            title: `${ba.benefitName} allocation`,
-            amount: Number(ba.allocationAmount),
-            benefitName: ba.benefitName,
-            createdAt: ba.createdAt.toISOString(),
-          }))
-      : benefitAllocationsData.map((ba) => ({
-        id: ba.id,
-        requestType: 'ALLOCATION' as const,
-        status: ba.status as any,
-        employeeName: `${ba.staff.firstName} ${ba.staff.lastName}`.trim(),
-        employeeEmail: ba.staff.email,
-        title: `${ba.benefitName} allocation`,
-        amount: Number(ba.allocationAmount),
-        benefitName: ba.benefitName,
-        createdAt: ba.createdAt.toISOString(),
-      }))
-
-    const pendingBenefitSource = isPersonalScope
-      ? benefitRequestsData.filter((br) => br.staff.email === user.email)
-      : benefitRequestsData
-    const pendingRequests = [
-      ...kpiLoanRequests.filter((lr) => lr.status === 'PENDING'),
-      ...pendingBenefitSource.filter((br) => br.status === 'PENDING'),
-    ].length
-
-    // ── Department-wise distribution (from staff_records, company-scoped) ──
-    // This is a company-wide breakdown, so it is omitted entirely in personal
-    // scope — STAFF must never see organisation-level distributions.
-    const departmentDistribution: { name: string; value: number; totalAmount: number }[] = []
-    if (!isPersonalScope) {
-      const staffByDept = await prisma.staffRecord.groupBy({
-        by: ['department'],
-        where: {
-          companyId: { in: scopedCompanyIds },
-          isActive: true,
-          department: { not: null },
-        },
-        _count: { id: true },
-        orderBy: { _count: { id: 'desc' } },
-        take: 10,
-      })
-
-      // Build a map of department → total deduction amount (from loanEntries, already fetched)
-      const deptAmountMap = new Map<string, number>()
-      for (const entry of loanEntries) {
-        const dept = entry.staff.department?.trim()
-        if (dept) {
-          deptAmountMap.set(dept, (deptAmountMap.get(dept) || 0) + Number(entry.amount || 0))
-        }
-      }
-
-      for (const d of staffByDept) {
-        if (!d.department) continue
-        departmentDistribution.push({
-          name: d.department,
-          value: d._count.id,
-          totalAmount: deptAmountMap.get(d.department) || 0,
-        })
-      }
-
-      // Also include departments with deductions but no active staff (edge case)
-      for (const [dept, amount] of deptAmountMap) {
-        if (!departmentDistribution.find((d) => d.name === dept)) {
-          departmentDistribution.push({ name: dept, value: 0, totalAmount: amount })
-        }
-      }
-      // Re-sort by staff count descending
-      departmentDistribution.sort((a, b) => b.value - a.value)
-    }
-
-    // In personal scope, alerts/insights describe only the user's own loans —
-    // overdueLoans/defaultedLoans/recoveryRatePercent are already personal-scoped above.
-    const alerts = isPersonalScope
-      ? [
-          ...(overdueLoans > 0
-            ? [{ id: 'al-001', type: 'warning', message: `You have ${overdueLoans} loan(s) that are overdue.` }]
-            : []),
-          ...(defaultedLoans > 0
-            ? [{ id: 'al-002', type: 'critical', message: `You have ${defaultedLoans} loan(s) in default.` }]
-            : []),
-        ]
-      : [
-          {
-            id: 'al-001',
-            type: 'warning',
-            message: `${overdueLoans} loans are overdue and need attention.`,
-          },
-          {
-            id: 'al-002',
-            type: 'critical',
-            message: `${defaultedLoans} loans are currently in default state.`,
-          },
-        ]
-
-    const insights = isPersonalScope
-      ? [
-          {
-            id: 'ins-001',
-            title: 'Your loan repayment progress',
-            detail: activeLoans > 0
-              ? `You have ${activeLoans} active loan(s) with ${toNaira(Math.round(totalOutstanding))} outstanding.`
-              : 'You have no active loans at the moment.',
-          },
-        ]
-      : [
-          {
-            id: 'ins-001',
-            title: 'Recovery performance trend',
-            detail: `Current recovery rate is ${recoveryRatePercent}%.`,
-          },
-          {
-            id: 'ins-002',
-            title: 'Coverage opportunity',
-            detail: `${Math.max(0, activeStaffCount - loans.length)} active staff have no loan deductions captured.`,
-          },
-        ]
 
     return withCors(
-      ApiResponse.success(
-        {
-          companyContext: {
-            role: user.role,
-            scopedCompanyIds,
-            baseCurrency: defaultCurrency,
-          },
-          kpis: {
-            totalLoansIssued: totalIssued,
-            totalOutstanding,
-            totalMonthlyRepayment,
-            activeLoans,
-            overdueLoans,
-            defaultedLoans,
-            pendingRequests,
-            recoveryRatePercent,
-          },
-          loans,
-          myLoans,
-          employeeSalary,
-          employeeNetSalary,
-          loanTerms: loanPolicies,
-          benefitsCatalog: benefitPolicies,
-          loanRequests,
-          benefitRequests,
-          benefitAllocations,
-          alerts,
-          insights,
-          departmentDistribution,
-          labels: {
-            totalLoansIssued: toNaira(totalIssued),
-            totalOutstanding: toNaira(totalOutstanding),
-          },
-        },
-        'Staff loans and benefits dashboard data fetched successfully'
-      ),
+      ApiResponse.success({
+        orgWide: false,
+        grossSalary,
+        netSalary,
+        loanKpis: { totalOutstanding, totalMonthlyDeduction, activeCount: activeLoans.length },
+        benefitKpis: { activeCount: benefitAllocations.length, totalValue: benefitAllocations.reduce((s, b) => s + Number(b.allocationAmount), 0) },
+        // Aliases so the frontend can read one canonical shape: the personal
+        // dashboard cards read myLoans/benefitAllocations/loanRequests.
+        myLoans: decoratedLoans,
+        loanRequests: decoratedLoans,
+        benefitAllocations,
+        recentLoans: decoratedLoans,
+        recentBenefitRequests: benefitRequests,
+        // Full allocation history (ACTIVE + used up/expired/cancelled) for
+        // Recent Activity — the old payload only exposed still-ACTIVE rows.
+        recentBenefitAllocations: benefitAllocationHistory,
+        // Actual repayment events, newest first.
+        recentRepayments: repaymentActivities,
+        activeBenefits: benefitAllocations,
+      }),
       origin
     )
   } catch (error) {
-    console.error('[Dashboard GET]', error)
     return withCors(handleApiError(error), origin)
   }
 }

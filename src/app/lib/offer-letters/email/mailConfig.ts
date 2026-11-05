@@ -56,4 +56,4 @@ export async function getOfferLetterMailConfig(companyId: string): Promise<Resol
 	return resolved;
 }
 
-export { encryptMailSecret };
+;

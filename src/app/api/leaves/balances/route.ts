@@ -5,6 +5,7 @@ import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { ensureStaffLeaveBalances } from '@/app/lib/leaves/balance-engine'
+import { validateCompanyAccess } from '@/app/lib/departments/department-utils'
 
 // ================ SIMPLIFIED, ROBUST PRISMA IMPORT ================
 // This is the most reliable approach - direct import with build-time safety
@@ -236,6 +237,33 @@ export async function GET(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = await requireModuleAccess(token, 'LEAVE', ['STAFF', 'HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER'])
 
+    // HR/Admin/Super Admin viewing a specific employee (e.g. Employee 360)
+    // pass staffRecordId; anyone else is hard-scoped to their own balance —
+    // same self-vs-param pattern already used by GET /api/certifications.
+    const { searchParams } = new URL(request.url)
+    const requestedStaffId = searchParams.get('staffRecordId')
+    let targetStaffId = user.userId
+    if (requestedStaffId && requestedStaffId !== user.userId) {
+      if (!['HR', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
+        const response = NextResponse.json(
+          { success: false, message: "Only HR/Admin can view another employee's leave balance" },
+          { status: 403 }
+        )
+        return withCors(response, origin)
+      }
+      const targetStaff = await prisma.staffRecord.findUnique({ where: { id: requestedStaffId }, select: { id: true, companyId: true } })
+      if (!targetStaff) {
+        const response = NextResponse.json({ success: false, message: 'Staff record not found' }, { status: 404 })
+        return withCors(response, origin)
+      }
+      const hasAccess = await validateCompanyAccess(user, targetStaff.companyId)
+      if (!hasAccess) {
+        const response = NextResponse.json({ success: false, message: 'You do not have access to this company' }, { status: 403 })
+        return withCors(response, origin)
+      }
+      targetStaffId = targetStaff.id
+    }
+
     const currentYear = new Date().getFullYear()
     const today = new Date()
     today.setHours(0, 0, 0, 0)
@@ -243,14 +271,14 @@ export async function GET(request: NextRequest) {
     // Auto-create/sync yearly balances from leave policies for staff with no prior applications.
     await ensureStaffLeaveBalances({
       prisma,
-      staffRecordId: user.userId,
+      staffRecordId: targetStaffId,
       year: currentYear,
     })
-    
+
     // 1. Get current year leave balances
     const balances: PrismaLeaveBalance[] = await prisma.staffLeaveBalance.findMany({
       where: {
-        staffRecordId: user.userId,
+        staffRecordId: targetStaffId,
         year: currentYear,
         leaveType: {
           isActive: true
@@ -347,7 +375,7 @@ export async function GET(request: NextRequest) {
     // 4. Get previous year's carried over amounts
     const previousYearBalances: PrismaPreviousYearBalance[] = await prisma.staffLeaveBalance.findMany({
       where: {
-        staffRecordId: user.userId,
+        staffRecordId: targetStaffId,
         year: currentYear - 1,
         carriedOver: {
           gt: 0

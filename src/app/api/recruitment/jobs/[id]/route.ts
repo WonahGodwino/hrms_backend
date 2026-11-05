@@ -59,7 +59,7 @@ export async function GET(request: NextRequest, context: { params: { id: string 
     const job = await prisma.job.findFirst({
       where: { id, company: { archived: 0 } },
       include: {
-        company: { select: { id: true, companyName: true } },
+        company: { select: { id: true, companyName: true, baseCurrency: true } },
         _count: { select: { applications: true } },
       },
     })
@@ -79,6 +79,7 @@ export async function GET(request: NextRequest, context: { params: { id: string 
         {
           ...rest,
           companyName: company?.companyName ?? null,
+          currency: company?.baseCurrency ?? null,
           applicationCount: _count?.applications ?? 0,
         },
         'Job fetched successfully'

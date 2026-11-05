@@ -7,6 +7,7 @@ import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { OFFER_IMPORT_COLUMNS } from '@/app/lib/offers/bulk-import-helpers'
+import { attachmentDisposition, safeFileName } from '@/app/lib/excel/sheet-theme'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -141,15 +142,14 @@ export async function GET(request: NextRequest) {
     const buffer = await workbook.xlsx.writeBuffer()
     const responseBuffer = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer)
 
-    const safeName = companyName.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'company'
     const timestamp = new Date().toISOString().split('T')[0]
-    const filename = `${safeName}_offer_upload_template_${timestamp}.xlsx`
+    const filename = `Offer Upload Template (${safeFileName(companyName || 'Company')}) ${timestamp}.xlsx`
 
     const excelResponse = new NextResponse(responseBuffer, {
       status: 200,
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        'Content-Disposition': attachmentDisposition(filename),
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache',
         'Expires': '0',

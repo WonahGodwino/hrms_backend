@@ -25,11 +25,13 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 		const body = await request.json();
 		const validated = ApproveOffboardingSchema.parse(body);
 
-		if (!validated.companyId && user.role !== 'SUPER_ADMIN') {
+		// The token's company wins; a SUPER_ADMIN without one may pass it in the body.
+		const companyId = user.companyId || validated.companyId;
+		if (!companyId && user.role !== 'SUPER_ADMIN') {
 			return withCors(ApiResponse.error('Company context required', 400), origin);
 		}
 
-		const offboarding = await OffboardingService.approveOffboarding(params.id, validated.companyId || '', user.userId, validated.comment);
+		const offboarding = await OffboardingService.approveOffboarding(params.id, companyId || '', user.userId, validated.comment);
 
 		return withCors(ApiResponse.success(offboarding, 'Offboarding approved successfully'), origin);
 	} catch (error) {

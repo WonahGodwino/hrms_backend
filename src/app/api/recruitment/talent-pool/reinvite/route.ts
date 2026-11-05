@@ -12,7 +12,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { sendEmail } from '@/app/lib/email'
 import { resolveRecruitmentCompanyId } from '@/app/lib/recruitment/companyScope'
 
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://247hr.co.uk'
+const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 

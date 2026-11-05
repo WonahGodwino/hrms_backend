@@ -2,6 +2,8 @@
 import { prisma } from '@/app/lib/db'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
 import { generateEnhancedPayslipPdf, type GeneratePayslipInput } from '../generateEnhancedPayslipPdf'
+import { generatePayslipPdfUnified, getActivePresetHtml } from '../payslip-preset-renderer'
+import { watermarkPdfIfTrial } from '@/app/lib/trial/watermark'
 import type { ProcessingResult } from './types'
 import ExcelJS from 'exceljs'
 import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/helpers'
@@ -13,6 +15,9 @@ import {
   getMonthNameFromNumber,
   detectMaliciousMarkup,
 } from '../utils/valueParsing'
+import { isUploadCancelled } from './utils'
+import { statutorySchemeForField } from '../statutory-columns'
+import { buildStaffIndex, matchStaff } from '../utils/staff-matching'
 
 function normalizeHeader(h: string): string {
   return h
@@ -79,18 +84,21 @@ export const processDynamicTemplate = {
     user: any,
     sendEmails: boolean,
     templateId?: string,
-    overwriteExisting: boolean = false
+    overwriteExisting: boolean = false,
+    uploadId?: string
   ): Promise<ProcessingResult> {
     const results: ProcessingResult = {
       successful: 0,
       failed: 0,
       payslipsGenerated: 0,
       payslipsUpdated: 0,
+      duplicatesSkipped: 0,
       emailsSent: 0,
       emailAttempts: 0,
       emailFailures: [],
       processedRecords: [],
       failedRecords: [],
+      skippedRecords: [],
       errors: [],
     }
 
@@ -203,22 +211,23 @@ export const processDynamicTemplate = {
         const worksheet = workbook.worksheets[0]
         if (!worksheet) throw new Error('No worksheet found in Excel file')
 
-        // Find header row (first row without === that has cells)
+        // Find the header row: the first non-merged row (skipping the title banner) in which
+        // at least one cell matches a template field. Matching on field names, rather than
+        // "first row with several cells", is what lets the styled banner sit above the headers.
         let headerRowIndex = -1
         let dataStartRow = -1
-        
-        worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-          const firstCell = row.getCell(1).value?.toString() || ''
-          
-          if (firstCell.includes('===')) {
-            dataStartRow = rowNumber + 2
-          }
-          
-          // If we haven't found headers yet and this row doesn't have ===
-          if (headerRowIndex === -1 && !firstCell.includes('===') && row.cellCount > 1) {
-            headerRowIndex = rowNumber
-          }
-        })
+
+        const scanLimit = Math.min(worksheet.rowCount, 30)
+        for (let r = 1; r <= scanLimit && headerRowIndex === -1; r++) {
+          const candidate = worksheet.getRow(r)
+          if (candidate.getCell(1).isMerged) continue
+          let matches = 0
+          candidate.eachCell((cell) => {
+            const v = cell.value?.toString() || ''
+            if (v && headerMap[normalizeHeader(v)]) matches++
+          })
+          if (matches > 0) headerRowIndex = r
+        }
 
         if (headerRowIndex === -1) {
           throw new Error('Could not find header row in Excel file')
@@ -250,7 +259,8 @@ export const processDynamicTemplate = {
           if (rowNumber < dataStartRow) return
 
           const firstCell = row.getCell(1).value?.toString() || ''
-          if (isMetaRowMarker(firstCell)) {
+          // Merged rows below the data are the styled notes/footer block, not payroll rows.
+          if (row.getCell(1).isMerged || isMetaRowMarker(firstCell)) {
             stopAtMetaSection = true
             return
           }
@@ -428,7 +438,19 @@ export const processDynamicTemplate = {
         .map((f) => f.systemField)
     )
 
+    // Load all active staff for the company ONCE; match rows in memory.
+    const staffIndex = await buildStaffIndex(companyId)
+
+    // Guard against two rows in the same upload resolving to the same staff &
+    // period: process the first, skip the rest. Key = staffRecordId|month|year.
+    const processedKeys = new Set<string>()
+
     for (let index = 0; index < data.length; index++) {
+      // Check if upload was cancelled before processing each row
+      if (uploadId && isUploadCancelled(uploadId)) {
+        console.log('[DYNAMIC] Upload cancelled, stopping at row', index)
+        throw new Error('PAYROLL_CANCELLED')
+      }
       const row = data[index]
       const displayRowNumber = index + 2
       let rawName = ''
@@ -500,72 +522,31 @@ export const processDynamicTemplate = {
           monthName = getMonthNameFromNumber(periodMonth)
         }
 
-        // Find staff record
-        let staffRecord = null
-        let staffIdMatchedOtherCompany = false
-        
-        if (staffId) {
-          const staffIdMatches = await prisma.staffRecord.findMany({
-            where: {
-              staffId: staffId,
-              isActive: true,
-            },
-          })
-
-          const inCompanyMatch = staffIdMatches.find((match) => match.companyId === companyId)
-
-          if (inCompanyMatch) {
-            staffRecord = inCompanyMatch
-          } else if (staffIdMatches.length > 0) {
-            staffIdMatchedOtherCompany = true
-          }
-        }
-
-        if (!staffRecord && rawEmail) {
-          staffRecord = await prisma.staffRecord.findUnique({
-            where: {
-              email_companyId: {
-                email: rawEmail,
-                companyId: companyId,
-              },
-            },
-          })
-        }
-
-        if (!staffRecord && staffIdMatchedOtherCompany) {
-          throw new Error(`Staff record not found for ${rawName || rawEmail || staffId}`)
-        }
-
-        if (!staffRecord && rawName && !staffIdMatchedOtherCompany) {
-          const parts = rawName.split(' ').filter(Boolean)
-          const firstName = parts[0]
-          const lastName = parts.slice(1).join(' ') || parts[0]
-
-          staffRecord = await prisma.staffRecord.findFirst({
-            where: {
-              companyId: companyId,
-              isActive: true,
-              OR: [
-                {
-                  AND: [
-                    { firstName: { contains: firstName, mode: 'insensitive' } },
-                    { lastName: { contains: lastName, mode: 'insensitive' } },
-                  ],
-                },
-                {
-                  AND: [
-                    { lastName: { contains: firstName, mode: 'insensitive' } },
-                    { firstName: { contains: lastName, mode: 'insensitive' } },
-                  ],
-                },
-              ],
-            },
-          })
-        }
+        // Match by staffId first, then email (case-insensitive). Never by name.
+        const staffRecord = matchStaff(staffIndex, { staffId, email: rawEmail })
 
         if (!staffRecord) {
-          throw new Error(`Staff record not found for ${rawName || rawEmail || staffId}`)
+          throw new Error(`Staff record not found for ${staffId || rawEmail || rawName}`)
         }
+
+        // Skip a second row in this upload that resolves to the same staff &
+        // period — it would otherwise create a duplicate payslip.
+        const dedupeKey = `${staffRecord.id}|${monthName}|${year}`
+        if (processedKeys.has(dedupeKey)) {
+          results.duplicatesSkipped++
+          results.skippedRecords.push({
+            rowNumber: displayRowNumber,
+            staffId: staffRecord.staffId,
+            staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
+            email: staffRecord.email,
+            month: monthName,
+            year,
+            reason: 'Duplicate of an earlier row for the same staff & pay period',
+          })
+          console.warn(`[DYNAMIC] Row ${displayRowNumber}: skipped duplicate for ${staffRecord.staffId} ${monthName} ${year}`)
+          continue
+        }
+        processedKeys.add(dedupeKey)
 
         // Prepare data for storage - ONLY template fields
         const templateData: any = {
@@ -577,6 +558,13 @@ export const processDynamicTemplate = {
           uploadedBy: user.userId,
           templateType: 'DYNAMIC',
           templateId: template.id,
+          // Trace back to the PayrollUpload that created/updated this row so
+          // per-upload reports (Bank Schedule) can scope to exactly one upload.
+          payrollUploadId: uploadId || null,
+          pensionRsaPinSnapshot: staffRecord.rsaPin,
+          pensionPfaCodeSnapshot: staffRecord.pfaCode,
+          pensionEmployerCodeSnapshot: staffRecord.pensionEmployerCode,
+          pensionSnapshotAt: new Date(),
         }
 
         // Store ALL template fields in customFields JSON, always include showOnPayslip fields
@@ -603,21 +591,27 @@ export const processDynamicTemplate = {
           }
         })
 
-        // Create or update payroll record with ONLY customFields
+        // NSITF / ITF / NHF also go on their own columns so the Finance
+        // statutory report covers uploaded payrolls too.
+        template.fields.forEach(field => {
+          const scheme = statutorySchemeForField(field as any)
+          if (scheme && field.dataType === 'Number') templateData[scheme] = customFields[field.systemField]?.value ?? 0
+        })
+
+        // Create or update payroll record with ONLY customFields.
+        // Always update an existing payroll for this (staff, month, year) in
+        // place rather than creating a duplicate — regardless of
+        // overwriteExisting — so re-uploads stay idempotent per pay period.
         let payrollRecord
-        if (overwriteExisting) {
-          const existingPayroll = await prisma.payroll.findFirst({
-            where: { staffRecordId: staffRecord.id, month: monthName, year, companyId: companyId },
-            orderBy: { createdAt: 'desc' },
+        const existingPayroll = await prisma.payroll.findFirst({
+          where: { staffRecordId: staffRecord.id, month: monthName, year, companyId: companyId },
+          orderBy: { createdAt: 'desc' },
+        })
+        if (existingPayroll) {
+          payrollRecord = await prisma.payroll.update({
+            where: { id: existingPayroll.id },
+            data: { ...templateData, customFields: customFields, updatedAt: new Date() },
           })
-          if (existingPayroll) {
-            payrollRecord = await prisma.payroll.update({
-              where: { id: existingPayroll.id },
-              data: { ...templateData, customFields: customFields, updatedAt: new Date() },
-            })
-          } else {
-            payrollRecord = await prisma.payroll.create({ data: { ...templateData, customFields: customFields } })
-          }
         } else {
           payrollRecord = await prisma.payroll.create({ data: { ...templateData, customFields: customFields } })
         }
@@ -642,7 +636,7 @@ export const processDynamicTemplate = {
 
             if (fieldSection === 'FIXED_EARNINGS' || fieldSection === 'EARNINGS') {
               earningsForPayslip.push({ ...payslipItem, type: 'earnings' })
-            } else if (fieldSection === 'FIXED_VALUE') {
+            } else if (fieldSection === 'FIXED_VALUE' || fieldSection === 'FIXED_VALUES') {
               fixedValuesForPayslip.push({ ...payslipItem, type: 'earnings', section: 'FIXED_VALUE' })
             } else if (fieldSection === 'DEDUCTIONS') {
               deductionsForPayslip.push({ ...payslipItem, type: 'deduction' })
@@ -681,6 +675,11 @@ export const processDynamicTemplate = {
             companyLogo: company?.logo || '',
             companyTaxId: company?.taxId || '',
             baseCurrency: (company as any)?.baseCurrency || 'NGN',
+            // Preset-only tokens ({{bankName}} etc.) - ignored by the built-in
+            // generator, consumed by the preset renderer when a preset is used.
+            bankName: (staffRecord as any).bankName || '',
+            accountNumber: (staffRecord as any).accountNumber || '',
+            pfa: (staffRecord as any).taxProfile?.pfaName || '',
           },
           payroll: {
             rowNumber: displayRowNumber,
@@ -738,9 +737,14 @@ export const processDynamicTemplate = {
           showPaymentDetails: false,
         }
 
-        const pdfResult = await generateEnhancedPayslipPdf(payslipInput)
+        // Company Payslip Preset dispatch: if the template has an active preset
+        // selected, its HTML layout renders the PDF instead of the built-in one.
+        const presetHtml = await getActivePresetHtml((template as any).payslipPresetId)
+        const pdfResult = await (presetHtml
+          ? generatePayslipPdfUnified({ ...payslipInput, payslipPresetHtml: presetHtml })
+          : generateEnhancedPayslipPdf(payslipInput))
 
-        const pdfBuffer = pdfResult.pdfBuffer
+        const pdfBuffer = await watermarkPdfIfTrial(staffRecord.companyId, pdfResult.pdfBuffer)
         const payslipFileName = pdfResult.fileName
         const fileSize = pdfBuffer.length
 
@@ -763,43 +767,30 @@ export const processDynamicTemplate = {
           draft: !sendEmails,
         }
 
-        if (overwriteExisting) {
-          const existingPayslip = await prisma.payslip.findFirst({
-            where: {
-              staffRecordId: staffRecord.id,
-              month: monthName,
-              year,
-              companyId: companyId,
-            },
-            orderBy: { createdAt: 'desc' },
+        // Always update an existing payslip for this (staff, month, year) in
+        // place rather than creating a duplicate — regardless of
+        // overwriteExisting — so re-uploads stay idempotent per pay period.
+        const existingPayslip = await prisma.payslip.findFirst({
+          where: {
+            staffRecordId: staffRecord.id,
+            month: monthName,
+            year,
+            companyId: companyId,
+          },
+          orderBy: { createdAt: 'desc' },
+        })
+        if (existingPayslip) {
+          isUpdate = true
+          payslipId = existingPayslip.id
+          // payrollId is intentionally omitted here: the existing payslip
+          // for this staff/period already points at the payroll record for
+          // that same period (payrollRecord, updated in place above), so it
+          // never needs to change on an update.
+          await prisma.payslip.update({
+            where: { id: existingPayslip.id },
+            data: { ...payslipData, updatedBy: user.userId, updatedAt: new Date() },
           })
-          if (existingPayslip) {
-            isUpdate = true
-            payslipId = existingPayslip.id
-            // payrollId is intentionally omitted here: the existing payslip
-            // for this staff/period already points at the payroll record for
-            // that same period (payrollRecord, updated in place above), so it
-            // never needs to change on an update.
-            await prisma.payslip.update({
-              where: { id: existingPayslip.id },
-              data: { ...payslipData, updatedBy: user.userId, updatedAt: new Date() },
-            })
-            results.payslipsUpdated++
-          } else {
-            const newPayslip = await prisma.payslip.create({
-              data: {
-                ...payslipData,
-                payrollId: payrollRecord.id,
-                staffRecordId: staffRecord.id,
-                companyId: companyId,
-                month: monthName,
-                year,
-                createdBy: user.userId,
-                updatedBy: user.userId,
-              },
-            })
-            payslipId = newPayslip.id
-          }
+          results.payslipsUpdated++
         } else {
           const newPayslip = await prisma.payslip.create({
             data: {

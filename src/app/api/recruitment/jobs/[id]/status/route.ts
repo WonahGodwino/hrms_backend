@@ -222,7 +222,10 @@ export async function PATCH(
       where: { id: jobId },
       data: {
         status: targetStatus,
-        ...(newExpirationDate !== undefined && { expirationDate: newExpirationDate }),
+        ...(targetStatus === "ACTIVE" && { publishedAt: new Date() }),
+        ...(newExpirationDate !== undefined && {
+          expirationDate: newExpirationDate,
+        }),
         updatedAt: new Date(),
       },
       select: {
@@ -232,15 +235,49 @@ export async function PATCH(
         expirationDate: true,
         updatedAt: true,
         company: {
-          select: { id: true, companyName: true }
-        }
+          select: { id: true, companyName: true },
+        },
       },
-    })
+    });
+
+    // Audit trail only — the external distribution feed is pull-based (see
+    // lib/recruitment/job-feed.ts), this just marks when the job became
+    // available to / dropped out of it.
+    if (targetStatus === 'ACTIVE' || targetStatus === 'CLOSED') {
+      void prisma.jobBoardDeliveryLog
+        .create({
+          data: {
+            companyId: job.companyId,
+            jobId: job.id,
+            channel: 'FEED_PULL',
+            event: targetStatus === 'ACTIVE' ? 'PUBLISHED' : 'CLOSED',
+            status: 'SENT',
+          },
+        })
+        .catch(() => {})
+    }
+
+    // Audit trail only — the external distribution feed is pull-based (see
+    // lib/recruitment/job-feed.ts), this just marks when the job became
+    // available to / dropped out of it.
+    if (targetStatus === 'ACTIVE' || targetStatus === 'CLOSED') {
+      void prisma.jobBoardDeliveryLog
+        .create({
+          data: {
+            companyId: job.companyId,
+            jobId: job.id,
+            channel: 'FEED_PULL',
+            event: targetStatus === 'ACTIVE' ? 'PUBLISHED' : 'CLOSED',
+            status: 'SENT',
+          },
+        })
+        .catch(() => {})
+    }
 
     // Determine public board status
     const isPubliclyVisible = targetStatus === 'ACTIVE'
     const expirationUpdated = newExpirationDate !== undefined
-    
+
     return withCors(ApiResponse.success(
       {
         ...updatedJob,

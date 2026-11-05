@@ -5,6 +5,7 @@ import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { signToken } from '@/app/lib/auth'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { syncUserCompanyForRole } from '@/app/lib/access/user-company-role'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -114,6 +115,19 @@ export async function POST(request: NextRequest) {
       },
       include: { company: { select: { id: true, companyName: true, email: true, phone: true, address: true } } },
     })
+
+    // Safety net: an invited HR/ADMIN completing registration must have the
+    // company-access link their elevated access resolves from. No-op for STAFF.
+    try {
+      await syncUserCompanyForRole(prisma, {
+        userId: updatedStaff.id,
+        companyId: updatedStaff.companyId,
+        role: updatedStaff.role,
+        actorEmail: updatedStaff.email,
+      })
+    } catch (err) {
+      console.error('Failed to sync company access on registration:', err)
+    }
 
     const token = signToken({
       userId: updatedStaff.id,

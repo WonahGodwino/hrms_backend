@@ -1,9 +1,9 @@
 import { z } from 'zod';
 
 // Enums as const for validation
-export const OffboardingTypeEnum = z.enum(['RESIGNATION', 'TERMINATION']);
-export const OffboardingStatusEnum = z.enum(['PENDING_REVIEW', 'HANDOVER_REQUESTED', 'HANDOVER_SUBMITTED', 'COMPLETED', 'REJECTED']);
-export const InitiatedByEnum = z.enum(['STAFF', 'HR']);
+const OffboardingTypeEnum = z.enum(['RESIGNATION', 'TERMINATION']);
+const OffboardingStatusEnum = z.enum(['PENDING_REVIEW', 'HANDOVER_REQUESTED', 'HANDOVER_SUBMITTED', 'COMPLETED', 'REJECTED']);
+const InitiatedByEnum = z.enum(['STAFF', 'HR']);
 
 // Submit Resignation Schema
 export const SubmitResignationSchema = z.object({
@@ -57,9 +57,9 @@ export const OffboardingFiltersSchema = z.object({
 	limit: z.coerce.number().int().positive().max(100).default(20),
 });
 // Types
-export type SubmitResignationInput = z.infer<typeof SubmitResignationSchema>;
-export type InitiateTerminationInput = z.infer<typeof InitiateTerminationSchema>;
-export type ReviewResignationInput = z.infer<typeof ReviewResignationSchema>;
-export type UploadHandoverInput = z.infer<typeof UploadHandoverSchema>;
-export type ApproveOffboardingInput = z.infer<typeof ApproveOffboardingSchema>;
-export type OffboardingFilters = z.infer<typeof OffboardingFiltersSchema>;
+type SubmitResignationInput = z.infer<typeof SubmitResignationSchema>;
+type InitiateTerminationInput = z.infer<typeof InitiateTerminationSchema>;
+type ReviewResignationInput = z.infer<typeof ReviewResignationSchema>;
+type UploadHandoverInput = z.infer<typeof UploadHandoverSchema>;
+type ApproveOffboardingInput = z.infer<typeof ApproveOffboardingSchema>;
+type OffboardingFilters = z.infer<typeof OffboardingFiltersSchema>;

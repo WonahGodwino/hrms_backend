@@ -1,12 +1,13 @@
 // POST /api/recruitment/offers/:id/executed-contract
 // Stores the signed/executed contract PDF for a dispatched offer, marks the offer
-// ACCEPTED, keeps the pipeline application aligned (HIRED), and — unless the caller
-// opts out — creates the onboarding record so the hire flows into the Command Center.
+// ACCEPTED, and — unless the caller opts out — promotes the candidate to staff
+// (the pre-offer Onboarding record already exists by this point).
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { promoteCandidateToStaff, PromoteCandidateError } from '@/app/lib/staff/promote-candidate-to-staff'
 import { promises as fs } from 'fs'
 import * as path from 'path'
 
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const file = formData.get('file') as File | null
-    const initiateOnboarding = String(formData.get('initiateOnboarding') ?? 'true') !== 'false'
+    const promoteToStaff = String(formData.get('initiateOnboarding') ?? 'true') !== 'false'
     if (!file) return withCors(ApiResponse.error('No file uploaded', 400), origin)
 
     const ext = (file.name.split('.').pop() || '').toLowerCase()
@@ -100,41 +101,42 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       },
     })
 
-    // Keep the pipeline application status aligned with the accepted outcome.
-    if (offer.applicationId) {
+    // Promote to staff — the pre-offer Onboarding record already exists (it's
+    // what made this offer generatable in the first place).
+    let staffRecordId: string | null = null
+    let staffId: string | null = null
+    if (promoteToStaff) {
+      const onboarding = await prisma.onboarding.findUnique({ where: { offerId: offer.id } })
+      if (!onboarding) {
+        return withCors(ApiResponse.error('No pre-offer onboarding record found for this offer — cannot complete hire.', 409), origin)
+      }
+      try {
+        const result = await promoteCandidateToStaff({ onboardingId: onboarding.id, companyId: effectiveCompanyId, actor })
+        staffRecordId = result.staffRecordId
+        staffId = result.staffId
+      } catch (promoteError) {
+        if (promoteError instanceof PromoteCandidateError) {
+          return withCors(ApiResponse.error(promoteError.message, promoteError.status), origin)
+        }
+        throw promoteError
+      }
+    } else if (offer.applicationId) {
+      // Caller explicitly opted out of promotion — still keep the pipeline
+      // status aligned with the accepted outcome.
       await prisma.jobApplication.update({
         where: { id: offer.applicationId },
         data: { status: 'HIRED', updatedBy: actor },
       }).catch(() => {})
     }
 
-    // Create (or reuse) the onboarding record so the hire appears in the Command Center.
-    let onboardingId: string | null = null
-    if (initiateOnboarding) {
-      const existing = await prisma.onboarding.findUnique({ where: { offerId: offer.id } }).catch(() => null)
-      if (existing) {
-        onboardingId = existing.id
-      } else {
-        const onboarding = await prisma.onboarding.create({
-          data: {
-            companyId: effectiveCompanyId,
-            offerId: offer.id,
-            status: 'IN_PROGRESS',
-            startDate: offer.proposedStartDate || now,
-            createdBy: actor,
-          },
-        })
-        onboardingId = onboarding.id
-      }
-    }
-
     return withCors(ApiResponse.success({
       offerId: offer.id,
       status: 'ACCEPTED',
       executedPdf: relativePath,
-      onboardingId,
-    }, initiateOnboarding
-      ? 'Executed contract saved. Offer accepted and onboarding initiated.'
+      staffRecordId,
+      staffId,
+    }, promoteToStaff
+      ? 'Executed contract saved. Offer accepted and the employee has been added to staff records.'
       : 'Executed contract saved. Offer accepted.'), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }
 }

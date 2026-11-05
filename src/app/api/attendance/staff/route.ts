@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/app/lib/auth";
 import { withCors, handleCorsOptions } from "@/app/lib/cors";
+import { canManageAttendance } from "@/app/lib/attendance/access";
+import { fillMissingAddresses, locationView } from "@/app/lib/attendance/clock-location";
+import { startOfBusinessDay, endOfBusinessDay, businessDateKey, isBusinessWeekday, startOfBusinessMonth, endOfBusinessMonth, businessDateParts, BUSINESS_TIMEZONE } from "@/app/lib/attendance/business-day";
 
 type AuthUser = {
   userId: string;
@@ -11,17 +14,11 @@ type AuthUser = {
 
 type AttendanceStatus = "PRESENT" | "LATE" | "PARTIAL" | "ABSENT";
 
-function startOfDay(date: Date): Date {
-  const value = new Date(date);
-  value.setHours(0, 0, 0, 0);
-  return value;
-}
-
-function endOfDay(date: Date): Date {
-  const value = new Date(date);
-  value.setHours(23, 59, 59, 999);
-  return value;
-}
+// Business-day-aware (Africa/Lagos, not server-local) — see business-day.ts.
+const startOfDay = startOfBusinessDay;
+const endOfDay = endOfBusinessDay;
+const toDateKey = businessDateKey;
+const isBusinessDay = isBusinessWeekday;
 
 function parseDateInput(value: string): Date | null {
   const parsed = new Date(value);
@@ -30,15 +27,6 @@ function parseDateInput(value: string): Date | null {
   }
 
   return startOfDay(parsed);
-}
-
-function toDateKey(date: Date): string {
-  return startOfDay(date).toISOString().split("T")[0];
-}
-
-function isBusinessDay(date: Date): boolean {
-  const day = date.getDay();
-  return day !== 0 && day !== 6;
 }
 
 function getDatesInRange(start: Date, end: Date): Date[] {
@@ -139,9 +127,9 @@ function resolveDateSelection(searchParams: URLSearchParams): {
 
   const month = searchParams.get("month");
   const year = searchParams.get("year");
-  const now = new Date();
-  const targetYear = year ? Number.parseInt(year, 10) : now.getFullYear();
-  const targetMonth = month ? Number.parseInt(month, 10) - 1 : now.getMonth();
+  const nowParts = businessDateParts();
+  const targetYear = year ? Number.parseInt(year, 10) : nowParts.year;
+  const targetMonth = month ? Number.parseInt(month, 10) - 1 : nowParts.month;
 
   if (
     Number.isNaN(targetYear) ||
@@ -152,8 +140,11 @@ function resolveDateSelection(searchParams: URLSearchParams): {
     throw new Error("INVALID_MONTH_YEAR");
   }
 
-  const monthStart = new Date(targetYear, targetMonth, 1);
-  const monthEnd = new Date(targetYear, targetMonth + 1, 0);
+  // Mid-month representative instant so the UTC+1 shift never crosses into
+  // an adjacent month before start/end-of-month resolve it.
+  const monthAnchor = new Date(Date.UTC(targetYear, targetMonth, 15));
+  const monthStart = startOfBusinessMonth(monthAnchor);
+  const monthEnd = endOfBusinessMonth(monthAnchor);
 
   return {
     selectedDates: getDatesInRange(monthStart, monthEnd),
@@ -306,6 +297,8 @@ export async function GET(req: NextRequest) {
 
     const selectedDateKeys = new Set(selectedDates.map((date) => toDateKey(date)));
     const selectedRecords = attendanceRecords.filter((record) => selectedDateKeys.has(toDateKey(record.date)));
+    // Make sure every clock-in / clock-out location shows a real address
+    await fillMissingAddresses(selectedRecords);
     const recordsByDate = new Map(selectedRecords.map((record) => [toDateKey(record.date), record]));
 
     const summary = {
@@ -335,13 +328,14 @@ export async function GET(req: NextRequest) {
 
       return {
         date: dateKey,
-        dayName: date.toLocaleDateString("en-US", { weekday: "short" }),
+        dayName: date.toLocaleDateString("en-US", { weekday: "short", timeZone: BUSINESS_TIMEZONE }),
         isBusinessDay: isBusinessDay(date),
         status,
         attendanceId: record?.id ?? null,
         signInAt: record?.signInTime ?? null,
         signOutAt: record?.signOutTime ?? null,
         method: record?.method ?? null,
+        location: record ? locationView(record) : null,
         rawStatus: record?.status ?? null,
       };
     });
@@ -391,6 +385,7 @@ export async function GET(req: NextRequest) {
           signInAt: record.signInTime,
           signOutAt: record.signOutTime,
           method: record.method,
+          location: locationView(record),
           status: deriveAttendanceStatus(record),
           rawStatus: record.status,
           notes: record.notes,
@@ -414,31 +409,8 @@ export async function GET(req: NextRequest) {
 }
 
 async function validateCompanyAccess(user: AuthUser, companyId: string): Promise<boolean> {
-  const { prisma } = await import("@/app/lib/prisma");
-
-  if (user.role === "SUPER_ADMIN") {
-    return true;
-  }
-
-  if (user.role === "HR") {
-    return user.companyId === companyId;
-  }
-
-  if (user.role === "ADMIN") {
-    const userCompany = await prisma.userCompany.findFirst({
-      where: {
-        userId: user.userId,
-        companyId,
-        role: { in: ["ADMIN", "ALL"] },
-      },
-    });
-
-    return !!userCompany;
-  }
-
-  if (user.role === "STAFF") {
-    return user.companyId === companyId;
-  }
-
-  return false;
+  // One rule for the whole attendance module (lib/attendance/access.ts):
+  // company membership incl. multi-company HR/ADMIN + Attendance enabled
+  // for that company, so the company switcher scopes everything.
+  return canManageAttendance(user, companyId);
 }

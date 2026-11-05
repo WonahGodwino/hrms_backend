@@ -11,6 +11,7 @@ export type JwtPayload = {
   companyIds?: string[] // All accessible companies for this user
   permissions?: string[]
   enabledModules?: string[] // Module keys enabled for this company
+  deviceId?: string // Device row this token was issued against (Device Management)
   sub?: string
 }
 
@@ -21,6 +22,41 @@ export interface AuthUser {
   companyId?: string // Current selected company
   companyIds?: string[] // All accessible companies
   permissions?: string[]
+  deviceId?: string // Device row this token was issued against (Device Management)
+}
+
+export type SessionValidityCode = 'ACCOUNT_BLOCKED' | 'ACCOUNT_DEACTIVATED' | 'SESSION_CLEARED'
+
+// Device Management — the one place a token gets checked against current DB
+// state instead of trusted purely on signature. Called from getUserFromToken
+// (so every route that resolves company assignments gets this for free) and
+// directly from /auth/me and /auth/session-status (which need the specific
+// code to tell the frontend why the session died).
+export async function assertSessionValid(
+  decoded: { userId?: string; sub?: string; deviceId?: string }
+): Promise<{ valid: boolean; code?: SessionValidityCode }> {
+  const staffId = decoded.userId || decoded.sub
+  if (!staffId) return { valid: false, code: 'ACCOUNT_DEACTIVATED' }
+
+  const staff = await prisma.staffRecord.findUnique({
+    where: { id: staffId },
+    select: { isActive: true, isBlocked: true }
+  })
+
+  if (!staff || !staff.isActive) return { valid: false, code: 'ACCOUNT_DEACTIVATED' }
+  if (staff.isBlocked) return { valid: false, code: 'ACCOUNT_BLOCKED' }
+
+  if (decoded.deviceId) {
+    const device = await prisma.device.findUnique({
+      where: { id: decoded.deviceId },
+      select: { isActive: true, staffRecordId: true }
+    })
+    if (!device || device.staffRecordId !== staffId || !device.isActive) {
+      return { valid: false, code: 'SESSION_CLEARED' }
+    }
+  }
+
+  return { valid: true }
 }
 
 function getJwtSecret() {
@@ -54,7 +90,10 @@ export const verifyToken = (token: string): JwtPayload | null => {
 export async function getUserFromToken(token: string): Promise<AuthUser | null> {
   try {
     const decoded = jwt.verify(token, getJwtSecret()) as any
-    
+
+    const sessionCheck = await assertSessionValid(decoded)
+    if (!sessionCheck.valid) return null
+
     let companyIds: string[] = []
     let currentCompanyId: string | undefined = decoded.companyId
 
@@ -119,7 +158,8 @@ export async function getUserFromToken(token: string): Promise<AuthUser | null> 
       role: effectiveRole,
       companyId: currentCompanyId,
       companyIds: companyIds.length > 0 ? companyIds : undefined,
-      permissions: decoded.permissions || []
+      permissions: decoded.permissions || [],
+      deviceId: decoded.deviceId
     }
   } catch (error) {
     console.error('Token verification failed:', error)
@@ -146,7 +186,8 @@ function getUserFromTokenSync(token: string): AuthUser | null {
       email: decoded.email,
       role: decoded.role || 'STAFF',
       companyId: decoded.companyId,
-      permissions: decoded.permissions || []
+      permissions: decoded.permissions || [],
+      deviceId: decoded.deviceId
     }
   } catch (error) {
     console.error('Token verification failed:', error)
@@ -155,7 +196,7 @@ function getUserFromTokenSync(token: string): AuthUser | null {
 }
 
 // Async version for routes that need company assignments
-export const requireAuthAsync = async (token: string | null): Promise<AuthUser> => {
+const requireAuthAsync = async (token: string | null): Promise<AuthUser> => {
   if (!token) throw new Error('Authentication required')
 
   const user = await getUserFromToken(token)
@@ -251,59 +292,3 @@ export async function createAuthPayloadWithCompanies(
   }
 }
 
-// Original function for backward compatibility
-export function createAuthPayload(
-  userId: string, 
-  email: string, 
-  role: string, 
-  companyId?: string, 
-  permissions?: string[]
-): JwtPayload {
-  return {
-    userId,
-    email,
-    role,
-    companyId: companyId || null,
-    permissions: permissions || []
-  }
-}
-
-export const requireCompany = (token: string | null): string => {
-  const user = requireAuth(token)
-  if (!user.companyId) throw new Error('Company context missing')
-  return user.companyId
-}
-
-export function checkPermission(user: AuthUser, requiredPermission: string): boolean {
-  if (user.role === 'SUPER_ADMIN') {
-    return true // SUPER_ADMIN has all permissions
-  }
-  
-  if (!user.permissions) {
-    return false
-  }
-  
-  return user.permissions.includes(requiredPermission)
-}
-
-// Convenience function to check permissions directly from token
-export const requirePermission = (token: string | null, requiredPermission: string): AuthUser => {
-  const user = requireAuth(token)
-  
-  if (!checkPermission(user, requiredPermission)) {
-    throw new Error(`Insufficient permissions. Required permission: ${requiredPermission}`)
-  }
-  
-  return user
-}
-
-// ** New Functions for OTP and Attendance **
-
-// Helper function to generate OTP
-export function generateOtp() {
-  return Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
-}
-
-export async function verifyPassword(storedPassword: string, enteredPassword: string) {
-  return bcrypt.compare(enteredPassword, storedPassword);
-}

@@ -35,7 +35,12 @@ async function loadForUser(id: string, user: any) {
   // Reschedule/update policy:
   // - Creator can manage their own meeting.
   // - Privileged users (HR/ADMIN/SUPER_ADMIN) can manage any meeting in their company.
-  const canManage = isCreator || isPrivileged;
+  // - A participant explicitly designated HOST can manage it too — matches
+  //   the host-detection already used by moderate/route.ts, so a
+  //   non-creator host isn't blocked from settings the moderate endpoint
+  //   would otherwise let them perform (e.g. the waiting-room toggle).
+  const isHost = meeting.participants.some((p: any) => p.staffId === user.userId && p.role === 'HOST')
+  const canManage = isCreator || isPrivileged || isHost;
   return { meeting, canManage }
 }
 
@@ -50,6 +55,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (res.error) return withCors(ApiResponse.error(res.error.message, res.error.status), origin)
     const m = res.meeting
 
+    // Staff-added participants only carry a staffId — resolve display names
+    // so the host UI (e.g. an "invited, not yet joined" list) has something
+    // to show besides a raw id, matching what external participants already
+    // get via externalName/externalEmail.
+    const staffIds = [...new Set(m.participants.map((p: any) => p.staffId).filter(Boolean))]
+    const staffById = new Map<string, { firstName: string; lastName: string; email: string }>()
+    if (staffIds.length > 0) {
+      const staffRecords = await prisma.staffRecord.findMany({
+        where: { id: { in: staffIds as string[] } },
+        select: { id: true, firstName: true, lastName: true, email: true },
+      })
+      for (const s of staffRecords) staffById.set(s.id, s)
+    }
+
     return withCors(ApiResponse.success({
       id: m.id,
       title: m.title,
@@ -62,11 +81,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       candidateAssessmentId: m.candidateAssessmentId,
       recordingUrl: m.recordingUrl || null,
       recordingStatus: m.recordingStatus || null,
+      lobbyEnabled: !!m.lobbyEnabled,
       wsUrl: getMeetingProvider().wsUrl || null,
-      participants: m.participants.map((p: any) => ({
-        id: p.id, staffId: p.staffId, externalName: p.externalName,
-        externalEmail: p.externalEmail, role: p.role, joinedAt: p.joinedAt, leftAt: p.leftAt,
-      })),
+      participants: m.participants.map((p: any) => {
+        const staff = p.staffId ? staffById.get(p.staffId) : null
+        return {
+          id: p.id, staffId: p.staffId, externalName: p.externalName,
+          externalEmail: p.externalEmail, role: p.role, joinedAt: p.joinedAt, leftAt: p.leftAt,
+          staffName: staff ? `${staff.firstName} ${staff.lastName}`.trim() : null,
+          staffEmail: staff?.email || null,
+        }
+      }),
     }, 'Meeting fetched'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
@@ -99,6 +124,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (!['SCHEDULED', 'LIVE', 'ENDED', 'CANCELLED'].includes(s)) return withCors(ApiResponse.error('Invalid status', 400), origin)
       data.status = s
     }
+    if (body.lobbyEnabled !== undefined) data.lobbyEnabled = !!body.lobbyEnabled
 
     const hadRescheduleFields = body.scheduledAt !== undefined || body.durationMins !== undefined || body.title !== undefined
     const updated = await (prisma as any).meeting.update({ where: { id }, data })
@@ -123,7 +149,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         })
       }
     }
-    return withCors(ApiResponse.success({ id: updated.id, status: updated.status, emailDelivery }, 'Meeting updated'), origin)
+    return withCors(ApiResponse.success({ id: updated.id, status: updated.status, lobbyEnabled: !!updated.lobbyEnabled, emailDelivery }, 'Meeting updated'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 

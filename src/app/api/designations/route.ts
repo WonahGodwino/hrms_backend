@@ -7,19 +7,18 @@ import { resolveScopedCompanyId } from '@/app/lib/company-scope'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-// GET /api/designations?search=&grade=&status=&page=1&limit=20
+// GET /api/designations?search=&status=&page=1&limit=20
 export async function GET(req: NextRequest) {
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     if (!token) return withCors(ApiResponse.error('Authorization header missing', 401), origin)
-    
+
     const user = await getUserFromToken(token)
     if (!user) return withCors(ApiResponse.error('Invalid token', 401), origin)
 
     const { searchParams } = new URL(req.url)
     const search = searchParams.get('search') || ''
-    const grade = searchParams.get('grade') || ''
     const status = searchParams.get('status') || ''
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20')))
@@ -39,7 +38,12 @@ export async function GET(req: NextRequest) {
     // Status is stored capitalized ("Active"/"Inactive"); accept any casing.
     if (status) where.status = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()
     if (grade) {
-      where.gradeLevel = { name: { contains: grade, mode: 'insensitive' } }
+      const upperGrade = grade.toUpperCase()
+      if (['ENTRY', 'JUNIOR', 'MID', 'SENIOR', 'LEAD', 'DIRECTOR', 'EXECUTIVE'].includes(upperGrade)) {
+        where.seniorityBand = upperGrade
+      } else {
+        where.title = { contains: grade, mode: 'insensitive' }
+      }
     }
 
     const [total, designations] = await Promise.all([
@@ -48,36 +52,34 @@ export async function GET(req: NextRequest) {
         where,
         skip,
         take: limit,
-        orderBy: { title: 'asc' },
+        orderBy: [{ rank: 'asc' }, { title: 'asc' }],
         include: {
-          gradeLevel: { select: { name: true, basePay: true, basePayFrequency: true } },
+          department: { select: { id: true, name: true } },
           _count: { select: { staffRecords: true } },
         },
       }),
     ])
 
     const data = designations.map((d: any) => {
-      // A designation is grade-based when it is explicitly flagged OR it already
-      // references a grade level (covers rows created before the flag existed).
-      const hasGradeLevel = d.hasGradeLevel ?? !!d.gradeLevelId
-      const base = {
+      return {
         id: d.id,
         title: d.title,
         code: d.code,
-        hasGradeLevel,
+        departmentId: d.departmentId,
+        department: d.department?.name || null,
+        rank: d.rank ?? 1,
+        seniorityBand: d.seniorityBand,
+        grade: d.seniorityBand || '—',
+        hasGradeLevel: false,
         usage: d._count?.staffRecords || d.staffCount || 0,
         status: d.status,
         description: d.description,
-        createdAt: d.createdAt,
-      }
-      if (hasGradeLevel) {
-        return { ...base, grade: d.gradeLevel?.name || '—' }
-      }
-      // Grade-less designation: surface its own base pay.
-      return {
-        ...base,
         basePay: d.basePay ?? null,
         basePayFrequency: d.basePayFrequency ?? null,
+        minSalary: d.minSalary != null ? Number(d.minSalary) : null,
+        maxSalary: d.maxSalary != null ? Number(d.maxSalary) : null,
+        benefits: d.benefits ?? null,
+        createdAt: d.createdAt,
       }
     })
 

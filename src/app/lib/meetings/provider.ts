@@ -23,7 +23,7 @@ import {
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
-export interface JoinTokenOptions {
+interface JoinTokenOptions {
   roomName: string
   identity: string      // unique, stable participant id
   name: string          // display name shown in the call
@@ -33,14 +33,14 @@ export interface JoinTokenOptions {
   waiting?: boolean
 }
 
-export interface ParticipantSummary {
+interface ParticipantSummary {
   identity: string
   name: string
   audioTrackSid?: string
   micMuted: boolean
 }
 
-export interface RecordingHandle {
+interface RecordingHandle {
   egressId: string
   url: string | null
   /** S3 object key — source of truth for signed playback URLs (see getRecordingDownloadUrl). */
@@ -114,21 +114,23 @@ class LiveKitProvider implements MeetingProvider {
       canPublish: !o.waiting,
       canSubscribe: !o.waiting,
       canPublishData: !o.waiting,
+      // Lets participants rename themselves live (room.localParticipant.setName).
+      canUpdateOwnMetadata: true,
     }
     if (o.isHost) grant.roomAdmin = true
     const claims: Record<string, any> = { video: grant, name: o.name }
     if (o.waiting) claims.metadata = JSON.stringify({ waiting: true })
     return (jwt as any).sign(
-      claims,
-      this.apiSecret,
-      {
-        issuer: this.apiKey,
-        subject: o.identity,
-        jwtid: o.identity,
-        notBefore: 0,
-        expiresIn: o.ttlSeconds && o.ttlSeconds > 0 ? o.ttlSeconds : 3600,
-        algorithm: 'HS256',
-      },
+        claims,
+        this.apiSecret,
+        {
+          issuer: this.apiKey,
+          subject: o.identity,
+          jwtid: o.identity,
+          notBefore: 0,
+          expiresIn: o.ttlSeconds && o.ttlSeconds > 0 ? o.ttlSeconds : 3600,
+          algorithm: 'HS256',
+        },
     ) as string
   }
 
@@ -192,11 +194,11 @@ class LiveKitProvider implements MeetingProvider {
 
   canRecord(): boolean {
     return (
-      this.isConfigured() &&
-      !!(process.env.LIVEKIT_S3_ACCESS_KEY &&
-        process.env.LIVEKIT_S3_SECRET &&
-        process.env.LIVEKIT_S3_BUCKET &&
-        process.env.LIVEKIT_S3_REGION)
+        this.isConfigured() &&
+        !!(process.env.LIVEKIT_S3_ACCESS_KEY &&
+            process.env.LIVEKIT_S3_SECRET &&
+            process.env.LIVEKIT_S3_BUCKET &&
+            process.env.LIVEKIT_S3_REGION)
     )
   }
 
@@ -217,9 +219,9 @@ class LiveKitProvider implements MeetingProvider {
       output: { case: 's3', value: s3 },
     })
     const info: any = await this.egress().startRoomCompositeEgress(
-      roomName,
-      { file: fileOutput },
-      { layout: 'grid' },
+        roomName,
+        { file: fileOutput },
+        { layout: 'grid' },
     )
     const publicBase = (process.env.LIVEKIT_S3_PUBLIC_URL || '').replace(/\/$/, '')
     const url = publicBase ? `${publicBase}/${filepath}` : null

@@ -63,7 +63,7 @@ function removeDuplicates<T>(array: T[]): T[] {
 /**
  * Calculate match score between job keywords and CV text
  */
-export function calculateMatchScore(jobKeywords: string[], cvText: string): {
+function calculateMatchScore(jobKeywords: string[], cvText: string): {
   matchCount: number;
   totalKeywords: number;
   percentage: number;

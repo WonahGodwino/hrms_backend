@@ -7,6 +7,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
+import { XL, XLSX_MIME, addFooter, addNotes, addTitleBand, argb, attachmentDisposition, buildSubtitle, confidentialFooter, solid, addInstructionsSheet } from '@/app/lib/excel/sheet-theme'
 import { PAYROLL_TEMPLATES } from '@/app/lib/payroll/templates/types'
 
 export async function OPTIONS(request: NextRequest) {
@@ -411,70 +412,63 @@ export async function GET(request: NextRequest) {
         )
     }
 
-    // Add instructions for both templates
-    const instructionsStartRow = templateType === 'BLUERIDGE' ? 3 : 3
-    
-    if (templateType === 'ISURF_STANDARD') {
-      worksheet.getRow(instructionsStartRow).values = [`${templateType} PAYROLL TEMPLATE INSTRUCTIONS:`]
-      worksheet.getRow(instructionsStartRow + 1).values = ['1. Fill in employee data for each row']
-      worksheet.getRow(instructionsStartRow + 2).values = ['2. Do not modify column headers or their order']
-      worksheet.getRow(instructionsStartRow + 3).values = ['3. Required columns must have values']
-      worksheet.getRow(instructionsStartRow + 4).values = ['4. Save as CSV for upload if using CSV format']
-      worksheet.getRow(instructionsStartRow + 5).values = ['5. Delete these instruction rows before uploading the payroll']
-      
-      // Style instruction rows for ISURF_STANDARD
-      for (let i = instructionsStartRow; i <= instructionsStartRow + 5; i++) {
-        const row = worksheet.getRow(i)
-        if (row.getCell(1)) {
-          row.getCell(1).font = { bold: true, italic: true }
-          if (i === instructionsStartRow) {
-            row.getCell(1).fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: 'FFF0E68C' } // Light yellow for title
-            }
-          }
-        }
-      }
-    } else if (templateType === 'BLUERIDGE') {
-      // Add instructions for BLUERIDGE template - starting at row 3
-      const instructionRow = worksheet.getRow(instructionsStartRow)
-      instructionRow.getCell(1).value = `${templateType} PAYROLL TEMPLATE INSTRUCTIONS:`
-      instructionRow.getCell(1).font = { bold: true, color: { argb: 'FF2E75B6' } } // Blue text
-      instructionRow.getCell(1).fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFF2F2F2' } // Light gray background
-      }
-      
-      const instructions = [
-        '1. Fill in employee data starting from row 2 (below the header)',
-        '2. Do not modify column headers or their order',
-        '3. For "Resumption Date", use format: YYYY-MM-DD HH:MM:SS',
-        '4. For "Exit Date", use "Active" for current employees or date in same format',
-        '5. "Month" column (Column B) should contain just the month name (e.g., "January")',
-        '6. Update "Staff ID" column with correct employee IDs',
-        '7. Required columns: Staff ID, Name, Basic Salary, Housing, Transport, Other Allowance, etc.',
-        '8. Save as Excel (.xlsx) format for upload',
-        '9. Delete these instruction rows before uploading the payroll'
-      ]
-      
-      instructions.forEach((instruction, index) => {
-        const row = worksheet.getRow(instructionsStartRow + index + 1)
-        row.getCell(1).value = instruction
-        row.getCell(1).font = { italic: true }
-        row.getCell(1).fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: 'FFF9F9F9' } // Very light gray
-        }
-      })
-      
-      // Freeze the header row (row 1)
-      worksheet.views = [
-        { state: 'frozen', xSplit: 0, ySplit: 1 }
-      ]
+    // Shift the sheet down three rows and put the shared title band on top, so the
+    // header lands on row 4 (the ISURF/Blueridge processors locate it by header names).
+    // Instructions go in a merged notes block below the sample row, which the processors skip.
+    const instructionLines =
+      templateType === 'ISURF_STANDARD'
+        ? [
+            '1. Fill in employee data for each row',
+            '2. Do not modify column headers or their order',
+            '3. Required columns must have values',
+            '4. Save as CSV for upload if using CSV format',
+            '5. Replace the sample row before uploading the payroll'
+          ]
+        : [
+            '1. Fill in employee data starting from the row under the header',
+            '2. Do not modify column headers or their order',
+            '3. For "Resumption Date", use format: YYYY-MM-DD HH:MM:SS',
+            '4. For "Exit Date", use "Active" for current employees or date in same format',
+            '5. "Month" column (Column B) should contain just the month name (e.g., "January")',
+            '6. Update "Staff ID" column with correct employee IDs',
+            '7. Required columns: Staff ID, Name, Basic Salary, Housing, Transport, Other Allowance, etc.',
+            '8. Save as Excel (.xlsx) format for upload',
+            '9. Replace the sample row before uploading the payroll'
+          ]
+
+    const sheetColCount = worksheet.columnCount
+    worksheet.spliceRows(1, 0, [], [], [])
+    addTitleBand(worksheet, {
+      title: `${templateConfig.name || templateType.replace(/_/g, ' ')}, Payroll Template`,
+      subtitle: buildSubtitle([`Template type: ${templateType.replace(/_/g, ' ')}`, `${currentMonth} ${currentYear}`]),
+      colCount: sheetColCount
+    })
+
+    const legacyHeader = worksheet.getRow(4)
+    for (let c = 1; c <= sheetColCount; c++) {
+      const cell = legacyHeader.getCell(c)
+      cell.fill = solid(XL.BRAND_DEEP)
+      cell.font = { bold: true, size: 10, color: argb('FFFFFF') }
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
+      cell.border = { bottom: { style: 'thin', color: argb(XL.BRAND) } }
     }
+    legacyHeader.height = 36
+
+    const legacySample = worksheet.getRow(5)
+    for (let c = 1; c <= sheetColCount; c++) {
+      const cell = legacySample.getCell(c)
+      cell.fill = solid(XL.ZEBRA)
+      cell.font = { size: 10, color: argb(XL.INK) }
+      cell.border = { bottom: { style: 'thin', color: argb(XL.HAIRLINE) } }
+    }
+    legacySample.height = 20
+
+    addInstructionsSheet(workbook, {
+      title: `${templateType.replace(/_/g, ' ')} Payroll Template Instructions`,
+      subtitle: buildSubtitle(['Read before filling the template sheet']),
+      sections: [{ heading: 'Instructions', lines: instructionLines }]
+    })
+    worksheet.views = [{ state: 'frozen', xSplit: 0, ySplit: 4, showGridLines: false }]
 
     // Generate Excel buffer
     const excelBuffer = await workbook.xlsx.writeBuffer()
@@ -642,7 +636,7 @@ export async function GET(request: NextRequest) {
         status: 200,
         headers: {
           'Content-Type': 'text/csv',
-          'Content-Disposition': `attachment; filename="${templateType.toLowerCase()}-payroll-template-${currentMonth}-${currentYear}.csv"`,
+          'Content-Disposition': attachmentDisposition(`Payroll Template (${templateType.replace(/_/g, ' ')}) ${currentMonth} ${currentYear}.csv`),
           'Cache-Control': 'no-cache, no-store, must-revalidate',
           'Pragma': 'no-cache',
           'Expires': '0',
@@ -655,8 +649,8 @@ export async function GET(request: NextRequest) {
       const response = new NextResponse(uint8Array, {
         status: 200,
         headers: {
-          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition': `attachment; filename="${templateType.toLowerCase()}-payroll-template-${currentMonth}-${currentYear}.xlsx"`,
+          'Content-Type': XLSX_MIME,
+          'Content-Disposition': attachmentDisposition(`Payroll Template (${templateType.replace(/_/g, ' ')}) ${currentMonth} ${currentYear}.xlsx`),
           'Cache-Control': 'no-cache, no-store, must-revalidate',
           'Pragma': 'no-cache',
           'Expires': '0',

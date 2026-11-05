@@ -59,7 +59,7 @@ export interface TemplateConfig {
 }
 
 // Interface for parsed payroll row (used in fixed templates)
-export interface ParsedPayrollRow {
+interface ParsedPayrollRow {
   rowNumber: number;
   staffId: string;
   email: string;
@@ -102,7 +102,7 @@ export interface ParsedPayrollRow {
 }
 
 // Interface for dynamic payroll data
-export interface DynamicPayrollData {
+interface DynamicPayrollData {
   staffId: string;
   staffName: string;
   email: string;
@@ -126,6 +126,9 @@ export interface ProcessingResult {
   failed: number;
   payslipsGenerated: number;
   payslipsUpdated: number;
+  // Rows skipped because an earlier row in the same upload already resolved to
+  // the same staff & pay period (prevents duplicate payslips).
+  duplicatesSkipped: number;
   emailsSent: number;
   emailAttempts: number;
   emailFailures: Array<{
@@ -154,11 +157,13 @@ export interface ProcessingResult {
     [key: string]: any;
   }>;
   failedRecords: any[];
+  // Detail for each row counted in duplicatesSkipped (staff, period, reason).
+  skippedRecords: any[];
   errors: string[];
 }
 
 // Template processor interface
-export interface TemplateProcessor {
+interface TemplateProcessor {
   processFile(
     buffer: Buffer,
     fileExtension: string,
@@ -184,6 +189,8 @@ export const PAYROLL_TEMPLATES: Record<Exclude<PayrollTemplateType, 'DYNAMIC'>, 
     ],
     canonicalHeaders: {
       's/n': 'S/N',
+      'staff id': 'Staff ID',
+      'staffid': 'Staff ID',
       'name': 'Name',
       'resumption date': 'Resumption Date',
       'no of working days in the month': 'No of Working Days in the Month',
@@ -210,6 +217,8 @@ export const PAYROLL_TEMPLATES: Record<Exclude<PayrollTemplateType, 'DYNAMIC'>, 
       'medical contribution': 'Medical Contribution',
       'employer pension': 'Employer Pension',
       'nsitf': 'NSITF',
+      'itf': 'ITF',
+      'nhf': 'NHF',
       'prorated sub total invoice': 'Prorated Sub Total Invoice',
       'mgt fee': 'Mgt Fee',
       'vat on management fee @7.5%': 'Vat on Management Fee @7.5%',
@@ -367,29 +376,3 @@ export function isValidTemplateType(type: string): type is PayrollTemplateType {
   return type === 'ISURF_STANDARD' || type === 'BLUERIDGE' || type === 'DYNAMIC';
 }
 
-// Helper function to create a payslip display item from custom field
-export function createPayslipItemFromCustomField(
-  field: CustomFieldValue,
-  type: 'earnings' | 'deduction'
-): PayslipDisplayItem {
-  return {
-    label: field.displayName,
-    value: typeof field.value === 'number' ? field.value : Number(field.value) || 0,
-    type,
-    dataType: field.dataType,
-    isCustom: true,
-    section: field.section
-  };
-}
-
-// Helper function to calculate totals from payslip items
-export function calculatePayslipTotals(
-  earnings: PayslipDisplayItem[],
-  deductions: PayslipDisplayItem[]
-): { grossPay: number; totalDeductions: number; netPay: number } {
-  const grossPay = earnings.reduce((sum, item) => sum + item.value, 0);
-  const totalDeductions = deductions.reduce((sum, item) => sum + item.value, 0);
-  const netPay = grossPay - totalDeductions;
-  
-  return { grossPay, totalDeductions, netPay };
-}

@@ -5,6 +5,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/app/lib/db";
 import { ApiResponse, formatError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
+import { formatJobSalary } from "@/app/lib/recruitment/job-salary";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -19,7 +20,7 @@ const toLocationLabel = (locations: any, workplaceType?: string | null): string 
   }
   if (Array.isArray(list) && list.length > 0) {
     const first = list[0] || {};
-    const loc = [first.lga, first.state].filter(Boolean).join(", ");
+    const loc = [first.city, first.lga, first.state].filter(Boolean).join(", ");
     if (loc) parts.push(loc);
     if (list.length > 1) parts.push(`+${list.length - 1} more`);
   }
@@ -58,15 +59,18 @@ export async function GET(request: NextRequest) {
         employmentType: true,
         workplaceType: true,
         experienceLevel: true,
+        salary: true,
         salaryRange: true,
         benefits: true,
         locations: true,
         createdAt: true,
+        publishedAt: true,
         expirationDate: true,
         companyId: true,
         company: {
           select: {
             companyName: true,
+            baseCurrency: true,
             industry: true,
             website: true,
             biography: true,
@@ -100,10 +104,11 @@ export async function GET(request: NextRequest) {
         department: true,
         employmentType: true,
         workplaceType: true,
+        salary: true,
         salaryRange: true,
         locations: true,
         companyId: true,
-        company: { select: { companyName: true } },
+        company: { select: { companyName: true, baseCurrency: true } },
       },
     });
 
@@ -121,7 +126,7 @@ export async function GET(request: NextRequest) {
         companyName: r.company?.companyName ?? null,
         department: r.department,
         employmentType: r.employmentType || null,
-        salaryRange: r.salaryRange || null,
+        salaryRange: formatJobSalary(r, r.company?.baseCurrency),
         locationLabel: toLocationLabel(r.locations, r.workplaceType),
       }));
 
@@ -135,11 +140,12 @@ export async function GET(request: NextRequest) {
         employmentType: job.employmentType || null,
         workplaceType: job.workplaceType || null,
         experienceLevel: job.experienceLevel || null,
-        salaryRange: job.salaryRange || null,
+        salaryRange: formatJobSalary(job, job.company?.baseCurrency),
+        currency: job.company?.baseCurrency ?? null,
         benefits: toBenefits(job.benefits),
         locationLabel: toLocationLabel(job.locations, job.workplaceType),
         companyName: job.company?.companyName ?? null,
-        publishedAt: job.createdAt,
+        publishedAt: job.publishedAt ?? job.createdAt,
         expirationDate: job.expirationDate,
       },
       company: {

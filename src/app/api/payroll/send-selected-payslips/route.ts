@@ -7,6 +7,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
+import { consumeTrialQuota } from '@/app/lib/trial/guard'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -118,6 +119,9 @@ export async function POST(request: NextRequest) {
         origin
       )
     }
+
+    // Free trial: payslips sent are a lifetime quota, counted by recipient.
+    await consumeTrialQuota(companyId, 'payslips', payslips.map((p) => p.staffRecordId))
 
     // Check if all requested payslips were found
     if (payslips.length !== payslipIds.length) {

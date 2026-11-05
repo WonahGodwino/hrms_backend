@@ -1,5 +1,5 @@
-// src/app/lib/services/staff-grade.service.ts
 import { prisma } from '@/app/lib/db'
+const db = prisma as any
 import { AllowanceCalculatorService, AllowanceCalculationContext } from './allowance-calculator.service'
 
 export class StaffGradeService {
@@ -32,7 +32,7 @@ export class StaffGradeService {
     }
 
     // Get staff member
-    const staff = await prisma.staffRecord.findFirst({
+    const staff = await db.staffRecord.findFirst({
       where: {
         id: staffId,
         companyId: this.companyId
@@ -47,7 +47,7 @@ export class StaffGradeService {
     }
 
     // Get grade level with steps
-    const gradeLevel = await prisma.gradeLevel.findFirst({
+    const gradeLevel = await db.gradeLevel.findFirst({
       where: {
         id: gradeLevelId,
         companyId: this.companyId
@@ -66,7 +66,7 @@ export class StaffGradeService {
     }
 
     // Validate step
-    const step = gradeLevel.steps.find(s => s.stepNumber === stepNumber)
+    const step = (gradeLevel.steps || []).find((s: any) => s.stepNumber === stepNumber)
     if (!step) {
       throw new Error(`Step ${stepNumber} not found in grade level ${gradeLevel.name}`)
     }
@@ -98,7 +98,7 @@ export class StaffGradeService {
     const currentStep = staff.currentGradeStep
 
     // Start transaction
-    return await prisma.$transaction(async (tx) => {
+    return await db.$transaction(async (tx: any) => {
       // End current grade history if exists
       if (currentGradeId) {
         await tx.staffGradeHistory.updateMany({
@@ -223,7 +223,7 @@ export class StaffGradeService {
     for (const rule of rules) {
       const appliesTo = rule.appliesTo ?? 'BASIC_SALARY'
 
-      const result = await prisma.companyAllowanceRule.upsert({
+      const result = await db.companyAllowanceRule.upsert({
         where: {
           companyId_code: {
             companyId: this.companyId,
@@ -279,7 +279,7 @@ export class StaffGradeService {
       ]
     }
 
-    const rules = await prisma.companyAllowanceRule.findMany({
+    const rules = await db.companyAllowanceRule.findMany({
       where,
       orderBy: [
         { priority: 'asc' },
@@ -310,7 +310,7 @@ export class StaffGradeService {
     const results = []
     
     for (const allowance of allowances) {
-      const result = await prisma.gradeStepAllowance.upsert({
+      const result = await db.gradeStepAllowance.upsert({
         where: {
           gradeLevelId_stepNumber_allowanceCode: {
             gradeLevelId,

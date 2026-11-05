@@ -1,4 +1,9 @@
 // POST /api/recruitment/assessments/candidates/:id/proceed-to-offer
+// Once a candidate clears their final interview round, this starts the
+// pre-offer onboarding stage (company handbook, role/day-to-day checklist,
+// final compliance agreement) instead of immediately creating an Offer. The
+// Offer itself is only created later, once that stage is ready — see
+// onboarding/[id]/generate-offer.
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
@@ -17,14 +22,14 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const companyId = searchParams.get('companyId') || body.companyId || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
 
-    const where: any = { id: params.id }
-    if (companyId) where.companyId = companyId
+    const templateId = String(body.templateId || '').trim()
+    if (!templateId) return withCors(ApiResponse.error('templateId is required — pick an onboarding template', 400), origin)
 
     const assessment = await prisma.recruitmentCandidateAssessment.findUnique({
       where: { id: params.id },
       include: {
         plan: { include: { rounds: { orderBy: { order: 'asc' } } } },
-        application: { select: { candidateId: true, jobId: true, offer: { select: { id: true } } } },
+        application: { select: { id: true, candidateId: true, jobId: true, onboarding: { select: { id: true } } } },
       },
     })
     if (!assessment) return withCors(ApiResponse.error('Candidate assessment not found', 404), origin)
@@ -33,48 +38,60 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return withCors(ApiResponse.error('Candidate must be on the final round', 400), origin)
     if (assessment.roundStatus !== 'COMPLETED')
       return withCors(ApiResponse.error('Round must be completed before proceeding to offer', 400), origin)
+
+    const template = await prisma.onboardingTemplate.findFirst({
+      where: { id: templateId, companyId, status: 'ACTIVE' },
+      include: { tasks: { orderBy: { order: 'asc' } } },
+    })
+    if (!template) return withCors(ApiResponse.error('Onboarding template not found or not active', 404), origin)
+
     const actor = user.userId || user.email || 'system'
 
     await prisma.recruitmentCandidateAssessment.update({
       where: { id: params.id }, data: { roundStatus: 'COMPLETED' },
     })
     await prisma.jobApplication.update({
-      where: { id: assessment.applicationId }, data: { status: 'OFFERED', updatedBy: actor },
+      where: { id: assessment.applicationId }, data: { status: 'PRE_OFFER_ONBOARDING', updatedBy: actor },
     })
 
-    // Create the draft offer so the approved candidate lands in the Offers
-    // workspace ready to configure (skip if one already exists for this application).
-    let offerId = assessment.application?.offer?.id || null
-    if (!offerId) {
-      try {
-        const offer = await prisma.offer.create({
-          data: {
-            companyId,
-            candidateId: assessment.application!.candidateId,
-            applicationId: assessment.applicationId,
-            jobId: assessment.application!.jobId,
-            status: 'DRAFT',
+    // Idempotent — reuse the existing pre-offer onboarding for this
+    // application if proceed-to-offer was already called once.
+    let onboardingId = assessment.application?.onboarding?.id || null
+    if (!onboardingId) {
+      const now = new Date()
+      const onboarding = await prisma.onboarding.create({
+        data: {
+          companyId,
+          applicationId: assessment.applicationId,
+          templateId: template.id,
+          status: 'IN_PROGRESS',
+          startDate: now,
+          createdBy: actor,
+        },
+        select: { id: true },
+      })
+      onboardingId = onboarding.id
+
+      if (template.tasks.length) {
+        await prisma.onboardingTask.createMany({
+          data: template.tasks.map((t) => ({
+            onboardingId: onboarding.id,
+            title: t.title,
+            description: t.description || undefined,
+            department: t.category || undefined,
+            assigneeId: t.assignee || undefined,
+            dueDate: t.dueOffsetDays != null ? new Date(now.getTime() + t.dueOffsetDays * 86400000) : undefined,
             createdBy: actor,
-            metadata: {
-              configMode: 'TEMPLATE',
-              displayStatus: 'DRAFT',
-              source: 'ASSESSMENT_HANDOFF',
-            } as any,
-          },
-          select: { id: true },
+          })),
         })
-        offerId = offer.id
-      } catch (offerErr: any) {
-        // Unique-constraint race (offer created concurrently) — non-fatal.
-        if (offerErr?.code !== 'P2002') throw offerErr
       }
     }
 
     return withCors(ApiResponse.success({
       candidateId: assessment.application?.candidateId,
       applicationId: assessment.applicationId,
-      offerId,
-      roundStatus: 'COMPLETED', status: 'OFFERED',
-    }, 'Candidate approved for offer. A draft offer is ready in the Offers workspace.'), origin)
+      onboardingId,
+      roundStatus: 'COMPLETED', status: 'PRE_OFFER_ONBOARDING',
+    }, 'Candidate approved. Pre-offer onboarding started.'), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }
 }

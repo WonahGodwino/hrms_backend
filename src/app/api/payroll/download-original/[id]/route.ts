@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
-import { requireModuleAccess } from '@/app/lib/module-access'
+import { hasModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { readFile } from 'fs/promises'
@@ -34,7 +34,12 @@ export async function GET(
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = await requireModuleAccess(token, 'PAYROLL', ['HR', 'SUPER_ADMIN', 'ADMIN'])
+    // Role check only here — module access is checked below against the
+    // upload's own company once it's known, not the token's "current"
+    // company. requireModuleAccess would gate on the wrong company for an
+    // ADMIN downloading a record that belongs to a different company than
+    // the one currently selected in their session.
+    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
     const uploadId = params.id
 
@@ -78,6 +83,16 @@ export async function GET(
       if (!hasAccess) {
         return withCors(
           ApiResponse.error('You do not have access to this upload record', 403),
+          origin
+        )
+      }
+    }
+
+    if (user.role !== 'SUPER_ADMIN') {
+      const moduleEnabled = await hasModuleAccess(uploadRecord.companyId, 'PAYROLL')
+      if (!moduleEnabled) {
+        return withCors(
+          ApiResponse.error('Insufficient permissions: This module is not available for your organisation', 403),
           origin
         )
       }

@@ -5,6 +5,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { normalizeInterviewType } from '@/app/lib/recruitment/interviewType'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -27,7 +28,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const body = await request.json()
     const update: any = {}
     if (body.title !== undefined) update.title = body.title
-    if (body.interviewType !== undefined) update.interviewType = body.interviewType
+    if (body.interviewType !== undefined) {
+      const normalizedType = normalizeInterviewType(body.interviewType)
+      if ('error' in normalizedType) return withCors(ApiResponse.error(normalizedType.error, 400), origin)
+      update.interviewType = normalizedType.value
+    }
     if (body.duration !== undefined) update.duration = body.duration
     if (body.gradingMetric !== undefined) update.gradingMetric = body.gradingMetric
     if (body.questionBanks !== undefined) update.questionBanks = body.questionBanks

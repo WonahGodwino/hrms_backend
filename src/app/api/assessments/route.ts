@@ -4,6 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
+import { QUESTION_BANK_SENTINEL } from '@/app/lib/training/question-bank'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
@@ -28,7 +29,7 @@ export async function GET(req: NextRequest) {
     const page      = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
     const limit     = Math.min(100, parseInt(searchParams.get('limit') ?? '20'))
 
-    const where: any = { companyId, deletedAt: null }
+    const where: any = { companyId, deletedAt: null, name: { not: QUESTION_BANK_SENTINEL } }
     if (status)    where.status             = status
     if (type)      where.type               = type
     if (category)  where.category           = category

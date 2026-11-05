@@ -7,9 +7,14 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
+import { XL, XLSX_MIME, attachmentDisposition, buildSubtitle, confidentialFooter, safeFileName, solid, writeStyledTable } from '@/app/lib/excel/sheet-theme'
 
 function normalizeSection(section: string): string {
-  return (section || '').toUpperCase().replace(/[\s-]+/g, '_')
+  const normalized = (section || '').toUpperCase().replace(/[\s-]+/g, '_')
+  // Canonical plural key (matches template storage + frontend); accept the
+  // legacy singular spelling.
+  if (normalized === 'FIXED_VALUE') return 'FIXED_VALUES'
+  return normalized
 }
 
 function toCsv(data: any[][]): string {
@@ -102,7 +107,7 @@ export async function GET(request: NextRequest) {
     const sections = {
       STAFF_DETAILS: template.fields.filter(f => normalizeSection(f.section) === 'STAFF_DETAILS'),
       FIXED_EARNINGS: template.fields.filter(f => normalizeSection(f.section) === 'FIXED_EARNINGS'),
-      FIXED_VALUE: template.fields.filter(f => normalizeSection(f.section) === 'FIXED_VALUE'),
+      FIXED_VALUES: template.fields.filter(f => normalizeSection(f.section) === 'FIXED_VALUES'),
       EARNINGS: template.fields.filter(f => normalizeSection(f.section) === 'EARNINGS'),
       DEDUCTIONS: template.fields.filter(f => normalizeSection(f.section) === 'DEDUCTIONS')
     }
@@ -142,34 +147,16 @@ export async function GET(request: NextRequest) {
     // are derived entirely from the template's real fields — no hardcoded
     // column list — so a field only ever appears here if it was actually
     // added to the template (and every field that was added does appear).
-    const staffHeaders = sections.STAFF_DETAILS.map((field) =>
-      field.required ? `${field.displayName}*` : field.displayName
-    )
-    const fixedHeaders = sections.FIXED_EARNINGS.map((field) =>
-      field.required
-        ? `${field.displayName}* [Fixed Earnings]`
-        : `${field.displayName} [Fixed Earnings]`
-    )
-    const fixedValueHeaders = sections.FIXED_VALUE.map((field) =>
-      field.required
-        ? `${field.displayName}* [Fixed Value]`
-        : `${field.displayName} [Fixed Value]`
-    )
-    const earningsHeaders = sections.EARNINGS.map((field) =>
-      field.required
-        ? `${field.displayName}* [Variable Earnings]`
-        : `${field.displayName} [Variable Earnings]`
-    )
-    const deductionHeaders = sections.DEDUCTIONS.map((field) =>
-      field.required
-        ? `${field.displayName}* [Deductions]`
-        : `${field.displayName} [Deductions]`
-    )
+    const staffHeaders = sections.STAFF_DETAILS.map((field) => field.displayName)
+    const fixedHeaders = sections.FIXED_EARNINGS.map((field) => field.displayName)
+    const fixedValueHeaders = sections.FIXED_VALUES.map((field) => field.displayName)
+    const earningsHeaders = sections.EARNINGS.map((field) => field.displayName)
+    const deductionHeaders = sections.DEDUCTIONS.map((field) => field.displayName)
 
     const unifiedColumns = [
       ...staffHeaders.map((label) => ({ label, section: 'STAFF_DETAILS' as const })),
       ...fixedHeaders.map((label) => ({ label, section: 'FIXED_EARNINGS' as const })),
-      ...fixedValueHeaders.map((label) => ({ label, section: 'FIXED_VALUE' as const })),
+      ...fixedValueHeaders.map((label) => ({ label, section: 'FIXED_VALUES' as const })),
       ...earningsHeaders.map((label) => ({ label, section: 'EARNINGS' as const })),
       ...deductionHeaders.map((label) => ({ label, section: 'DEDUCTIONS' as const }))
     ]
@@ -180,7 +167,7 @@ export async function GET(request: NextRequest) {
     const unifiedSampleRow = [
       ...sections.STAFF_DETAILS.map((field) => getStaffSampleValue(field)),
       ...sections.FIXED_EARNINGS.map((field) => getSampleValue(field.dataType)),
-      ...sections.FIXED_VALUE.map((field) => getSampleValue(field.dataType)),
+      ...sections.FIXED_VALUES.map((field) => getSampleValue(field.dataType)),
       ...sections.EARNINGS.map((field) => getSampleValue(field.dataType)),
       ...sections.DEDUCTIONS.map((field) => getSampleValue(field.dataType))
     ]
@@ -192,7 +179,7 @@ export async function GET(request: NextRequest) {
     // INSTRUCTIONS
     referenceData.push(['=== INSTRUCTIONS ==='])
     referenceData.push(['1. Do not modify the header row order'])
-    referenceData.push(['2. Fields marked with * are required'])
+    referenceData.push(['2. Fill every column your template defines'])
     referenceData.push(['3. Staff ID (or your template\'s staff identifier field) must match an existing employee in the system'])
     referenceData.push(['4. Add one row per employee when entering actual payroll data'])
     referenceData.push(['5. Leave values blank only when the field is not applicable'])
@@ -221,55 +208,47 @@ export async function GET(request: NextRequest) {
 
     // Create workbook
     const workbook = new ExcelJS.Workbook()
+    workbook.creator = '24/7HR'
     const worksheet = workbook.addWorksheet('Payroll Template')
 
-    worksheetData.forEach((row) => {
-      worksheet.addRow(row)
-    })
-
-    worksheet.columns = Array.from({ length: totalCols }, () => ({ width: 20 }))
-
-    // Color-code consolidated header columns by section for easier visual grouping.
-    const headerRowIndex = 5
-    const headerRow = worksheet.getRow(headerRowIndex)
-    const sectionStyles: Record<string, { fill: string; font: string }> = {
-      STAFF_DETAILS: { fill: 'FFDCEBFF', font: 'FF1E3A8A' },
-      FIXED_EARNINGS: { fill: 'FFE6F7EC', font: 'FF14532D' },
-      FIXED_VALUE: { fill: 'FFE3F2FD', font: 'FF0C4A6E' },
-      EARNINGS: { fill: 'FFFFF3D6', font: 'FF92400E' },
-      DEDUCTIONS: { fill: 'FFFDE2E2', font: 'FF991B1B' }
+    // Section colour coding for the header cells: the colour tells HR which kind of
+    // column they are filling in. The header sits on row 4 under the centred title band;
+    // the payroll processors find it by matching template field names, so the banner,
+    // notes and legend never reach the data.
+    const sectionTones: Record<string, string> = {
+      STAFF_DETAILS: XL.BRAND_DEEP,
+      FIXED_EARNINGS: XL.SUCCESS_FG,
+      FIXED_VALUES: XL.INFO_FG,
+      EARNINGS: XL.WARN_FG,
+      DEDUCTIONS: XL.DANGER_FG
     }
 
-    unifiedColumns.forEach((column, index) => {
-      const cell = headerRow.getCell(index + 1)
-      const style = sectionStyles[column.section]
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: style.fill }
-      }
-      cell.font = {
-        bold: true,
-        color: { argb: style.font }
-      }
-      cell.alignment = {
-        horizontal: 'center',
-        vertical: 'middle',
-        wrapText: true
-      }
-      cell.border = {
-        top: { style: 'thin', color: { argb: 'FFBDBDBD' } },
-        left: { style: 'thin', color: { argb: 'FFBDBDBD' } },
-        bottom: { style: 'thin', color: { argb: 'FFBDBDBD' } },
-        right: { style: 'thin', color: { argb: 'FFBDBDBD' } }
-      }
+    const table = writeStyledTable(worksheet, {
+      title: `${template.templateName}, Payroll Template`,
+      subtitle: buildSubtitle([
+        companyName,
+        `Created ${new Date(template.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`
+      ]),
+      columns: unifiedColumns.map((column, i) => ({
+        header: column.label,
+        key: `c${i}`,
+        width: column.section === 'STAFF_DETAILS' ? 22 : 20,
+        align: 'center' as const
+      })),
+      rows: [Object.fromEntries(unifiedSampleRow.map((v, i) => [`c${i}`, v]))],
+      autoFilter: false
     })
 
+    unifiedColumns.forEach((column, index) => {
+      const cell = worksheet.getRow(table.headerRow).getCell(index + 1)
+      cell.fill = solid(sectionTones[column.section])
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+    })
+    worksheet.getRow(table.headerRow).height = 34
+
     // Generate filename
-    const sanitizedCompanyName = companyName.replace(/[^a-z0-9]/gi, '_').toLowerCase()
-    const sanitizedTemplateName = template.templateName.replace(/[^a-z0-9]/gi, '_').toLowerCase()
     const timestamp = new Date().toISOString().split('T')[0]
-    const filename = `${sanitizedCompanyName}_${sanitizedTemplateName}_template_${timestamp}`
+    const excelFileName = `Payroll Template (${safeFileName(companyName)}) ${safeFileName(template.templateName)} ${timestamp}.xlsx`
 
     if (format === 'csv') {
       // Convert to CSV
@@ -279,18 +258,45 @@ export async function GET(request: NextRequest) {
       const response = new NextResponse(csvBuffer, {
         headers: {
           'Content-Type': 'text/csv; charset=utf-8',
-          'Content-Disposition': `attachment; filename="${filename}.csv"`,
+          'Content-Disposition': attachmentDisposition(excelFileName.replace(/\.xlsx$/, '.csv')),
           'X-Template-Id': templateId,
           'X-Template-Name': encodeURIComponent(template.templateName)
         }
       })
       return withCors(response, origin)
     } else {
-      const referenceWorksheet = workbook.addWorksheet('Instructions & Fields')
-      referenceData.forEach((row) => {
-        referenceWorksheet.addRow(row)
+      const fieldsSheet = workbook.addWorksheet('Instructions & Fields')
+      writeStyledTable(fieldsSheet, {
+        title: 'Instructions and Template Fields',
+        subtitle: buildSubtitle([companyName, template.templateName]),
+        columns: [
+          { header: 'Section', key: 'section', width: 24, align: 'left' },
+          { header: 'Field Name', key: 'name', width: 34, align: 'left' },
+          { header: 'Data Type', key: 'type', width: 18, align: 'left' },
+          { header: 'Required', key: 'required', width: 12, align: 'center' },
+          { header: 'Show on Payslip', key: 'payslip', width: 18, align: 'center' }
+        ],
+        rows: template.fields.map((field) => ({
+          section: field.section.replace(/_/g, ' '),
+          name: field.displayName,
+          type: field.dataType,
+          required: field.required ? 'Yes' : 'No',
+          payslip: field.showOnPayslip ? 'Yes' : 'No'
+        })),
+        notes: {
+          heading: 'Instructions',
+          lines: [
+            '1. Do not modify the header row order',
+            '2. Fill every column your template defines',
+            "3. Staff ID (or your template's staff identifier field) must match an existing employee in the system",
+            '4. Replace the sample row and add one row per employee when entering actual payroll data',
+            '5. Leave values blank only when the field is not applicable',
+            '6. Upload the file through the payroll upload endpoint',
+            'Header colours on the Payroll Template sheet: purple = staff details, green = fixed earnings, blue = fixed values, amber = variable earnings, red = deductions'
+          ]
+        },
+        footer: confidentialFooter(companyName)
       })
-      referenceWorksheet.columns = Array.from({ length: 5 }, () => ({ width: 28 }))
 
       // Generate Excel file
       const arrayBuffer = await workbook.xlsx.writeBuffer()
@@ -298,8 +304,8 @@ export async function GET(request: NextRequest) {
       
       const response = new NextResponse(uint8Array, {
         headers: {
-          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition': `attachment; filename="${filename}.xlsx"`,
+          'Content-Type': XLSX_MIME,
+          'Content-Disposition': attachmentDisposition(excelFileName),
           'X-Template-Id': templateId,
           'X-Template-Name': encodeURIComponent(template.templateName)
         }

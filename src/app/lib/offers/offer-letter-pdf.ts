@@ -51,7 +51,7 @@ function italicFont(): string { resolveFonts(); return _italicFont! }
 // ---------------------------------------------------------------------------
 // HTML → structured blocks parser (exported for DOCX generator)
 // ---------------------------------------------------------------------------
-export type BlockType = 'h1' | 'h2' | 'h3' | 'p' | 'li' | 'divider' | 'image'
+type BlockType = 'h1' | 'h2' | 'h3' | 'p' | 'li' | 'divider' | 'image'
 
 export interface Block {
   type: BlockType
@@ -391,18 +391,5 @@ function renderImage(doc: PDFKit.PDFDocument, html: string, y: number): number {
     // Silently skip images that can't be loaded
   }
   return y
-}
-
-// ---------------------------------------------------------------------------
-// Exported convenience — shared browser instance removed (no longer needed)
-// ---------------------------------------------------------------------------
-
-/**
- * Previously launched a shared headless-Chromium instance via Puppeteer.
- * Now returns `null` since we render via PDFKit directly.
- * Kept as a no-op export so any code that imported `getBrowser()` still compiles.
- */
-export async function getBrowser(): Promise<null> {
-  return null
 }
 

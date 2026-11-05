@@ -37,10 +37,32 @@ export async function GET(request: NextRequest) {
     const includeInactive = searchParams.get('includeInactive') === 'true'
     const policyId = searchParams.get('policyId')
 
+    // HR/Admin applying leave on behalf of a staff member: use that staff member's company
+    const onBehalfStaffId = searchParams.get('staffRecordId')
+
     // Determine which companies to fetch leave types for
     let targetCompanyIds: string[] = []
 
-    if (user.role === 'SUPER_ADMIN' && companyId) {
+    if (onBehalfStaffId && ['HR', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
+      const target = await prisma.staffRecord.findUnique({
+        where: { id: onBehalfStaffId },
+        select: { companyId: true }
+      })
+      if (!target?.companyId) {
+        return withCors(ApiResponse.error('Staff member not found', 404), origin)
+      }
+      if (user.role !== 'SUPER_ADMIN') {
+        // 'ALL' assignments cover every role, so they count for HR/Admin access too
+        const links = await prisma.userCompany.findMany({
+          where: { userId: user.userId, role: { in: ['HR', 'ADMIN', 'ALL'] } },
+          select: { companyId: true }
+        })
+        if (!links.some((l) => l.companyId === target.companyId)) {
+          return withCors(ApiResponse.error('You do not have access to this staff member\'s company', 403), origin)
+        }
+      }
+      targetCompanyIds = [target.companyId]
+    } else if (user.role === 'SUPER_ADMIN' && companyId) {
       // SUPER_ADMIN can specify any company
       targetCompanyIds = [companyId]
     } else if (user.role === 'SUPER_ADMIN') {
@@ -53,7 +75,17 @@ export async function GET(request: NextRequest) {
     } else {
       // HR/ADMIN/STAFF/MANAGER - get their accessible companies
       const accessibleCompanyIds = await getAccessibleCompanyIds(user)
-      
+      if (['HR', 'ADMIN'].includes(user.role)) {
+        // 'ALL' assignments cover every role, so they count for HR/Admin access too
+        const allLinks = await prisma.userCompany.findMany({
+          where: { userId: user.userId, role: 'ALL' },
+          select: { companyId: true }
+        })
+        allLinks.forEach((l) => {
+          if (!accessibleCompanyIds.includes(l.companyId)) accessibleCompanyIds.push(l.companyId)
+        })
+      }
+
       if (companyId) {
         // Verify they have access to the requested company
         if (accessibleCompanyIds.includes(companyId)) {
@@ -114,6 +146,7 @@ export async function GET(request: NextRequest) {
             noticePeriod: true,
             minEmploymentMonths: true,
             documentationRequired: true,
+            documentationTiming: true,
             // ✅ NEW FIELDS FROM schema
             allowHalfDays: true,
             maxConsecutiveDays: true,
@@ -165,6 +198,7 @@ export async function GET(request: NextRequest) {
         noticePeriod: type.policy.noticePeriod,
         minEmploymentMonths: type.policy.minEmploymentMonths,
         documentationRequired: type.policy.documentationRequired,
+        documentationTiming: type.policy.documentationTiming,
         // ✅ NEW FIELDS
         allowHalfDays: type.policy.allowHalfDays,
         maxConsecutiveDays: type.policy.maxConsecutiveDays,
@@ -260,6 +294,7 @@ export async function GET(request: NextRequest) {
       noticePeriod: policy.noticePeriod,
       minEmploymentMonths: policy.minEmploymentMonths,
       documentationRequired: policy.documentationRequired,
+      documentationTiming: policy.documentationTiming,
       // ✅ NEW FIELDS
       allowHalfDays: policy.allowHalfDays,
       maxConsecutiveDays: policy.maxConsecutiveDays,

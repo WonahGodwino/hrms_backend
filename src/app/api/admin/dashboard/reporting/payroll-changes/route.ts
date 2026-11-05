@@ -36,17 +36,17 @@ function compareGroups(groupsA: Array<{ label: string; totalGrossPay: number; to
   const byLabelB = new Map(groupsB.map((g) => [g.label, g]))
 
   return Array.from(labels)
-    .map((label) => {
-      const a = byLabelA.get(label) || { totalGrossPay: 0, totalNetSalary: 0, staffCount: 0 }
-      const b = byLabelB.get(label) || { totalGrossPay: 0, totalNetSalary: 0, staffCount: 0 }
-      return {
-        label,
-        A: { totalGrossPay: a.totalGrossPay, totalNetSalary: a.totalNetSalary, staffCount: a.staffCount },
-        B: { totalGrossPay: b.totalGrossPay, totalNetSalary: b.totalNetSalary, staffCount: b.staffCount },
-        delta: { totalGrossPay: computeDelta(a.totalGrossPay, b.totalGrossPay), totalNetSalary: computeDelta(a.totalNetSalary, b.totalNetSalary) }
-      }
-    })
-    .sort((x, y) => y.A.totalGrossPay - x.A.totalGrossPay)
+      .map((label) => {
+        const a = byLabelA.get(label) || { totalGrossPay: 0, totalNetSalary: 0, staffCount: 0 }
+        const b = byLabelB.get(label) || { totalGrossPay: 0, totalNetSalary: 0, staffCount: 0 }
+        return {
+          label,
+          A: { totalGrossPay: a.totalGrossPay, totalNetSalary: a.totalNetSalary, staffCount: a.staffCount },
+          B: { totalGrossPay: b.totalGrossPay, totalNetSalary: b.totalNetSalary, staffCount: b.staffCount },
+          delta: { totalGrossPay: computeDelta(a.totalGrossPay, b.totalGrossPay), totalNetSalary: computeDelta(a.totalNetSalary, b.totalNetSalary) }
+        }
+      })
+      .sort((x, y) => y.A.totalGrossPay - x.A.totalGrossPay)
 }
 
 export async function OPTIONS(request: NextRequest) {
@@ -98,11 +98,11 @@ export async function GET(request: NextRequest) {
 
     if (!periodA || !periodB) {
       return withCors(
-        ApiResponse.success(
-          { periodA, periodB, usingFallback, manualSelection, insufficientData: true },
-          'Not enough pay-period history to compare yet'
-        ),
-        origin
+          ApiResponse.success(
+              { periodA, periodB, usingFallback, manualSelection, insufficientData: true },
+              'Not enough pay-period history to compare yet'
+          ),
+          origin
       )
     }
 
@@ -115,31 +115,30 @@ export async function GET(request: NextRequest) {
     const totalsB = totalsFor(aggregateB)
 
     return withCors(
-      ApiResponse.success(
-        {
-          periodA,
-          periodB,
-          usingFallback,
-          manualSelection,
-          insufficientData: false,
-          companyContext: { role: user.role, accessibleCompanies, selectedCompanyId: resolvedCompanyId },
-          totals: {
-            A: totalsA,
-            B: totalsB,
-            delta: {
-              totalGrossPay: computeDelta(totalsA.totalGrossPay, totalsB.totalGrossPay),
-              totalNetSalary: computeDelta(totalsA.totalNetSalary, totalsB.totalNetSalary),
-              totalDeductions: computeDelta(totalsA.totalDeductions, totalsB.totalDeductions),
-              staffCount: computeDelta(totalsA.staffCount, totalsB.staffCount)
-            }
-          },
-          byDepartment: compareGroups(aggregateA.breakdowns.byDepartment, aggregateB.breakdowns.byDepartment),
-          byGrade: compareGroups(aggregateA.breakdowns.byGrade, aggregateB.breakdowns.byGrade),
-          byDesignation: compareGroups(aggregateA.breakdowns.byDesignation, aggregateB.breakdowns.byDesignation)
-        },
-        'Payroll changes fetched successfully'
-      ),
-      origin
+        ApiResponse.success(
+            {
+              periodA,
+              periodB,
+              usingFallback,
+              manualSelection,
+              insufficientData: false,
+              companyContext: { role: user.role, accessibleCompanies, selectedCompanyId: resolvedCompanyId },
+              totals: {
+                A: totalsA,
+                B: totalsB,
+                delta: {
+                  totalGrossPay: computeDelta(totalsA.totalGrossPay, totalsB.totalGrossPay),
+                  totalNetSalary: computeDelta(totalsA.totalNetSalary, totalsB.totalNetSalary),
+                  totalDeductions: computeDelta(totalsA.totalDeductions, totalsB.totalDeductions),
+                  staffCount: computeDelta(totalsA.staffCount, totalsB.staffCount)
+                }
+              },
+              byDepartment: compareGroups(aggregateA.breakdowns.byDepartment, aggregateB.breakdowns.byDepartment),
+              byDesignation: compareGroups(aggregateA.breakdowns.byDesignation, aggregateB.breakdowns.byDesignation)
+            },
+            'Payroll changes fetched successfully'
+        ),
+        origin
     )
   } catch (error) {
     return withCors(handleApiError(error), origin)

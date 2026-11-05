@@ -1,3 +1,4 @@
+import { assertTrialCapacity } from '@/app/lib/trial/guard'
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
@@ -47,6 +48,8 @@ export async function POST(req: NextRequest) {
 
     if (!valid.length)
       return withCors(ApiResponse.error('No valid records to import', 422, errors), origin)
+
+    await assertTrialCapacity(cid, 'courses', valid.length)
 
     const created = await prisma.$transaction(
       valid.map((r: any) => {

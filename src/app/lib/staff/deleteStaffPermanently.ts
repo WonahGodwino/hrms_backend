@@ -28,7 +28,7 @@ import { prisma } from '@/app/lib/db'
 
 export type ActingUser = { userId: string; role: string }
 
-export class DeletionValidationError extends Error {}
+class DeletionValidationError extends Error {}
 
 export async function permanentlyDeleteStaff(actingUser: ActingUser, staffRecordId: string, reason?: string | null) {
   if (!['ADMIN', 'SUPER_ADMIN'].includes(actingUser.role)) {

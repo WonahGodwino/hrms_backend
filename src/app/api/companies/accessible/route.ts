@@ -87,14 +87,15 @@ export async function GET(request: NextRequest) {
       // HR/ADMIN - try userCompany first
       if ('userCompany' in prisma) {
         try {
+          // Access to a company is granted by the existence of this row, full
+          // stop — it is NOT re-gated by whether its `role` column still
+          // matches the staff record's live `role`. That column is a
+          // point-in-time snapshot from whenever the assignment was made and
+          // can drift (e.g. an HR promoted/demoted to ADMIN later without the
+          // assignment row being touched); filtering on it meant a role
+          // change could silently zero out a user's entire company list.
           const userCompanies = await (prisma as any).userCompany.findMany({
-            where: { 
-              userId: user.userId,
-              OR: [
-                { role: user.role },
-                { role: 'ALL' }
-              ]
-            },
+            where: { userId: user.userId },
             include: {
               company: { select: { id: true, companyName: true, email: true, phone: true, address: true, logo: true } }
             }

@@ -3,7 +3,7 @@
 // Moves a STAFF-role StaffRecord to a different company, along with every
 // "own-record" table that references it (payroll, payslips, attendance,
 // leave requests, etc.), inside a single prisma.$transaction. Company-scoped
-// assignments that don't carry over (department/grade/designation/location/
+// assignments that don't carry over (department/designation/location/
 // manager) are cleared unless the caller supplies destination-company
 // replacements. Deliberately does NOT touch secondary-actor fields
 // (approvers/reviewers/supervisors), historical-event tables (Onboarding,
@@ -13,7 +13,6 @@
 // which despite their plain names are exclusively PHED's "Pay Period
 // Workflow" data — confirmed via their only call sites being
 // backend/src/app/api/phed/pay-periods/**).
-import { Prisma } from '@prisma/client'
 import { prisma } from '@/app/lib/db'
 import { getAccessibleCompanies } from '@/app/lib/reporting/access'
 import { findIdentifierHolder, describeIdentifierCollision } from '@/app/lib/staff/identifierCollision'
@@ -22,7 +21,6 @@ export type TransferInput = {
   staffRecordId: string
   toCompanyId: string
   newDepartmentId?: string | null
-  newGradeId?: string | null
   newDesignationId?: string | null
   newLocationId?: string | null
   reason?: string | null
@@ -32,7 +30,6 @@ export type BulkTransferInput = {
   staffRecordIds: string[]
   toCompanyId: string
   newDepartmentId?: string | null
-  newGradeId?: string | null
   newDesignationId?: string | null
   newLocationId?: string | null
   reason?: string | null
@@ -54,14 +51,12 @@ const OWN_RECORD_TABLES: Array<{ model: string; field: string; label: string }> 
   { model: 'participantProgress', field: 'employeeId', label: 'Training Progress' },
   { model: 'certificationRecord', field: 'employeeId', label: 'Certification Records' },
   { model: 'roleElevation', field: 'staffId', label: 'Role Elevations' },
-  { model: 'staffSalaryHistory', field: 'staffId', label: 'Salary History' },
-  { model: 'staffGradeHistory', field: 'staffId', label: 'Grade History' },
   { model: 'loanRequest', field: 'staffId', label: 'Loan Requests' },
   { model: 'benefitRequest', field: 'staffId', label: 'Benefit Requests' },
   { model: 'benefitAllocation', field: 'staffId', label: 'Benefit Allocations' }
 ]
 
-export class TransferValidationError extends Error {}
+class TransferValidationError extends Error {}
 
 async function validateTransfer(actingUser: ActingUser, input: TransferInput) {
   if (!['ADMIN', 'SUPER_ADMIN'].includes(actingUser.role)) {
@@ -147,29 +142,21 @@ export async function executeStaffTransfer(actingUser: ActingUser, input: Transf
   const staff = await validateTransfer(actingUser, input)
 
   const previousDepartmentId = staff.departmentId
-  const previousGradeId = staff.currentGradeId
   const previousDesignationId = staff.designationId
   const previousLocationId = staff.locationId
   const previousManagerId = staff.managerId
 
   // Default interactive-transaction timeout (5s) is too tight for this many
-  // sequential round-trips (staff update + head-reference cleanup + 17
+  // sequential round-trips (staff update + head-reference cleanup + 15
   // own-record table reassignments + audit log) — raised per Prisma's own
   // guidance on the "expired transaction" error.
   const result = await prisma.$transaction(async (tx) => {
-    const gradeAssigned = Boolean(input.newGradeId)
-
     await tx.staffRecord.update({
       where: { id: staff.id },
       data: {
         companyId: input.toCompanyId,
         department: null,
         departmentId: input.newDepartmentId ?? null,
-        currentGradeId: input.newGradeId ?? null,
-        currentGradeStep: gradeAssigned ? 1 : null,
-        gradeLevelStartDate: gradeAssigned ? new Date() : null,
-        gradeBasicSalary: null,
-        gradeAllowances: Prisma.DbNull,
         designationId: input.newDesignationId ?? null,
         location: null,
         locationId: input.newLocationId ?? null,
@@ -200,12 +187,10 @@ export async function executeStaffTransfer(actingUser: ActingUser, input: Transf
         transferredBy: actingUser.userId,
         reason: input.reason ?? null,
         previousDepartmentId,
-        previousGradeId,
         previousDesignationId,
         previousLocationId,
         previousManagerId,
         newDepartmentId: input.newDepartmentId ?? null,
-        newGradeId: input.newGradeId ?? null,
         newDesignationId: input.newDesignationId ?? null,
         newLocationId: input.newLocationId ?? null,
         recordCounts
@@ -234,7 +219,6 @@ function toSingleInput(bulkInput: BulkTransferInput, staffRecordId: string): Tra
     staffRecordId,
     toCompanyId: bulkInput.toCompanyId,
     newDepartmentId: bulkInput.newDepartmentId,
-    newGradeId: bulkInput.newGradeId,
     newDesignationId: bulkInput.newDesignationId,
     newLocationId: bulkInput.newLocationId,
     reason: bulkInput.reason
@@ -263,7 +247,7 @@ export async function previewBulkStaffTransfer(actingUser: ActingUser, input: Bu
 export async function executeBulkStaffTransfer(actingUser: ActingUser, input: BulkTransferInput) {
   // Sequential, not Promise.all — these are independent transactions, but
   // running them concurrently against the same destination-company lookups
-  // (department/grade/designation reads) offers no real benefit here and
+  // (department/designation reads) offers no real benefit here and
   // keeps the audit log's transferredAt ordering meaningful.
   const results: Array<{ staffRecordId: string; success: boolean; staffId?: string; staffName?: string; recordCounts?: Record<string, number>; transferId?: string; error?: string }> = []
 
