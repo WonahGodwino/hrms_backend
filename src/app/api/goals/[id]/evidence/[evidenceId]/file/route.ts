@@ -70,7 +70,7 @@ export const GET = withGoalAuth<{ id: string; evidenceId: string }>(
             .update({
               where: { id: evidence.id },
               data: {
-                data: buffer,
+                data: new Uint8Array(buffer),
                 mimeType: contentType,
                 sizeBytes: buffer.length,
               },

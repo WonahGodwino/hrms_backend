@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
         requestedAmount: true,
         tenureMonths: true,
         monthlyRepayment: true,
-        interestRate: true,
+        interestRatePercent: true,
         purpose: true,
         status: true,
         guarantorStatus: true,
@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const r = Number(loan.interestRate ?? 0) / 100 / 12
+    const r = Number(loan.interestRatePercent ?? 0) / 100 / 12
     const n = loan.tenureMonths
     const P = Number(loan.requestedAmount)
     const computedMonthly = Number(loan.monthlyRepayment ?? 0) ||
@@ -95,7 +95,7 @@ export async function GET(request: NextRequest) {
           requestedAmount: P,
           tenureMonths: n,
           monthlyRepayment: Number(computedMonthly.toFixed(2)),
-          interestRate: Number(loan.interestRate ?? 0),
+          interestRate: Number(loan.interestRatePercent ?? 0),
           totalRepayable: Number((computedMonthly * n).toFixed(2)),
           purpose: loan.purpose,
           createdAt: loan.createdAt,

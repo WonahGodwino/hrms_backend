@@ -82,7 +82,7 @@ export async function POST(
           fileUrl,
           mimeType: finalMime,
           sizeBytes: finalSize,
-          data: bufInfo?.buffer ?? null,
+          data: bufInfo?.buffer ? new Uint8Array(bufInfo.buffer) : null,
           uploadedById: actorId,
         },
         include: {

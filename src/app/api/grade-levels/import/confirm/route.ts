@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     
     for (const item of session.data) {
       try {
-        await prisma.gradeLevel.create({
+        await (prisma as any).gradeLevel.create({
           data: {
             name: item.name,
             rank: parseInt(item.rank),

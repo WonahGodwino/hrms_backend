@@ -114,7 +114,7 @@ export async function PATCH(
               fileUrl: f.fileUrl,
               mimeType: bufInfo?.mimeType ?? null,
               sizeBytes: bufInfo?.sizeBytes ?? null,
-              data: bufInfo?.buffer ?? null,
+              data: bufInfo?.buffer ? new Uint8Array(bufInfo.buffer) : null,
             },
           });
         }

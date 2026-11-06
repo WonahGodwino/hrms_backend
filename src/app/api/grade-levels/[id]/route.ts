@@ -65,43 +65,6 @@ export async function GET(
   }
 }
 
-// GET a single grade level with its full step detail (stepNumber +
-// calculatedPay per step) — was implemented in GradeLevelService.getGradeById
-// but never reachable; the Assign Grade dialog needs real step pay figures,
-// not just the step count the list endpoint returns.
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  const origin = request.headers.get('origin')
-
-  try {
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader) {
-      return withCors(ApiResponse.error('Authorization header missing', 401), origin)
-    }
-
-    const token = authHeader.replace('Bearer ', '')
-    const user = await requireRole(token, ['SUPER_ADMIN', 'HR', 'ADMIN', 'STAFF'])
-
-    const { searchParams } = new URL(request.url)
-    const scope = await resolveScopedCompanyId(user, searchParams.get('companyId'))
-    if (scope.forbidden) {
-      return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
-    }
-    if (!scope.companyId) {
-      return withCors(ApiResponse.error('Company ID is required', 400), origin)
-    }
-
-    const service = new GradeLevelService(scope.companyId, user.userId, user.role)
-    const grade = await service.getGradeById(params.id)
-
-    return withCors(ApiResponse.success(grade), origin)
-  } catch (error) {
-    return withCors(handleApiError(error), origin)
-  }
-}
-
 export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } },

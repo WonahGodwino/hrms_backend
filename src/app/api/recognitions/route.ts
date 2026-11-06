@@ -211,7 +211,7 @@ export async function POST(request: NextRequest) {
           attachmentUrl: parsed.attachment?.fileUrl ?? null,
           attachmentMime: bufInfo?.mimeType ?? null,
           attachmentSize: bufInfo?.sizeBytes ?? null,
-          attachmentData: bufInfo?.buffer ?? null,
+          attachmentData: bufInfo?.buffer ? new Uint8Array(bufInfo.buffer) : null,
         },
       });
       const fb = await tx.feedback.create({

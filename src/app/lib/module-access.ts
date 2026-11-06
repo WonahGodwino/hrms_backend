@@ -83,8 +83,6 @@ export async function getEnabledModules(companyId: string | undefined | null): P
 export async function seedModuleAccessForCompany(companyId: string, enableKeys?: readonly string[]): Promise<void> {
   // REPORTS is a baseline capability — new companies get it enabled by default.
   const AUTO_ENABLE_KEYS = new Set<string>(enableKeys ?? ['REPORTS'])
-  // REPORTS is a baseline capability — new companies get it enabled by default.
-  const AUTO_ENABLE_KEYS = new Set(['REPORTS'])
   const modules = await (prisma as any).platformModule.findMany({
     where:  { archived: false },
     select: { id: true, key: true },
@@ -99,60 +97,6 @@ export async function seedModuleAccessForCompany(companyId: string, enableKeys?:
       data:  { enabled: true },
     })
   }
-}
-
-// Seeds the default nav sections (Workforce / Operations / More) and assigns
-// every module's default sidebar placement if it doesn't have one yet.
-// Idempotent — safe to run on every sync.
-export async function seedNavPlacement(): Promise<{ sectionsSeeded: number; modulesAssigned: number }> {
-  // 1) Ensure default sections exist (match by label).
-  const existingSections = await prisma.navSection.findMany()
-  const byLabel = new Map(existingSections.map((s: { label: string }) => [s.label, s]))
-
-  let sectionsSeeded = 0
-  for (const def of DEFAULT_NAV_SECTIONS) {
-    if (!byLabel.has(def.label)) {
-      const created = await prisma.navSection.create({
-        data: { label: def.label, sortOrder: def.sortOrder, isSystem: def.isSystem },
-      })
-      byLabel.set(def.label, created as any)
-      sectionsSeeded += 1
-    }
-  }
-
-  // 2) Assign each registered module its default placement if unassigned.
-  //    Main-section modules (defaultSection null) get navSectionId null and
-  //    rely on their navOrder for ordering within the main block.
-  //    Also backfill name/description/navIcon from the registry so Module
-  //    Setup mirrors the sidebar (registry icon as the default) — explicit
-  //    overrides set by super admins are never overwritten.
-  const modules = await (prisma as any).platformModule.findMany({ select: { id: true, key: true, navSectionId: true, navOrder: true, navIcon: true, name: true, description: true } })
-  let modulesAssigned = 0
-  for (const m of modules) {
-    const def = PLATFORM_MODULES.find((p) => p.key === m.key)
-    if (!def) continue
-    const needsSection = !m.navSectionId && def.defaultSection
-    const needsOrder = !m.navOrder && def.defaultOrder
-    const needsIcon = !m.navIcon && def.icon
-    const needsName = m.name !== def.name
-    const needsDesc = m.description !== def.description
-    if (needsSection || needsOrder || needsIcon || needsName || needsDesc) {
-      const section = def.defaultSection ? byLabel.get(def.defaultSection) : null
-      await (prisma as any).platformModule.update({
-        where: { id: m.id },
-        data: {
-          ...(needsSection && section ? { navSectionId: (section as any).id } : {}),
-          ...(needsOrder && def.defaultOrder ? { navOrder: def.defaultOrder } : {}),
-          ...(needsIcon ? { navIcon: def.icon } : {}),
-          ...(needsName ? { name: def.name } : {}),
-          ...(needsDesc ? { description: def.description } : {}),
-        },
-      })
-      modulesAssigned += 1
-    }
-  }
-
-  return { sectionsSeeded, modulesAssigned }
 }
 
 // Seeds the default nav sections (Workforce / Operations / More) and assigns

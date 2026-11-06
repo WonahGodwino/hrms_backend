@@ -25,6 +25,7 @@
     "**/* - Copy.ts",
     "**/* - Copy.tsx",
     "src/app/api/engine/**",
-    "src/app/lib/payroll-engine/**"
+    "src/app/lib/payroll-engine/**",
+    "scripts/backfill-participant-snapshots.ts"
   ]
 }

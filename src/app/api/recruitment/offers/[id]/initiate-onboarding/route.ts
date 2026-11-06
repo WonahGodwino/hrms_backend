@@ -39,6 +39,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const onboarding = await prisma.onboarding.create({
       data: {
         companyId,
+        applicationId: offer.applicationId,
         offerId: offer.id,
         status: 'IN_PROGRESS',
         startDate: new Date(),

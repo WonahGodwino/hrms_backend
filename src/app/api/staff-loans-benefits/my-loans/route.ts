@@ -114,7 +114,6 @@ export async function GET(request: NextRequest) {
         where: { companyId, staffId },
         include: {
           staff: { select: { firstName: true, lastName: true, email: true, department: true } },
-          approver: { select: { firstName: true, lastName: true, email: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),
@@ -122,7 +121,6 @@ export async function GET(request: NextRequest) {
         where: { companyId, staffId },
         include: {
           staff: { select: { firstName: true, lastName: true, email: true, department: true } },
-          approver: { select: { firstName: true, lastName: true, email: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),
@@ -144,7 +142,7 @@ export async function GET(request: NextRequest) {
     // Build myLoans from LoanRequest records (accurate principal, rate, tenure, monthly payment)
     const myLoans = myLoanRequests.map((lr) => {
       const P = Number(lr.requestedAmount)
-      const rate = Number(lr.interestRate ?? 0) / 100 / 12
+      const rate = Number(lr.interestRatePercent ?? 0) / 100 / 12
       const n = lr.tenureMonths ?? 12
       const monthlyPayment =
         Number(lr.monthlyRepayment ?? 0) ||
@@ -192,11 +190,11 @@ export async function GET(request: NextRequest) {
       amount: Number(lr.requestedAmount),
       approvedAmount: lr.approvedAmount ? Number(lr.approvedAmount) : null,
       tenureMonths: lr.tenureMonths,
-      interestRate: Number(lr.interestRate || 0),
+      interestRate: Number(lr.interestRatePercent || 0),
       createdAt: lr.createdAt.toISOString(),
       reviewedAt: lr.approvedAt?.toISOString() || null,
-      reviewerComment: lr.approvalComment || lr.rejectionReason || null,
-      approverName: lr.approver ? `${lr.approver.firstName} ${lr.approver.lastName}`.trim() : null,
+      reviewerComment: lr.rejectionReason || null,
+      approverName: null,
       guarantorStatus: (lr as any).guarantorStatus || 'NOT_REQUIRED',
       disbursedAt: (lr as any).disbursedAt?.toISOString() || null,
     }))
@@ -214,8 +212,8 @@ export async function GET(request: NextRequest) {
       amount: 0,
       createdAt: br.createdAt.toISOString(),
       reviewedAt: br.approvedAt?.toISOString() || null,
-      reviewerComment: br.approvalComment || br.rejectionReason || null,
-      approverName: br.approver ? `${br.approver.firstName} ${br.approver.lastName}`.trim() : null,
+      reviewerComment: br.rejectionReason || null,
+      approverName: null,
     }))
 
     // Map benefit allocations

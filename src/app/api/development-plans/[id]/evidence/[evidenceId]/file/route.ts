@@ -66,7 +66,7 @@ export async function GET(
           .update({
             where: { id: ev.id },
             data: {
-              data: buffer,
+              data: new Uint8Array(buffer),
               mimeType: contentType,
               sizeBytes: buffer.length,
             },

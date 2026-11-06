@@ -46,10 +46,10 @@ export async function POST(request: NextRequest) {
     const rows = lines.slice(1) // Skip header row
     
     // Get existing ranks for validation
-    const existingGrades = await prisma.gradeLevel.findMany({
+    const existingGrades = (await (prisma as any).gradeLevel.findMany({
       where: { companyId },
       select: { rank: true, name: true }
-    })
+    })) as { rank: number; name: string }[]
     const existingRanks = new Set(existingGrades.map(g => g.rank))
     const existingNames = new Set(existingGrades.map(g => g.name.toLowerCase()))
     

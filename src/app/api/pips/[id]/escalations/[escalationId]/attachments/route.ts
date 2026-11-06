@@ -62,7 +62,7 @@ export async function POST(
           fileUrl: f.files[0].fileUrl,
           mimeType: bufInfo?.mimeType ?? null,
           sizeBytes: bufInfo?.sizeBytes ?? null,
-          data: bufInfo?.buffer ?? null,
+          data: bufInfo?.buffer ? new Uint8Array(bufInfo.buffer) : null,
         },
       });
       await logEscalationAction(tx, {

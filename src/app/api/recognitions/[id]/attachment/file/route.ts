@@ -81,7 +81,7 @@ export async function GET(
           .update({
             where: { id: recognition.id },
             data: {
-              attachmentData: buffer,
+              attachmentData: new Uint8Array(buffer),
               attachmentMime: contentType,
               attachmentSize: buffer.length,
             },

@@ -90,7 +90,7 @@ export const POST = withGoalAuth<{ id: string }>(
           fileUrl,
           mimeType,
           sizeBytes: buffer ? buffer.length : null,
-          data: buffer,
+          data: buffer ? new Uint8Array(buffer) : null,
           note,
           uploadedBy: actorId,
         },

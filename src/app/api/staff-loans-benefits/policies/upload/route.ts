@@ -80,7 +80,11 @@ export async function POST(request: NextRequest) {
           const guarantorMustNotHaveActiveLoan = parseBool(row.getCell(10).value, false)
           const salaryMultiplier = parseFloat(String(row.getCell(11).value || 1)) || 1
           const isActive = parseBool(row.getCell(12).value, true)
-          const rules = String(row.getCell(13).value || '').trim() || null
+          const rules = (() => {
+            const raw = String(row.getCell(13).value || '').trim()
+            if (!raw) return undefined
+            try { return JSON.parse(raw) } catch { return raw }
+          })()
 
           // Upsert: update if exists by companyId+name, otherwise create
           await prisma.loanPolicy.upsert({
@@ -97,7 +101,7 @@ export async function POST(request: NextRequest) {
               guarantorMustNotHaveActiveLoan,
               salaryMultiplier,
               isActive,
-              rules,
+              eligibilityRules: rules,
             },
             create: {
               companyId,
@@ -113,7 +117,9 @@ export async function POST(request: NextRequest) {
               guarantorMustNotHaveActiveLoan,
               salaryMultiplier,
               isActive,
-              rules,
+              eligibilityRules: rules,
+              approvalWorkflow: [],
+              createdBy: user.userId,
             },
           })
           results.loansCreated++
@@ -129,12 +135,8 @@ export async function POST(request: NextRequest) {
     if (benefitSheet) {
       // Preload the company's designations + grade levels so the sheet can
       // reference them by human-readable name (resolved to ids, case-insensitive).
-      const [designationRows, gradeRows] = await Promise.all([
-        (prisma as any).designation.findMany({ where: { companyId }, select: { id: true, title: true } }),
-        prisma.gradeLevel.findMany({ where: { companyId }, select: { id: true, name: true } }),
-      ])
+      const designationRows = await (prisma as any).designation.findMany({ where: { companyId }, select: { id: true, title: true } })
       const desByName = new Map<string, string>(designationRows.map((d: any) => [String(d.title).trim().toLowerCase(), d.id]))
-      const gradeByName = new Map<string, string>(gradeRows.map((g: any) => [String(g.name).trim().toLowerCase(), g.id]))
 
       const rows = benefitSheet.getRows(2, benefitSheet.rowCount - 1) || []
       for (const row of rows) {
@@ -153,17 +155,10 @@ export async function POST(request: NextRequest) {
 
           // Optional designation + grade scope (by name).
           const designationName = String(row.getCell(9).value || '').trim()
-          const gradeLevelName = String(row.getCell(10).value || '').trim()
           let designationId: string | null = null
-          let gradeLevelId: string | null = null
           if (designationName) {
             designationId = desByName.get(designationName.toLowerCase()) || null
             if (!designationId) throw new Error(`Designation "${designationName}" not found in this company`)
-          }
-          if (gradeLevelName) {
-            if (!designationId) throw new Error('Grade Level requires a Designation on the same row')
-            gradeLevelId = gradeByName.get(gradeLevelName.toLowerCase()) || null
-            if (!gradeLevelId) throw new Error(`Grade Level "${gradeLevelName}" not found in this company`)
           }
 
           await (prisma as any).benefitPolicy.upsert({
@@ -177,7 +172,6 @@ export async function POST(request: NextRequest) {
               isActive,
               jobId,
               designationId,
-              gradeLevelId,
             },
             create: {
               companyId,
@@ -190,7 +184,6 @@ export async function POST(request: NextRequest) {
               isActive,
               jobId,
               designationId,
-              gradeLevelId,
             },
           })
           results.benefitsCreated++

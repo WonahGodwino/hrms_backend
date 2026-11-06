@@ -78,7 +78,7 @@ export async function GET(
           .update({
             where: { id: attachment.id },
             data: {
-              data: buffer,
+              data: new Uint8Array(buffer),
               mimeType: contentType,
               sizeBytes: buffer.length,
             },

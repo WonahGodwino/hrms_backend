@@ -57,115 +57,153 @@ async function main() {
     },
   })
 
-  // 2. Create demo loans
+  // 2. Create demo loan + benefit policies
+  const loanPolicy = await prisma.loanPolicy.upsert({
+    where: { companyId_name: { companyId, name: 'Personal Loan' } },
+    update: {},
+    create: {
+      companyId,
+      name: 'Personal Loan',
+      interestRatePercent: 5,
+      maxDurationMonths: 12,
+      maxAmount: 500000,
+      minServiceMonths: 3,
+      maxDebtRatioPercent: 40,
+      approvalWorkflow: [],
+      createdBy,
+    },
+  })
+
+  const healthPolicy = await prisma.benefitPolicy.upsert({
+    where: { companyId_name: { companyId, name: 'Health Insurance' } },
+    update: {},
+    create: {
+      companyId,
+      name: 'Health Insurance',
+      category: 'HEALTH',
+      requestApprovalWorkflow: [],
+      createdBy,
+    },
+  })
+
+  const transportPolicy = await prisma.benefitPolicy.upsert({
+    where: { companyId_name: { companyId, name: 'Transport Allowance' } },
+    update: {},
+    create: {
+      companyId,
+      name: 'Transport Allowance',
+      category: 'TRANSPORT',
+      requestApprovalWorkflow: [],
+      createdBy,
+    },
+  })
+
+  // 3. Create demo loans
   await prisma.loanRequest.createMany({
     data: [
       {
         companyId,
         staffId: staff1.id,
-        loanType: 'PERSONAL_LOAN',
+        loanPolicyId: loanPolicy.id,
+        loanPolicyVersion: loanPolicy.version,
+        loanType: 'Personal Loan',
         requestedAmount: 500000,
         approvedAmount: 500000,
         tenureMonths: 12,
         purpose: 'Medical bills',
+        currencyCode: 'NGN',
+        interestRatePercent: 5.0,
         status: 'DISBURSED',
-        approvalComment: 'Approved for demo',
-        approvedBy: staff2.id,
+        approvalWorkflow: [],
         approvedAt: new Date(),
         disbursedAt: new Date(),
+        disbursedBy: staff2.id,
         expectedRepaymentDate: new Date(new Date().setMonth(new Date().getMonth() + 12)),
-        interestRate: 5.0,
         monthlyRepayment: 45000,
         remainingBalance: 225000,
-        createdAt: new Date(),
-        updatedAt: new Date(),
         createdBy,
       },
       {
         companyId,
         staffId: staff2.id,
-        loanType: 'SALARY_ADVANCE',
+        loanPolicyId: loanPolicy.id,
+        loanPolicyVersion: loanPolicy.version,
+        loanType: 'Salary Advance',
         requestedAmount: 100000,
         approvedAmount: 100000,
         tenureMonths: 3,
         purpose: 'School fees',
+        currencyCode: 'NGN',
+        interestRatePercent: 2.5,
         status: 'APPROVED',
-        approvalComment: 'Approved for demo',
-        approvedBy: staff1.id,
+        approvalWorkflow: [],
         approvedAt: new Date(),
-        disbursedAt: null,
         expectedRepaymentDate: new Date(new Date().setMonth(new Date().getMonth() + 3)),
-        interestRate: 2.5,
         monthlyRepayment: 35000,
         remainingBalance: 100000,
-        createdAt: new Date(),
-        updatedAt: new Date(),
         createdBy,
       },
     ],
     skipDuplicates: true,
   })
 
-  // 3. Create demo benefits
+  // 4. Create demo benefit allocations
   await prisma.benefitAllocation.createMany({
     data: [
       {
         companyId,
         staffId: staff1.id,
-        benefitId: 'BENEFIT-001',
+        benefitPolicyId: healthPolicy.id,
+        benefitPolicyVersion: healthPolicy.version,
         benefitName: 'Health Insurance',
         allocationAmount: 200000,
+        currencyCode: 'NGN',
         allocatedBy: staff2.id,
         note: 'Demo allocation',
-        status: 'ALLOCATED',
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        status: 'ACTIVE',
       },
       {
         companyId,
         staffId: staff2.id,
-        benefitId: 'BENEFIT-002',
+        benefitPolicyId: transportPolicy.id,
+        benefitPolicyVersion: transportPolicy.version,
         benefitName: 'Transport Allowance',
         allocationAmount: 50000,
+        currencyCode: 'NGN',
         allocatedBy: staff1.id,
         note: 'Demo allocation',
-        status: 'ALLOCATED',
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        status: 'ACTIVE',
       },
     ],
     skipDuplicates: true,
   })
 
-  // 4. Create demo benefit requests
+  // 5. Create demo benefit requests
   await prisma.benefitRequest.createMany({
     data: [
       {
         companyId,
         staffId: staff1.id,
-        benefitId: 'BENEFIT-001',
+        benefitPolicyId: healthPolicy.id,
+        benefitPolicyVersion: healthPolicy.version,
         benefitName: 'Health Insurance',
+        currencyCode: 'NGN',
         reason: 'Family medical',
         status: 'APPROVED',
-        approvalComment: 'Demo approved',
-        approvedBy: staff2.id,
+        approvalWorkflow: [],
         approvedAt: new Date(),
-        createdAt: new Date(),
-        updatedAt: new Date(),
         createdBy,
       },
       {
         companyId,
         staffId: staff2.id,
-        benefitId: 'BENEFIT-002',
+        benefitPolicyId: transportPolicy.id,
+        benefitPolicyVersion: transportPolicy.version,
         benefitName: 'Transport Allowance',
+        currencyCode: 'NGN',
         reason: 'Commute support',
-        status: 'PENDING',
-        approvalComment: null,
-        approvedBy: null,
-        approvedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        status: 'PENDING_APPROVAL',
+        approvalWorkflow: [],
         createdBy,
       },
     ],

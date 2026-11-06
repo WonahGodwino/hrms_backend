@@ -23,7 +23,9 @@
 //   named value is non-empty — lets a layout hide rows whose field has no
 //   value (e.g. no PFA recorded) instead of printing a blank label.
 // Unknown tokens render as empty strings, never raw template code.
-import puppeteer, { type Browser } from 'puppeteer'
+import puppeteer from 'puppeteer'
+
+type Browser = Awaited<ReturnType<typeof puppeteer.launch>>
 
 export type PresetEarningsItem = { label: string; amount: number }
 export type PresetDeductionsItem = { label: string; amount: number }
@@ -237,7 +239,7 @@ async function getBrowser(): Promise<Browser> {
         executablePath: resolveChromeExecutable(),
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
       })
-      .catch((err) => {
+      .catch((err: any) => {
         browserPromise = null
         throw err
       })

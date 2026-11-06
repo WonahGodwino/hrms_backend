@@ -36,7 +36,7 @@ export async function GET(
         tenureMonths: true,
         purpose: true,
         status: true,
-        interestRate: true,
+        interestRatePercent: true,
         signature: true,
         signatureType: true,
         signedAt: true,
@@ -61,12 +61,6 @@ export async function GET(
             email: true,
             logo: true,
             baseCurrency: true,
-          },
-        },
-        approver: {
-          select: {
-            firstName: true,
-            lastName: true,
           },
         },
       },
@@ -98,7 +92,7 @@ export async function GET(
     // Build repayment schedule
     const amount = Number(loanRequest.approvedAmount || loanRequest.requestedAmount)
     const tenure = loanRequest.tenureMonths
-    const rate = Number(loanRequest.interestRate || policy?.interestRatePercent || 5) / 100
+    const rate = Number(loanRequest.interestRatePercent || policy?.interestRatePercent || 5) / 100
     const totalRepayable = amount * (1 + rate)
     const monthlyRepayment = tenure > 0 ? totalRepayable / tenure : amount
     const schedule = Array.from({ length: tenure }, (_, i) => ({
@@ -109,9 +103,7 @@ export async function GET(
     }))
 
     const staffName = `${loanRequest.staff.firstName} ${loanRequest.staff.lastName}`.trim()
-    const approverName = loanRequest.approver
-      ? `${loanRequest.approver.firstName} ${loanRequest.approver.lastName}`.trim()
-      : null
+    const approverName = null
 
     const currencySymbol = (() => {
       const syms: Record<string, string> = { NGN: '₦', USD: '$', EUR: '€', GBP: '£', GHS: '₵', KES: 'KSh', ZAR: 'R' }
@@ -126,7 +118,7 @@ export async function GET(
         requestedAmount: Number(loanRequest.requestedAmount),
         approvedAmount: loanRequest.approvedAmount ? Number(loanRequest.approvedAmount) : null,
         tenureMonths: tenure,
-        interestRate: Number(loanRequest.interestRate),
+        interestRate: Number(loanRequest.interestRatePercent),
         monthlyRepayment: Math.round(monthlyRepayment * 100) / 100,
         totalRepayable: Math.round(totalRepayable * 100) / 100,
         purpose: loanRequest.purpose,
@@ -159,7 +151,7 @@ export async function GET(
         maxAmount: policy.maxAmount,
         salaryMultiplier: policy.salaryMultiplier,
         requiresGuarantor: policy.requiresGuarantor,
-        rules: policy.rules,
+        eligibilityRules: policy.eligibilityRules,
       } : null,
       approverName,
       currencySymbol,

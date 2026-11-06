@@ -25,10 +25,6 @@ export async function POST(req: NextRequest) {
     if (!user || !["ADMIN", "HR", "SUPER_ADMIN"].includes(user.role))
       return withCors(ApiResponse.error("Unauthorized", 403), origin);
 
-    const body = await req.json()
-    const { title, code, description, basePay, basePayFrequency, benefits } = body
-    if (!title || !code) return withCors(ApiResponse.error('title and code are required', 400), origin)
-
     const body = await req.json();
     const {
       title,

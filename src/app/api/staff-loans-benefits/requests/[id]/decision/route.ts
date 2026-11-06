@@ -154,12 +154,10 @@ export async function PATCH(
     if (loanRequest) {
       updated = await prisma.loanRequest.update({
         where: { id: record.id },
-          data: {
+        data: {
           status: nextStatus as any,
-          approvedBy: action === 'APPROVE' ? user.userId : null,
           approvedAt: action === 'APPROVE' ? new Date() : null,
           rejectionReason: action === 'REJECT' ? comment : null,
-          approvalComment: action === 'APPROVE' ? comment || null : null,
           ...(action === 'APPROVE' && approvedAmount != null && !isNaN(approvedAmount) && approvedAmount > 0
             ? { approvedAmount: new Decimal(approvedAmount) }
             : {}),
@@ -174,7 +172,6 @@ export async function PATCH(
           monthlyRepayment: true,
           purpose: true,
           status: true,
-          approvalComment: true,
           rejectionReason: true,
           approvedAt: true,
           updatedAt: true,
@@ -185,19 +182,16 @@ export async function PATCH(
         where: { id: record.id },
         data: {
           status: nextStatus as any,
-          approvedBy: action === 'APPROVE' ? user.userId : null,
           approvedAt: action === 'APPROVE' ? new Date() : null,
           rejectionReason: action === 'REJECT' ? comment : null,
-          approvalComment: action === 'APPROVE' ? comment || null : null,
         },
         select: {
           id: true,
           staffId: true,
-          benefitId: true,
+          benefitPolicyId: true,
           benefitName: true,
           reason: true,
           status: true,
-          approvalComment: true,
           rejectionReason: true,
           approvedAt: true,
           updatedAt: true,
@@ -211,7 +205,7 @@ export async function PATCH(
           id: updated.id,
           recordType,
           status: updated.status,
-          approvalComment: updated.approvalComment,
+          approvalComment: null,
           rejectionReason: updated.rejectionReason,
           approvedAt: updated.approvedAt,
           updatedAt: updated.updatedAt,
