@@ -122,7 +122,15 @@ export async function POST(request: NextRequest) {
     const companyIdParam = formData.get('companyId') as string | null
     const templateId = formData.get('templateId') as string | null // For dynamic templates
     const overwriteExisting = formData.get('overwriteExisting') === 'true'
-    
+    // Row count the frontend parsed from the sheet for its preview. Stored as a
+    // provisional totalRecords so the pending/status endpoints can report size
+    // (used to scale polling cadence) before processing fills in the real count.
+    const estimatedRecordCountRaw = formData.get('recordCount')
+    const estimatedRecordCount =
+      typeof estimatedRecordCountRaw === 'string' && /^\d+$/.test(estimatedRecordCountRaw)
+        ? parseInt(estimatedRecordCountRaw, 10)
+        : null
+
     // Get template type from form data if not in URL
     if (!templateType) {
       templateType = formData.get('templateType') as PayrollTemplateType | null
@@ -283,7 +291,8 @@ export async function POST(request: NextRequest) {
       sendEmails,
       user.userId,
       templateId,
-      overwriteExisting
+      overwriteExisting,
+      estimatedRecordCount
     )
 
     // Respond immediately; actual row-by-row processing (DB writes, PDF

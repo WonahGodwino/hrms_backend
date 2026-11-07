@@ -44,7 +44,9 @@ export async function GET(request: NextRequest) {
 
     return withCors(
       ApiResponse.success(
-        active ? { active: true, uploadId: active.id, status: active.status } : { active: false },
+        active
+          ? { active: true, uploadId: active.id, status: active.status, totalRecords: active.totalRecords ?? null }
+          : { active: false },
         active ? 'A payroll upload is in progress' : 'No payroll upload in progress'
       ),
       origin

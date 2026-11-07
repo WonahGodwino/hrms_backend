@@ -182,7 +182,8 @@ export async function createPendingPayrollUpload(
   sendEmails: boolean,
   userId: string,
   templateId?: string | null,
-  overwriteExisting?: boolean
+  overwriteExisting?: boolean,
+  estimatedRecordCount?: number | null
 ) {
   return await prisma.payrollUpload.create({
     data: {
@@ -196,6 +197,9 @@ export async function createPendingPayrollUpload(
       uploadedBy: userId,
       status: 'PROCESSING',
       startedAt: new Date(),
+      // Provisional count from the frontend's sheet parse; overwritten with the
+      // true successful+failed total once processing completes.
+      totalRecords: estimatedRecordCount ?? 0,
     },
   })
 }

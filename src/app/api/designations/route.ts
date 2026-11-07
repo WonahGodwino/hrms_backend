@@ -22,7 +22,8 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get('status') || ''
     const grade = searchParams.get('grade') || ''
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
-    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20')))
+    // Pickers/dropdowns request the full list (limit=1000); a 100 cap silently truncated them.
+    const limit = Math.min(1000, Math.max(1, parseInt(searchParams.get('limit') || '20') || 20))
     const skip = (page - 1) * limit
 
     // Honour the global company switcher (companyId param) so a multi-company
