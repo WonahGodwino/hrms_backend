@@ -14,7 +14,8 @@ const getNotificationsSchema = z.object({
   startDate: z.string().optional(),
   endDate: z.string().optional(),
   // Free-text search over title + message (case-insensitive).
-  search: z.string().trim().max(200).optional()
+  search: z.string().trim().max(200).optional(),
+  userId: z.string().optional()
 })
 
 const markAsReadSchema = z.object({
@@ -30,42 +31,6 @@ const createNotificationSchema = z.object({
   data: z.record(z.any()).optional(),
   companyId: z.string().cuid()
 })
-
-// Helper function to get a line manager's team staff IDs: the staff of every
-// department where they sit on the leave line-manager ladder
-async function getManagedStaffIds(managerId: string, companyId: string) {
-  const departments = await prisma.departmentLineManager.findMany({
-    where: { staffId: managerId, companyId },
-    select: { departmentId: true }
-  })
-  if (departments.length === 0) return []
-
-  const managedStaff = await prisma.staffRecord.findMany({
-    where: {
-      departmentId: { in: departments.map(d => d.departmentId) },
-      id: { not: managerId },
-      companyId,
-      isActive: true
-    },
-    select: { id: true }
-  })
-  
-  return managedStaff.map(staff => staff.id)
-}
-
-// Helper to get HR/Admin staff IDs
-async function getHRAdminStaffIds(companyId: string) {
-  const hrAdmins = await prisma.staffRecord.findMany({
-    where: {
-      companyId,
-      role: { in: ['HR', 'ADMIN', 'SUPER_ADMIN'] },
-      isActive: true
-    },
-    select: { id: true }
-  })
-  
-  return hrAdmins.map(staff => staff.id)
-}
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -147,19 +112,9 @@ async function getUserNotificationsData(userId: string, companyId: string, filte
 }
 
 async function getManagerNotificationsData(managerId: string, companyId: string, filters: any) {
-  const managedStaffIds = await getManagedStaffIds(managerId, companyId)
-  
   const where: any = {
     companyId,
-    OR: [
-      // Notifications directly to manager
-      { userId: managerId },
-      // Notifications about leave requests from managed staff
-      {
-        userId: { in: managedStaffIds },
-        type: { contains: 'LEAVE' }
-      }
-    ]
+    userId: managerId
   }
   
   if (filters.read !== 'all') {
@@ -171,6 +126,12 @@ async function getManagerNotificationsData(managerId: string, companyId: string,
   }
 
   applySearch(where, filters.search)
+
+  if (filters.startDate || filters.endDate) {
+    where.createdAt = {}
+    if (filters.startDate) where.createdAt.gte = new Date(filters.startDate)
+    if (filters.endDate) where.createdAt.lte = new Date(filters.endDate)
+  }
   
   const skip = (filters.page - 1) * filters.limit
   
@@ -209,7 +170,7 @@ async function getManagerNotificationsData(managerId: string, companyId: string,
     notifications: notifications.map(notification => ({
       ...notification,
       data: notification.data ? JSON.parse(notification.data as string) : null,
-      isDirect: notification.userId === managerId
+      isDirect: true
     })),
     pagination: {
       page: filters.page,
@@ -222,27 +183,10 @@ async function getManagerNotificationsData(managerId: string, companyId: string,
   }
 }
 
-async function getHRNotificationsData(companyId: string, filters: any) {
-  const hrAdminIds = await getHRAdminStaffIds(companyId)
-  
+async function getHRNotificationsData(userId: string, companyId: string, filters: any) {
   const where: any = {
     companyId,
-    OR: [
-      // Notifications to HR/Admin users
-      { userId: { in: hrAdminIds } },
-      // Leave notifications that HR should see
-      {
-        type: {
-          in: [
-            'LEAVE_HR_APPROVAL_NEEDED',
-            'LEAVE_REQUEST_SUBMITTED',
-            'LEAVE_APPROVED',
-            'LEAVE_REJECTED',
-            'LEAVE_CANCELLED'
-          ]
-        }
-      }
-    ]
+    userId: filters.userId || userId
   }
   
   if (filters.read !== 'all') {
@@ -254,6 +198,12 @@ async function getHRNotificationsData(companyId: string, filters: any) {
   }
 
   applySearch(where, filters.search)
+
+  if (filters.startDate || filters.endDate) {
+    where.createdAt = {}
+    if (filters.startDate) where.createdAt.gte = new Date(filters.startDate)
+    if (filters.endDate) where.createdAt.lte = new Date(filters.endDate)
+  }
   
   const skip = (filters.page - 1) * filters.limit
   
@@ -293,7 +243,7 @@ async function getHRNotificationsData(companyId: string, filters: any) {
     notifications: notifications.map(notification => ({
       ...notification,
       data: notification.data ? JSON.parse(notification.data as string) : null,
-      isHRAdmin: hrAdminIds.includes(notification.userId)
+      isHRAdmin: true
     })),
     pagination: {
       page: filters.page,
@@ -306,9 +256,12 @@ async function getHRNotificationsData(companyId: string, filters: any) {
   }
 }
 
-async function getAdminNotificationsData(companyId: string, filters: any) {
-  // Admins see all notifications in their company
-  const where: any = { companyId }
+async function getAdminNotificationsData(userId: string, companyId: string, filters: any) {
+  // Admins see their own notifications by default, or filter by a specific target user when requested
+  const where: any = {
+    companyId,
+    userId: filters.userId || userId
+  }
   
   if (filters.read !== 'all') {
     where.read = filters.read === 'true'
@@ -319,9 +272,11 @@ async function getAdminNotificationsData(companyId: string, filters: any) {
   }
 
   applySearch(where, filters.search)
-  
-  if (filters.userId) {
-    where.userId = filters.userId
+
+  if (filters.startDate || filters.endDate) {
+    where.createdAt = {}
+    if (filters.startDate) where.createdAt.gte = new Date(filters.startDate)
+    if (filters.endDate) where.createdAt.lte = new Date(filters.endDate)
   }
   
   const skip = (filters.page - 1) * filters.limit
@@ -374,49 +329,11 @@ async function getAdminNotificationsData(companyId: string, filters: any) {
   }
 }
 
-async function getUnreadCount(userId: string, companyId: string, role: string) {
-  let where: any = {
+async function getUnreadCount(userId: string, companyId: string, _role: string) {
+  const where: any = {
+    userId,
     companyId,
     read: false
-  }
-  
-  switch (role) {
-    case 'STAFF':
-      where.userId = userId
-      break
-      
-    case 'MANAGER':
-      const managedStaffIds = await getManagedStaffIds(userId, companyId)
-      where = {
-        companyId,
-        read: false,
-        OR: [
-          { userId },
-          {
-            userId: { in: managedStaffIds },
-            type: { contains: 'LEAVE' }
-          }
-        ]
-      }
-      break
-      
-    case 'HR':
-      const hrAdminIds = await getHRAdminStaffIds(companyId)
-      where = {
-        companyId,
-        read: false,
-        OR: [
-          { userId: { in: hrAdminIds } },
-          { type: 'LEAVE_HR_APPROVAL_NEEDED' }
-        ]
-      }
-      break
-      
-    case 'ADMIN':
-    case 'SUPER_ADMIN':
-      // Admins see all unread
-      where = { companyId, read: false }
-      break
   }
   
   return await prisma.notification.count({ where })
@@ -424,51 +341,10 @@ async function getUnreadCount(userId: string, companyId: string, role: string) {
 
 // Same visibility rules as the GET handlers above, factored out so mutations
 // (mark-as-read, delete) authorize against everything a role can actually
-// see rather than just notifications addressed to their own userId — HR,
-// ADMIN, SUPER_ADMIN and MANAGER routinely see notifications belonging to
-// other staff, and restricting mutations to `userId: user.userId` silently
-// no-ops on all of those rows.
-async function getNotificationVisibilityWhere(userId: string, companyId: string, role: string): Promise<any> {
-  switch (role) {
-    case 'MANAGER': {
-      const managedStaffIds = await getManagedStaffIds(userId, companyId)
-      return {
-        OR: [
-          { userId },
-          { userId: { in: managedStaffIds }, type: { contains: 'LEAVE' } }
-        ]
-      }
-    }
-
-    case 'HR': {
-      const hrAdminIds = await getHRAdminStaffIds(companyId)
-      return {
-        OR: [
-          { userId: { in: hrAdminIds } },
-          {
-            type: {
-              in: [
-                'LEAVE_HR_APPROVAL_NEEDED',
-                'LEAVE_REQUEST_SUBMITTED',
-                'LEAVE_APPROVED',
-                'LEAVE_REJECTED',
-                'LEAVE_CANCELLED'
-              ]
-            }
-          }
-        ]
-      }
-    }
-
-    case 'ADMIN':
-    case 'SUPER_ADMIN':
-      // Admins can act on every notification in their company.
-      return {}
-
-    case 'STAFF':
-    default:
-      return { userId }
-  }
+// see rather than just notifications addressed to their own userId — each user
+// strictly manages their own notifications.
+async function getNotificationVisibilityWhere(userId: string, _companyId: string, _role: string): Promise<any> {
+  return { userId }
 }
 
 // ==================== API ENDPOINTS ====================
@@ -549,12 +425,12 @@ export async function GET(request: NextRequest) {
         break
         
       case 'HR':
-        result = await getHRNotificationsData(staff.companyId, filters)
+        result = await getHRNotificationsData(user.userId, staff.companyId, filters)
         break
         
       case 'ADMIN':
       case 'SUPER_ADMIN':
-        result = await getAdminNotificationsData(staff.companyId, filters)
+        result = await getAdminNotificationsData(user.userId, staff.companyId, filters)
         break
         
       default:

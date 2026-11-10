@@ -185,6 +185,6 @@ export function formatCurrency(amount: number, currencyCode: string): string {
   try {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: currencyCode, maximumFractionDigits: 0 }).format(amount)
   } catch {
-    return `${currencyCode} ${amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+    return `${currencyCode} ${amount.toLocaleString('en-NG', { maximumFractionDigits: 0 })}`
   }
 }

@@ -95,9 +95,14 @@ export async function aggregateLeavePeriod(targetCompanyIds: string[], start: Da
     }
   }
 
+  // Filter by the staff's company + active flag rather than an `IN (...)`
+  // list of every staff id — for "all companies" that list ran to thousands
+  // of bind parameters per query. Same rows either way.
+  const inScope = { staffRecord: { companyId: { in: targetCompanyIds }, isActive: true } }
+
   const [periodRequests, pendingManager, pendingHR, balances, seasonalRequests] = await Promise.all([
     prisma.leaveRequest.findMany({
-      where: { staffRecordId: { in: staffIds }, startDate: { gte: start, lt: end } },
+      where: { ...inScope, startDate: { gte: start, lt: end } },
       select: {
         id: true,
         staffRecordId: true,
@@ -115,10 +120,10 @@ export async function aggregateLeavePeriod(targetCompanyIds: string[], start: Da
         managerApprover: { select: { firstName: true, lastName: true } }
       }
     }),
-    prisma.leaveRequest.count({ where: { staffRecordId: { in: staffIds }, status: 'PENDING', currentStep: 'MANAGER' } }),
-    prisma.leaveRequest.count({ where: { staffRecordId: { in: staffIds }, status: 'MANAGER_APPROVED', currentStep: 'HR' } }),
+    prisma.leaveRequest.count({ where: { ...inScope, status: 'PENDING', currentStep: 'MANAGER' } }),
+    prisma.leaveRequest.count({ where: { ...inScope, status: 'MANAGER_APPROVED', currentStep: 'HR' } }),
     prisma.staffLeaveBalance.findMany({
-      where: { staffRecordId: { in: staffIds }, year },
+      where: { ...inScope, year },
       select: {
         staffRecordId: true,
         totalDays: true,
@@ -129,7 +134,7 @@ export async function aggregateLeavePeriod(targetCompanyIds: string[], start: Da
     }),
     prisma.leaveRequest.findMany({
       where: {
-        staffRecordId: { in: staffIds },
+        ...inScope,
         status: { in: APPROVED_STATUSES },
         startDate: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) }
       },

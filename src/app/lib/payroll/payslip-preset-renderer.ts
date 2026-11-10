@@ -318,8 +318,15 @@ export type PresetAwarePayslipInput = GeneratePayslipInput & {
 // Resolves the active preset HTML for a payroll template (null = use the
 // built-in default layout). Returns null when no preset is selected, the
 // preset row is missing, or it has been deactivated.
+// Short-lived cache: a payroll run calls this once per row with the same preset
+// id, so without it a 3,000-row upload does 3,000 identical DB reads.
+const PRESET_CACHE_TTL_MS = 60 * 1000
+const presetHtmlCache = new Map<string, { html: string | null; expires: number }>()
+
 export async function getActivePresetHtml(presetId?: string | null): Promise<string | null> {
   if (!presetId) return null
+  const cached = presetHtmlCache.get(presetId)
+  if (cached && cached.expires > Date.now()) return cached.html
   try {
     // Lazy import keeps this module loadable outside a configured Next runtime
     // (scripts, tests) and avoids a hard DB dependency at import time.
@@ -328,8 +335,9 @@ export async function getActivePresetHtml(presetId?: string | null): Promise<str
       where: { id: presetId },
       select: { isActive: true, htmlContent: true }
     })
-    if (!preset || !preset.isActive) return null
-    return preset.htmlContent
+    const html = !preset || !preset.isActive ? null : preset.htmlContent
+    presetHtmlCache.set(presetId, { html, expires: Date.now() + PRESET_CACHE_TTL_MS })
+    return html
   } catch (error) {
     console.error('[PAYSIP_PRESET] Failed to load preset, falling back to default layout:', error)
     return null

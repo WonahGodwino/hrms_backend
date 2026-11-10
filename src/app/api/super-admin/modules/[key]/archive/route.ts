@@ -42,7 +42,7 @@ export async function POST(
 
     return withCors(ApiResponse.success(
       { module: { key: updated.key, name: updated.name, archived: true } },
-      `Module "${mod.name}" archived — it is now hidden from all sidebars and disabled for every company. Re-register it to make it available again.`
+      `Module "${mod.name}" archived. It is now hidden from all sidebars and disabled for every company. Re-register it to make it available again.`
     ), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
@@ -72,7 +72,7 @@ export async function DELETE(
 
     return withCors(ApiResponse.success(
       { module: { key: updated.key, name: updated.name, archived: false } },
-      `Module "${mod.name}" re-registered — grant company access via Module Access.`
+      `Module "${mod.name}" re-registered. Grant company access via Module Access.`
     ), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }

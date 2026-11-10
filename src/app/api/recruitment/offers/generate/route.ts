@@ -45,21 +45,16 @@ export async function POST(request: NextRequest) {
     let requiresException = false
     let gradeName: string | null = null
     if (gradeId) {
-      const grade = await (prisma as any).gradeLevel.findFirst({
+      // Standalone grade levels were replaced by designation seniority bands;
+      // gradeId now carries the designation id.
+      const designation = await prisma.designation.findFirst({
         where: { id: gradeId, companyId },
-        select: { name: true, totalSteps: true },
+        select: { title: true, seniorityBand: true },
       })
-      if (grade) {
-        gradeName = grade.name
-        if (step != null) {
-          // Beyond the grade's actual step ladder → invalid input.
-          if (grade.totalSteps && step > grade.totalSteps)
-            return withCors(ApiResponse.error('step exceeds the grade\'s defined step bands', 422), origin)
-          // Within the ladder but above the approved budget band → needs exception.
-          const approvedCeiling = maxApprovedStep != null ? maxApprovedStep : grade.totalSteps
-          if (approvedCeiling != null && step > approvedCeiling) requiresException = true
-        }
-      }
+      if (designation) gradeName = designation.seniorityBand ?? designation.title
+      // No step ladder exists any more, so only an explicit client-approved
+      // ceiling can trigger an exception.
+      if (step != null && maxApprovedStep != null && step > maxApprovedStep) requiresException = true
     }
 
     const status = requiresException ? 'PENDING_APPROVAL' : 'PENDING_APPROVAL'

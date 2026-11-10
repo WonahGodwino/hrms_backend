@@ -13,6 +13,19 @@ export function isUploadCancelled(uploadId: string): boolean {
 export function clearUploadCancelled(uploadId: string) {
   _cancelledUploads.delete(uploadId)
 }
+
+// In-memory heartbeat per running upload (same process that runs the loop).
+// A live upload keeps touching this; a row that is PROCESSING in the DB but has
+// no heartbeat here belongs to a process that restarted, i.e. it is orphaned.
+const _uploadHeartbeats = new Map<string, number>()
+
+export function touchUploadHeartbeat(uploadId: string) {
+  _uploadHeartbeats.set(uploadId, Date.now())
+}
+
+export function clearUploadHeartbeat(uploadId: string) {
+  _uploadHeartbeats.delete(uploadId)
+}
 // src/app/lib/payroll/utils.ts
 import { prisma } from '@/app/lib/db'
 import path from 'path'
@@ -137,9 +150,16 @@ export function calculateTotals(
 }
 
 // No worker/queue backs this — a crashed or redeployed process leaves a row
-// stuck in PROCESSING forever. Treat anything older than this as abandoned
-// so a company doesn't get permanently locked out of uploading.
-const STALE_UPLOAD_THRESHOLD_MS = 15 * 60 * 1000
+// stuck in PROCESSING forever, so stale uploads are swept to FAILED so a
+// company is never permanently locked out. Staleness is judged on activity,
+// not on how long the upload has been running, so a healthy 3,000-row run is
+// never killed:
+//  - a live run (heartbeat present) is stale only after this long with no
+//    progress (a hung PDF render or email call);
+//  - a PROCESSING row with no heartbeat in this process was left by a process
+//    that restarted, and is abandoned after a short grace period.
+const STALE_NO_PROGRESS_MS = 5 * 60 * 1000
+const ORPHANED_UPLOAD_GRACE_MS = 2 * 60 * 1000
 
 /**
  * Returns the company's in-flight upload (PENDING/PROCESSING), if any.
@@ -155,7 +175,11 @@ export async function getActivePayrollUpload(companyId: string) {
   if (!active) return null
 
   const startedAt = active.startedAt || active.createdAt
-  if (Date.now() - startedAt.getTime() > STALE_UPLOAD_THRESHOLD_MS) {
+  const lastBeat = _uploadHeartbeats.get(active.id)
+  const isStale = lastBeat != null
+    ? Date.now() - lastBeat > STALE_NO_PROGRESS_MS
+    : Date.now() - startedAt.getTime() > ORPHANED_UPLOAD_GRACE_MS
+  if (isStale) {
     await failPayrollUploadRecord(active.id, 'Processing was interrupted (server restarted or timed out)')
     return null
   }
@@ -185,7 +209,7 @@ export async function createPendingPayrollUpload(
   overwriteExisting?: boolean,
   estimatedRecordCount?: number | null
 ) {
-  return await prisma.payrollUpload.create({
+  const created = await prisma.payrollUpload.create({
     data: {
       companyId,
       fileName,
@@ -202,6 +226,40 @@ export async function createPendingPayrollUpload(
       totalRecords: estimatedRecordCount ?? 0,
     },
   })
+  touchUploadHeartbeat(created.id)
+  return created
+}
+
+const PROGRESS_EVERY_ROWS = 25
+
+/**
+ * Called from each processor's row loop. Every PROGRESS_EVERY_ROWS rows it
+ * persists progress (successful/failed counters, which the status endpoint
+ * reports as processed) and refreshes the heartbeat. It also reads the DB
+ * status so a cancel issued from another request/process is honoured, not just
+ * the in-memory flag. Never throws: progress reporting must not fail payroll.
+ */
+export async function reportUploadProgress(
+  uploadId: string | undefined,
+  rowIndex: number,
+  counts: { successful: number; failed: number }
+): Promise<void> {
+  if (!uploadId) return
+  touchUploadHeartbeat(uploadId)
+  if (rowIndex === 0 || rowIndex % PROGRESS_EVERY_ROWS !== 0) return
+  try {
+    const row = await prisma.payrollUpload.findUnique({ where: { id: uploadId }, select: { status: true } })
+    if (row?.status === 'CANCELLED') {
+      markUploadCancelled(uploadId)
+      return
+    }
+    await prisma.payrollUpload.update({
+      where: { id: uploadId },
+      data: { successful: counts.successful, failed: counts.failed },
+    })
+  } catch (err) {
+    console.error('[PAYROLL_PROGRESS] Failed to persist progress (non-critical):', err)
+  }
 }
 
 /**
@@ -213,6 +271,7 @@ export async function completePayrollUploadRecord(
   sendEmails: boolean,
   processedFilePath?: string | null
 ) {
+  clearUploadHeartbeat(uploadId)
   const upload = await prisma.payrollUpload.update({
     where: { id: uploadId },
     data: {
@@ -250,6 +309,7 @@ export async function completePayrollUploadRecord(
  * any per-row results exist (unparseable workbook, no matching template, etc).
  */
 export async function failPayrollUploadRecord(uploadId: string, reason: string) {
+  clearUploadHeartbeat(uploadId)
   return await prisma.payrollUpload.update({
     where: { id: uploadId },
     data: {
@@ -267,6 +327,7 @@ export async function failPayrollUploadRecord(uploadId: string, reason: string) 
  */
 export async function cancelPayrollUpload(uploadId: string) {
   markUploadCancelled(uploadId)
+  clearUploadHeartbeat(uploadId)
   return await prisma.payrollUpload.update({
     where: { id: uploadId },
     data: {

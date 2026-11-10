@@ -1,6 +1,7 @@
 // src/app/lib/payroll/templates/dynamic-processor.ts
 import { prisma } from '@/app/lib/db'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
+import { logPayslipEmailAttempt } from '@/app/lib/payroll/email-log'
 import { generateEnhancedPayslipPdf, type GeneratePayslipInput } from '../generateEnhancedPayslipPdf'
 import { generatePayslipPdfUnified, getActivePresetHtml } from '../payslip-preset-renderer'
 import { watermarkPdfIfTrial } from '@/app/lib/trial/watermark'
@@ -15,7 +16,8 @@ import {
   getMonthNameFromNumber,
   detectMaliciousMarkup,
 } from '../utils/valueParsing'
-import { isUploadCancelled } from './utils'
+import { isUploadCancelled, reportUploadProgress } from './utils'
+import { mapWithConcurrency } from '@/app/lib/payroll/concurrency'
 import { statutorySchemeForField } from '../statutory-columns'
 import { buildStaffIndex, matchStaff } from '../utils/staff-matching'
 
@@ -75,6 +77,8 @@ function splitCsvLine(line: string): string[] {
   result.push(cur.trim())
   return result
 }
+
+const UPLOAD_ROW_CONCURRENCY = 4
 
 export const processDynamicTemplate = {
   async processFile(
@@ -445,7 +449,11 @@ export const processDynamicTemplate = {
     // period: process the first, skip the rest. Key = staffRecordId|month|year.
     const processedKeys = new Set<string>()
 
-    for (let index = 0; index < data.length; index++) {
+    // Each row is independent once the same-upload duplicate guard below has
+    // claimed its staff+period, so rows run a few at a time. The guard runs
+    // synchronously at the top of a row (no await before it) so the first row
+    // in sheet order still wins.
+    const processRow = async (index: number) => {
       // Check if upload was cancelled before processing each row
       if (uploadId && isUploadCancelled(uploadId)) {
         console.log('[DYNAMIC] Upload cancelled, stopping at row', index)
@@ -544,7 +552,7 @@ export const processDynamicTemplate = {
             reason: 'Duplicate of an earlier row for the same staff & pay period',
           })
           console.warn(`[DYNAMIC] Row ${displayRowNumber}: skipped duplicate for ${staffRecord.staffId} ${monthName} ${year}`)
-          continue
+          return
         }
         processedKeys.add(dedupeKey)
 
@@ -837,11 +845,36 @@ export const processDynamicTemplate = {
             
             if (emailResult.success) {
               results.emailsSent++
+              await logPayslipEmailAttempt({
+                companyId: staffRecord.companyId,
+                staffId: staffRecord.id,
+                payslipId,
+                payrollId: payrollRecord.id,
+                recipient: staffRecord.email,
+                emailType: 'PAYSLIP_UPLOAD',
+                success: true,
+              messageId: (emailResult as any)?.data?.id,
+                sentBy: user.userId,
+                month: monthName,
+                year,
+              })
             } else {
               throw new Error(emailResult.error || 'Email sending failed')
             }
           } catch (err: any) {
             const msg = `Email sending failed - ${err.message}`
+            await logPayslipEmailAttempt({
+              companyId: staffRecord.companyId,
+              staffId: staffRecord.id,
+              payslipId,
+              payrollId: payrollRecord.id,
+              recipient: staffRecord.email,
+              emailType: 'PAYSLIP_UPLOAD',
+              success: false,
+              sentBy: user.userId,
+              month: monthName,
+              year,
+            })
             results.errors.push(`Row ${displayRowNumber}: ${msg}`)
             results.emailFailures.push({
               rowNumber: displayRowNumber,
@@ -871,6 +904,7 @@ export const processDynamicTemplate = {
 
         results.successful++
         results.processedRecords.push({
+          rowNumber: displayRowNumber,
           staffId: staffRecord.staffId,
           staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
           month: monthName,
@@ -879,7 +913,7 @@ export const processDynamicTemplate = {
           grossPay: totalEarnings,
           totalDeductions: totalDeductions,
           status: isUpdate ? 'UPDATED' : 'PROCESSED',
-          emailSent: sendEmails,
+          emailSent: sendEmails && !results.emailFailures.some(f => f.rowNumber === displayRowNumber),
           emailStatus: sendEmails ? 
             (results.emailFailures.some(f => f.rowNumber === displayRowNumber) ? 'FAILED' : 'SENT') : 
             'SKIPPED',
@@ -905,6 +939,27 @@ export const processDynamicTemplate = {
         })
       }
     }
+
+    let rowsDone = 0
+    const rowOutcomes = await mapWithConcurrency(
+      Array.from({ length: data.length }, (_, i) => i),
+      UPLOAD_ROW_CONCURRENCY,
+      async (index) => {
+        await processRow(index)
+        rowsDone++
+        await reportUploadProgress(uploadId, rowsDone, { successful: results.successful, failed: results.failed })
+      }
+    )
+    // processRow only throws for a cancellation (everything else is recorded
+    // per row); surface it once every in-flight row has settled so cleanup
+    // never races a row that is still writing.
+    const aborted = rowOutcomes.find((o) => !o.ok)
+    if (aborted && !aborted.ok) throw aborted.error
+
+    // Rows finish out of order under concurrency; restore sheet order.
+    results.processedRecords.sort((a: any, b: any) => (a.rowNumber ?? 0) - (b.rowNumber ?? 0))
+    results.failedRecords.sort((a: any, b: any) => (a.ROW_NUMBER ?? 0) - (b.ROW_NUMBER ?? 0))
+
 
     console.log('[DYNAMIC_PROCESSOR] Processing completed', {
       successful: results.successful,

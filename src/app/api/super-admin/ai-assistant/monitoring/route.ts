@@ -1,4 +1,4 @@
-// [ai-assistant] Super Admin monitoring — GET: response time and error rate per provider, and refused requests by reason.
+// [ai-assistant] Super Admin monitoring - GET: response time and error rate per provider, and refused requests by reason.
 // Counts and timings only; no message content is read.
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'

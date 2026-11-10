@@ -1,4 +1,4 @@
-// [ai-assistant] Super Admin success metrics — GET ?days=90 (1 to 365).
+// [ai-assistant] Super Admin success metrics - GET ?days=90 (1 to 365).
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'

@@ -4,6 +4,10 @@ import { NextRequest } from 'next/server';
 import { requireRole } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
+import { cleanStaffText, PLACEHOLDER_TEXT_VALUES } from '@/app/lib/staff/placeholder-values';
+
+// Department values that count as "unassigned" in the summary counts.
+const PLACEHOLDER_DEPARTMENT_VALUES = ['', ' ', ...PLACEHOLDER_TEXT_VALUES];
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 
 export async function OPTIONS(request: NextRequest) {
@@ -75,8 +79,18 @@ export async function GET(request: NextRequest) {
 		}
 
 		// Department filter if provided
+		// Matches either the linked Department's name (what the list displays)
+		// or the legacy free-text column. Combined via AND so it can't clobber
+		// the search OR below.
 		if (department) {
-			where.department = { contains: department, mode: 'insensitive' };
+			where.AND = [
+				{
+					OR: [
+						{ departments: { name: { equals: department, mode: 'insensitive' } } },
+						{ department: { contains: department, mode: 'insensitive' } },
+					],
+				},
+			];
 		}
 
 		// Employment status filter (revamp staff-management).
@@ -125,8 +139,15 @@ export async function GET(request: NextRequest) {
 					updatedAt: true,
 					createdAt: true,
 					companyId: true,
+					location: true,
 					designation: {
 						select: { title: true, code: true },
+					},
+					departments: {
+						select: { id: true, name: true },
+					},
+					locationRecord: {
+						select: { name: true },
 					},
 					company: {
 						select: {
@@ -158,13 +179,33 @@ export async function GET(request: NextRequest) {
 		// Get active and inactive counts
 		let activeCount = 0;
 		let inactiveCount = 0;
+		// Whole-result-set counts for the Staff Management summary cards. These
+		// must come from the database: the page used to derive them from a
+		// single 1,000-row fetch, so large companies (7k+ staff) saw "1000".
+		let blockedCount = 0;
+		let needsAssignmentCount = 0;
 
 		if (includeInactive) {
 			const activeWhere = { ...where, isActive: true };
 			const inactiveWhere = { ...where, isActive: false };
 
-			activeCount = await prisma.staffRecord.count({ where: activeWhere });
-			inactiveCount = await prisma.staffRecord.count({ where: inactiveWhere });
+			[activeCount, inactiveCount, blockedCount, needsAssignmentCount] = await Promise.all([
+				prisma.staffRecord.count({ where: activeWhere }),
+				prisma.staffRecord.count({ where: inactiveWhere }),
+				prisma.staffRecord.count({ where: { ...where, isBlocked: true } }),
+				// Active staff with no linked department and no usable department
+				// text (blank or a filler like "0" from older imports).
+				prisma.staffRecord.count({
+					where: {
+						...activeWhere,
+						departmentId: null,
+						AND: [
+							...((where.AND as any[]) || []),
+							{ OR: [{ department: null }, { department: { in: PLACEHOLDER_DEPARTMENT_VALUES, mode: 'insensitive' } }] },
+						],
+					},
+				}),
+			]);
 		} else {
 			activeCount = totalCount;
 			inactiveCount = 0;
@@ -175,6 +216,12 @@ export async function GET(request: NextRequest) {
 			// A staff is a manager if their staffId is referenced as a managerId in the same company
 			// Or if their role is HR, ADMIN, or MANAGER and their staffId is found in managerId
 			const isManager = managerStaffIds.includes(record.staffId);
+			// Prefer the linked Department/Designation records (what Core Setup
+			// owns); fall back to the free-text columns, ignoring filler values
+			// like "0" that older imports stored for blank cells.
+			const department = cleanStaffText(record.departments?.name) ?? cleanStaffText(record.department);
+			const position = cleanStaffText(record.position);
+			const designation = cleanStaffText(record.designation?.title) ?? position;
 			return {
 				id: record.id,
 				staffId: record.staffId,
@@ -183,13 +230,15 @@ export async function GET(request: NextRequest) {
 				lastName: record.lastName,
 				fullName: `${record.firstName} ${record.lastName}`,
 				role: record.role,
-				department: record.department,
-				position: record.position,
-				phone: record.phone,
+				department,
+				departmentId: record.departments?.id || null,
+				position,
+				phone: cleanStaffText(record.phone),
+				location: cleanStaffText(record.locationRecord?.name) ?? cleanStaffText(record.location),
 				isActive: record.isActive,
 				isBlocked: record.isBlocked,
 				accessStatus: record.isBlocked ? 'blocked' : 'enabled',
-				designation: record.designation?.title || record.position || '—',
+				designation: designation || '—',
 				designationCode: record.designation?.code || null,
 				lastUpdated: record.updatedAt,
 				createdAt: record.createdAt,
@@ -213,6 +262,8 @@ export async function GET(request: NextRequest) {
 					active: activeCount,
 					inactive: inactiveCount,
 					total: activeCount + inactiveCount,
+					blocked: blockedCount,
+					needsAssignment: needsAssignmentCount,
 				},
 				filters: {
 					includeInactive,

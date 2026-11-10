@@ -17,6 +17,52 @@ const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@ms.hr247.co.uk'
 const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk'
 const BACKEND_URL = process.env.BACKEND_URL || 'https://hrms.isurfglobal.com'
 
+// ========== Resilient sending ==========
+// EMAIL_DRY_RUN=true (or PAYROLL_EMAIL_DRY_RUN=true) short-circuits every send:
+// nothing reaches Mailgun and no cost is incurred, but callers still get a
+// success result and their logging runs. Use it for load tests and local runs.
+const isEmailDryRun = () =>
+  ['true', '1'].includes(String(process.env.EMAIL_DRY_RUN ?? process.env.PAYROLL_EMAIL_DRY_RUN ?? '').toLowerCase())
+
+const SEND_TIMEOUT_MS = 15_000
+const SEND_MAX_ATTEMPTS = 3
+
+const payrollCompanyCache = new Map<string, { companyName: string; baseCurrency: string; expires: number }>()
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// 429, 5xx, timeouts and network errors are transient; other 4xx are permanent
+// (bad address, auth, validation) and must not be retried.
+function isTransientEmailError(error: any): boolean {
+  const status = Number(error?.status ?? error?.statusCode)
+  if (Number.isFinite(status) && status > 0) return status === 429 || status >= 500
+  return true // no HTTP status: timeout / connection reset / DNS
+}
+
+async function createMessageWithRetry(mailOptions: any): Promise<any> {
+  let lastError: any
+  for (let attempt = 1; attempt <= SEND_MAX_ATTEMPTS; attempt++) {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        mg.messages.create(MAILGUN_DOMAIN, mailOptions),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Email request timed out')), SEND_TIMEOUT_MS)
+        }),
+      ])
+    } catch (error: any) {
+      lastError = error
+      if (attempt === SEND_MAX_ATTEMPTS || !isTransientEmailError(error)) break
+      const retryAfter = Number(error?.headers?.['retry-after'])
+      const backoff = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 500 * 2 ** (attempt - 1)
+      await sleep(Math.min(backoff, 10_000) + Math.floor(Math.random() * 250))
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+  throw lastError
+}
+
 // ========== NEW: Generic sendEmail function ==========
 export async function sendEmail(options: {
   to: string | string[]
@@ -70,7 +116,11 @@ export async function sendEmail(options: {
       }))
     }
 
-    const data = await mg.messages.create(MAILGUN_DOMAIN, mailOptions)
+    if (isEmailDryRun()) {
+      return { success: true, data: { id: 'dry-run', message: 'EMAIL_DRY_RUN: not sent' } }
+    }
+
+    const data = await createMessageWithRetry(mailOptions)
 
     console.log(`✅ Email sent successfully: ${data.id} to ${options.to}`)
     return { success: true, data }
@@ -413,25 +463,37 @@ export async function sendPayrollNotificationEmail(
     console.log(`📧 Attempting to send payroll email to ${staff.email}`)
     console.log(`📧 Using domain: ${MAILGUN_DOMAIN}, from: ${FROM_EMAIL}`)
 
-    // Fetch company name from database
+    // Company name/currency: cached per company for a few minutes so a
+    // 3,000-email run does one lookup instead of 3,000.
     let companyName = 'Your Company' // Default fallback
     let companyBaseCurrency = 'NGN'
 
-    try {
-      const company = await prisma.company.findUnique({
-        where: { id: staff.companyId },
-        select: { companyName: true, baseCurrency: true as any }
-      })
+    const cachedCompany = payrollCompanyCache.get(staff.companyId)
+    if (cachedCompany && cachedCompany.expires > Date.now()) {
+      companyName = cachedCompany.companyName
+      companyBaseCurrency = cachedCompany.baseCurrency
+    } else {
+      try {
+        const company = await prisma.company.findUnique({
+          where: { id: staff.companyId },
+          select: { companyName: true, baseCurrency: true as any }
+        })
 
-      if (company) {
-        companyName = company.companyName
-        companyBaseCurrency = normalizeCurrencyCode((company as any).baseCurrency || 'NGN')
-      } else {
-        console.warn(`⚠️ Company not found for ID: ${staff.companyId}, using default name`)
+        if (company) {
+          companyName = company.companyName
+          companyBaseCurrency = normalizeCurrencyCode((company as any).baseCurrency || 'NGN')
+          payrollCompanyCache.set(staff.companyId, {
+            companyName,
+            baseCurrency: companyBaseCurrency,
+            expires: Date.now() + 5 * 60 * 1000,
+          })
+        } else {
+          console.warn(`⚠️ Company not found for ID: ${staff.companyId}, using default name`)
+        }
+      } catch (dbError) {
+        console.error('❌ Failed to fetch company name from database:', dbError)
+        // Continue with default name
       }
-    } catch (dbError) {
-      console.error('❌ Failed to fetch company name from database:', dbError)
-      // Continue with default name
     }
 
     // Generate access token - INCLUDING companyId
@@ -469,12 +531,10 @@ export async function sendPayrollNotificationEmail(
         accessUrl = `${frontendUrl}/login?email=${encodeURIComponent(staff.email)}`
       }
       callToAction = 'Login to view your payslip'
-      console.log(`✅ Registered user URL (frontend): ${accessUrl}`)
     } else {
       // For unregistered users: API endpoint on BACKEND
       accessUrl = `${backendUrl}/api/auth/payslip-access?token=${accessToken}`
       callToAction = 'Complete your registration to access your payslip'
-      console.log(`✅ Unregistered user URL (backend API): ${accessUrl}`)
     }
 
     const subject = payroll.isUpdate
@@ -709,7 +769,6 @@ If you have any questions, please contact your HR department.`
 
     if (result.success) {
       console.log(`✅ Payroll notification email sent to ${staff.email} from ${companyName}`)
-      console.log(`🔗 Access URL: ${accessUrl}`)
       console.log(`👤 User registration status: ${staff.isRegistered ? 'Registered' : 'Unregistered'}`)
     } else {
       console.error(`❌ Failed to send payroll email: ${result.error}`)

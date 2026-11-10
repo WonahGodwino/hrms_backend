@@ -47,7 +47,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (upload.status === 'PENDING' || upload.status === 'PROCESSING') {
       return withCors(
         ApiResponse.success(
-          { uploadId: upload.id, status: upload.status, totalRecords: upload.totalRecords ?? null },
+          {
+            uploadId: upload.id,
+            status: upload.status,
+            totalRecords: upload.totalRecords ?? null,
+            // Rows handled so far (persisted every ~25 rows by the processor).
+            processed: (upload.successful ?? 0) + (upload.failed ?? 0),
+          },
           'Payroll upload is still processing'
         ),
         origin

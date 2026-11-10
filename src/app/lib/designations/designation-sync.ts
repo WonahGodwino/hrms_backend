@@ -1,7 +1,8 @@
 import { prisma } from '@/app/lib/db';
+import { isPlaceholderValue } from '@/app/lib/staff/placeholder-values';
 
 export function normalizeDesignationTitle(raw: string | null | undefined): string | null {
-	if (!raw) return null;
+	if (!raw || isPlaceholderValue(raw)) return null;
 	const normalized = raw.replace(/\s+/g, ' ').trim();
 	return normalized || null;
 }

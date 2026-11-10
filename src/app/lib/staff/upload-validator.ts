@@ -7,6 +7,7 @@ import { describeIdentifierCollision } from '@/app/lib/staff/identifierCollision
 import { loadActivePfaCodes, parsePensionRow } from '@/app/lib/staff/pension-fields'
 import { NSITF_IDENTITY_FIELD_KEYS, parseHireDateCell, parseNsitfIdentityRow, nsitfIdentityWarnings } from '@/app/lib/staff/nsitf-identity-fields'
 import { cellToString, cleanEmail, isValidEmail, normalizeHeader, pick, type ParsedUploadRow } from '@/app/lib/staff/upload-parser'
+import { isPlaceholderValue } from '@/app/lib/staff/placeholder-values'
 
 export type RowIssue = { field: string; message: string }
 
@@ -125,7 +126,9 @@ function validateFields(f: StaffUploadFields, row: Record<string, string>, pfaCo
     else if (/^\d+$/.test(value)) err(key, `${LABEL[key]} "${value}" looks like a number, not a name.`)
   }
   if (f.department.length > 100) err('department', 'Department is longer than 100 characters.')
+  else if (f.department && isPlaceholderValue(f.department)) err('department', `Department "${f.department}" is not a department name.`)
   if (f.position.length > 100) err('position', 'Position is longer than 100 characters.')
+  else if (f.position && isPlaceholderValue(f.position)) err('position', `Position "${f.position}" is not a position name.`)
 
   if (f.phone) {
     const digits = f.phone.replace(/[\s\-().]/g, '')

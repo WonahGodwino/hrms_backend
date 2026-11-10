@@ -241,5 +241,5 @@ function token(authHeader: string) {
 }
 
 function currency(n: number) {
-	return `NGN ${Math.round(n).toLocaleString()}`
+	return `NGN ${Math.round(n).toLocaleString('en-NG')}`
 }

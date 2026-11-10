@@ -7,6 +7,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validateCompanyAccess, logDepartmentAction } from '@/app/lib/departments/department-utils'
 import { sanitizeDepartmentName } from '@/app/lib/departments/department-sync'
+import { generateDepartmentCode, resolveBusinessUnitLink } from '@/app/lib/departments/business-unit-link'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -24,14 +25,17 @@ export async function POST(request: NextRequest) {
     const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
     const body = await request.json()
     
-    const { name: rawName, code, businessUnit, companyId, headId, assistantHeadId } = body
+    const { name: rawName, companyId, headId, assistantHeadId } = body
     // Title-cased so manually-created departments never differ from
     // auto-sync-created ones by casing alone (see department-sync.ts).
     const name = sanitizeDepartmentName(rawName)
 
-    if (!name || !code || !companyId) {
-      return withCors(ApiResponse.error('Missing required fields: name, code, companyId', 400), origin)
+    // Only the name and company are required. Business unit and code are
+    // optional: a code is generated from the name when none is given.
+    if (!name || !companyId) {
+      return withCors(ApiResponse.error('Missing required fields: name, companyId', 400), origin)
     }
+    const code = String(body.code ?? '').trim() || (await generateDepartmentCode(companyId, name))
 
     const hasAccess = await validateCompanyAccess(user, companyId)
     if (!hasAccess && user.role !== 'SUPER_ADMIN') {
@@ -76,11 +80,15 @@ export async function POST(request: NextRequest) {
     
     await assertTrialCapacity(companyId || user.companyId, 'departments')
 
+    // Optional; accepts a BusinessUnit id or name, and links the record.
+    const unit = (await resolveBusinessUnitLink(companyId, body)) ?? { businessUnit: null, businessUnitId: null }
+
     const department = await prisma.department.create({
       data: {
         name,
         code,
-        businessUnit: businessUnit || null,
+        businessUnit: unit.businessUnit,
+        businessUnitId: unit.businessUnitId,
         companyId,
         headId: headId || null,
         assistantHeadId: assistantHeadId || null,
@@ -108,7 +116,7 @@ export async function POST(request: NextRequest) {
       user.userId,
       userName,
       'create',
-      { name, code, businessUnit, headId, assistantHeadId }
+      { name, code, businessUnit: unit.businessUnit, businessUnitId: unit.businessUnitId, headId, assistantHeadId }
     )
     
     return withCors(ApiResponse.success({ 

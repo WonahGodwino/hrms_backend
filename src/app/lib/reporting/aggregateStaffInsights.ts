@@ -21,10 +21,16 @@ export type AggregateStaffInsightsParams = {
   year: number
   month: number
   quarter: number
+  // Sections a caller doesn't display can be skipped; both default to on.
+  // The Reports Hub turns them off because it has dedicated Attendance and
+  // Leave sections, and these two read every attendance row in the period.
+  include?: { attendance?: boolean; leave?: boolean }
 }
 
 export async function aggregateStaffInsights(params: AggregateStaffInsightsParams) {
   const { targetCompanyIds, period, year, month, quarter } = params
+  const includeAttendance = params.include?.attendance !== false
+  const includeLeave = params.include?.leave !== false
   const { start, end } = getPeriodRange(period, year, month, quarter)
   const now = new Date()
 
@@ -232,10 +238,12 @@ export async function aggregateStaffInsights(params: AggregateStaffInsightsParam
   // Attendance — present-day rate within the period, by department.
   // "Present" = a sign-in was recorded (mirrors deriveAttendanceStatus in
   // /api/attendance/daily — absent means no signInTime).
-  const attendanceRecords = await prisma.attendance.findMany({
-    where: { companyId: { in: targetCompanyIds }, date: { gte: start, lt: end } },
-    select: { staffId: true, signInTime: true }
-  })
+  const attendanceRecords = includeAttendance
+    ? await prisma.attendance.findMany({
+        where: { companyId: { in: targetCompanyIds }, date: { gte: start, lt: end } },
+        select: { staffId: true, signInTime: true }
+      })
+    : []
   const staffDepartmentMap = new Map(staff.map((s) => [s.id, (s.departmentId && departmentById.get(s.departmentId)?.name) || 'Unassigned']))
   const attendanceByDeptMap = new Map<string, { label: string; present: number; total: number }>()
   for (const record of attendanceRecords) {
@@ -257,10 +265,12 @@ export async function aggregateStaffInsights(params: AggregateStaffInsightsParam
 
   // Leave utilization — StaffLeaveBalance is year-scoped, not
   // month/quarter-scoped, so this always reflects the whole `year`.
-  const leaveBalances = await prisma.staffLeaveBalance.findMany({
-    where: { year, staffRecord: { companyId: { in: targetCompanyIds } } },
-    select: { usedDays: true, totalDays: true, staffRecordId: true }
-  })
+  const leaveBalances = includeLeave
+    ? await prisma.staffLeaveBalance.findMany({
+        where: { year, staffRecord: { companyId: { in: targetCompanyIds } } },
+        select: { usedDays: true, totalDays: true, staffRecordId: true }
+      })
+    : []
   const leaveByDeptMap = new Map<string, { label: string; usedDays: number; totalDays: number }>()
   for (const balance of leaveBalances) {
     const label = staffDepartmentMap.get(balance.staffRecordId) || 'Unassigned'

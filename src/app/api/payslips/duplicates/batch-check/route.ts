@@ -6,7 +6,9 @@ import { NextRequest } from 'next/server';
 import { requireRole } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
+import { staffIdsWithMultiplePayslips } from '@/app/lib/payroll/payslip-duplicate-prefilter';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { groupDuplicatePayslips } from '@/app/lib/payroll/payslip-duplicates';
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -44,44 +46,29 @@ export async function GET(request: NextRequest) {
     if (month) where.month = month;
     if (year) where.year = parseInt(year);
 
-    const payslips = await prisma.payslip.findMany({
+    // Only staff with 2+ payslips in the filter can have duplicates.
+    const candidateStaffIds = await staffIdsWithMultiplePayslips(where);
+    if (candidateStaffIds.length > 0) where.staffRecordId = { in: candidateStaffIds };
+
+    const payslips = candidateStaffIds.length === 0 ? [] : await prisma.payslip.findMany({
       where,
       select: {
         staffRecordId: true,
         payrollId: true,
         month: true,
         year: true,
+        payroll: { select: { templateId: true, templateType: true } },
       },
     });
 
-    // Group by staffRecordId + month + year
-    const groups: Record<string, Set<string>> = {};
-    for (const p of payslips) {
-      const key = `${p.staffRecordId}-${p.month}-${p.year}`;
-      if (!groups[key]) groups[key] = new Set();
-      groups[key].add(p.payrollId);
-    }
-
-    // Find staff with at least one duplicate group
+    // Duplicates = same staff + period + SAME template (2+ payslips).
     const staffWithDuplicates: Record<string, { hasDuplicates: boolean; duplicateCount: number; totalExcessPayslips: number }> = {};
 
-    for (const [key, payrollIds] of Object.entries(groups)) {
-      if (payrollIds.size > 1) {
-        const staffRecordId = key.split('-')[0]; // first part is staffRecordId
-        // Parse the key more carefully (staffRecordId could contain dashes)
-        const dashIndex = key.indexOf('-');
-        const actualStaffId = key.substring(0, dashIndex);
-
-        if (!staffWithDuplicates[actualStaffId]) {
-          staffWithDuplicates[actualStaffId] = {
-            hasDuplicates: true,
-            duplicateCount: 0,
-            totalExcessPayslips: 0,
-          };
-        }
-        staffWithDuplicates[actualStaffId].duplicateCount++;
-        staffWithDuplicates[actualStaffId].totalExcessPayslips += payrollIds.size - 1;
-      }
+    for (const [, slips] of groupDuplicatePayslips(payslips)) {
+      const staffRecordId = slips[0].staffRecordId;
+      const entry = (staffWithDuplicates[staffRecordId] ||= { hasDuplicates: true, duplicateCount: 0, totalExcessPayslips: 0 });
+      entry.duplicateCount++;
+      entry.totalExcessPayslips += slips.length - 1;
     }
 
     const affectedStaffCount = Object.keys(staffWithDuplicates).length;

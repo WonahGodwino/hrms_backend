@@ -9,6 +9,7 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { ensureDefaultPayslipPreset } from '@/app/lib/payroll/seed-default-payslip-preset'
 import { validatePresetHtml } from '@/app/lib/payroll/payslip-preset-renderer'
 
 export async function OPTIONS(request: NextRequest) {
@@ -40,6 +41,10 @@ export async function GET(request: NextRequest) {
     if (!(await verifyCompanyAccess(user, companyId))) {
       return withCors(ApiResponse.error('Access denied to this company', 403), origin)
     }
+
+    // Self-healing: guarantee the built-in preset exists for this company
+    // (covers companies created before it was seeded, and fresh deployments).
+    await ensureDefaultPayslipPreset(companyId)
 
     const presets = await prisma.payslipPreset.findMany({
       where: { companyId },

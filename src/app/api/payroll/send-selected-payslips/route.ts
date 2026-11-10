@@ -8,6 +8,15 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
 import { consumeTrialQuota } from '@/app/lib/trial/guard'
+import { createRateLimiter, mapWithConcurrency } from '@/app/lib/payroll/concurrency'
+import { markPayslipEmailResult } from '@/app/lib/payroll/payslip-email-status'
+
+// Sends run a few at a time under a global rate cap: ~6x faster than one by
+// one, while staying gentle on the mail provider. Very large selections (a
+// whole month) should use the async bulk-send endpoint instead, which does not
+// hold the HTTP request open.
+const SEND_CONCURRENCY = 6
+const SEND_RATE_PER_SECOND = 15
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -108,8 +117,13 @@ export async function POST(request: NextRequest) {
         companyId: companyId
       },
       include: {
-        staffRecord: true
-        // REMOVED: payroll include since it's causing issues
+        // Only the fields the email needs (whole staff rows carry bank details etc.)
+        staffRecord: {
+          select: {
+            id: true, companyId: true, firstName: true, lastName: true, email: true,
+            staffId: true, department: true, position: true, isRegistered: true,
+          },
+        },
       }
     })
 
@@ -186,7 +200,7 @@ export async function POST(request: NextRequest) {
       }>
     }
 
-    for (const payslip of payslips) {
+    const processOne = async (payslip: (typeof payslips)[number]) => {
       const staff = payslip.staffRecord
       const payroll = payslip.payrollId ? payrollsMap.get(payslip.payrollId) : null
       const staffName = `${staff.firstName} ${staff.lastName}`
@@ -233,6 +247,7 @@ export async function POST(request: NextRequest) {
 
         if (emailResult.success) {
           results.successful++
+          await markPayslipEmailResult(payslip.id, { success: true, messageId: (emailResult as any)?.data?.id ? String((emailResult as any).data.id).replace(/^<|>$/g, '') : null })
           results.details.push({
             payslipId: payslip.id,
             staffName,
@@ -259,7 +274,8 @@ export async function POST(request: NextRequest) {
                   month: payslip.month,
                   year: payslip.year,
                   isUpdate: payrollForEmail.isUpdate,
-                  isRegistered: staffForEmail.isRegistered
+                  isRegistered: staffForEmail.isRegistered,
+                  messageId: (emailResult as any)?.data?.id ? String((emailResult as any).data.id).replace(/^<|>$/g, '') : null
                 }
               }
             })
@@ -272,6 +288,7 @@ export async function POST(request: NextRequest) {
         }
       } catch (error: any) {
         results.failed++
+        await markPayslipEmailResult(payslip.id, { success: false })
         results.details.push({
           payslipId: payslip.id,
           staffName,
@@ -308,6 +325,16 @@ export async function POST(request: NextRequest) {
         }
       }
     }
+
+    const acquireSlot = createRateLimiter(SEND_RATE_PER_SECOND)
+    await mapWithConcurrency(payslips, SEND_CONCURRENCY, async (payslip) => {
+      await acquireSlot()
+      await processOne(payslip)
+    })
+
+    // Sends finish out of order; return the details in the order requested.
+    const order = new Map(payslips.map((p, i) => [p.id, i]))
+    results.details.sort((a, b) => (order.get(a.payslipId) ?? 0) - (order.get(b.payslipId) ?? 0))
 
     // Prepare response
     const responseData = {

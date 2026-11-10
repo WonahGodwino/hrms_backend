@@ -38,7 +38,13 @@ export async function POST(request: NextRequest, { params }: { params: { runId: 
 		if (!run) {
 			return withCors(ApiResponse.error('Generation run not found', 404), origin);
 		}
-		if (run.status === 'PROCESSING') {
+		// A run stuck in PROCESSING (server restarted mid-approval) would otherwise
+		// be locked forever. The approval loop touches updatedAt every ~25 rows, so
+		// no activity for 5 minutes means it is abandoned; re-approving resumes the
+		// rows still in GENERATED.
+		const APPROVAL_STALE_MS = 5 * 60 * 1000;
+		const approvalIsStale = run.status === 'PROCESSING' && Date.now() - run.updatedAt.getTime() > APPROVAL_STALE_MS;
+		if (run.status === 'PROCESSING' && !approvalIsStale) {
 			return withCors(ApiResponse.error('This payroll is still being processed. Please wait for it to finish.', 409), origin);
 		}
 		if (run.status === 'APPROVED') {

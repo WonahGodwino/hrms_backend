@@ -10,6 +10,17 @@ import PDFDocument from 'pdfkit'
 import { NextResponse } from 'next/server'
 import type { CostCentreSheet } from './types'
 import type { SummaryWorkbookData } from './payroll-sheets'
+import type {
+  PayrollSummaryReport,
+  AggregateComparisonReport,
+  MultiPeriodAggregateReport,
+  VarianceSummaryRow,
+  FinancePayrollSummaryReport,
+  FinancePayrollCostRow,
+  FinanceRemittanceRow,
+  FinanceAggregateReport,
+  FinanceVarianceRow,
+} from './reports'
 
 // ── Column definition ─────────────────────────────────────────
 export interface ReportColDef {
@@ -860,8 +871,6 @@ export async function exportReportResponse(
 // PAYROLL SUMMARY – dedicated table-based export
 // Matches screenshot: category rows + TOTAL row (7 columns)
 // =============================================================
-
-import type { PayrollSummaryReport, AggregateComparisonReport, MultiPeriodAggregateReport, VarianceSummaryRow } from './reports'
 
 const SUMMARY_HEADERS = [
   'Payroll',
@@ -2828,13 +2837,6 @@ export function exportIADSummaryToPdf(
 // =============================================================
 // FINANCE PAYROLL SUMMARY – Excel & PDF
 // =============================================================
-import type {
-  FinancePayrollSummaryReport,
-  FinancePayrollCostRow,
-  FinanceRemittanceRow,
-  FinanceAggregateReport,
-  FinanceVarianceRow,
-} from './reports'
 
 const FINANCE_TEAL       = '0f766e'
 const FINANCE_TEAL_LIGHT = 'ccfbf1'

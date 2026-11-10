@@ -445,6 +445,8 @@ async function processPayrollUploadInBackground({
     const stalePayrolls = await prisma.payroll.findMany({
       where: {
         companyId,
+        // Only rows this upload created (see cancel/route.ts).
+        payrollUploadId: uploadId,
         createdAt: { gte: new Date(startTime) },
       },
       select: { id: true },

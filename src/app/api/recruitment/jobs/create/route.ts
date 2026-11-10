@@ -248,10 +248,13 @@ export async function POST(request: NextRequest) {
         experienceLevel: body.experienceLevel,
         ...(salary !== null ? { salary } : {}),
         benefits: benefits ? JSON.parse(JSON.stringify(benefits)) : undefined,
-        locations: locations ? JSON.parse(JSON.stringify(locations)) : undefined,
+        locations: locations
+          ? JSON.parse(JSON.stringify(locations))
+          : undefined,
         ...(offerDefaults ? { offerDefaults } : {}),
         expirationDate,
         status: status as any,
+        ...(status === "ACTIVE" ? { publishedAt: new Date() } : {}),
         createdBy: user.userId,
         updatedBy: user.userId,
       } as any,

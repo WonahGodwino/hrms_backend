@@ -917,31 +917,40 @@ model Payroll {
 }
 
 model Payslip {
-  id            String      @id @default(cuid())
-  payrollId     String
-  staffRecordId String
-  companyId     String
-  fileData      Bytes?
-  fileName      String
-  fileType      String      @default("application/pdf")
-  fileSize      Int?
-  filePath      String?
-  month         String
-  year          Int
-  grossPay      Decimal?    @db.Decimal(18, 2)
-  netPay        Decimal?    @db.Decimal(18, 2)
-  draft         Boolean     @default(true)
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @default(now()) @updatedAt
-  updatedBy     String?
-  createdBy     String?
-  company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  payroll       Payroll     @relation(fields: [payrollId], references: [id], onDelete: Cascade)
-  staffRecord   StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
-  emailLogs     EmailLog[]
+  id             String      @id @default(cuid())
+  payrollId      String
+  staffRecordId  String
+  companyId      String
+  fileData       Bytes?
+  fileName       String
+  fileType       String      @default("application/pdf")
+  fileSize       Int?
+  filePath       String?
+  month          String
+  year           Int
+  grossPay       Decimal?    @db.Decimal(18, 2)
+  netPay         Decimal?    @db.Decimal(18, 2)
+  draft          Boolean     @default(true)
+  // Per-payslip email outcome so a crashed bulk send can resume and the Mailgun
+  // delivery webhook can match events. emailStatus: 'SENT' | 'FAILED' | null (never attempted).
+  emailStatus    String?
+  emailSentAt    DateTime?
+  emailMessageId String? // Mailgun message id, without angle brackets
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @default(now()) @updatedAt
+  updatedBy      String?
+  createdBy      String?
+  company        Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payroll        Payroll     @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+  staffRecord    StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+  emailLogs      EmailLog[]
 
   @@index([staffRecordId, year, month])
   @@index([staffRecordId, draft])
+  @@index([companyId, year, month])
+  @@index([companyId, month, year, draft])
+  @@index([payrollId])
+  @@index([emailMessageId])
   @@map("payslips")
 }
 
@@ -1000,12 +1009,14 @@ model PayrollUpload {
   failureReason     String?
   startedAt         DateTime?
   completedAt       DateTime?
+  lastHeartbeatAt   DateTime? // written by the running job so stalled-job checks work across server instances
   createdAt         DateTime            @default(now())
   company           Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   template          PayrollTemplate?    @relation(fields: [templateId], references: [id])
   payrolls          Payroll[]
 
   @@index([companyId, status])
+  @@index([companyId, createdAt])
   @@map("payroll_uploads")
 }
 
@@ -1023,21 +1034,22 @@ enum PayrollUploadStatus {
 // potentially thousands of emails sequentially can't happen inside a single
 // HTTP request without risking a timeout.
 model PayslipBulkSend {
-  id            String                @id @default(cuid())
-  companyId     String
-  month         String
-  year          Int
-  totalPayslips Int                   @default(0)
-  sent          Int                   @default(0)
-  failed        Int                   @default(0)
-  emailFailures Json?
-  status        PayslipBulkSendStatus @default(PENDING)
-  failureReason String?
-  triggeredBy   String
-  startedAt     DateTime?
-  completedAt   DateTime?
-  createdAt     DateTime              @default(now())
-  company       Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  id              String                @id @default(cuid())
+  companyId       String
+  month           String
+  year            Int
+  totalPayslips   Int                   @default(0)
+  sent            Int                   @default(0)
+  failed          Int                   @default(0)
+  emailFailures   Json?
+  status          PayslipBulkSendStatus @default(PENDING)
+  failureReason   String?
+  triggeredBy     String
+  startedAt       DateTime?
+  completedAt     DateTime?
+  lastHeartbeatAt DateTime? // written by the running job so stalled-job checks work across server instances
+  createdAt       DateTime              @default(now())
+  company         Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId, status])
   @@map("payslip_bulk_sends")
@@ -1451,6 +1463,7 @@ model RecruitmentPageAccess {
   @@unique([companyId, pageKey])
   @@map("recruitment_page_access")
 }
+
 // ==================== RECRUITMENT: CANDIDATE PORTAL ====================
 // Candidate Portal
 enum AccountDocumentCategory {
@@ -1748,8 +1761,8 @@ model Candidate {
 
   @@unique([email, companyId])
   @@index([companyId, archived])
-  @@map("candidates")
   @@index([accountId])
+  @@map("candidates")
 }
 
 model ApplicationStageHistory {
@@ -2790,6 +2803,7 @@ model Notification {
 
   @@index([userId])
   @@index([companyId])
+  @@index([userId, read, createdAt])
   @@map("notifications")
 }
 
@@ -2818,6 +2832,8 @@ model EmailLog {
   @@index([payrollId])
   @@index([payslipId])
   @@index([createdAt])
+  @@index([companyId, status, createdAt])
+  @@index([emailType, createdAt])
 }
 
 // ==================== PAYROLL TEMPLATE MODULE ====================
@@ -4635,6 +4651,7 @@ model PhedBulkUpload {
 
   company   Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   payPeriod PhedPayPeriod? @relation(fields: [payPeriodId], references: [id])
+
   //@@map("computed_payslips")
   @@index([companyId, type])
   @@map("phed_bulk_uploads")
@@ -5174,35 +5191,35 @@ enum BasePayFrequency {
 
 // Designation model
 model Designation {
-  id               String                  @id @default(cuid())
-  companyId        String?
-  title            String
-  code             String
-  departmentId     String?
-  department       Department?             @relation(fields: [departmentId], references: [id])
-  roleMappings     CompetencyRoleMapping[]
-  description      String?                 @db.Text
-  status           String                  @default("Active")
-  staffCount       Int                     @default(0)
+  id           String                  @id @default(cuid())
+  companyId    String?
+  title        String
+  code         String
+  departmentId String?
+  department   Department?             @relation(fields: [departmentId], references: [id])
+  roleMappings CompetencyRoleMapping[]
+  description  String?                 @db.Text
+  status       String                  @default("Active")
+  staffCount   Int                     @default(0)
 
   // Seniority & hierarchy (Workaround A: embeds seniority & pay bands, replaces standalone GradeLevel)
-  rank             Int                     @default(1)
-  seniorityBand    SeniorityBand           @default(MID)
-  minSalary        Decimal?                @db.Decimal(18, 2)
-  maxSalary        Decimal?                @db.Decimal(18, 2)
+  rank             Int               @default(1)
+  seniorityBand    SeniorityBand     @default(MID)
+  minSalary        Decimal?          @db.Decimal(18, 2)
+  maxSalary        Decimal?          @db.Decimal(18, 2)
   basePay          Float?
-  basePayFrequency BasePayFrequency?       @default(Monthly)
+  basePayFrequency BasePayFrequency? @default(Monthly)
   benefits         Json?
   staffRecords     StaffRecord[]
   jobs             Job[]
-  createdAt        DateTime                @default(now())
-  updatedAt        DateTime                @updatedAt
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
-  company               Company?                  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  promotionsFrom        PromotionRecommendation[] @relation("PromotionCurrentDesignation")
-  promotionsTo          PromotionRecommendation[] @relation("PromotionTargetDesignation")
-  careerHistoryOld      StaffCareerHistory[]      @relation("CareerOldDesignation")
-  careerHistoryNew      StaffCareerHistory[]      @relation("CareerNewDesignation")
+  company               Company?                    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  promotionsFrom        PromotionRecommendation[]   @relation("PromotionCurrentDesignation")
+  promotionsTo          PromotionRecommendation[]   @relation("PromotionTargetDesignation")
+  careerHistoryOld      StaffCareerHistory[]        @relation("CareerOldDesignation")
+  careerHistoryNew      StaffCareerHistory[]        @relation("CareerNewDesignation")
   appraisalParticipants AppraisalCycleParticipant[]
   pips                  Pip[]
   criticalRoles         CriticalRole[]
@@ -5216,21 +5233,21 @@ model Designation {
 
 // Workaround A: Tracks designation and seniority transitions over time (replaces StaffGradeHistory)
 model StaffCareerHistory {
-  id                    String       @id @default(cuid())
+  id                    String   @id @default(cuid())
   companyId             String
   staffId               String
   previousDesignationId String?
   newDesignationId      String
   effectiveDate         DateTime
-  reason                String?      // e.g. "Performance Promotion", "Role Reassignment"
-  promotionRecId        String?      // Optional link to PromotionRecommendation
+  reason                String? // e.g. "Performance Promotion", "Role Reassignment"
+  promotionRecId        String? // Optional link to PromotionRecommendation
 
-  company               Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  staff                 StaffRecord  @relation(fields: [staffId], references: [id], onDelete: Cascade)
-  previousDesignation   Designation? @relation("CareerOldDesignation", fields: [previousDesignationId], references: [id])
-  newDesignation        Designation  @relation("CareerNewDesignation", fields: [newDesignationId], references: [id])
+  company             Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  staff               StaffRecord  @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  previousDesignation Designation? @relation("CareerOldDesignation", fields: [previousDesignationId], references: [id])
+  newDesignation      Designation  @relation("CareerNewDesignation", fields: [newDesignationId], references: [id])
 
-  createdAt             DateTime     @default(now())
+  createdAt DateTime @default(now())
 
   @@index([companyId, staffId, effectiveDate])
   @@index([previousDesignationId])
@@ -5428,6 +5445,17 @@ model Offboarding {
   reviewedBy    String?
   reviewedAt    DateTime?
 
+  // Exit flow and final settlement (migrations 20260917120000, 20260917140000)
+  reason             String?
+  exitCategory       String?
+  lastWorkingDay     DateTime?
+  noticeDays         Int?
+  compensationItems  Json?
+  finalPayPeriod     String?
+  settlementInjected Boolean   @default(false)
+  settlementPaidAt   DateTime?
+  archivedAt         DateTime?
+
   // Timestamps
   createdAt   DateTime  @default(now())
   submittedAt DateTime?
@@ -5450,6 +5478,8 @@ model Offboarding {
   @@index([staffId])
   @@index([departmentId])
   @@index([createdAt])
+  @@index([lastWorkingDay, status])
+  @@index([companyId, exitCategory], map: "offboardings_company_exitCategory_idx")
   @@map("offboardings")
 }
 
@@ -5932,7 +5962,7 @@ model TemplateAssignmentJobLevelScope {
   assignmentId  String
   seniorityBand SeniorityBand?
 
-  assignment    TemplateAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  assignment TemplateAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
 
   @@unique([assignmentId, seniorityBand])
   @@index([assignmentId])
@@ -7750,6 +7780,7 @@ enum DevelopmentPlanStatus {
   COMPLETED
   ARCHIVED // soft delete: the UI "Delete" action; hidden from lists, kept for audit
 }
+
 // "Overdue" is NOT stored: it is ACTIVE with targetDate in the past (derived at read time).
 
 enum DevelopmentActivityType {
@@ -7990,6 +8021,7 @@ enum PipActionItemStatus {
   DONE
   CANCELLED
 }
+
 enum PipKpiSnapshotKind {
   BASELINE // written at activation
   CHECKPOINT // written when progress changes (see decision 42)
@@ -8468,6 +8500,7 @@ enum SuccessionReadiness {
   READY_1_2_YEARS
   READY_3_5_YEARS
 }
+
 model PromotionRecommendation {
   id            String @id @default(cuid())
   companyId     String

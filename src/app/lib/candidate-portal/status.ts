@@ -49,6 +49,13 @@ export async function requestStatusCode(body: any, ip: string) {
   const generic = { sent: true };
   if (!(await allow(limiters.minute, 10, `cp-status:ip:${ip}`)))
     throw httpErr(429, "Too many requests. Please try again in a minute.");
+
+  // If a reference code is provided, do NOT send an email OTP - reference code unlocks directly!
+  const ref = String(body.referenceCode ?? "")
+    .replace(/[^A-Za-z0-9]/g, "")
+    .toUpperCase();
+  if (ref) return generic;
+
   const { email } = await resolveLookup(body);
   if (!email) return generic;
   if (!(await allow(limiters.window, 3, `cp-status:${email}`))) return generic;
@@ -68,6 +75,45 @@ export async function requestStatusCode(body: any, ip: string) {
 export async function verifyStatus(body: any, ip: string) {
   if (!(await allow(limiters.minute, 20, `cp-status-verify:ip:${ip}`)))
     throw httpErr(429, "Too many attempts. Please try again in a minute.");
+
+  // 1. Direct unlock with Reference Code (zero email costs)
+  const ref = String(body.referenceCode ?? "")
+    .replace(/[^A-Za-z0-9]/g, "")
+    .toUpperCase();
+
+  if (ref && !body.code) {
+    if (ref.length !== 10 || !/^[A-Z0-9]{10}$/.test(ref)) {
+      throw httpErr(400, "Reference code must be 10 letters or numbers.");
+    }
+    const app = await prisma.jobApplication.findFirst({
+      where: { referenceCode: ref, ...notArchived },
+      select: {
+        ...APP_DETAIL_SELECT,
+        candidate: {
+          select: {
+            ...APP_DETAIL_SELECT.candidate.select,
+            email: true,
+          },
+        },
+      },
+    });
+    if (!app) {
+      throw httpErr(404, "No application found with this reference code.");
+    }
+    return {
+      applications: [
+        {
+          ...appDetailDto(app),
+          isFocus: true,
+        },
+      ],
+      maskedEmail: maskEmail(app.candidate.email),
+      grant: signGrant(app.candidate.email),
+      focusRef: ref,
+    };
+  }
+
+  // 2. Email verification with 6-digit OTP code
   const code = String(body.code ?? "").trim();
   if (!/^\d{6}$/.test(code))
     throw httpErr(400, "Enter the 6-digit code from your email");

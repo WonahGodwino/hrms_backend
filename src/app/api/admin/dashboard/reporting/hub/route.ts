@@ -15,7 +15,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { getAccessibleCompanies, resolveTargetCompanies } from '@/app/lib/reporting/access'
 import { getPeriodRange, getQuarterFromMonth, type Period } from '@/app/lib/reporting/periodRange'
 import { aggregateStaffInsights } from '@/app/lib/reporting/aggregateStaffInsights'
-import { aggregatePayrollPeriod } from '@/app/lib/reporting/aggregatePayrollPeriod'
+import { buildPayrollAggregate, fetchPayrollPayslips } from '@/app/lib/reporting/aggregatePayrollPeriod'
 import { aggregateAttendancePeriod } from '@/app/lib/reporting/aggregateAttendancePeriod'
 import { aggregateLeavePeriod } from '@/app/lib/reporting/aggregateLeavePeriod'
 import {
@@ -33,13 +33,56 @@ export async function OPTIONS(request: NextRequest) {
 
 type Section<T> = { ok: true; data: T } | { ok: false; notEnabled?: boolean; error?: string }
 
-async function run<T>(fn: () => Promise<T>): Promise<Section<T>> {
+// Each section gets its own time budget, kept well under the gateway timeout.
+// A section that overruns is reported as failed so the rest of the hub still
+// renders, instead of the whole request hanging until the proxy returns 504.
+const SECTION_TIMEOUT_MS = 25_000
+
+async function run<T>(fn: () => Promise<T>, label = 'section'): Promise<Section<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('This section took too long to load. Try a single company or a shorter period.')), SECTION_TIMEOUT_MS)
+  })
+  const started = Date.now()
   try {
-    return { ok: true, data: await fn() }
+    return { ok: true, data: await Promise.race([fn(), timeout]) }
   } catch (e: any) {
-    console.error('[reports-hub] section failed:', e)
+    console.error(`[reports-hub] ${label} failed after ${Date.now() - started}ms:`, e?.message || e)
     return { ok: false, error: e?.message || 'Failed to load this section' }
+  } finally {
+    clearTimeout(timer)
   }
+}
+
+// Short-lived cache of the computed sections, keyed by scope + period. The hub
+// is a dashboard that gets reopened and re-filtered often, and the payroll and
+// attendance sections read a whole period of rows; recomputing them on every
+// load is what pushed the endpoint past the gateway timeout. Identical requests
+// that arrive while one is still computing share it instead of starting their
+// own. Results with a failed section are not cached, so a retry recomputes.
+const HUB_CACHE_TTL_MS = 5 * 60_000
+const HUB_CACHE_MAX_ENTRIES = 100
+type HubComputed = { currency: { code: string; symbol: string | null }; sections: Record<string, Section<any>> }
+const hubCache = new Map<string, { at: number; value: HubComputed }>()
+const hubInFlight = new Map<string, Promise<HubComputed>>()
+
+async function cachedHub(key: string, compute: () => Promise<HubComputed>): Promise<HubComputed> {
+  const hit = hubCache.get(key)
+  if (hit && Date.now() - hit.at < HUB_CACHE_TTL_MS) return hit.value
+  const pending = hubInFlight.get(key)
+  if (pending) return pending
+
+  const promise = compute()
+    .then((value) => {
+      if (Object.values(value.sections).every((sec) => sec.ok || (sec as any).notEnabled)) {
+        if (hubCache.size >= HUB_CACHE_MAX_ENTRIES) hubCache.delete(hubCache.keys().next().value as string)
+        hubCache.set(key, { at: Date.now(), value })
+      }
+      return value
+    })
+    .finally(() => hubInFlight.delete(key))
+  hubInFlight.set(key, promise)
+  return promise
 }
 
 export async function GET(request: NextRequest) {
@@ -74,64 +117,86 @@ export async function GET(request: NextRequest) {
     if (error) return withCors(ApiResponse.error(error, 403), origin)
 
     const { start, end } = getPeriodRange(period, year, month, quarter)
+    const cacheKey = JSON.stringify([[...targetCompanyIds].sort(), period, year, month, quarter])
+    const fresh = searchParams.get('refresh') === '1'
+    if (fresh) hubCache.delete(cacheKey)
 
-    // Which of the selected companies have each module switched on.
-    const access: Array<{ companyId: string; module: { key: string } }> = await (prisma as any).companyModuleAccess.findMany({
-      where: { companyId: { in: targetCompanyIds }, enabled: true },
-      select: { companyId: true, module: { select: { key: true } } }
+    const { currency, sections } = await cachedHub(cacheKey, async () => {
+      // Which of the selected companies have each module switched on.
+      const access: Array<{ companyId: string; module: { key: string } }> = await (prisma as any).companyModuleAccess.findMany({
+        where: { companyId: { in: targetCompanyIds }, enabled: true },
+        select: { companyId: true, module: { select: { key: true } } }
+      })
+      const companiesWith = (key: string) => access.filter((a) => a.module.key === key).map((a) => a.companyId)
+      const gated = <T>(key: string, fn: (ids: string[]) => Promise<T>): Promise<Section<T>> => {
+        const ids = companiesWith(key)
+        return ids.length ? run(() => fn(ids), key.toLowerCase()) : Promise.resolve({ ok: false, notEnabled: true } as Section<T>)
+      }
+
+      // Payroll: load the year's payslips ONCE and derive both the selected
+      // period's figures and the year trend from them (previously two separate
+      // full fetches, one of them a whole year).
+      const payrollBoth = async (ids: string[]) => {
+        const base = { targetCompanyIds: ids, year, month, quarter }
+        const payslips = await fetchPayrollPayslips({ ...base, period: 'yearly' })
+        const [selected, trend] = await Promise.all([
+          buildPayrollAggregate(payslips, { ...base, period }),
+          period === 'yearly' ? null : buildPayrollAggregate(payslips, { ...base, period: 'yearly' })
+        ])
+        return { selected, trend: trend ?? selected }
+      }
+
+      const [currency, insights, payrollCombined, attendance, leave, recruitment, training, offboarding, meetings] = await Promise.all([
+        resolveReportCurrency(targetCompanyIds).catch(() => ({ code: 'NGN', symbol: '₦' })),
+        // The hub shows its own Attendance and Leave sections, so skip the
+        // per-department attendance/leave figures Staff Insights would compute.
+        run(() => aggregateStaffInsights({ targetCompanyIds, period, year, month, quarter, include: { attendance: false, leave: false } }), 'workforce'),
+        gated('PAYROLL', payrollBoth),
+        gated('ATTENDANCE', (ids) => aggregateAttendancePeriod(ids, start, end)),
+        gated('LEAVE', (ids) => aggregateLeavePeriod(ids, start, end, year)),
+        gated('RECRUITMENT', (ids) => aggregateRecruitmentSummary(ids, start, end)),
+        gated('TRAINING', (ids) => aggregateTrainingSummary(ids)),
+        gated('OFFBOARDING', (ids) => aggregateOffboardingSummary(ids, start, end)),
+        gated('MEETINGS', (ids) => aggregateMeetingsSummary(ids, start, end))
+      ])
+
+      // Workforce / loans-benefits come from staff insights; payroll is trimmed to
+      // what the dashboard shows (row-level data stays in the Finance Report).
+      const workforce: Section<any> = insights.ok
+        ? {
+            ok: true,
+            data: {
+              headcount: insights.data.headcount,
+              movement: insights.data.movement,
+              tenure: insights.data.tenure,
+              lifecycle: insights.data.lifecycle,
+              structure: insights.data.structure,
+              devices: insights.data.devices,
+              departments: insights.data.departments
+            }
+          }
+        : insights
+      const loansBenefits: Section<any> = insights.ok ? { ok: true, data: insights.data.loansBenefits } : insights
+
+      const payrollSection: Section<any> = payrollCombined.ok
+        ? {
+            ok: true,
+            data: {
+              summary: payrollCombined.data.selected.summary,
+              perMonth: payrollCombined.data.selected.perMonth,
+              yearTrend: payrollCombined.data.trend.perMonth,
+              byDepartment: payrollCombined.data.selected.breakdowns.byDepartment,
+              statutory: payrollCombined.data.selected.statutory,
+              staffCovered: payrollCombined.data.selected.perStaff.length
+            }
+          }
+        : payrollCombined
+
+      return {
+        currency: { code: currency.code === 'MIXED' ? 'NGN' : currency.code, symbol: currency.symbol || '₦' },
+        sections: { workforce, payroll: payrollSection, attendance, leave, recruitment, training, offboarding, loansBenefits, meetings }
+      }
     })
-    const companiesWith = (key: string) => access.filter((a) => a.module.key === key).map((a) => a.companyId)
-    const gated = <T>(key: string, fn: (ids: string[]) => Promise<T>): Promise<Section<T>> => {
-      const ids = companiesWith(key)
-      return ids.length ? run(() => fn(ids)) : Promise.resolve({ ok: false, notEnabled: true } as Section<T>)
-    }
-
-    const [currency, insights, payroll, payrollTrend, attendance, leave, recruitment, training, offboarding, meetings] = await Promise.all([
-      resolveReportCurrency(targetCompanyIds).catch(() => ({ code: 'NGN', symbol: '₦' })),
-      run(() => aggregateStaffInsights({ targetCompanyIds, period, year, month, quarter })),
-      gated('PAYROLL', (ids) => aggregatePayrollPeriod({ targetCompanyIds: ids, year, period, month, quarter })),
-      gated('PAYROLL', (ids) => aggregatePayrollPeriod({ targetCompanyIds: ids, year, period: 'yearly', month, quarter })),
-      gated('ATTENDANCE', (ids) => aggregateAttendancePeriod(ids, start, end)),
-      gated('LEAVE', (ids) => aggregateLeavePeriod(ids, start, end, year)),
-      gated('RECRUITMENT', (ids) => aggregateRecruitmentSummary(ids, start, end)),
-      gated('TRAINING', (ids) => aggregateTrainingSummary(ids)),
-      gated('OFFBOARDING', (ids) => aggregateOffboardingSummary(ids, start, end)),
-      gated('MEETINGS', (ids) => aggregateMeetingsSummary(ids, start, end))
-    ])
-
-    const currencyCode = currency.code === 'MIXED' ? 'NGN' : currency.code
-
-    // Workforce / loans-benefits come from staff insights; payroll is trimmed to
-    // what the dashboard shows (row-level data stays in the Finance Report).
-    const workforce: Section<any> = insights.ok
-      ? {
-          ok: true,
-          data: {
-            headcount: insights.data.headcount,
-            movement: insights.data.movement,
-            tenure: insights.data.tenure,
-            lifecycle: insights.data.lifecycle,
-            structure: insights.data.structure,
-            devices: insights.data.devices,
-            departments: insights.data.departments
-          }
-        }
-      : insights
-    const loansBenefits: Section<any> = insights.ok ? { ok: true, data: insights.data.loansBenefits } : insights
-
-    const payrollSection: Section<any> = payroll.ok
-      ? {
-          ok: true,
-          data: {
-            summary: payroll.data.summary,
-            perMonth: payroll.data.perMonth,
-            yearTrend: payrollTrend.ok ? payrollTrend.data.perMonth : [],
-            byDepartment: payroll.data.breakdowns.byDepartment,
-            statutory: payroll.data.statutory,
-            staffCovered: payroll.data.perStaff.length
-          }
-        }
-      : payroll
 
     return withCors(
       ApiResponse.success(
@@ -144,18 +209,8 @@ export async function GET(request: NextRequest) {
             quarter: period === 'quarterly' ? quarter : null
           },
           companyContext: { role: user.role, accessibleCompanies, selectedCompanyId: resolvedCompanyId },
-          currency: { code: currencyCode, symbol: currency.symbol || '₦' },
-          sections: {
-            workforce,
-            payroll: payrollSection,
-            attendance,
-            leave,
-            recruitment,
-            training,
-            offboarding,
-            loansBenefits,
-            meetings
-          }
+          currency,
+          sections
         },
         'Reports hub fetched successfully'
       ),

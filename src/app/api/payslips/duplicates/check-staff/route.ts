@@ -7,6 +7,7 @@ import { requireRole } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { groupDuplicatePayslips } from '@/app/lib/payroll/payslip-duplicates';
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -16,7 +17,9 @@ export async function OPTIONS(request: NextRequest) {
  * GET /api/payslips/duplicates/check-staff?staffRecordId=X&companyId=Y
  *
  * Returns duplicate info for a specific staff member across all periods,
- * or for a specific period if month/year are provided.
+ * or for a specific period if month/year are provided. Only payslips of the
+ * SAME template in the same period are duplicates; different templates in
+ * one month are a normal payroll setup.
  */
 export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin');
@@ -44,23 +47,24 @@ export async function GET(request: NextRequest) {
     if (month) where.month = month;
     if (year) where.year = parseInt(year);
 
+    // `select`, not `include`, so the stored PDF (fileData) is never loaded.
     const payslips = await prisma.payslip.findMany({
       where,
-      include: {
+      select: {
+        id: true,
+        payrollId: true,
+        staffRecordId: true,
+        month: true,
+        year: true,
+        grossPay: true,
+        netPay: true,
+        createdAt: true,
         payroll: {
-          select: { id: true, templateType: true, createdAt: true },
+          select: { id: true, templateId: true, templateType: true, createdAt: true },
         },
       },
       orderBy: { createdAt: 'asc' },
     });
-
-    // Group by month+year
-    const groups: Record<string, typeof payslips> = {};
-    for (const p of payslips) {
-      const key = `${p.month}-${p.year}`;
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(p);
-    }
 
     const duplicates: Array<{
       month: string;
@@ -78,9 +82,8 @@ export async function GET(request: NextRequest) {
       }>;
     }> = [];
 
-    for (const [, slips] of Object.entries(groups)) {
-      const uniquePayrollIds = new Set(slips.map((s) => s.payrollId));
-      if (uniquePayrollIds.size > 1) {
+    for (const [, slips] of groupDuplicatePayslips(payslips)) {
+      {
         const sorted = [...slips].sort(
           (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
         );

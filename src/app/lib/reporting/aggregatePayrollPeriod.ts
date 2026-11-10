@@ -80,13 +80,58 @@ export type AggregatePayrollPeriodParams = {
   staffRecordId?: string | null
 }
 
-export async function aggregatePayrollPeriod(params: AggregatePayrollPeriodParams) {
-  const { targetCompanyIds, year, period, month, quarter, staffRecordId } = params
+// Only the columns the aggregation reads. This MUST stay a `select`, never an
+// `include`: an `include` pulls every Payslip scalar, including `fileData` —
+// the stored PDF — so a yearly report across all companies streamed gigabytes
+// of PDFs out of Postgres (Reports Hub 504s).
+const PAYSLIP_AGGREGATE_SELECT = {
+  staffRecordId: true,
+  month: true,
+  year: true,
+  grossPay: true,
+  netPay: true,
+  staffRecord: {
+    select: {
+      id: true,
+      staffId: true,
+      firstName: true,
+      lastName: true,
+      department: true,
+      departmentId: true,
+      position: true,
+      designationId: true,
+      bankName: true,
+      accountNumber: true
+    }
+  },
+  payroll: {
+    select: {
+      status: true,
+      templateType: true,
+      customFields: true,
+      basicSalary: true,
+      grossPay: true,
+      netSalary: true,
+      payee: true,
+      pensionDeduction: true,
+      bonusKPI: true,
+      employerPension: true,
+      nsitf: true,
+      itf: true,
+      nhf: true,
+      medicalContribution: true
+    }
+  }
+} as const
 
-  const quarterRange = getQuarterRange(quarter)
+export type PayrollAggregatePayslip = Awaited<ReturnType<typeof fetchPayrollPayslips>>[number]
+
+/** Loads the payslips a payroll aggregate is built from (no PDF data). */
+export async function fetchPayrollPayslips(params: AggregatePayrollPeriodParams) {
+  const { targetCompanyIds, year, period, month, quarter, staffRecordId } = params
   const periodMonthCandidates = getPeriodMonthCandidates(period, month, quarter)
 
-  const payslips = await prisma.payslip.findMany({
+  return prisma.payslip.findMany({
     where: {
       companyId: { in: targetCompanyIds },
       ...(staffRecordId ? { staffRecordId } : {}),
@@ -99,42 +144,24 @@ export async function aggregatePayrollPeriod(params: AggregatePayrollPeriodParam
           }
         : {}),
     },
-    include: {
-      staffRecord: {
-        select: {
-          id: true,
-          staffId: true,
-          firstName: true,
-          lastName: true,
-          department: true,
-          departmentId: true,
-          position: true,
-          designationId: true,
-          bankName: true,
-          accountNumber: true
-        }
-      },
-      payroll: {
-        select: {
-          status: true,
-          templateType: true,
-          customFields: true,
-          basicSalary: true,
-          grossPay: true,
-          netSalary: true,
-          payee: true,
-          pensionDeduction: true,
-          bonusKPI: true,
-          employerPension: true,
-          nsitf: true,
-          itf: true,
-          nhf: true,
-          medicalContribution: true
-        }
-      }
-    },
+    select: PAYSLIP_AGGREGATE_SELECT,
     orderBy: [{ year: 'desc' }, { createdAt: 'desc' }]
   })
+}
+
+export async function aggregatePayrollPeriod(params: AggregatePayrollPeriodParams) {
+  return buildPayrollAggregate(await fetchPayrollPayslips(params), params)
+}
+
+/**
+ * Builds the aggregate from already-loaded payslips. `payslips` may cover a
+ * wider range than `params` (e.g. a whole year when only one month is asked
+ * for); rows outside the requested period are skipped below. Lets the Reports
+ * Hub load a year once and derive both the period figures and the trend.
+ */
+export async function buildPayrollAggregate(payslips: PayrollAggregatePayslip[], params: AggregatePayrollPeriodParams) {
+  const { period, month, quarter } = params
+  const quarterRange = getQuarterRange(quarter)
 
   const rows: AggregatedSalaryRow[] = []
   const monthStaffDedup = new Set<string>()

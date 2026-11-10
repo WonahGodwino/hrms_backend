@@ -13,6 +13,7 @@
 // frontend/src/pages/core-setup/template/templateAnalysis.js, which has not been ported.
 import { prisma } from '@/app/lib/db'
 import { raiseFailedCheckAlerts, type FailedCheck } from '@/app/lib/core-setup/automation'
+import { isPlaceholderValue } from '@/app/lib/staff/placeholder-values'
 
 export const CADENCE_MINUTES: Record<string, number> = { event: 0, hourly: 60, daily: 1440, weekly: 10080 }
 
@@ -70,6 +71,11 @@ export function hasDuplicateDepartments(names: string[]): boolean {
   return false
 }
 
+// A linked record OR usable typed text counts (filler like "0" from old imports does not).
+// Matches the Action Center's browser-side check in frontend/src/features/intelligence/rules.js.
+const hasDepartment = (s: { departmentId: string | null; department: string | null }) => Boolean(s.departmentId) || !isPlaceholderValue(s.department)
+const hasDesignation = (s: { designationId: string | null; position: string | null }) => Boolean(s.designationId) || !isPlaceholderValue(s.position)
+
 // ---- the scanning checks
 async function scanChecks(companyId: string, ids: string[]): Promise<Record<string, RuleResult>> {
   const want = new Set(ids)
@@ -80,7 +86,7 @@ async function scanChecks(companyId: string, ids: string[]): Promise<Record<stri
   const staff = needStaff
     ? await prisma.staffRecord.findMany({
         where: { companyId, isActive: true },
-        select: { firstName: true, lastName: true, department: true, departmentId: true, designationId: true },
+        select: { firstName: true, lastName: true, department: true, departmentId: true, designationId: true, position: true },
       })
     : []
   const departments = needDepts
@@ -91,10 +97,10 @@ async function scanChecks(companyId: string, ids: string[]): Promise<Record<stri
     : []
 
   if (want.has('ar-001')) {
-    out['ar-001'] = { evaluated: staff.length, exceptions: staff.filter((s) => !s.department && !s.departmentId).length }
+    out['ar-001'] = { evaluated: staff.length, exceptions: staff.filter((s) => !hasDepartment(s)).length }
   }
   if (want.has('ar-010')) {
-    out['ar-010'] = { evaluated: staff.length, exceptions: staff.filter((s) => !s.designationId).length }
+    out['ar-010'] = { evaluated: staff.length, exceptions: staff.filter((s) => !hasDesignation(s)).length }
   }
   if (want.has('ar-002')) {
     const groups = new Map<string, number>()
@@ -151,8 +157,8 @@ async function eventChecks(companyId: string, since: Record<string, number>, ids
     const re = fresh('ar-011').filter((e) => e.area === 'staff' && /reactivated/i.test(e.action))
     if (re.length) {
       const staffIds = re.flatMap((e) => related(e).filter((r) => r.type === 'staff').map((r) => r.identifier || '')).filter(Boolean)
-      const people = await prisma.staffRecord.findMany({ where: { companyId, id: { in: staffIds } }, select: { department: true, departmentId: true, designationId: true } })
-      const bad = people.filter((s) => (!s.department && !s.departmentId) || !s.designationId).length
+      const people = await prisma.staffRecord.findMany({ where: { companyId, id: { in: staffIds } }, select: { department: true, departmentId: true, designationId: true, position: true } })
+      const bad = people.filter((s) => !hasDepartment(s) || !hasDesignation(s)).length
       out['ar-011'] = { evaluated: re.length, exceptions: bad }
     }
   }

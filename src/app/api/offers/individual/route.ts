@@ -64,8 +64,7 @@ export async function POST(request: NextRequest) {
           { code: { equals: position, mode: 'insensitive' } },
           { title: { equals: position, mode: 'insensitive' } },
         ],
-      },
-      include: { gradeLevel: { select: { id: true, name: true, basePay: true } } },
+      },
     })
 
     if (!designation) {
@@ -132,7 +131,7 @@ export async function POST(request: NextRequest) {
       const parsedSalary = proposedBasicSalary ? parseFloat(proposedBasicSalary.replace(/[^0-9.]/g, '')) : NaN
       const basePay = !isNaN(parsedSalary) && parsedSalary > 0
         ? parsedSalary
-        : designation.basePay ?? designation.gradeLevel?.basePay ?? null
+        : designation.basePay ?? null
 
       const startDate = resumptionDate && !isNaN(new Date(resumptionDate).getTime())
         ? new Date(resumptionDate)
@@ -148,8 +147,8 @@ export async function POST(request: NextRequest) {
           // Only set PENDING_APPROVAL when the user explicitly opts in.
           status: requiresApproval ? 'PENDING_APPROVAL' : 'APPROVED',
           salary: basePay != null ? basePay : undefined,
-          gradeId: designation.gradeLevel?.id ?? null,
-          gradeName: designation.gradeLevel?.name ?? null,
+          gradeId: designation.id,
+          gradeName: designation.seniorityBand ?? designation.title,
           proposedStartDate: startDate,
           createdBy: actor,
           metadata: {

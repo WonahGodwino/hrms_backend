@@ -33,16 +33,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     // Validate the step against the grade's ladder / approved band.
     let requiresException = false
-    if (offer.gradeId && step != null) {
-      const grade = await (prisma as any).gradeLevel.findFirst({ where: { id: offer.gradeId }, select: { totalSteps: true } })
-      if (grade) {
-        if (grade.totalSteps && step > grade.totalSteps)
-          return withCors(ApiResponse.error('step exceeds the grade\'s defined step bands', 422), origin)
-        // The client resolves the approved band from the context endpoint.
-        const ceiling = maxApprovedStep ?? grade.totalSteps
-        if (ceiling != null && step > ceiling) requiresException = true
-      }
-    }
+    // Grade step ladders no longer exist; only the client-resolved approved
+    // ceiling (from the context endpoint) can trigger an exception.
+    if (step != null && maxApprovedStep != null && step > maxApprovedStep) requiresException = true
 
     const meta = (offer.metadata && typeof offer.metadata === 'object') ? offer.metadata as any : {}
     const extra = (offer.additionalBenefits && typeof offer.additionalBenefits === 'object') ? offer.additionalBenefits as any : {}

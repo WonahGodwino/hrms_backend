@@ -31,6 +31,7 @@ import { STAFF_GROSS_COLUMN, STAFF_PENSION_COLUMNS } from '@/app/lib/staff/pensi
 import { GROSS_SYSTEM_FIELD } from '@/app/lib/payroll/generation/field-resolver'
 import { NSITF_IDENTITY_COLUMNS, STAFF_HIRE_DATE_COLUMN } from '@/app/lib/staff/nsitf-identity-fields'
 import { XLSX_MIME, writeStyledTable, buildSubtitle, confidentialFooter, safeFileName, attachmentDisposition } from '@/app/lib/excel/sheet-theme'
+import { cleanStaffText } from '@/app/lib/staff/placeholder-values'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -173,6 +174,7 @@ export async function GET(request: NextRequest) {
         residentialAddress: true,
         numberOfPrimaryDependants: true,
         locationRecord: { select: { name: true } },
+        departments: { select: { name: true } },
         manager: { select: { firstName: true, lastName: true } },
       },
     })
@@ -203,9 +205,9 @@ export async function GET(request: NextRequest) {
         email: s.email,
         firstName: s.firstName,
         lastName: s.lastName,
-        department: s.department || '',
-        position: s.position,
-        phone: s.phone || '',
+        department: cleanStaffText(s.departments?.name) ?? cleanStaffText(s.department) ?? '',
+        position: cleanStaffText(s.position) ?? '',
+        phone: cleanStaffText(s.phone) ?? '',
         bankName: s.bankName || '',
         accountNumber: s.accountNumber || '',
         bvn: s.bvn || '',
@@ -220,7 +222,7 @@ export async function GET(request: NextRequest) {
         stateOfOrigin: s.stateOfOrigin || '',
         lgaOfOrigin: s.lgaOfOrigin || '',
         townOfOrigin: s.townOfOrigin || '',
-        alternatePhone: s.alternatePhone || '',
+        alternatePhone: cleanStaffText(s.alternatePhone) ?? '',
         nin: s.nin || '',
         stateOfIssuance: s.stateOfIssuance || '',
         residentialAddress: s.residentialAddress || '',
@@ -230,7 +232,7 @@ export async function GET(request: NextRequest) {
         voluntaryPensionEmployee: fmtNum(s.voluntaryPensionEmployee),
         voluntaryPensionEmployer: fmtNum(s.voluntaryPensionEmployer),
         otherPensionContribution: fmtNum(s.otherPensionContribution),
-        location: s.locationRecord?.name || s.location || '',
+        location: cleanStaffText(s.locationRecord?.name) ?? cleanStaffText(s.location) ?? '',
         manager: s.manager ? `${s.manager.firstName} ${s.manager.lastName}`.trim() : '',
         role: s.role,
         status: s.isActive ? 'Active' : 'Inactive',

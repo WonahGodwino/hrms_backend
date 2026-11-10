@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 import { getUserFromToken } from "@/app/lib/auth";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
+import { logRecordChange } from "@/app/lib/core-setup/audit";
 import { prisma } from "@/app/lib/db";
 import { normalizeFrequency } from "@/app/lib/designations/helpers";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
@@ -105,6 +106,27 @@ export async function PATCH(
     const updated = await (prisma as any).designation.update({
       where: { id },
       data,
+    });
+
+    const pick = (d: any) => ({
+      id: d.id,
+      title: d.title,
+      code: d.code,
+      description: d.description,
+      rank: d.rank,
+      seniorityBand: d.seniorityBand,
+      minSalary: d.minSalary != null ? Number(d.minSalary) : null,
+      maxSalary: d.maxSalary != null ? Number(d.maxSalary) : null,
+      basePay: d.basePay,
+      basePayFrequency: d.basePayFrequency,
+      status: d.status,
+    });
+    await logRecordChange(req, user, {
+      companyId: existing.companyId,
+      noun: "Designation",
+      type: "designation",
+      before: pick(existing),
+      after: pick(updated),
     });
 
     if (title && title !== existing.title) {

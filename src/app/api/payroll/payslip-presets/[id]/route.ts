@@ -173,6 +173,12 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       return withCors(ApiResponse.error('Access denied to this company', 403), origin)
     }
 
+    // The built-in preset is part of the application; it is re-created on
+    // read anyway, so deleting it would only cause confusion.
+    if (preset.isSeed) {
+      return withCors(ApiResponse.error('The built-in payslip preset cannot be deleted. You can deactivate it or create your own preset.', 400), origin)
+    }
+
     if (preset._count.payrollTemplates > 0) {
       return withCors(
         ApiResponse.error(

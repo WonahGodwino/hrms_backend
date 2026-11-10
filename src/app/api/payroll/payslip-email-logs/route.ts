@@ -1,9 +1,10 @@
 // src/app/api/payroll/payslip-email-logs/route.ts
 //
 // GET — persistent, browsable history of payslip email delivery attempts,
-// backed by the EmailLog rows both the bulk-month send
+// backed by the EmailLog rows written per staff, per attempt by payroll upload
+// and generation (PAYSLIP_UPLOAD / PAYSLIP_GENERATED), the bulk-month send
 // (payslips/bulk-send/route.ts) and the "resend selected" flow
-// (send-selected-payslips/route.ts) already write per staff, per attempt.
+// (send-selected-payslips/route.ts).
 // Replaces relying solely on the one-time completion screen in
 // SendPayslipsDrawer.jsx, which discards its result the moment it's closed.
 import { NextRequest } from 'next/server'
@@ -13,6 +14,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { PAYSLIP_EMAIL_TYPES } from '@/app/lib/payroll/email-log'
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request)
@@ -51,7 +53,7 @@ export async function GET(request: NextRequest) {
 
 		const where: any = {
 			companyId,
-			emailType: { in: ['PAYSLIP_BULK_SEND', 'PAYSLIP_RESEND'] },
+			emailType: { in: PAYSLIP_EMAIL_TYPES },
 		}
 		if (status === 'SENT' || status === 'FAILED') where.status = status
 		if (month) where.payslip = { ...(where.payslip || {}), month }
@@ -64,7 +66,25 @@ export async function GET(request: NextRequest) {
 			]
 		}
 
-		const [logs, total] = await Promise.all([
+		// Month/year/search without the status filter, so the summary cards stay
+		// consistent with the rows whichever status tab is selected.
+		const { status: _statusFilter, ...whereWithoutStatus } = where
+
+		// Latest attempt per payslip = what actually happened to that payslip's
+		// email. A failed send that was later resent successfully is delivered.
+		const latestPerPayslip: Array<{ status: string; count: bigint }> = await prisma.$queryRaw`
+			SELECT l."status" AS status, COUNT(*) AS count FROM (
+				SELECT DISTINCT ON (COALESCE(e."payslipId", e."id")) e."status"
+				FROM "EmailLog" e
+				LEFT JOIN "payslips" p ON p."id" = e."payslipId"
+				WHERE e."companyId" = ${companyId}
+				  AND e."emailType" = ANY(${PAYSLIP_EMAIL_TYPES})
+				  AND (${month}::text IS NULL OR p."month" = ${month})
+				  AND (${year ? parseInt(year, 10) : null}::int IS NULL OR p."year" = ${year ? parseInt(year, 10) : null})
+				ORDER BY COALESCE(e."payslipId", e."id"), e."createdAt" DESC, e."id" DESC
+			) l GROUP BY l."status"`
+
+		const [logs, total, attemptGroups] = await Promise.all([
 			prisma.emailLog.findMany({
 				where,
 				include: {
@@ -76,7 +96,11 @@ export async function GET(request: NextRequest) {
 				take: limit,
 			}),
 			prisma.emailLog.count({ where }),
+			prisma.emailLog.groupBy({ by: ['status'], where: whereWithoutStatus, _count: { _all: true } }),
 		])
+
+		const attemptCount = (st: string) => attemptGroups.find((g) => g.status === st)?._count._all ?? 0
+		const latestCount = (st: string) => Number(latestPerPayslip.find((g) => g.status === st)?.count ?? 0)
 
 		const items = logs.map((log) => ({
 			id: log.id,
@@ -88,12 +112,20 @@ export async function GET(request: NextRequest) {
 			emailType: log.emailType,
 			status: log.status,
 			error: log.error,
+			// 'delivered' once Mailgun's webhook confirmed it; null = accepted, not yet confirmed.
+			deliveryEvent: (log.metadata as any)?.delivery?.event ?? null,
 			createdAt: log.createdAt,
 		}))
 
 		return withCors(
 			ApiResponse.success({
 				items,
+				summary: {
+					// Every send attempt in the filter.
+					attempts: { sent: attemptCount('SENT'), failed: attemptCount('FAILED') },
+					// Outcome of the most recent attempt per payslip.
+					payslips: { delivered: latestCount('SENT'), undelivered: latestCount('FAILED') },
+				},
 				pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
 			}),
 			origin

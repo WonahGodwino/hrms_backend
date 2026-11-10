@@ -116,7 +116,7 @@ export async function DELETE(req: NextRequest) {
     return withCors(
       ApiResponse.success(
         { modulesMovedToMain: existing._count.modules },
-        `Section deleted — ${existing._count.modules} module(s) moved to the main section`
+        `Section deleted: ${existing._count.modules} module(s) moved to the main section`
       ),
       origin
     )

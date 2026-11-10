@@ -8,7 +8,17 @@
 // behind this.
 import { prisma } from '@/app/lib/db'
 
-const STALE_JOB_THRESHOLD_MS = 30 * 60 * 1000 // emails take longer than a plain DB write loop
+// Staleness is judged on activity, not total runtime, so a healthy 3,000-email
+// run is never killed. A live job (heartbeat in this process) is stale only
+// after this long with no progress; a PROCESSING row with no heartbeat belongs
+// to a process that restarted and is abandoned after a short grace period.
+const STALE_NO_PROGRESS_MS = 5 * 60 * 1000
+const ORPHANED_JOB_GRACE_MS = 2 * 60 * 1000
+const _jobHeartbeats = new Map<string, number>()
+
+export function touchBulkSendHeartbeat(jobId: string) {
+  _jobHeartbeats.set(jobId, Date.now())
+}
 
 export interface PayslipBulkSendResults {
   sent: number
@@ -30,7 +40,11 @@ export async function getActivePayslipBulkSend(companyId: string) {
   if (!active) return null
 
   const startedAt = active.startedAt || active.createdAt
-  if (Date.now() - startedAt.getTime() > STALE_JOB_THRESHOLD_MS) {
+  const lastBeat = _jobHeartbeats.get(active.id)
+  const isStale = lastBeat != null
+    ? Date.now() - lastBeat > STALE_NO_PROGRESS_MS
+    : Date.now() - startedAt.getTime() > ORPHANED_JOB_GRACE_MS
+  if (isStale) {
     await failPayslipBulkSendRecord(active.id, 'Processing was interrupted (server restarted or timed out)')
     return null
   }
@@ -45,7 +59,7 @@ export async function createPendingPayslipBulkSend(
   userId: string,
   totalPayslips: number
 ) {
-  return await prisma.payslipBulkSend.create({
+  const created = await prisma.payslipBulkSend.create({
     data: {
       companyId,
       month,
@@ -56,9 +70,28 @@ export async function createPendingPayslipBulkSend(
       startedAt: new Date(),
     },
   })
+  touchBulkSendHeartbeat(created.id)
+  return created
+}
+
+/**
+ * Persist running counters (sent/failed) and refresh the heartbeat. Never
+ * throws: progress reporting must not fail the send.
+ */
+export async function reportBulkSendProgress(jobId: string, results: PayslipBulkSendResults) {
+  touchBulkSendHeartbeat(jobId)
+  try {
+    await prisma.payslipBulkSend.update({
+      where: { id: jobId },
+      data: { sent: results.sent, failed: results.failed },
+    })
+  } catch (err) {
+    console.error('[PAYSLIP_BULK_SEND] Failed to persist progress (non-critical):', err)
+  }
 }
 
 export async function completePayslipBulkSendRecord(jobId: string, results: PayslipBulkSendResults) {
+  _jobHeartbeats.delete(jobId)
   return await prisma.payslipBulkSend.update({
     where: { id: jobId },
     data: {
@@ -72,6 +105,7 @@ export async function completePayslipBulkSendRecord(jobId: string, results: Pays
 }
 
 export async function failPayslipBulkSendRecord(jobId: string, reason: string) {
+  _jobHeartbeats.delete(jobId)
   return await prisma.payslipBulkSend.update({
     where: { id: jobId },
     data: {

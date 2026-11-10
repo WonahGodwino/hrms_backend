@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
 		const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null;
 		requireRole(token, ['SUPER_ADMIN']);
 
-		// Pagination (companies dimension — modules are few and always returned
+		// Pagination (companies dimension - modules are few and always returned
 		// in full so the matrix renders one complete row per company).
 		const { searchParams } = new URL(req.url);
 		const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);

@@ -61,7 +61,11 @@ export async function POST(request: NextRequest) {
     const stalePayrolls = await prisma.payroll.findMany({
       where: {
         companyId: upload.companyId,
-        createdAt: { gte: upload.createdAt },
+        // Only rows this upload itself created: scoped by upload id AND start
+        // time so a concurrent upload/generation or pre-existing payroll that
+        // merely got updated is never deleted.
+        payrollUploadId: upload.id,
+        createdAt: { gte: upload.startedAt || upload.createdAt },
       },
       select: { id: true },
     })

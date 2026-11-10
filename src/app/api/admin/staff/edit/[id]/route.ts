@@ -8,6 +8,7 @@ import { withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { reconcileStaffDepartmentLink } from '@/app/lib/departments/department-sync';
 import { getUserDisplayName } from '@/app/lib/departments/department-utils';
+import { cleanStaffText } from '@/app/lib/staff/placeholder-values';
 import { reconcileStaffDesignationLink } from '@/app/lib/designations/designation-sync';
 import { syncUserCompanyForRole } from '@/app/lib/access/user-company-role';
 import {
@@ -126,6 +127,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 				position: true,
 				designationId: true,
 				designation: { select: { id: true, title: true } },
+				departmentId: true,
+				departments: { select: { id: true, name: true } },
 				phone: true,
 				bankName: true,
 				accountNumber: true,
@@ -232,9 +235,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 			firstName: validator.escape(staffRecord.firstName),
 			lastName: validator.escape(staffRecord.lastName),
 			email: validator.escape(staffRecord.email),
-			department: staffRecord.department ? validator.escape(staffRecord.department) : null,
+			// Prefer the linked Department; ignore filler values ("0", "-", ...)
+			// older imports stored for blank cells.
+			department: (() => {
+				const d = cleanStaffText(staffRecord.departments?.name) ?? cleanStaffText(staffRecord.department);
+				return d ? validator.escape(d) : null;
+			})(),
 			position: validator.escape(staffRecord.position),
-			phone: staffRecord.phone ? validator.escape(staffRecord.phone) : null,
+			phone: cleanStaffText(staffRecord.phone) ? validator.escape(staffRecord.phone!.trim()) : null,
 			bankName: staffRecord.bankName ? validator.escape(staffRecord.bankName) : null,
 			accountNumber: staffRecord.accountNumber ? validator.escape(staffRecord.accountNumber) : null,
 			bvn: staffRecord.bvn ? '***' + staffRecord.bvn.slice(-4) : null, // Mask BVN for security
@@ -253,7 +261,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 			stateOfOrigin: staffRecord.stateOfOrigin || null,
 			lgaOfOrigin: staffRecord.lgaOfOrigin ? validator.escape(staffRecord.lgaOfOrigin) : null,
 			townOfOrigin: staffRecord.townOfOrigin ? validator.escape(staffRecord.townOfOrigin) : null,
-			alternatePhone: staffRecord.alternatePhone ? validator.escape(staffRecord.alternatePhone) : null,
+			alternatePhone: cleanStaffText(staffRecord.alternatePhone) ? validator.escape(staffRecord.alternatePhone!.trim()) : null,
 			nin: staffRecord.nin ? validator.escape(staffRecord.nin) : null,
 			stateOfIssuance: staffRecord.stateOfIssuance || null,
 			residentialAddress: staffRecord.residentialAddress ? validator.escape(staffRecord.residentialAddress) : null,

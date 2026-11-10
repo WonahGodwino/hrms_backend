@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
     const monthParam = searchParams.get('month')
     const companyIdParam = searchParams.get('companyId')
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
-    const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') || '20')))
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20')))
     const skip = (page - 1) * limit
 
     // Validate year/month parameters
@@ -212,7 +212,7 @@ export async function GET(request: NextRequest) {
     }
 
     // 5) Fetch payroll uploads with pagination
-    const [uploads, totalCount] = await Promise.all([
+    const [uploads, totalCount, totalsAgg, recentUploads] = await Promise.all([
       prisma.payrollUpload.findMany({
         where,
         orderBy: { createdAt: 'desc' },
@@ -241,7 +241,20 @@ export async function GET(request: NextRequest) {
         skip,
         take: limit
       }),
-      prisma.payrollUpload.count({ where })
+      prisma.payrollUpload.count({ where }),
+      // Totals over EVERYTHING matching the filter, not just the current page,
+      // so dashboard KPIs stay correct however many uploads exist.
+      prisma.payrollUpload.aggregate({
+        where,
+        _sum: { totalRecords: true, successful: true, failed: true },
+      }),
+      // Newest six uploads (for the trend chart), independent of the page shown.
+      prisma.payrollUpload.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: 6,
+        select: { id: true, successful: true, failed: true },
+      }),
     ])
 
     // 6) Resolve uploader details from StaffRecord
@@ -310,6 +323,19 @@ export async function GET(request: NextRequest) {
         hasNextPage,
         hasPrevPage
       },
+      totals: {
+        uploads: totalCount,
+        totalRecords: totalsAgg._sum.totalRecords ?? 0,
+        successful: totalsAgg._sum.successful ?? 0,
+        failed: totalsAgg._sum.failed ?? 0,
+      },
+      // Newest first; displayNumber is the upload's overall sequence number.
+      recent: recentUploads.map((u, i) => ({
+        uploadId: u.id,
+        displayNumber: totalCount - i,
+        successful: u.successful,
+        failed: u.failed,
+      })),
       uploads: uploads.map((upload) => {
         const uploader = upload.uploadedBy
           ? uploaderMap[upload.uploadedBy] || null

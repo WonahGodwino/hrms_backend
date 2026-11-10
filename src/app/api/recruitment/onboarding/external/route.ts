@@ -77,8 +77,9 @@ export async function POST(request: NextRequest) {
       // Grade snapshot (optional).
       let gradeName: string | null = null
       if (body.gradeId) {
-        const grade = await (tx as any).gradeLevel.findFirst({ where: { id: body.gradeId, companyId }, select: { name: true } })
-        gradeName = grade?.name ?? null
+        // gradeId now carries the designation id (grade levels were replaced by seniority bands).
+        const designation = await tx.designation.findFirst({ where: { id: body.gradeId, companyId }, select: { title: true, seniorityBand: true } })
+        gradeName = designation ? (designation.seniorityBand ?? designation.title) : null
       }
 
       // Offer — external hires are already agreed, so it starts ACCEPTED and is

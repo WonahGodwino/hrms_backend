@@ -19,6 +19,8 @@
 // rows/[staffId]/route.ts, recompute/route.ts, include/route.ts.
 import { prisma } from '@/app/lib/db';
 import { sendPayrollNotificationEmail } from '@/app/lib/email';
+import { logPayslipEmailAttempt } from '@/app/lib/payroll/email-log';
+import { mapWithConcurrency } from '@/app/lib/payroll/concurrency';
 import { createNotification } from '@/app/lib/notifications/helpers';
 
 import { generateEnhancedPayslipPdf, type GeneratePayslipInput } from '../generateEnhancedPayslipPdf';
@@ -102,6 +104,8 @@ export type FinalizeOneStaffRowResult = {
 	payrollId: string;
 	isUpdate: boolean;
 	emailSent: boolean;
+	/** True when a SENT log already exists for this payslip, so no duplicate was sent. */
+	emailAlreadySent?: boolean;
 	emailError?: string;
 };
 
@@ -381,7 +385,20 @@ export async function finalizeOneStaffRow(params: FinalizeOneStaffRowParams): Pr
 
 	let emailSent = false;
 	let emailError: string | undefined;
+	let emailMessageId: string | undefined;
+	// A retried or re-approved run must not email staff who already got this
+	// payslip. The EmailLog is the source of truth for what was delivered.
+	let emailAlreadySent = false;
 	if (sendEmails) {
+		const previous = await prisma.emailLog
+			.findFirst({
+				where: { companyId, staffId: staffRecord.id, payslipId, emailType: 'PAYSLIP_GENERATED', status: 'SENT' },
+				select: { id: true },
+			})
+			.catch(() => null);
+		emailAlreadySent = Boolean(previous);
+	}
+	if (sendEmails && !emailAlreadySent) {
 		try {
 			const emailResult = await sendPayrollNotificationEmail(
 				{
@@ -403,11 +420,28 @@ export async function finalizeOneStaffRow(params: FinalizeOneStaffRowParams): Pr
 					isUpdate,
 				}
 			);
-			if (emailResult.success) emailSent = true;
+			if (emailResult.success) {
+				emailSent = true;
+				emailMessageId = (emailResult as any)?.data?.id;
+			}
 			else emailError = emailResult.error || 'Email sending failed';
 		} catch (err: any) {
 			emailError = err.message || 'Email sending failed';
 		}
+		await logPayslipEmailAttempt({
+			companyId: staffRecord.companyId,
+			staffId: staffRecord.id,
+			payslipId,
+			payrollId: payrollRecord.id,
+			recipient: staffRecord.email,
+			emailType: 'PAYSLIP_GENERATED',
+			success: emailSent,
+			error: emailError,
+			messageId: emailMessageId,
+			sentBy: approvedBy,
+			month: monthName,
+			year,
+		});
 	}
 
 	await createNotification(
@@ -424,7 +458,7 @@ export async function finalizeOneStaffRow(params: FinalizeOneStaffRowParams): Pr
 		data: { status: 'APPROVED', approvedBy, approvedAt: new Date(), payrollId: payrollRecord.id },
 	});
 
-	return { payslipId, payrollId: payrollRecord.id, isUpdate, emailSent, emailError };
+	return { payslipId, payrollId: payrollRecord.id, isUpdate, emailSent, emailAlreadySent, emailError };
 }
 
 export type ApproveGenerationRunParams = {
@@ -469,6 +503,8 @@ export function findMissingRequiredFields(row: PayrollData & { staff: StaffRecor
 	}
 	return missing;
 }
+
+const APPROVAL_CONCURRENCY = 4;
 
 export async function approveGenerationRun(params: ApproveGenerationRunParams): Promise<ApproveGenerationRunResult> {
 	const { runId, approvedBy, sendEmails } = params;
@@ -527,24 +563,46 @@ export async function approveGenerationRun(params: ApproveGenerationRunParams): 
 	let emailsSent = 0;
 	const emailFailures: Array<{ staffId: string; error: string }> = [];
 
-	for (const row of rows) {
-		const result = await finalizeOneStaffRow({
-			row,
-			template,
-			company,
-			companyId: run.companyId,
-			monthName,
-			year,
-			periodMonth,
-			approvedBy,
-			sendEmails,
-			payPeriod: run.payPeriod,
-			payrollGenerationRunId: run.id,
-		});
-		if (result.emailSent) emailsSent += 1;
-		if (result.emailError) emailFailures.push({ staffId: row.staff.staffId, error: result.emailError });
-		approvedCount += 1;
-	}
+	// Rows are independent (one staff, one payroll, one payslip each) so they
+	// are finalised a few at a time instead of strictly one after another. A row
+	// that throws is recorded and does not stop the rest; each finished row is
+	// flipped to APPROVED, so after a crash a re-approve only redoes the rows
+	// still in GENERATED. The run's updatedAt is touched every 25 rows as a
+	// heartbeat so a live approval is never mistaken for a stuck one.
+	let finished = 0;
+	let firstError: unknown = null;
+	await mapWithConcurrency(rows, APPROVAL_CONCURRENCY, async (row) => {
+		try {
+			const result = await finalizeOneStaffRow({
+				row,
+				template,
+				company,
+				companyId: run.companyId,
+				monthName,
+				year,
+				periodMonth,
+				approvedBy,
+				sendEmails,
+				payPeriod: run.payPeriod,
+				payrollGenerationRunId: run.id,
+			});
+			if (result.emailSent) emailsSent += 1;
+			if (result.emailError) emailFailures.push({ staffId: row.staff.staffId, error: result.emailError });
+			approvedCount += 1;
+		} catch (error) {
+			firstError = firstError ?? error;
+			console.error('[PAYROLL_GENERATION] Failed to finalise row:', { runId, staffId: row.staff.staffId, error });
+		}
+		finished += 1;
+		if (finished % 25 === 0) {
+			await prisma.payrollGenerationRun
+				.update({ where: { id: runId }, data: { status: 'PROCESSING' } })
+				.catch(() => undefined);
+		}
+	});
+	// Any failed row means the run is not fully approved: surface it so the run
+	// is restored to GENERATED (the rows already approved stay approved).
+	if (firstError) throw firstError;
 
 	await prisma.payrollGenerationRun.update({
 		where: { id: runId },

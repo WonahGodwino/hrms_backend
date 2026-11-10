@@ -6,6 +6,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { getDepartmentWithAccess, logDepartmentAction } from '@/app/lib/departments/department-utils'
 import { sanitizeDepartmentName } from '@/app/lib/departments/department-sync'
+import { resolveBusinessUnitLink } from '@/app/lib/departments/business-unit-link'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -63,13 +64,29 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     const updateData: any = {}
     const updatedFields: string[] = []
     
-    const allowedFields = ['name', 'code', 'businessUnit', 'headId', 'assistantHeadId', 'maxHeadcount', 'costCenter', 'budgetCode']
+    // Business unit is handled separately below (optional, may be cleared).
+    const allowedFields = ['name', 'code', 'headId', 'assistantHeadId', 'maxHeadcount', 'costCenter', 'budgetCode']
     
     for (const key of allowedFields) {
       if (body[key] !== undefined) {
         updateData[key] = body[key]
         updatedFields.push(key)
       }
+    }
+
+    // Optional business unit: id or name links it, blank/null clears it,
+    // omitted leaves it as is.
+    const unit = await resolveBusinessUnitLink(department.companyId, body)
+    if (unit) {
+      updateData.businessUnit = unit.businessUnit
+      updateData.businessUnitId = unit.businessUnitId
+      updatedFields.push('businessUnit')
+    }
+
+    // An empty code would break the per-company unique code; ignore it.
+    if (updateData.code !== undefined && !String(updateData.code ?? '').trim()) {
+      delete updateData.code
+      updatedFields.splice(updatedFields.indexOf('code'), 1)
     }
 
     updateData.updatedAt = new Date()

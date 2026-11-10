@@ -6,7 +6,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { syncModuleAccess } from '@/app/lib/module-access'
 import { PLATFORM_MODULES } from '@/app/lib/modules'
 
-// Available modules come from the platform module registry — single source of truth
+// Available modules come from the platform module registry - single source of truth
 const AVAILABLE_MODULE_OPTIONS = PLATFORM_MODULES.map(m => ({
   key: m.key,
   name: m.name,
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
 
     const existingKeys = new Set(existingModules.map((m: any) => m.key))
 
-    // Find available modules not yet created — archived ones are still
+    // Find available modules not yet created - archived ones are still
     // "registered" (re-registering = un-archiving), so exclude them too.
     const availableOptions = AVAILABLE_MODULE_OPTIONS.filter(
       (opt) => !existingKeys.has(opt.key)
@@ -126,7 +126,7 @@ export async function DELETE(req: NextRequest) {
 
     if (activeAccessCount > 0) {
       return withCors(ApiResponse.error(
-        `Cannot delete module "${existing.name}" — it is currently enabled for ${activeAccessCount} company(s). Please disable it first.`,
+        `Cannot delete module "${existing.name}", it is currently enabled for ${activeAccessCount} company(s). Please disable it first.`,
         409
       ), origin)
     }

@@ -3,7 +3,7 @@
 // PATCH /api/super-admin/nav/modules/:key
 //   body: { navSectionId?: string | null, navOrder?: number, navLabel?: string | null, navIcon?: string | null }
 //
-// Updates a module's sidebar placement. All fields optional — omitted fields
+// Updates a module's sidebar placement. All fields optional - omitted fields
 // are left unchanged. navSectionId null puts the module back in the main
 // (unlabelled) section.
 import { NextRequest } from 'next/server'

@@ -43,6 +43,6 @@ export async function POST(req: NextRequest) {
       accessRowsCreated: created,
       navSectionsSeeded: nav.sectionsSeeded,
       navModulesAssigned: nav.modulesAssigned,
-    }, `Sync complete — ${PLATFORM_MODULES.length} modules registered, ${created} new access rows created`), origin)
+    }, `Sync complete: ${PLATFORM_MODULES.length} modules registered, ${created} new access rows created`), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }

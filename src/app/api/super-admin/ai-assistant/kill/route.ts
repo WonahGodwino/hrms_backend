@@ -1,4 +1,4 @@
-// [ai-assistant] Super Admin kill switch — POST turns the assistant off for one company, or for every company.
+// [ai-assistant] Super Admin kill switch - POST turns the assistant off for one company, or for every company.
 //
 // For platform safety (for example a provider incident). Turning a company back on is left to that company's Admin or HR; the
 // platform-wide switch is turned back on from the platform toggle (PATCH /api/super-admin/ai-assistant).

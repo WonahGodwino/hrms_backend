@@ -1,12 +1,16 @@
 // src/app/api/payslips/duplicates/route.ts
-// Detect and delete duplicate payslips:
-// Same staffRecordId + month + year + companyId but different payrollId
+// Detect and delete duplicate payslips: same staff + month/year + SAME payroll
+// template, 2 or more payslips. Payslips from different templates in the same
+// month are a normal payroll setup and are not duplicates (see
+// lib/payroll/payslip-duplicates.ts, which mirrors Payroll Generation's rule).
 
 import { NextRequest } from 'next/server';
 import { requireRole } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
+import { staffIdsWithMultiplePayslips } from '@/app/lib/payroll/payslip-duplicate-prefilter';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { groupDuplicatePayslips, payslipDuplicateKey } from '@/app/lib/payroll/payslip-duplicates';
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -15,9 +19,8 @@ export async function OPTIONS(request: NextRequest) {
 /**
  * GET /api/payslips/duplicates?companyId=X&month=Y&year=Z
  *
- * Returns groups of duplicate payslips. A "duplicate" is when the same
- * staff member has 2+ payslips generated from different payroll cycles
- * (different payrollId) for the same month/year/company.
+ * Returns groups of duplicate payslips: the same staff member with 2+
+ * payslips for the same month/year under the SAME payroll template.
  */
 export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin');
@@ -45,10 +48,25 @@ export async function GET(request: NextRequest) {
     if (month) where.month = month;
     if (year) where.year = parseInt(year);
 
-    // Fetch all payslips with payroll info for this company/period
-    const payslips = await prisma.payslip.findMany({
+    // Only staff with 2+ payslips in this filter can have a duplicate, so load
+    // just those instead of every payslip for the company/period.
+    const candidateStaffIds = await staffIdsWithMultiplePayslips(where);
+    if (candidateStaffIds.length > 0) where.staffRecordId = { in: candidateStaffIds };
+
+    // Fetch payslips with payroll info for those staff. `select`, not
+    // `include`, so the stored PDF (fileData) is never loaded.
+    const payslips = candidateStaffIds.length === 0 ? [] : await prisma.payslip.findMany({
       where,
-      include: {
+      select: {
+        id: true,
+        payrollId: true,
+        staffRecordId: true,
+        month: true,
+        year: true,
+        grossPay: true,
+        netPay: true,
+        createdAt: true,
+        fileName: true,
         payroll: {
           select: {
             id: true,
@@ -76,20 +94,8 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: 'asc' },
     });
 
-    // Group by staffRecordId + month + year to find duplicates
-    const groups: Record<string, typeof payslips> = {};
-    for (const payslip of payslips) {
-      const key = `${payslip.staffRecordId}-${payslip.month}-${payslip.year}`;
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(payslip);
-    }
-
-    // Filter to only groups with 2+ unique payrollIds (true duplicates)
-    const duplicateGroups = Object.entries(groups)
-      .filter(([, slips]) => {
-        const uniquePayrollIds = new Set(slips.map((s) => s.payrollId));
-        return uniquePayrollIds.size > 1;
-      })
+    // Same staff + same period + same template, 2+ payslips.
+    const duplicateGroups = groupDuplicatePayslips(payslips)
       .map(([key, slips]) => {
         const staff = slips[0].staffRecord;
         const staffName = [staff.firstName, staff.lastName].filter(Boolean).join(' ') || 'Unknown';
@@ -99,8 +105,14 @@ export async function GET(request: NextRequest) {
           (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
         );
 
+        const first = slips[0].payroll;
+        const groupTemplateName =
+          first?.template?.templateName ||
+          (first?.templateType || 'UNKNOWN').toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
         return {
           groupKey: key,
+          templateName: groupTemplateName,
           staffName,
           staffId: staff.staffId,
           staffEmail: staff.email,
@@ -164,7 +176,9 @@ export async function GET(request: NextRequest) {
  * DELETE /api/payslips/duplicates
  *
  * Delete selected duplicate payslips. Body: { payslipIds: string[] }
- * Always preserves at least one payslip per staff+month+year group.
+ * Always keeps at least one payslip per staff + month/year + template, so this
+ * can only ever remove duplicates, never a staff member's only payslip for a
+ * template.
  */
 export async function DELETE(request: NextRequest) {
   const origin = request.headers.get('origin');
@@ -188,60 +202,46 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Verify all payslips exist
+    // Load the selected payslips, then every payslip in the same staff +
+    // period so the safety check sees the whole template group.
+    const templateSelect = { payroll: { select: { templateId: true, templateType: true } } } as const;
     const existingPayslips = await prisma.payslip.findMany({
       where: { id: { in: payslipIds } },
-      select: {
-        id: true,
-        staffRecordId: true,
-        month: true,
-        year: true,
-        companyId: true,
-      },
+      select: { id: true, staffRecordId: true, month: true, year: true, companyId: true, ...templateSelect },
     });
 
     if (existingPayslips.length === 0) {
       return withCors(ApiResponse.error('No matching payslips found', 404), origin);
     }
 
-    // Check if all payslips to be deleted belong to the same pay-period (month/year).
-    // If yes, they are all duplicates from the same period — safe to delete all.
-    // If not, apply the safety check to preserve at least one per staff+period.
-    const toDelete = new Set(payslipIds);
+    const siblings = await prisma.payslip.findMany({
+      where: {
+        OR: existingPayslips.map((p) => ({ companyId: p.companyId, staffRecordId: p.staffRecordId, year: p.year })),
+      },
+      select: { id: true, staffRecordId: true, month: true, year: true, ...templateSelect },
+    });
 
-    const allSamePeriod = existingPayslips.every(
-      (p) => p.month === existingPayslips[0].month && p.year === existingPayslips[0].year
-    );
+    const toDelete = new Set(payslipIds.map(String));
+    const groups = new Map<string, string[]>();
+    for (const p of siblings) {
+      const key = payslipDuplicateKey(p);
+      groups.set(key, [...(groups.get(key) || []), p.id]);
+    }
 
-    let safeToDelete: string[] = [];
-    let rejected: string[] = [];
-
-    if (allSamePeriod) {
-      // All payslips are from the same pay-period — delete them all
-      safeToDelete = existingPayslips.map((p) => p.id).filter((id) => toDelete.has(id));
-    } else {
-      // Different periods — group by staff+month+year and ensure at least one remains per group
-      const groups: Record<string, string[]> = {};
-      for (const p of existingPayslips) {
-        const key = `${p.staffRecordId}-${p.month}-${p.year}`;
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(p.id);
-      }
-
-      for (const [, groupIds] of Object.entries(groups)) {
-        const remainingAfterDelete = groupIds.filter((id) => !toDelete.has(id));
-        if (remainingAfterDelete.length === 0) {
-          rejected.push(...groupIds.filter((id) => toDelete.has(id)));
-        } else {
-          safeToDelete.push(...groupIds.filter((id) => toDelete.has(id)));
-        }
-      }
+    const safeToDelete: string[] = [];
+    const rejected: string[] = [];
+    for (const p of existingPayslips) {
+      const group = groups.get(payslipDuplicateKey(p)) || [p.id];
+      const remaining = group.filter((id) => !toDelete.has(id));
+      // Never remove the last payslip of a staff member's template for a period.
+      if (remaining.length === 0) rejected.push(p.id);
+      else safeToDelete.push(p.id);
     }
 
     if (safeToDelete.length === 0) {
       return withCors(
         ApiResponse.error(
-          'Cannot delete: this would remove all payslips for one or more staff members in the selected period',
+          "Cannot delete: each selected payslip is the only one of its template for that staff member and period, so it isn't a duplicate",
           400
         ),
         origin

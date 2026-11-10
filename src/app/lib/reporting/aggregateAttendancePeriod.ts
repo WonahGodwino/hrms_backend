@@ -53,10 +53,11 @@ export async function aggregateAttendancePeriod(targetCompanyIds: string[], star
   const companyConfigById = new Map(companies.map((c) => [c.id, c]))
   const departmentNameById = new Map(departments.map((d) => [d.id, d.name]))
 
-  const workingDaysByCompany = new Map<string, Date[]>()
-  for (const companyId of targetCompanyIds) {
-    workingDaysByCompany.set(companyId, await getWorkingDaysInRange(companyId, start, end))
-  }
+  // One calendar lookup per company, run in parallel (was sequential, which
+  // added a full round-trip per company for "all companies" reports).
+  const workingDaysByCompany = new Map<string, Date[]>(
+    await Promise.all(targetCompanyIds.map(async (companyId) => [companyId, await getWorkingDaysInRange(companyId, start, end)] as [string, Date[]]))
+  )
 
   const attendanceByKey = new Map<string, Date | null>()
   for (const record of attendanceRecords) {

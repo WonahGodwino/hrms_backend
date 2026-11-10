@@ -1,4 +1,4 @@
-// [ai-assistant] Super Admin platform off-switch — GET and PATCH.
+// [ai-assistant] Super Admin platform off-switch - GET and PATCH.
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'

@@ -18,11 +18,14 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
 import { consumeTrialQuota } from '@/app/lib/trial/guard'
+import { createRateLimiter, mapWithConcurrency } from '@/app/lib/payroll/concurrency'
+import { findResumablePayslipIds, markPayslipEmailResult, markPayslipsPending } from '@/app/lib/payroll/payslip-email-status'
 import {
   getActivePayslipBulkSend,
   createPendingPayslipBulkSend,
   completePayslipBulkSendRecord,
   failPayslipBulkSendRecord,
+  reportBulkSendProgress,
   type PayslipBulkSendResults,
 } from '@/app/lib/payroll/payslipBulkSend'
 
@@ -83,9 +86,14 @@ export async function POST(request: NextRequest) {
     }
 
     const draftCount = await prisma.payslip.count({ where: { companyId, month, year: yearNumber, draft: true } })
-    if (draftCount === 0) {
+    // Published payslips whose email never completed (an interrupted or failed
+    // earlier send) are picked up again too. Empty until the email-status
+    // columns exist, so behaviour is unchanged before the migration.
+    const resumableCount = (await findResumablePayslipIds(companyId, month, yearNumber)).length
+    const totalToSend = draftCount + resumableCount
+    if (totalToSend === 0) {
       return withCors(
-        ApiResponse.error(`No draft payslips found for ${month} ${yearNumber}.`, 400),
+        ApiResponse.error(`No draft or unsent payslips found for ${month} ${yearNumber}.`, 400),
         origin
       )
     }
@@ -97,7 +105,7 @@ export async function POST(request: NextRequest) {
     })
     await consumeTrialQuota(companyId, 'payslips', draftRecipients.map((p) => p.staffRecordId))
 
-    const job = await createPendingPayslipBulkSend(companyId, month, yearNumber, user.userId, draftCount)
+    const job = await createPendingPayslipBulkSend(companyId, month, yearNumber, user.userId, totalToSend)
 
     // Respond immediately; the actual send loop continues after the response
     // is sent. This process is a long-running Node server (not a serverless
@@ -118,12 +126,12 @@ export async function POST(request: NextRequest) {
       companyId,
       month,
       year: yearNumber,
-      totalPayslips: draftCount,
+      totalPayslips: totalToSend,
     })
 
     return withCors(
       ApiResponse.success(
-        { jobId: job.id, status: 'PROCESSING', totalPayslips: draftCount },
+        { jobId: job.id, status: 'PROCESSING', totalPayslips: totalToSend },
         'Payslip bulk-send started'
       ),
       origin
@@ -132,6 +140,9 @@ export async function POST(request: NextRequest) {
     return withCors(handleApiError(error), origin)
   }
 }
+
+const BULK_SEND_CONCURRENCY = 6
+const BULK_SEND_RATE_PER_SECOND = 15
 
 async function processBulkSendInBackground({
   jobId,
@@ -149,9 +160,25 @@ async function processBulkSendInBackground({
   const results: PayslipBulkSendResults = { sent: 0, failed: 0, emailFailures: [] }
 
   try {
+    // Drafts, plus published payslips left PENDING/FAILED by an earlier run.
+    const resumeIds = await findResumablePayslipIds(companyId, month, year)
     const payslips = await prisma.payslip.findMany({
-      where: { companyId, month, year, draft: true },
-      include: { staffRecord: true },
+      where: {
+        companyId,
+        month,
+        year,
+        OR: [{ draft: true }, ...(resumeIds.length > 0 ? [{ id: { in: resumeIds } }] : [])],
+      },
+      // Only what the email needs — `include: { staffRecord: true }` pulled
+      // whole staff rows (bank details etc.) for every payslip.
+      include: {
+        staffRecord: {
+          select: {
+            id: true, companyId: true, firstName: true, lastName: true, email: true,
+            staffId: true, department: true, position: true, isRegistered: true,
+          },
+        },
+      },
     })
 
     if (payslips.length === 0) {
@@ -176,8 +203,11 @@ async function processBulkSendInBackground({
       where: { id: { in: payslips.map((p) => p.id) }, companyId },
       data: { draft: false },
     })
+    // Mark everything selected as PENDING: if the process dies from here on, the
+    // unsent ones are findable and a re-run resumes exactly those.
+    await markPayslipsPending(payslips.map((p) => p.id))
 
-    for (const payslip of payslips) {
+    const processOne = async (payslip: (typeof payslips)[number]) => {
       const staff = payslip.staffRecord
       const staffName = `${staff.firstName} ${staff.lastName}`
 
@@ -214,6 +244,7 @@ async function processBulkSendInBackground({
         }
 
         results.sent++
+        await markPayslipEmailResult(payslip.id, { success: true, messageId: (emailResult as any)?.data?.id ? String((emailResult as any).data.id).replace(/^<|>$/g, '') : null })
 
         try {
           await prisma.emailLog.create({
@@ -226,7 +257,7 @@ async function processBulkSendInBackground({
               recipient: staff.email,
               status: 'SENT',
               sentBy: userId,
-              metadata: { month, year },
+              metadata: { month, year, messageId: (emailResult as any)?.data?.id ? String((emailResult as any).data.id).replace(/^<|>$/g, '') : null },
             },
           })
         } catch (logError) {
@@ -234,6 +265,7 @@ async function processBulkSendInBackground({
         }
       } catch (err: any) {
         results.failed++
+        await markPayslipEmailResult(payslip.id, { success: false })
         const message = err?.message || 'Failed to send email'
         results.emailFailures.push({
           payslipId: payslip.id,
@@ -262,6 +294,19 @@ async function processBulkSendInBackground({
         }
       }
     }
+
+    // Bounded concurrency + a global rate cap: ~6 in flight and at most ~15
+    // sends/second keeps 3,000 emails to a few minutes without hammering the
+    // provider. Progress is persisted every 25 sends so status is live and the
+    // stale check sees activity.
+    const acquireSlot = createRateLimiter(BULK_SEND_RATE_PER_SECOND)
+    let completed = 0
+    await mapWithConcurrency(payslips, BULK_SEND_CONCURRENCY, async (payslip) => {
+      await acquireSlot()
+      await processOne(payslip)
+      completed++
+      if (completed % 25 === 0) await reportBulkSendProgress(jobId, results)
+    })
 
     await completePayslipBulkSendRecord(jobId, results)
 

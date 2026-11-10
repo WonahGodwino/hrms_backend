@@ -36,20 +36,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const job = (offer as any).application?.job || null
     const jobDefaults = (job?.offerDefaults && typeof job.offerDefaults === 'object') ? job.offerDefaults : {}
 
-    // Grade + step ladder (real pay per step).
-    let grade: any = null
-    if (offer.gradeId) {
-      grade = await (prisma as any).gradeLevel.findFirst({
-        where: { id: offer.gradeId },
-        include: { steps: { orderBy: { stepNumber: 'asc' } }, benefits: { select: { id: true } } },
-      })
-    }
-
-    const steps = (grade?.steps || []).map((s: any) => {
-      const basePay = s.calculatedPay ?? (grade?.basePay ? grade.basePay * (1 + (s.incrementPercent || 0) / 100) : 0)
-      return { id: s.stepNumber, label: `Step ${s.stepNumber}: ${money(basePay)} / yr`, basePay: Math.round(basePay) }
-    })
-    const maxApprovedStep = jobDefaults.maxApprovedStep ?? grade?.totalSteps ?? null
+    // Standalone grade levels (and their step ladders) were replaced by
+    // designation seniority bands, so there are no steps to offer.
+    const grade: any = null
+    const steps: Array<{ id: number; label: string; basePay: number }> = []
+    const maxApprovedStep = jobDefaults.maxApprovedStep ?? null
 
     // Benefit catalog from the benefits module, scoped to this offer's job:
     // job-specific benefits plus the all-roles (jobId = null) ones.

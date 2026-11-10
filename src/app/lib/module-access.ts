@@ -93,7 +93,7 @@ export async function seedModuleAccessForCompany(companyId: string, enableKeys?:
   })
   if (enableKeys) {
     await (prisma as any).companyModuleAccess.updateMany({
-      where: { companyId, module: { key: { in: [...AUTO_ENABLE_KEYS] } } },
+      where: { companyId, module: { key: { in: Array.from(AUTO_ENABLE_KEYS) } } },
       data:  { enabled: true },
     })
   }

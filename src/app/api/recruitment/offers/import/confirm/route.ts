@@ -71,8 +71,7 @@ export async function POST(request: NextRequest) {
               { code: { equals: effectiveDesignation, mode: 'insensitive' } },
               { title: { equals: effectiveDesignation, mode: 'insensitive' } },
             ],
-          },
-          include: { gradeLevel: { select: { id: true, name: true, basePay: true } } },
+          },
         })
         if (!designation) { skipped++; errors.push({ email: row.email, reason: 'Unknown designation/position' }); continue }
 
@@ -160,7 +159,7 @@ export async function POST(request: NextRequest) {
         const proposedSalary = row.proposedBasicSalary ? parseFloat(row.proposedBasicSalary.replace(/[^0-9.]/g, '')) : NaN
         const basePay = !isNaN(proposedSalary) && proposedSalary > 0
           ? proposedSalary
-          : designation.basePay ?? designation.gradeLevel?.basePay ?? null
+          : designation.basePay ?? null
 
         const startDate = row.resumptionDate || row.anticipatedStartDate
 
@@ -177,8 +176,8 @@ export async function POST(request: NextRequest) {
             jobId: application.jobId,
             status: offerStatus,
             salary: basePay != null ? basePay : undefined,
-            gradeId: designation.gradeLevel?.id ?? null,
-            gradeName: designation.gradeLevel?.name ?? null,
+            gradeId: designation.id,
+            gradeName: designation.seniorityBand ?? designation.title,
             proposedStartDate: startDate ? new Date(startDate) : null,
             createdBy: actor,
             metadata: {

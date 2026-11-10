@@ -16,6 +16,7 @@
 // logic the way payroll generation deliberately duplicates the upload path —
 // this is one feature, not two systems that must stay independently provable.
 import { prisma } from '@/app/lib/db'
+import { isPlaceholderValue } from '@/app/lib/staff/placeholder-values'
 import { logDepartmentAction, logStaffDepartmentChange, updateDepartmentHeadcount } from './department-utils'
 
 /**
@@ -26,7 +27,7 @@ import { logDepartmentAction, logStaffDepartmentChange, updateDepartmentHeadcoun
  * input — callers treat that as "no department info", not "unassign".
  */
 export function sanitizeDepartmentName(raw: string | null | undefined): string | null {
-  if (!raw) return null
+  if (!raw || isPlaceholderValue(raw)) return null
   const collapsed = raw.replace(/\s+/g, ' ').trim()
   if (!collapsed) return null
   return collapsed

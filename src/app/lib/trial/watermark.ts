@@ -5,14 +5,27 @@
 import { PDFDocument, StandardFonts, degrees, rgb } from 'pdf-lib'
 import { getTrialState } from './guard'
 
+// A payroll run watermarks one PDF per row for the same company; cache the
+// restricted flag briefly so that is one lookup per minute, not one per row.
+const RESTRICTED_CACHE_TTL_MS = 60 * 1000
+const restrictedCache = new Map<string, { restricted: boolean; expires: number }>()
+
+async function isCompanyRestricted(companyId: string | null | undefined): Promise<boolean> {
+  const key = companyId || ''
+  const cached = restrictedCache.get(key)
+  if (cached && cached.expires > Date.now()) return cached.restricted
+  const state = await getTrialState(companyId)
+  restrictedCache.set(key, { restricted: state.restricted, expires: Date.now() + RESTRICTED_CACHE_TTL_MS })
+  return state.restricted
+}
+
 export async function watermarkPdfIfTrial(
   companyId: string | null | undefined,
   pdf: Uint8Array | Buffer,
 ): Promise<Uint8Array> {
   const bytes = pdf instanceof Uint8Array ? pdf : new Uint8Array(pdf)
   try {
-    const state = await getTrialState(companyId)
-    if (!state.restricted) return bytes
+    if (!(await isCompanyRestricted(companyId))) return bytes
 
     const doc = await PDFDocument.load(bytes)
     const font = await doc.embedFont(StandardFonts.HelveticaBold)

@@ -7,6 +7,7 @@ import { ApiResponse, formatError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { fileTypeFromBuffer } from "file-type";
 import { extractCvText } from "@/app/lib/recruitment/cvText";
+import { mail, receivedMail } from "@/app/lib/candidate-portal/emails";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -84,6 +85,7 @@ export async function POST(request: NextRequest) {
         status: true,
         companyId: true,
         title: true,
+        company: { select: { companyName: true } },
       },
     });
 
@@ -354,11 +356,22 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    const ref = application.referenceCode;
+    void mail(
+      email,
+      receivedMail(
+        firstName,
+        job.title,
+        job.company?.companyName ?? "",
+        `${ref.slice(0, 5)}-${ref.slice(5)}`,
+      ),
+    );
+
     return withCors(
       ApiResponse.success(
         {
           applicationId: application.id,
-          referenceCode: application.referenceCode,
+          referenceCode: ref,
           candidateId: candidate.id,
           jobTitle: job.title,
           message: "Application submitted successfully",
