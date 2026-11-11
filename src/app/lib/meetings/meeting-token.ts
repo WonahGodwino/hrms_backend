@@ -40,3 +40,30 @@ export function verifyMeetingAccessToken(
     return null
   }
 }
+
+const PUBLIC_PURPOSE = 'meeting-public-access'
+
+// Public / general meeting link: lets ANYONE holding the link join a PUBLIC
+// meeting as a guest — no staff account and no participant record required.
+export function signMeetingPublicAccessToken(
+  meetingId: string,
+  expiresIn: string = '30d',
+): string {
+  return (jwt as any).sign(
+    { meetingId, purpose: PUBLIC_PURPOSE },
+    getSecret(),
+    { expiresIn },
+  ) as string
+}
+
+export function verifyMeetingPublicAccessToken(
+  token: string,
+): { meetingId: string } | null {
+  try {
+    const decoded = jwt.verify(token, getSecret()) as any
+    if (!decoded || decoded.purpose !== PUBLIC_PURPOSE || !decoded.meetingId) return null
+    return { meetingId: String(decoded.meetingId) }
+  } catch {
+    return null
+  }
+}

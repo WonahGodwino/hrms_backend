@@ -5,13 +5,14 @@
 //   2. A signed meeting access token (?token= or body.token) for an
 //      unauthenticated participant (candidate / external panelist).
 // Never issues a token for a CANCELLED/ENDED meeting.
+import { randomUUID } from 'crypto'
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { getUserFromToken } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { getMeetingProvider } from '@/app/lib/meetings/provider'
-import { verifyMeetingAccessToken } from '@/app/lib/meetings/meeting-token'
+import { verifyMeetingAccessToken, verifyMeetingPublicAccessToken } from '@/app/lib/meetings/meeting-token'
 import { hasModuleAccess } from '@/app/lib/module-access'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
@@ -51,42 +52,57 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     let displayName = 'Guest'
     let isHost = false
     let viaAccessToken = false
+    let isPublicGuest = false
 
-    // ---- Path 2: signed access token (unauthenticated participant) ----
+    // ---- Path 2: signed access token (unauthenticated participant, or a
+    //      public/general guest joining via a shareable link) ----
     if (accessToken) {
       viaAccessToken = true
-      const decoded = verifyMeetingAccessToken(String(accessToken))
-      if (!decoded || decoded.meetingId !== id) {
-        return withCors(ApiResponse.error('Invalid or expired meeting link', 401), origin)
-      }
-      participant = meeting.participants.find((p: any) => p.id === decoded.participantId)
-      if (!participant) return withCors(ApiResponse.error('You are not a participant of this meeting', 403), origin)
+      const publicDecoded = verifyMeetingPublicAccessToken(String(accessToken))
+      if (publicDecoded && publicDecoded.meetingId === id) {
+        // Public/general meeting link: no staff account or invite needed.
+        if (String(meeting.accessType || 'STAFF_ONLY') !== 'PUBLIC') {
+          return withCors(ApiResponse.error('This meeting does not allow public joining', 403), origin)
+        }
+        isPublicGuest = true
+        identity = `guest_${randomUUID()}`
+        displayName = preferredName || 'Guest'
+        isHost = false
+        participant = null
+      } else {
+        const decoded = verifyMeetingAccessToken(String(accessToken))
+        if (!decoded || decoded.meetingId !== id) {
+          return withCors(ApiResponse.error('Invalid or expired meeting link', 401), origin)
+        }
+        participant = meeting.participants.find((p: any) => p.id === decoded.participantId)
+        if (!participant) return withCors(ApiResponse.error('You are not a participant of this meeting', 403), origin)
 
-      // External participant security: bind this invite token to the participant's
-      // invited email address. First successful join stores accessEmail on the
-      // participant record; subsequent joins must use the same email.
-      if (participant.externalEmail) {
-        if (!accessEmail) {
-          return withCors(ApiResponse.error('Please provide your invitation email to continue', 400), origin)
+        // External participant security: bind this invite token to the participant's
+        // invited email address. First successful join stores accessEmail on the
+        // participant record; subsequent joins must use the same email.
+        if (participant.externalEmail) {
+          if (!accessEmail) {
+            return withCors(ApiResponse.error('Please provide your invitation email to continue', 400), origin)
+          }
+          const invited = String(participant.externalEmail).trim().toLowerCase()
+          if (accessEmail !== invited) {
+            return withCors(ApiResponse.error('This invitation link is not valid for this email address', 403), origin)
+          }
+          if (participant.accessEmail && String(participant.accessEmail).trim().toLowerCase() !== accessEmail) {
+            return withCors(ApiResponse.error('This invitation link has already been bound to another email', 403), origin)
+          }
+          if (!participant.accessEmail) {
+            await (prisma as any).meetingParticipant.update({
+              where: { id: participant.id },
+              data: { accessEmail },
+            }).catch(() => {})
+          }
         }
-        const invited = String(participant.externalEmail).trim().toLowerCase()
-        if (accessEmail !== invited) {
-          return withCors(ApiResponse.error('This invitation link is not valid for this email address', 403), origin)
-        }
-        if (participant.accessEmail && String(participant.accessEmail).trim().toLowerCase() !== accessEmail) {
-          return withCors(ApiResponse.error('This invitation link has already been bound to another email', 403), origin)
-        }
-        if (!participant.accessEmail) {
-          await (prisma as any).meetingParticipant.update({
-            where: { id: participant.id },
-            data: { accessEmail },
-          }).catch(() => {})
-        }
+        identity = `p_${participant.id}`
+        displayName = participant.externalName
+          || (participant.staffId ? await staffName(participant.staffId) : 'Guest')
+        isHost = participant.role === 'HOST'
       }
-      identity = `p_${participant.id}`
-      displayName = participant.externalName
-        || (participant.staffId ? await staffName(participant.staffId) : 'Guest')
-      isHost = participant.role === 'HOST'
     } else {
       // ---- Path 1: authenticated staff ----
       const bearer = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -106,8 +122,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     if (preferredName) displayName = preferredName
 
-    // Lobby: only unauthenticated guests wait; staff/hosts join directly.
-    const waiting = !!meeting.lobbyEnabled && viaAccessToken && !isHost
+    // Lobby: only unauthenticated invited guests wait; staff/hosts and public
+    // link guests join directly.
+    const waiting = !!meeting.lobbyEnabled && viaAccessToken && !isHost && !isPublicGuest
 
     const joinToken = await provider.issueJoinToken({
       roomName: meeting.roomName,

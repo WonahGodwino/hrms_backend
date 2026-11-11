@@ -8,6 +8,7 @@ import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { getMeetingProvider } from '@/app/lib/meetings/provider'
+import { signMeetingPublicAccessToken } from '@/app/lib/meetings/meeting-token'
 import { hasModuleAccess } from '@/app/lib/module-access'
 import { notifyMeetingParticipants } from '@/app/lib/meetings/notify'
 
@@ -82,6 +83,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       recordingUrl: m.recordingUrl || null,
       recordingStatus: m.recordingStatus || null,
       lobbyEnabled: !!m.lobbyEnabled,
+      accessType: m.accessType || 'STAFF_ONLY',
+      publicToken: m.accessType === 'PUBLIC' ? signMeetingPublicAccessToken(m.id) : null,
       wsUrl: getMeetingProvider().wsUrl || null,
       participants: m.participants.map((p: any) => {
         const staff = p.staffId ? staffById.get(p.staffId) : null

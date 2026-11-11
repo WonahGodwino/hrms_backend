@@ -10,7 +10,7 @@ import { requireRoleAsync } from '@/app/lib/auth';
 import { resolveScopedCompanyId } from '@/app/lib/company-scope';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
-import { signMeetingAccessToken } from '@/app/lib/meetings/meeting-token';
+import { signMeetingAccessToken, signMeetingPublicAccessToken } from '@/app/lib/meetings/meeting-token';
 import { notifyMeetingParticipants } from '@/app/lib/meetings/notify';
 import { hasModuleAccess } from '@/app/lib/module-access';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
@@ -91,6 +91,7 @@ async function generateRecurringInstances(companyId: string, parent: any, partic
 				status: 'SCHEDULED',
 				createdBy,
 				lobbyEnabled: !!parent.lobbyEnabled,
+				accessType: parent.accessType || 'STAFF_ONLY',
 				recurrence: { ...rec, parentMeetingId: parent.id },
 				participants: {
 					create: participants.map((p: any) => ({
@@ -161,6 +162,7 @@ export async function GET(req: NextRequest) {
 			recordingUrl: m.recordingUrl || null,
 			recordingStatus: m.recordingStatus || null,
 			lobbyEnabled: !!m.lobbyEnabled,
+			accessType: m.accessType || 'STAFF_ONLY',
 			recurrence: m.recurrence || null,
 			participantCount: m.participants.length,
 		}));
@@ -191,6 +193,12 @@ export async function POST(req: NextRequest) {
 		const purpose = String(body.purpose || 'WORK_MEETING').toUpperCase();
 		if (!['INTERVIEW', 'WORK_MEETING'].includes(purpose)) {
 			return withCors(ApiResponse.error('Invalid meeting purpose', 400), origin);
+		}
+
+		// STAFF_ONLY = company staff + invited email guests; PUBLIC = anyone with the link.
+		const accessType = String(body.accessType || 'STAFF_ONLY').toUpperCase();
+		if (!['STAFF_ONLY', 'PUBLIC'].includes(accessType)) {
+			return withCors(ApiResponse.error('Invalid meeting access type', 400), origin);
 		}
 
 		// Unguessable room name (never expose sequential ids to the SFU).
@@ -256,6 +264,7 @@ export async function POST(req: NextRequest) {
 				createdBy: user.userId,
 				candidateAssessmentId: body.candidateAssessmentId ? String(body.candidateAssessmentId) : null,
 				lobbyEnabled: !!body.lobbyEnabled,
+				accessType,
 				recurrence: body.recurrence || null,
 				participants: { create: participants },
 			},
@@ -305,6 +314,8 @@ export async function POST(req: NextRequest) {
 					scheduledAt: meeting.scheduledAt,
 					recurrence: meeting.recurrence,
 					instanceCount: instances.length,
+					accessType: meeting.accessType || 'STAFF_ONLY',
+					publicToken: accessType === 'PUBLIC' ? signMeetingPublicAccessToken(meeting.id) : null,
 					invites,
 					emailDelivery,
 				},
