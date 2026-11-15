@@ -14,12 +14,21 @@ interface PayslipItem {
 
 // Extended interface with new fields (optional for backward compatibility)
 export interface ExtendedPayslipItem extends PayslipItem {
+  // Which payslip this is (Salary, Transport Allowance, Bonus, ...) — see
+  // Payroll.payslipCategory. Null for rows written before categories existed.
+  payslipCategory?: string | null;
   // Template information
   templateType?: 'ISURF_STANDARD' | 'BLUERIDGE' | 'DYNAMIC' | 'STANDARD';
   templateName?: string;
   isDynamic?: boolean;
   templateId?: string;
-  
+  // Notification delivery outcome for the email HR sent when publishing this
+  // payslip (Payslip.emailStatus) — 'SENT' | 'FAILED' | null (never attempted,
+  // e.g. published before this tracking existed). The payslip is visible to
+  // the staff member regardless of this value; it's shown only as a badge.
+  notificationStatus?: string | null;
+
+
   // Detailed breakdown (only when requested)
   earningsBreakdown?: Array<{
     label: string;
@@ -61,17 +70,6 @@ export interface StaffRecordInfo {
   position: string;
 }
 
-// Extended staff record info with additional fields
-interface ExtendedStaffRecordInfo extends StaffRecordInfo {
-  bankName?: string;
-  accountNumber?: string;
-  phone?: string;
-  isActive?: boolean;
-  companyId?: string;
-  companyName?: string;
-  joinedDate?: Date;
-  employmentType?: string;
-}
 
 export interface CompanyInfo {
   id: string;
@@ -83,67 +81,7 @@ export interface CompanyInfo {
   taxId?: string;
 }
 
-interface StaffItem {
-  id: string;
-  staffId: string;
-  name: string;
-  email: string;
-  department: string;
-  position: string;
-  isActive: boolean;
-  companyName: string;
-  payslipCount: number;
-  actions: {
-    viewPayslips: string;
-    downloadAllPayslips: string;
-  };
-}
 
-// Extended staff item with more details
-interface ExtendedStaffItem extends StaffItem {
-  phone?: string;
-  bankName?: string;
-  accountNumber?: string;
-  lastPayslipDate?: Date;
-  totalEarnings?: number;
-  averageNetPay?: number;
-}
 
-// Payslip summary statistics
-interface PayslipSummary {
-  totalPayslips: number;
-  totalGrossPay: number;
-  totalNetPay: number;
-  totalTax: number;
-  totalPension: number;
-  earliestPayslip: string | null;
-  latestPayslip: string | null;
-  averageGrossPay: number;
-  averageNetPay: number;
-}
 
-// Payslip filter options
-interface PayslipFilters {
-  year?: number;
-  month?: string;
-  startDate?: Date;
-  endDate?: Date;
-  minAmount?: number;
-  maxAmount?: number;
-  templateType?: 'ISURF_STANDARD' | 'BLUERIDGE' | 'DYNAMIC';
-  includeDetails?: boolean;
-}
 
-// Payslip paginated response
-interface PaginatedPayslipResponse {
-  staff: StaffRecordInfo;
-  payslips: PayslipItem[] | ExtendedPayslipItem[];
-  summary: PayslipSummary;
-  availableYears: number[];
-  pagination: {
-    total: number;
-    page: number;
-    limit: number;
-    totalPages: number;
-  };
-}

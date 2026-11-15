@@ -161,7 +161,12 @@ export async function getStaffPensionHistory(staffRecordId: string, companyId: s
 	if (!staffRecord) return null;
 
 	const payrolls = (await prisma.payroll.findMany({
-		where: { staffRecordId, companyId },
+		// Pension snapshot data is a Salary-category concept — once a staff
+		// member has separate Salary/TA/Bonus rows for one month, only the
+		// Salary row's snapshot is meaningful here (decision: reports reflect
+		// Salary only). Legacy rows (payslipCategory IS NULL, pre-dating the
+		// category field) are included unconditionally — see Payroll.payslipCategory.
+		where: { staffRecordId, companyId, OR: [{ payslipCategory: null }, { payslipCategory: 'SALARY' }] },
 		select: SNAPSHOT_SELECT,
 	})) as PayrollSnapshotRow[];
 
@@ -180,7 +185,9 @@ export async function getStaffPensionHistory(staffRecordId: string, companyId: s
 
 export async function getCompanyPensionGaps(companyId: string): Promise<CompanyPensionGapSummary[]> {
 	const payrolls = (await prisma.payroll.findMany({
-		where: { companyId },
+		// See getStaffPensionHistory above — Salary category only (+ legacy
+		// untagged rows), same reasoning.
+		where: { companyId, OR: [{ payslipCategory: null }, { payslipCategory: 'SALARY' }] },
 		select: { ...SNAPSHOT_SELECT, staffRecordId: true },
 	})) as Array<PayrollSnapshotRow & { staffRecordId: string }>;
 

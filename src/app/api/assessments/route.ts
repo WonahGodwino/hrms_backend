@@ -1,7 +1,6 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { QUESTION_BANK_SENTINEL } from '@/app/lib/training/question-bank'

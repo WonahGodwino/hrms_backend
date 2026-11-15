@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
 		const resolved = await resolveRequestCompanyId(user, searchParams.get('companyId'));
 		if (isCompanyError(resolved)) return new Response(resolved.error.message, { status: resolved.error.status, headers: getCorsHeaders(origin) });
 		const { companyId } = resolved;
-		const riskLevel = searchParams.get('riskLevel');
+		searchParams.get('riskLevel');
 		const department = searchParams.get('department');
 		const certType = searchParams.get('certType');
 		const search = searchParams.get('search')?.trim();

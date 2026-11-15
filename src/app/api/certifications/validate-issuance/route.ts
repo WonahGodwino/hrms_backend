@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    const foundEmpIds = new Set(employees.map(e => e.id))
+    new Set(employees.map(e => e.id));
 
     // Fetch existing certifications for these employees to check for duplicates or active certs
     const existingCerts = await prisma.certificationRecord.findMany({

@@ -54,9 +54,6 @@ export const ASSIGNMENT_INCLUDE = {
   departmentScopes: {
     include: { department: { select: { id: true, name: true } } },
   },
-  jobLevelScopes: {
-    select: { id: true, seniorityBand: true },
-  },
 } as const;
 
 export function resolveAssignmentPhase(input: {
@@ -111,27 +108,17 @@ export function resolveAssignmentPhase(input: {
 export interface AssignmentScope {
   scopeType: string;
   departmentIds: string[];
-  seniorityBands: string[];
-  gradeLevelIds?: string[];
 }
 
 type ScopeRow = {
   scopeType: string;
   departmentScopes: { departmentId: string }[];
-  jobLevelScopes: { id?: string; seniorityBand?: string | null; gradeLevelId?: string | null }[];
 };
 
-export const toScope = (r: ScopeRow): AssignmentScope => {
-  const bands = r.jobLevelScopes
-    .map((g) => g.seniorityBand || g.gradeLevelId)
-    .filter((b): b is string => !!b);
-  return {
-    scopeType: r.scopeType,
-    departmentIds: r.departmentScopes.map((d) => d.departmentId),
-    seniorityBands: bands,
-    gradeLevelIds: bands,
-  };
-};
+export const toScope = (r: ScopeRow): AssignmentScope => ({
+  scopeType: r.scopeType,
+  departmentIds: r.departmentScopes.map((d) => d.departmentId),
+});
 
 // Anything that isn't SPECIFIC_DEPARTMENTS means "every department the cycle covers".
 export function scopesOverlap(a: AssignmentScope, b: AssignmentScope): boolean {
@@ -139,16 +126,7 @@ export function scopesOverlap(a: AssignmentScope, b: AssignmentScope): boolean {
     a.scopeType === "SPECIFIC_DEPARTMENTS" ? new Set(a.departmentIds) : null;
   const db =
     b.scopeType === "SPECIFIC_DEPARTMENTS" ? new Set(b.departmentIds) : null;
-  const deptOverlap =
-    da === null || db === null || [...da].some((id) => db.has(id));
-  if (!deptOverlap) return false;
-  const bandsA = a.seniorityBands?.length ? a.seniorityBands : (a.gradeLevelIds ?? []);
-  const bandsB = b.seniorityBands?.length ? b.seniorityBands : (b.gradeLevelIds ?? []);
-  return (
-    bandsA.length === 0 ||
-    bandsB.length === 0 ||
-    bandsA.some((g) => bandsB.includes(g))
-  );
+  return da === null || db === null || [...da].some((id) => db.has(id));
 }
 
 export function describeScope(
@@ -161,8 +139,7 @@ export function describeScope(
           scope.departmentIds.map((id) => deptNames.get(id) ?? "a department"),
         )
       : "all departments";
-  const n = scope.seniorityBands?.length ?? scope.gradeLevelIds?.length ?? 0;
-  return `${depts} • ${n ? `${n} seniority level${n === 1 ? "" : "s"}` : "all seniority levels"}`;
+  return depts;
 }
 
 export interface AssignmentSummary {
@@ -174,8 +151,6 @@ export interface AssignmentSummary {
   phaseType: ReviewPhaseType | null;
   scopeType: string;
   departmentCount: number;
-  gradeLevelCount?: number;
-  seniorityBandCount?: number;
 }
 export interface AssignmentImpactRow extends AssignmentSummary {
   reason: string;
@@ -216,7 +191,6 @@ export async function unassignAssignments(
       phaseType: a.phaseType,
       scopeType: a.scopeType,
       departmentCount: a.departmentCount,
-      gradeLevelCount: a.gradeLevelCount,
       ...(reason ? { reason } : {}),
     };
     await logTemplateAction(tx, {
@@ -254,7 +228,6 @@ export async function getAssignmentImpact(
       template: { select: { name: true } },
       version: { select: { versionNumber: true } },
       departmentScopes: { select: { departmentId: true } },
-      jobLevelScopes: { select: { seniorityBand: true } },
     },
   });
   const allowed =
@@ -288,7 +261,6 @@ export async function getAssignmentImpact(
         phaseType: r.phaseType,
         scopeType: r.scopeType,
         departmentCount: r.departmentScopes.length,
-        gradeLevelCount: r.jobLevelScopes.length,
         reason: reasons.join(" and "),
       },
     ];
@@ -320,7 +292,6 @@ export async function getTemplateBlockers(
         template: { select: { name: true } },
         version: { select: { status: true, versionNumber: true } },
         departmentScopes: { select: { departmentId: true } },
-        jobLevelScopes: { select: { seniorityBand: true } },
       },
     }),
     client.staffRecord.findMany({
@@ -334,22 +305,15 @@ export async function getTemplateBlockers(
       }),
       select: {
         departmentId: true,
-        designation: { select: { seniorityBand: true } },
       },
     }),
   ]);
 
-  const staffGroupMap = new Map<
-    string,
-    { departmentId: string | null; seniorityBand: string | null }
-  >();
+  const staffGroupMap = new Map<string, { departmentId: string | null }>();
   for (const s of staffRows) {
-    const key = `${s.departmentId ?? ""}:${s.designation?.seniorityBand ?? ""}`;
+    const key = s.departmentId ?? "";
     if (!staffGroupMap.has(key)) {
-      staffGroupMap.set(key, {
-        departmentId: s.departmentId,
-        seniorityBand: s.designation?.seniorityBand ?? null,
-      });
+      staffGroupMap.set(key, { departmentId: s.departmentId });
     }
   }
   const staffGroups = Array.from(staffGroupMap.values());
@@ -375,12 +339,9 @@ export async function getTemplateBlockers(
       .filter((r) => r.version.status === "ACTIVE")
       .map(toResolvable);
     if (live.length === 0) continue;
-    // Department AND seniority band: every group of employees must be covered by some assignment.
+    // Every department group of employees must be covered by some assignment.
     const uncovered = staffGroups.filter(
-      (g) =>
-        !live.some((a) =>
-          assignmentCovers(a, g.departmentId, g.seniorityBand),
-        ),
+      (g) => !live.some((a) => assignmentCovers(a, g.departmentId)),
     );
     if (uncovered.length > 0) pending.push({ label, groups: uncovered });
   }
@@ -400,9 +361,7 @@ export async function getTemplateBlockers(
       : [];
     const deptName = new Map(depts.map((d) => [d.id, d.name]));
     const describe = (g: (typeof staffGroups)[number]) =>
-      `${g.departmentId ? (deptName.get(g.departmentId) ?? "a department") : "No department"} / ${
-        g.seniorityBand ?? "All levels"
-      }`;
+      g.departmentId ? (deptName.get(g.departmentId) ?? "a department") : "No department";
     for (const p of pending) {
       const extra = p.groups.length > 3 ? ` +${p.groups.length - 3} more` : "";
       blockers.push(
@@ -418,8 +377,6 @@ export interface ResolvableAssignment {
   scopeType: string;
   assignedAt: Date;
   departmentIds: Set<string>;
-  seniorityBands: Set<string>;
-  gradeLevelIds?: Set<string>;
 }
 
 export const toResolvable = (r: {
@@ -427,51 +384,34 @@ export const toResolvable = (r: {
   scopeType: string;
   assignedAt: Date;
   departmentScopes: { departmentId: string }[];
-  jobLevelScopes: { seniorityBand?: string | null; gradeLevelId?: string | null }[];
-}): ResolvableAssignment => {
-  const bands = new Set(
-    r.jobLevelScopes
-      .map((g) => g.seniorityBand || g.gradeLevelId)
-      .filter((b): b is string => !!b),
-  );
-  return {
-    id: r.id,
-    scopeType: r.scopeType,
-    assignedAt: r.assignedAt,
-    departmentIds: new Set(r.departmentScopes.map((d) => d.departmentId)),
-    seniorityBands: bands,
-    gradeLevelIds: bands,
-  };
-};
+}): ResolvableAssignment => ({
+  id: r.id,
+  scopeType: r.scopeType,
+  assignedAt: r.assignedAt,
+  departmentIds: new Set(r.departmentScopes.map((d) => d.departmentId)),
+});
 
 // Anything that isn't SPECIFIC_DEPARTMENTS covers every department the cycle covers (including none).
 export function assignmentCovers(
   a: ResolvableAssignment,
   departmentId: string | null,
-  seniorityBand: string | null,
 ) {
-  const deptOk =
+  return (
     a.scopeType !== "SPECIFIC_DEPARTMENTS" ||
-    (departmentId !== null && a.departmentIds.has(departmentId));
-  const bandSet = a.seniorityBands.size > 0 ? a.seniorityBands : (a.gradeLevelIds ?? new Set());
-  const bandOk =
-    bandSet.size === 0 ||
-    (seniorityBand !== null && bandSet.has(seniorityBand));
-  return deptOk && bandOk;
+    (departmentId !== null && a.departmentIds.has(departmentId))
+  );
 }
 
-// Most specific wins (department-limited, then job-level-limited), then the most recent.
+// Most specific wins (department-limited), then the most recent.
 export function resolveAssignment(
   list: ResolvableAssignment[],
   departmentId: string | null,
-  seniorityBand: string | null,
 ) {
   const specificity = (a: ResolvableAssignment) =>
-    (a.scopeType === "SPECIFIC_DEPARTMENTS" ? 2 : 0) +
-    (a.seniorityBands.size ? 1 : 0);
+    a.scopeType === "SPECIFIC_DEPARTMENTS" ? 2 : 0;
   return (
     list
-      .filter((a) => assignmentCovers(a, departmentId, seniorityBand))
+      .filter((a) => assignmentCovers(a, departmentId))
       .sort(
         (a, b) =>
           specificity(b) - specificity(a) ||

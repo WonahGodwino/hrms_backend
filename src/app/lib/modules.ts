@@ -136,6 +136,14 @@ export const PLATFORM_MODULES = [
     defaultSection: 'More',
     defaultOrder: 1,
   },
+  {
+    key:         'CV_SCREENING',
+    name:        'CV Screening',
+    description: 'Standalone AI CV screening - reusable scoring profiles, bulk or quick upload, independent of the recruitment pipeline',
+    icon:        'ScanSearch',
+    defaultSection: 'More',
+    defaultOrder: 7,
+  },
 ] as const
 
 export type ModuleKey = typeof PLATFORM_MODULES[number]['key']

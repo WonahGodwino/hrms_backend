@@ -34,7 +34,6 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       title,
       enabled,
       trainingProgramId,
-      applicableTraining,
       targetAudience,
       requirementLevel,
       enforcementLevel,

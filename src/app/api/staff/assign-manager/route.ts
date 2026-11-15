@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
+    requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN']);
 
     const body = await request.json()
     const { staffIds, managerId } = body

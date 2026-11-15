@@ -62,7 +62,7 @@ function safeJson(raw: string): unknown {
   }
 }
 
-function classifyError(status: number, body: string): ProviderErrorCode {
+function classifyError(status: number, _body: string): ProviderErrorCode {
   if (status === 401) return 'auth_failed'
   if (status === 429) return 'rate_limited'
   if (status >= 500) return 'provider_down'

@@ -16,8 +16,6 @@ import type {
   MultiPeriodAggregateReport,
   VarianceSummaryRow,
   FinancePayrollSummaryReport,
-  FinancePayrollCostRow,
-  FinanceRemittanceRow,
   FinanceAggregateReport,
   FinanceVarianceRow,
 } from './reports'
@@ -406,7 +404,7 @@ export const STATUTORY_COLS: ReportColDef[] = [
 // =============================================================
 export async function exportWorkbook(
   sheets:      CostCentreSheet[],
-  companyName: string = '',
+  _companyName: string = '',
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook()
   wb.creator = '24/7HR – PHED Module'
@@ -464,7 +462,7 @@ export async function exportWorkbook(
 // =============================================================
 export async function exportSummaryWorkbookExcel(
   data:        SummaryWorkbookData,
-  companyName: string = '',
+  _companyName: string = '',
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook()
   wb.creator = '24/7HR – PHED Module'
@@ -612,7 +610,7 @@ export async function exportCostCentreExcel(
   title:       string,
   periodName:  string,
   sheets:      CostCentreSheet[],
-  companyName: string = ''
+  _companyName: string = ''
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook()
   wb.creator = '24/7HR – PHED Module'
@@ -683,7 +681,7 @@ export async function exportCostCentreExcel(
 
 export function exportCostCentrePdf(
   title:       string,
-  periodName:  string,
+  _periodName:  string,
   sheets:      CostCentreSheet[],
   companyName: string = ''
 ): Promise<Buffer> {
@@ -2596,7 +2594,7 @@ function writeSummaryBlock(
 
 export async function exportIADSummaryToExcel(
   data:        IADSummaryInput,
-  companyName: string = '',
+  _companyName: string = '',
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook()
   wb.creator = '24/7HR – PHED Module'
@@ -2846,7 +2844,7 @@ function writeFinanceCostSection(
   ws:          ExcelJS.Worksheet,
   startRow:    number,
   report:      FinancePayrollSummaryReport,
-  companyName: string,
+  _companyName: string,
   numCols:     number, // total cols on the sheet (for merging title/section headers)
 ): number {
   let r = startRow
@@ -2861,7 +2859,6 @@ function writeFinanceCostSection(
     { header: 'Total Payroll Cost (₦)', key: 'totalPayrollCost', width: 22, isText: false },
     { header: 'Net Pay (₦)',            key: 'netPay',           width: 18, isText: false },
   ]
-  const nc = costCols.length
 
   // Section header
   ws.mergeCells(r, 1, r, numCols)

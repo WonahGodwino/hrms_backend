@@ -13,12 +13,11 @@ import type { AutomationRule } from "@prisma/client";
 import prisma from "@/app/lib/prisma";
 import { requireRole } from "@/app/lib/auth";
 import { verifyCompanyAccess, UserContext } from "@/app/lib/access-control";
-import { Actor, Db, kpiScore, resolveActor } from "@/app/lib/manager-review";
+import { Actor, Db, resolveActor } from "@/app/lib/manager-review";
 import {
   DAY,
   nameOf,
   parseInstant,
-  pipLabel,
   startOfUtcDay,
 } from "@/app/lib/pip";
 import { PipHttpError, bail, oneOf, text } from "@/app/lib/pip-employee";
@@ -829,9 +828,6 @@ export async function buildOverview(companyId: string) {
 import {
   evaluateRule,
   loadRuleContext,
-  RuleContext,
-  RuleStep,
-  StepOutcome,
 } from "@/app/lib/automation-eval";
 import { planAction, performAction } from "@/app/lib/automation-actions";
 

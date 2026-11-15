@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
           { code: { equals: position, mode: 'insensitive' } },
           { title: { equals: position, mode: 'insensitive' } },
         ],
-      },
+      },
     })
 
     if (!designation) {
@@ -148,7 +148,7 @@ export async function POST(request: NextRequest) {
           status: requiresApproval ? 'PENDING_APPROVAL' : 'APPROVED',
           salary: basePay != null ? basePay : undefined,
           gradeId: designation.id,
-          gradeName: designation.seniorityBand ?? designation.title,
+          gradeName: designation.title,
           proposedStartDate: startDate,
           createdBy: actor,
           metadata: {

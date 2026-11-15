@@ -111,7 +111,7 @@ const department: RecordTypeDef = {
     staffCount: { label: 'active staff', kind: 'count', category: 'employment', operators: COUNT },
     createdAt: { label: 'created', kind: 'date', category: null, operators: AGE },
   },
-  async load(db, companyId, now) {
+  async load(db, companyId, _now) {
     const rows = await db.department.findMany({
       where: { companyId },
       select: { id: true, name: true, code: true, status: true, headId: true, businessUnit: true, createdAt: true, _count: { select: { staff: { where: { isActive: true } } } } },
@@ -135,7 +135,7 @@ const designation: RecordTypeDef = {
     staffCount: { label: 'active staff', kind: 'count', category: 'employment', operators: COUNT },
     createdAt: { label: 'created', kind: 'date', category: null, operators: AGE },
   },
-  async load(db, companyId, now) {
+  async load(db, companyId, _now) {
     const rows = await db.designation.findMany({
       where: { companyId },
       select: { id: true, title: true, code: true, status: true, basePay: true, createdAt: true, _count: { select: { staffRecords: { where: { isActive: true } } } } },
@@ -159,7 +159,7 @@ const businessUnit: RecordTypeDef = {
     departmentCount: { label: 'departments', kind: 'count', category: null, operators: COUNT },
     createdAt: { label: 'created', kind: 'date', category: null, operators: AGE },
   },
-  async load(db, companyId, now) {
+  async load(db, companyId, _now) {
     const rows = await db.businessUnit.findMany({
       where: { companyId, OR: [{ archived: null }, { archived: 0 }] },
       select: { id: true, name: true, code: true, status: true, headId: true, createdAt: true, _count: { select: { departments: true } } },
@@ -183,7 +183,7 @@ const leaveRequest: RecordTypeDef = {
     totalDays: { label: 'days requested', kind: 'number', category: 'leave', operators: NUM },
     submitted: { label: 'submitted', kind: 'date', category: 'leave', operators: AGE },
   },
-  async load(db, companyId, now) {
+  async load(db, companyId, _now) {
     const rows = await db.leaveRequest.findMany({
       where: { companyId },
       orderBy: { createdAt: 'desc' },
@@ -208,7 +208,7 @@ const payrollTemplate: RecordTypeDef = {
     createdAt: { label: 'created', kind: 'date', category: 'compensation', operators: AGE },
     updatedAt: { label: 'last changed', kind: 'date', category: 'compensation', operators: AGE },
   },
-  async load(db, companyId, now) {
+  async load(db, companyId, _now) {
     const rows = await db.payrollTemplate.findMany({
       where: { companyId },
       select: { id: true, templateName: true, createdAt: true, updatedAt: true, _count: { select: { fields: true } } },

@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['SUPER_ADMIN']) // Only SUPER_ADMIN can assign companies
+    requireRole(token, ['SUPER_ADMIN']); // Only SUPER_ADMIN can assign companies
 
     const body = await request.json()
     const { userId, companyId, role = 'HR' } = body
@@ -170,7 +170,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = requireRole(token, ['SUPER_ADMIN'])
+    requireRole(token, ['SUPER_ADMIN']);
 
     const { searchParams } = new URL(request.url)
     const userId = searchParams.get('userId')

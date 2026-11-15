@@ -1,12 +1,10 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/app/lib/db";
 import { Prisma } from "@prisma/client";
-import { QuestionType } from "@prisma/client";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { verifyCompanyAccess, UserContext } from "@/app/lib/access-control";
-import { VALID_QUESTION_TYPES } from "@/app/lib/review-templates/question-bank-utils";
 import {
   normalizeQuestion,
   resolveQuestionLinks,

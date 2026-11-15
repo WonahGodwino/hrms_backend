@@ -13,7 +13,6 @@ import type { PhedPayrollInput, PhedPayrollResult } from './types'
 export function processOneStaff(input: PhedPayrollInput): PhedPayrollResult {
   const {
     salary,
-    hasLifeAssurance,
     lifeAssuranceAmount,
     overtimeAmount,
     unionDeductionTotal,

@@ -88,7 +88,7 @@ export async function GET(request: NextRequest) {
     const blockedCycle = cycleInfo
       ? assertCalibrationOpen(cycleInfo)
       : "Cycle not found";
-    const [row] = await buildRows([record], {
+    const [] = await buildRows([record], {
       companyId,
       isAdmin,
       cycleOpen: !blockedCycle,

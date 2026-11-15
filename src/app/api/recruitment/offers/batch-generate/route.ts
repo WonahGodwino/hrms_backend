@@ -47,9 +47,9 @@ export async function POST(request: NextRequest) {
 
         let gradeName: string | null = null
         if (c.gradeId) {
-          // gradeId now carries the designation id (grade levels were replaced by seniority bands).
-          const designation = await prisma.designation.findFirst({ where: { id: c.gradeId, companyId }, select: { title: true, seniorityBand: true } })
-          gradeName = designation ? (designation.seniorityBand ?? designation.title) : null
+          // gradeId now carries the designation id (standalone grade levels no longer exist).
+          const designation = await prisma.designation.findFirst({ where: { id: c.gradeId, companyId }, select: { title: true } })
+          gradeName = designation ? designation.title : null
         }
 
         const offer = await prisma.offer.create({

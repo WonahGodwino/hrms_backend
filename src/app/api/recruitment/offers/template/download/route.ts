@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN']);
 
     const { searchParams } = new URL(request.url)
     // companyId from the global company selector — required for ADMIN/SUPER_ADMIN.

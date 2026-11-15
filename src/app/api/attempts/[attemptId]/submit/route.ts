@@ -1,7 +1,6 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
@@ -54,10 +53,10 @@ export async function PUT(req: NextRequest, { params }: { params: { attemptId: s
     const score   = total > 0 ? Math.round((earned / total) * 100) : 0
     const outcome = score >= assessment.passingScore ? 'Passed' : 'Failed'
 
-    const updated = await prisma.assessmentAttempt.update({
+    await prisma.assessmentAttempt.update({
       where: { id: params.attemptId },
       data: { responses, score, outcome, timeTakenSeconds: time_taken_seconds ?? null, completedAt: new Date() },
-    })
+    });
 
     // Auto-update participant progress on pass
     if (assessment.trainingProgramId && outcome === 'Passed') {

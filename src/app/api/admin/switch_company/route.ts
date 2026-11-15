@@ -1,13 +1,11 @@
 // src/app/api/admin/switch_company/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { 
   requireRole, 
   createAuthPayloadWithCompanies, 
   signToken, 
-  checkCompanyAccess,
-  AuthUser
-} from '@/app/lib/auth'
+  } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 

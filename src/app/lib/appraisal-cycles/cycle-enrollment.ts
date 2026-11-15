@@ -120,7 +120,6 @@ export async function enrollCycleParticipants(
       locationId: true,
       managerId: true,
       designationId: true,
-      designation: { select: { seniorityBand: true } },
       manager: { select: { managerId: true } },
     },
   });
@@ -151,7 +150,6 @@ export async function enrollCycleParticipants(
         locationId: s.locationId,
         managerId: s.managerId,
         designationId: s.designationId,
-        seniorityBand: s.designation?.seniorityBand ?? null,
         skipLevelManagerId: s.manager?.managerId ?? null,
         departmentHeadId: s.departmentId
           ? (headByDept.get(s.departmentId) ?? null)
@@ -171,7 +169,6 @@ export async function enrollCycleParticipants(
         staffRecordId: true,
         departmentId: true,
         designationId: true,
-        seniorityBand: true,
         managerId: true,
       },
     })
@@ -189,7 +186,6 @@ export async function enrollCycleParticipants(
       scopeType: true,
       assignedAt: true,
       departmentScopes: { select: { departmentId: true } },
-      jobLevelScopes: { select: { seniorityBand: true } },
     },
   });
   const byPhase = new Map<ReviewPhaseType, ResolvableAssignment[]>();
@@ -206,8 +202,7 @@ export async function enrollCycleParticipants(
   const missing = new Set<string>();
   for (const r of rows) {
     const resolveFor = (pt: ReviewPhaseType) =>
-      resolveAssignment(byPhase.get(pt) ?? [], r.departmentId, r.seniorityBand)
-        ?.id ?? null;
+      resolveAssignment(byPhase.get(pt) ?? [], r.departmentId)?.id ?? null;
     // Calibration and HR Validation work from the Manager Review form.
     const managerAssignment = enabled.includes("MANAGER_REVIEW")
       ? resolveFor("MANAGER_REVIEW")

@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     const companyId = queryCompanyId || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company ID is required', 400), origin)
 
-    const search = searchParams.get('search')
+    searchParams.get('search');
     const status = searchParams.get('status')
     // Tab scope: 'pending' = not yet dispatched, 'dispatched' = letter sent (and beyond).
     const scope = (searchParams.get('scope') || '').toLowerCase()

@@ -31,7 +31,6 @@ export async function buildMembershipTemplate(opts: MembershipTemplateOptions): 
   // ── Sheet 1: New Members (what the chairman fills in) ────────
   const ws1 = wb.addWorksheet('New Members')
 
-  const totalCols = isCooperative ? 5 : isDeductionLiab ? 3 : 4
   const colRange  = isCooperative ? 'A1:E1' : isDeductionLiab ? 'A1:C1' : 'A1:D1'
 
   // Title block

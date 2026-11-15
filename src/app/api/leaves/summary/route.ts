@@ -1,7 +1,6 @@
 // /src/app/api/leaves/summary/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 

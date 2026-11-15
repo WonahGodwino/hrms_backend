@@ -7,7 +7,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { logRecordChange, logBulkChange } from '@/app/lib/core-setup/audit'
+import { logBulkChange } from '@/app/lib/core-setup/audit'
 import { resolveBUCompanyId } from '@/app/lib/business-units/bu-utils'
 import { verifyImportToken } from '@/app/lib/business-units/import-token'
 

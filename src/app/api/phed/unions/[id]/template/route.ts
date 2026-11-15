@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { buildMembershipTemplate } from '@/app/lib/phed/membership-template'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'

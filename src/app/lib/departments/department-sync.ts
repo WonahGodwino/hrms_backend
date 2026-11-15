@@ -69,7 +69,7 @@ async function generateDepartmentCode(companyId: string, name: string): Promise<
  * to the company — finding an existing one (case-insensitive) or creating
  * it (Title Case name, auto-generated code) if none exists yet.
  */
-async function resolveDepartmentForStaffText(
+export async function resolveDepartmentForStaffText(
   companyId: string,
   rawDepartmentText: string | null | undefined,
   performedBy: string,

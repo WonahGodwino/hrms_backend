@@ -2,12 +2,12 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/app/lib/db";
 
-import { requireRole } from "@/app/lib/auth";
 import { requireModuleAccess } from "@/app/lib/module-access";
 import { ApiResponse, formatError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { sanitizeOfferDefaults } from "@/app/lib/jobs/offer-defaults";
 import { parseSalaryAmount } from "@/app/lib/recruitment/job-salary";
+import { checkJobPermission } from "@/app/lib/recruitment/companyScope";
 
 type UpdateJobBody = {
   title?: string;
@@ -44,31 +44,6 @@ function parseDate(value?: string | null): Date | null {
   if (!trimmed) return null;
   const parsed = new Date(trimmed);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-async function checkJobPermission(
-  user: any,
-  companyId: string,
-): Promise<boolean> {
-  if (user.role === "SUPER_ADMIN") return true;
-
-  if (user.role === "ADMIN") {
-    const userCompany = await prisma.userCompany.findFirst({
-      where: {
-        userId: user.userId,
-        companyId,
-        role: { in: ["ADMIN", "ALL"] },
-      },
-      select: { id: true },
-    });
-    return !!userCompany;
-  }
-
-  if (user.role === "HR") {
-    return user.companyId === companyId;
-  }
-
-  return false;
 }
 
 export async function OPTIONS(request: NextRequest) {
@@ -122,6 +97,7 @@ export async function PUT(
       select: {
         id: true,
         companyId: true,
+        createdBy: true,
         status: true,
         _count: {
           select: { applications: true },
@@ -133,7 +109,7 @@ export async function PUT(
       return withCors(ApiResponse.error("Job not found", 404), origin);
     }
 
-    const hasPermission = await checkJobPermission(user, job.companyId);
+    const hasPermission = await checkJobPermission(user, job.companyId, job.createdBy);
     if (!hasPermission) {
       return withCors(
         ApiResponse.error("You cannot update this job", 403),

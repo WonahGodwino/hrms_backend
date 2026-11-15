@@ -28,8 +28,8 @@ export async function GET(req: NextRequest) {
 		let days = 30;
 		if (range.endsWith('d')) days = parseInt(range.replace('d', ''), 10) || 30;
 
-		const rangeDate = new Date(now.getTime() + days * 86_400_000);
-		const critical7Date = new Date(now.getTime() + 7 * 86_400_000);
+		new Date(now.getTime() + days * 86_400_000);
+		new Date(now.getTime() + 7 * 86_400_000);
 		const prior30Date = new Date(now.getTime() - 30 * 86_400_000);
 
 		const where: any = {

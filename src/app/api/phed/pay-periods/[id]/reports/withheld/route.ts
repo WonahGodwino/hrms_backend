@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { requireRole } from '@/app/lib/auth'
 import { requirePhedReadAccess } from '@/app/lib/phed/access-role'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { buildWithheldReport } from '@/app/lib/phed/reports'
-import { exportReportToExcel, exportReportToPdf, exportWorkbook, WITHHELD_COLS } from '@/app/lib/phed/report-export'
+import { exportReportToPdf, exportWorkbook, WITHHELD_COLS } from '@/app/lib/phed/report-export'
 import { buildWithheldSheet } from '@/app/lib/phed/payroll-sheets'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }

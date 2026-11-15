@@ -2,7 +2,6 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
@@ -294,7 +293,7 @@ export async function POST(request: NextRequest) {
   )
 }
 
-async function calculateLeaveStatistics(user: any, year: number) {
+async function calculateLeaveStatistics(user: any, _year: number) {
   let pendingManagerApprovals = 0
   let pendingHRApprovals = 0
   

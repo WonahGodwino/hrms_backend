@@ -2,96 +2,24 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { writeFile, mkdir } from 'fs/promises'
+import { writeFile } from 'fs/promises'
 import path from 'path'
-import ExcelJS from 'exceljs'
-import { buildSubtitle, confidentialFooter, writeStyledTable } from '@/app/lib/excel/sheet-theme'
 import {
   PayrollTemplateType,
-  isFixedTemplate,
-  isValidTemplateType,
-  getTemplateConfig
-} from '@/app/lib/payroll/templates/types'
-import { processIsurfStandardTemplate } from '@/app/lib/payroll/templates/isurf-standard'
-import { processBlueridgeTemplate } from '@/app/lib/payroll/templates/blueridge'
-import { processDynamicTemplate } from '@/app/lib/payroll/templates/dynamic-processor'
+  isValidTemplateType} from '@/app/lib/payroll/templates/types'
 import {
   getActivePayrollUpload,
   createPendingPayrollUpload,
-  completePayrollUploadRecord,
-  failPayrollUploadRecord,
   validatePayrollCompanyAccess,
-  isUploadCancelled,
-  clearUploadCancelled,
 } from '@/app/lib/payroll/templates/utils'
-import { neutralizeRowForSpreadsheet } from '@/app/lib/payroll/utils/valueParsing'
-import type { ProcessingResult } from '@/app/lib/payroll/templates/types'
 import { findCompanyDisabledCodesInUse } from '@/app/lib/staff/pension-fields'
-
-function getRelativePath(absolutePath: string): string {
-  const projectRoot = process.cwd()
-  if (absolutePath.startsWith(projectRoot)) {
-    return path.relative(projectRoot, absolutePath)
-  }
-  return absolutePath
-}
-
-async function ensureUploadDirectories() {
-  const baseDir = process.cwd()
-  const uploadsDir = path.join(baseDir, 'uploads')
-  const payrollDir = path.join(uploadsDir, 'payroll')
-  
-  await mkdir(uploadsDir, { recursive: true })
-  await mkdir(payrollDir, { recursive: true })
-  
-  return { baseDir, uploadsDir, payrollDir }
-}
-
-async function generateFailedRecordsFile(
-  failedRecords: any[],
-  payrollDir: string
-): Promise<string | null> {
-  if (failedRecords.length === 0) return null
-
-  const failedWorkbook = new ExcelJS.Workbook()
-  failedWorkbook.creator = '24/7HR'
-  const failedWorksheet = failedWorkbook.addWorksheet('Failed Records')
-
-  // Get all unique headers from failed records
-  const headersSet = new Set<string>()
-  failedRecords.forEach(record => {
-    Object.keys(record).forEach(k => headersSet.add(k))
-  })
-
-  const headers = Array.from(headersSet)
-
-  // Raw uploaded cell values are written verbatim into this brand-new
-  // spreadsheet for download. Neutralize any value that would be
-  // interpreted as a live formula (CSV/Excel "formula injection") when the
-  // report is opened, so re-exporting failed rows can never execute
-  // anything - this never changes the data used for actual payroll
-  // processing, only the copy written into this report. The header sits on
-  // row 4 under the title band; the payroll processors find it by field name.
-  writeStyledTable(failedWorksheet, {
-    title: 'Failed Payroll Records',
-    subtitle: buildSubtitle([`${failedRecords.length} failed row${failedRecords.length === 1 ? '' : 's'}`, 'Correct the errors and re-upload']),
-    columns: headers.map((h) => ({ header: h, key: h, width: 25, align: 'left' as const })),
-    rows: failedRecords.map((record) => neutralizeRowForSpreadsheet(record) as Record<string, any>),
-    footer: confidentialFooter(),
-  })
-
-  const failedFileName = `failed-payroll-${Date.now()}.xlsx`
-  const failedFilePath = path.join(payrollDir, failedFileName)
-
-  const failedBuffer = await failedWorkbook.xlsx.writeBuffer()
-  await writeFile(failedFilePath, Buffer.from(failedBuffer as any))
-
-  return getRelativePath(failedFilePath)
-}
+import { compressFileBuffer, decompressFileBufferIfNeeded } from '@/app/lib/payroll/templates/shared/file-compression'
+import { MAX_PAYROLL_UPLOAD_BYTES } from '@/app/lib/payroll/upload/parse'
+import { hashUpload, parseAndValidatePayroll, parseExpectedPeriod } from '@/app/lib/payroll/upload/run'
+import { getRelativePath, ensureUploadDirectories, processPayrollUploadInBackground } from '@/app/lib/payroll/upload/background'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -122,6 +50,12 @@ export async function POST(request: NextRequest) {
     const companyIdParam = formData.get('companyId') as string | null
     const templateId = formData.get('templateId') as string | null // For dynamic templates
     const overwriteExisting = formData.get('overwriteExisting') === 'true'
+    // Pay period chosen in the drawer's Setup step; rows without a period inherit it.
+    const expectedPeriod = parseExpectedPeriod(formData.get('expectedMonth'), formData.get('expectedYear'))
+    // Hash returned by the validate endpoint: proves this is the file the user reviewed.
+    const validatedFileHash = formData.get('validatedFileHash') as string | null
+    // The user confirmed replacing payslips that were already sent to staff.
+    const confirmOverwriteSent = formData.get('confirmOverwriteSent') === 'true'
     // Row count the frontend parsed from the sheet for its preview. Stored as a
     // provisional totalRecords so the pending/status endpoints can report size
     // (used to scale polling cadence) before processing fills in the real count.
@@ -257,8 +191,22 @@ export async function POST(request: NextRequest) {
 
     const { payrollDir } = await ensureUploadDirectories()
 
+    if (file.size > MAX_PAYROLL_UPLOAD_BYTES) {
+      return withCors(
+        ApiResponse.error(`This file is ${(file.size / 1024 / 1024).toFixed(1)} MB. Upload a file smaller than ${MAX_PAYROLL_UPLOAD_BYTES / 1024 / 1024} MB.`, 400),
+        origin
+      )
+    }
+
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
+
+    if (validatedFileHash && validatedFileHash !== hashUpload(buffer)) {
+      return withCors(
+        ApiResponse.error('The file changed after it was validated. Validate it again before importing.', 400),
+        origin
+      )
+    }
 
     const fileExtension = file.name.split('.').pop()?.toLowerCase()
     const isExcel = fileExtension === 'xlsx' || fileExtension === 'xls'
@@ -274,12 +222,50 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Replacing payslips that were already sent to staff needs an explicit yes.
+    if (overwriteExisting && !confirmOverwriteSent) {
+      let preview
+      try {
+        preview = await parseAndValidatePayroll({
+          templateType: templateType as PayrollTemplateType,
+          templateId,
+          companyId,
+          buffer,
+          fileExtension: fileExtension || '',
+          overwriteExisting,
+          expectedPeriod,
+        })
+      } catch (parseError: any) {
+        return withCors(ApiResponse.error(parseError?.message || 'Failed to parse file.', 400), origin)
+      }
+      if (preview.summary.overwriteSent > 0) {
+        return withCors(
+          ApiResponse.error(
+            `${preview.summary.overwriteSent} payslip${preview.summary.overwriteSent === 1 ? ' was' : 's were'} already sent to staff. Confirm that you want to replace them.`,
+            409,
+            undefined,
+            { code: 'OVERWRITE_SENT_CONFIRM_REQUIRED', overwriteSent: preview.summary.overwriteSent }
+          ),
+          origin
+        )
+      }
+    }
+
     // Save original file
     const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
     const originalFileName = `payroll-upload-${Date.now()}-${templateType}-${sanitizedFileName}`
     const originalFilePath = path.join(payrollDir, originalFileName)
     await writeFile(originalFilePath, buffer)
     const relativeOriginalPath = getRelativePath(originalFilePath)
+
+    // Gzip before the DB write — spreadsheets are the common case and
+    // compress poorly (already-zipped OOXML), but CSV uploads shrink
+    // significantly, and gzip is lossless either way: verify the round
+    // trip here rather than trusting that blindly.
+    const compressedBuffer = compressFileBuffer(buffer)
+    if (!decompressFileBufferIfNeeded(compressedBuffer).equals(buffer)) {
+      throw new Error('Compressed upload buffer failed round-trip verification; aborting to avoid storing corrupt data')
+    }
 
     // Create the upload record up front so there's an id to poll and to
     // enforce the one-in-flight-per-company rule on the next request.
@@ -292,7 +278,13 @@ export async function POST(request: NextRequest) {
       user.userId,
       templateId,
       overwriteExisting,
-      estimatedRecordCount
+      estimatedRecordCount,
+      // Durable, gzip-compressed copy in Postgres, in addition to the disk
+      // write above — the disk file is lost on a host restart/redeploy (no
+      // persistent volume), the DB copy survives. download-original falls
+      // back to disk only for rows uploaded before this field existed, and
+      // transparently gunzips based on the gzip magic bytes.
+      compressedBuffer
     )
 
     // Respond immediately; actual row-by-row processing (DB writes, PDF
@@ -310,6 +302,7 @@ export async function POST(request: NextRequest) {
       sendEmails,
       overwriteExisting,
       payrollDir,
+      expectedPeriod,
     }).catch((err) => {
       console.error('[PAYROLL_UPLOAD] Unhandled background processing error:', err)
     })
@@ -338,165 +331,4 @@ export async function POST(request: NextRequest) {
     console.error('[PAYROLL_UPLOAD] Top-level error:', error)
     return withCors(handleApiError(error), origin)
   }
-}
-
-async function processPayrollUploadInBackground({
-  uploadId,
-  templateType,
-  templateId,
-  buffer,
-  fileExtension,
-  companyId,
-  user,
-  sendEmails,
-  overwriteExisting,
-  payrollDir,
-}: {
-  uploadId: string
-  templateType: PayrollTemplateType
-  templateId: string | null
-  buffer: Buffer
-  fileExtension: string
-  companyId: string
-  user: any
-  sendEmails: boolean
-  overwriteExisting: boolean
-  payrollDir: string
-}) {
-  const startTime = Date.now()
-  let results: ProcessingResult = {
-    successful: 0,
-    failed: 0,
-    payslipsGenerated: 0,
-    payslipsUpdated: 0,
-    duplicatesSkipped: 0,
-    emailsSent: 0,
-    emailAttempts: 0,
-    emailFailures: [],
-    processedRecords: [],
-    failedRecords: [],
-    skippedRecords: [],
-    errors: [],
-  }
-
-  try {
-    if (templateType === 'ISURF_STANDARD') {
-      console.log('[PAYROLL_UPLOAD] Processing ISURF_STANDARD template', { uploadId })
-      results = await processIsurfStandardTemplate.processFile(
-        buffer,
-        fileExtension,
-        companyId,
-        user,
-        sendEmails,
-        overwriteExisting,
-        uploadId
-      )
-    } else if (templateType === 'BLUERIDGE') {
-      console.log('[PAYROLL_UPLOAD] Processing BLUERIDGE template', { uploadId })
-      results = await processBlueridgeTemplate.processFile(
-        buffer,
-        fileExtension,
-        companyId,
-        user,
-        sendEmails,
-        overwriteExisting,
-        uploadId
-      )
-    } else if (templateType === 'DYNAMIC') {
-      console.log('[PAYROLL_UPLOAD] Processing DYNAMIC template', { uploadId })
-      results = await processDynamicTemplate.processFile(
-        buffer,
-        fileExtension,
-        companyId,
-        user,
-        sendEmails,
-        templateId || undefined,
-        overwriteExisting,
-        uploadId
-      )
-    } else {
-      throw new Error(`Unsupported template type: ${templateType}`)
-    }
-
-    const processingTime = Date.now() - startTime
-    console.log(`[PAYROLL_UPLOAD] Processing completed in ${processingTime}ms`, {
-      uploadId,
-      templateType,
-      successful: results.successful,
-      failed: results.failed,
-      payslipsGenerated: results.payslipsGenerated,
-    })
-  } catch (processingError: any) {
-    // Check if this was a cancellation (processor threw after detecting cancel flag)
-    // Also check the error message string as a fallback in case the flag wasn't set yet
-    if (isUploadCancelled(uploadId) || processingError?.message === 'PAYROLL_CANCELLED') {
-      console.log('[PAYROLL_UPLOAD] Processing was cancelled', { uploadId })
-    } else {
-      console.error('[PAYROLL_UPLOAD] Processing error:', { uploadId, error: processingError })
-      await failPayrollUploadRecord(uploadId, processingError.message || 'Unknown processing error')
-      return
-    }
-  }
-
-  // Check if the upload was cancelled during processing
-  if (isUploadCancelled(uploadId)) {
-    console.log('[PAYROLL_UPLOAD] Upload was cancelled, cleaning up payslips', { uploadId })
-    // Delete any payslips whose Payroll records were created during this upload
-    const stalePayrolls = await prisma.payroll.findMany({
-      where: {
-        companyId,
-        // Only rows this upload created (see cancel/route.ts).
-        payrollUploadId: uploadId,
-        createdAt: { gte: new Date(startTime) },
-      },
-      select: { id: true },
-    })
-    const stalePayrollIds = stalePayrolls.map(p => p.id)
-    const deletedPayslips = stalePayrollIds.length > 0
-      ? await prisma.payslip.deleteMany({ where: { payrollId: { in: stalePayrollIds } } })
-      : { count: 0 }
-    console.log(`[PAYROLL_UPLOAD] Cleaned up ${deletedPayslips.count} payslip(s) from cancelled upload`)
-    clearUploadCancelled(uploadId)
-    return
-  }
-
-  // Surface rows skipped as same-upload duplicates (a second row resolving to
-  // the same staff & pay period). No payslip is created for them, so include
-  // them in the downloadable report and the upload's error summary alongside
-  // genuinely-failed rows so HR can see exactly which rows were dropped.
-  if (results.duplicatesSkipped > 0) {
-    results.errors.push(
-      `${results.duplicatesSkipped} row(s) skipped as duplicates of an earlier row for the same staff & pay period.`
-    )
-    for (const skipped of results.skippedRecords) {
-      results.failedRecords.push({
-        ROW_NUMBER: skipped.rowNumber ?? '',
-        ERROR_MESSAGE: skipped.reason || 'Duplicate row (same staff & pay period)',
-        STAFF_NAME: skipped.staffName || '',
-        STAFF_ID: skipped.staffId || '',
-        STAFF_EMAIL: skipped.email || '',
-        MONTH_VALUE: skipped.month ? `${skipped.month} ${skipped.year ?? ''}`.trim() : '',
-      })
-    }
-  }
-
-  let processedFilePath: string | null = null
-  if (results.failedRecords.length > 0) {
-    try {
-      processedFilePath = await generateFailedRecordsFile(results.failedRecords, payrollDir)
-    } catch (fileError) {
-      console.error('[PAYROLL_UPLOAD] Failed to generate failed-records report:', { uploadId, fileError })
-    }
-  }
-
-  await completePayrollUploadRecord(uploadId, results, sendEmails, processedFilePath)
-
-  console.log('[PAYROLL_UPLOAD] Completed successfully', {
-    uploadId,
-    templateType,
-    companyId,
-    userId: user.userId,
-    successful: results.successful,
-    failed: results.failed,
-  })
 }

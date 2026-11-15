@@ -40,7 +40,6 @@ export async function GET(req: NextRequest) {
 		if (certType) baseWhere.certificationType = { type: certType };
 
 		// build risk-specific where conditions
-		const riskWhere: any = { ...baseWhere };
 
 		// Determine risk membership using Prisma where clauses where possible
 		// Safe = valid with document and >30 days to expiry

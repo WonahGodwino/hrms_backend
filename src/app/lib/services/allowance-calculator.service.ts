@@ -255,7 +255,7 @@ export class AllowanceCalculatorService {
   /**
    * Generate breakdown explanation
    */
-  private generateBreakdown(rule: any, context: AllowanceCalculationContext, amount: number): string {
+  private generateBreakdown(rule: any, _context: AllowanceCalculationContext, amount: number): string {
     if (rule.type === 'PERCENTAGE') {
       return `${rule.value}% of ${rule.appliesTo === 'BASIC_SALARY' ? 'basic salary' : 'gross salary'} = ${amount.toFixed(2)}`
     } else if (rule.type === 'FIXED') {

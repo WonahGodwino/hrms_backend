@@ -4,6 +4,7 @@ import Mailgun from 'mailgun.js'
 import { prisma } from '@/app/lib/db'
 import { sign, verify } from 'jsonwebtoken'
 import { normalizeCurrencyCode } from '@/app/lib/currency'
+import { reserveStaffEmailSlot } from '@/app/lib/trial/guard'
 
 // Initialize Mailgun
 const mailgun = new Mailgun(formData)
@@ -162,6 +163,7 @@ export async function sendLeaveNotificationEmail(
     options: { employeeName?: string } = {}
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    if (!(await reserveStaffEmailSlot(staff.companyId))) return { success: false, error: 'Daily email limit for the free trial reached' }
     const employeeName = options.employeeName || `${staff.firstName} ${staff.lastName}`
     // Get company info
     const company = await prisma.company.findUnique({
@@ -439,6 +441,7 @@ export async function sendPayrollNotificationEmail(
     }
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    if (!(await reserveStaffEmailSlot(staff.companyId))) return { success: false, error: 'Daily email limit for the free trial reached' }
     // Validate required environment variables
     if (!process.env.MAILGUN_API_KEY) {
       console.error('❌ MAILGUN_API_KEY is not set')

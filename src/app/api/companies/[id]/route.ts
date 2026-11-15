@@ -168,7 +168,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
 	try {
 		const token = extractToken(request);
 		if (!token) return withCors(ApiResponse.error('Authorization header missing', 401), origin);
-		const user = await requireRole(token, ['SUPER_ADMIN']);
+		await requireRole(token, ['SUPER_ADMIN']);
 		const { id } = params;
 
 		const existing = await prisma.company.findFirst({

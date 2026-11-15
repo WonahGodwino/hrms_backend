@@ -14,7 +14,6 @@ import type { PdfSection } from "@/app/lib/comparison-export";
 import {
   BAND_LABELS,
   EVOLUTION_CYCLES,
-  FOCUS,
   MIN_GROUP,
   COMPARE_MAX,
   applyFilters,

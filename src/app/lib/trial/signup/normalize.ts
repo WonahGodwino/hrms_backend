@@ -2,7 +2,30 @@
 // TrialSignal: only the keyed hash, so a leak of the table reveals nothing.
 import crypto from 'crypto'
 
-export type SignalKind = 'EMAIL_DOMAIN' | 'PHONE' | 'RC_NUMBER' | 'TAX_ID' | 'DEVICE' | 'IP' | 'COMPANY_NAME'
+export type SignalKind =
+  | 'EMAIL_DOMAIN' | 'PHONE' | 'RC_NUMBER' | 'TAX_ID' | 'DEVICE' | 'IP' | 'COMPANY_NAME'
+  | 'EMAIL_CANON' | 'HR_NAME' | 'STAFF_LIST'
+
+const TITLES = /\b(mr|mrs|ms|miss|dr|prof|engr|eng|chief|alhaji|alhaja|hon|barr|rev|pastor|sir|madam)\b/g
+
+// "Dr. John  Okoro" and "okoro john" normalise to the same string: titles removed,
+// tokens sorted, so surname-first and given-name-first orders match.
+export function normalizePersonName(first: string, last: string): string {
+  const tokens = `${first || ''} ${last || ''}`
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z\s]/g, ' ')
+    .replace(TITLES, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+  return tokens.sort().join(' ')
+}
+
+// Real CAC numbers are 5-8 digits once the RC/BN/IT prefix is removed.
+export function isValidRcFormat(normalizedRc: string): boolean {
+  return /^\d{5,8}$/.test(normalizedRc)
+}
 
 const SUFFIXES = /\b(limited|ltd|plc|inc|incorporated|llc|nigeria|nig|enterprises|enterprise|ventures|group|company|co)\b/g
 
@@ -47,8 +70,15 @@ export function hashSignal(kind: SignalKind, value: string): string {
 
 // Dice coefficient on character bigrams, 0..1. Cheap and good for near-matches.
 export function similarity(a: string, b: string): number {
-  const x = normalizeCompanyName(a)
-  const y = normalizeCompanyName(b)
+  return dice(normalizeCompanyName(a), normalizeCompanyName(b))
+}
+
+// Same measure for two already-normalised person names (see normalizePersonName).
+export function personNameSimilarity(a: string, b: string): number {
+  return dice(a, b)
+}
+
+function dice(x: string, y: string): number {
   if (!x || !y) return 0
   if (x === y) return 1
   if (x.length < 2 || y.length < 2) return 0

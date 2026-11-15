@@ -4,6 +4,7 @@
 // (offer acceptance, the manual "complete onboarding" fallback) converges on
 // one implementation instead of duplicating the StaffRecord-creation logic.
 import { prisma } from '@/app/lib/db';
+import { isStaffAutoLinkEnabled } from '@/app/lib/departments/auto-link';
 import { reconcileStaffDepartmentLink } from '@/app/lib/departments/department-sync';
 import { reconcileStaffDesignationLink } from '@/app/lib/designations/designation-sync';
 import { sendEmail } from '@/app/lib/email';
@@ -185,8 +186,10 @@ export async function promoteCandidateToStaff(
 	// create/link the matching Department. A sync hiccup must never block
 	// the promotion.
 	try {
-		await reconcileStaffDepartmentLink(created.id, companyId, created.department, created.departmentId, created.position, actor, performedByName);
-		await reconcileStaffDesignationLink({
+		// Switched off in Core Setup > Automation: skip the automatic department link. A designation the person chose is still honoured.
+		const autoLink = await isStaffAutoLinkEnabled(companyId);
+		if (autoLink) await reconcileStaffDepartmentLink(created.id, companyId, created.department, created.departmentId, created.position, actor, performedByName);
+		if (autoLink || designationId) await reconcileStaffDesignationLink({
 			staffId: created.id,
 			companyId,
 			rawPosition: created.position,

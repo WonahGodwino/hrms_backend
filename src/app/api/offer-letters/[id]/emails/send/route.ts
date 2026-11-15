@@ -27,20 +27,22 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const user = await requireModuleAccess(token, 'OFFER_LETTERS', ['HR', 'ADMIN', 'SUPER_ADMIN'])
     const { id } = await params
 
-    const letter = await prisma.generatedOfferLetter.findUnique({ where: { id }, select: { companyId: true } })
+    const letter = await prisma.generatedOfferLetter.findUnique({ where: { id }, select: { companyId: true, recipientEmail: true } })
     if (!letter) return withCors(ApiResponse.error('Offer letter not found', 404), origin)
 
     const hasAccess = await validateOfferLetterCompanyAccess(user, letter.companyId)
     if (!hasAccess) return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
-
-    // Free trial: offer letters sent are a lifetime quota.
-    await consumeTrialQuota(letter.companyId, 'offerLetters', [id])
 
     const formData = await request.formData()
     const templateId = (formData.get('templateId') as string) || null
     const subject = (formData.get('subject') as string) || undefined
     const body = (formData.get('body') as string) || undefined
     const toEmail = (formData.get('toEmail') as string) || undefined
+
+    // Free trial: offer letters sent are a lifetime quota, counted per recipient
+    // so a second letter to the same person does not use another slot.
+    await consumeTrialQuota(letter.companyId, 'offerLetters', [(toEmail || letter.recipientEmail).trim().toLowerCase()])
+
     const toName = (formData.get('toName') as string) || undefined
     const ccEmailsRaw = (formData.get('ccEmails') as string) || ''
     const bccEmailsRaw = (formData.get('bccEmails') as string) || ''

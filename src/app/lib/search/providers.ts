@@ -80,7 +80,7 @@ export const SEARCH_PROVIDERS: SearchProvider[] = [
     moduleKey: 'CORE_SETUP',
     roles: ADMIN_ROLES,
     keywords: ['department', 'departments', 'dept'],
-    async search(ctx, tokens, raw, limit) {
+    async search(ctx, _tokens, raw, limit) {
       const rows = await prisma.department.findMany({
         where: { companyId: ctx.companyId, OR: [{ name: contains(raw) }, { code: startsWith(raw) }] },
         orderBy: { name: 'asc' },
@@ -96,7 +96,7 @@ export const SEARCH_PROVIDERS: SearchProvider[] = [
     moduleKey: 'CORE_SETUP',
     roles: ADMIN_ROLES,
     keywords: ['designation', 'designations', 'role', 'position'],
-    async search(ctx, tokens, raw, limit) {
+    async search(ctx, _tokens, raw, limit) {
       const rows = await prisma.designation.findMany({
         where: { companyId: ctx.companyId, OR: [{ title: contains(raw) }, { code: startsWith(raw) }] },
         orderBy: { title: 'asc' },
@@ -154,7 +154,7 @@ export const SEARCH_PROVIDERS: SearchProvider[] = [
     moduleKey: 'TRAINING',
     roles: ADMIN_ROLES,
     keywords: ['training', 'trainings', 'course', 'program', 'programs'],
-    async search(ctx, tokens, raw, limit) {
+    async search(ctx, _tokens, raw, limit) {
       const rows = await prisma.trainingProgram.findMany({
         where: { companyId: ctx.companyId, OR: [{ programName: contains(raw) }, { category: contains(raw) }] },
         orderBy: { startDate: 'desc' },
@@ -170,7 +170,7 @@ export const SEARCH_PROVIDERS: SearchProvider[] = [
     moduleKey: 'RECRUITMENT',
     roles: ADMIN_ROLES,
     keywords: ['job', 'jobs', 'vacancy', 'vacancies', 'opening'],
-    async search(ctx, tokens, raw, limit) {
+    async search(ctx, _tokens, raw, limit) {
       const rows = await prisma.job.findMany({
         where: { companyId: ctx.companyId, OR: [{ title: contains(raw) }, { department: contains(raw) }] },
         orderBy: { title: 'asc' },
@@ -206,7 +206,7 @@ export const SEARCH_PROVIDERS: SearchProvider[] = [
     moduleKey: 'PAYROLL',
     roles: ADMIN_ROLES,
     keywords: ['payroll', 'payslip', 'payslips', 'salary'],
-    async search(ctx, tokens, raw, limit) {
+    async search(ctx, _tokens, raw, limit) {
       const rows = await prisma.payrollUpload.findMany({
         where: { companyId: ctx.companyId, fileName: contains(raw) },
         orderBy: { createdAt: 'desc' },

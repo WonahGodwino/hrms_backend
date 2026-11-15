@@ -48,7 +48,6 @@ export interface TrialLimits {
   departments: number
   businessUnits: number
   designations: number
-  gradeLevels: number
   payrollTemplates: number
   openJobs: number
   applicantsPerJob: number
@@ -68,7 +67,6 @@ const STANDARD: TrialLimits = {
   departments: 3,
   businessUnits: 1,
   designations: 5,
-  gradeLevels: 5,
   payrollTemplates: 1,
   openJobs: 1,
   applicantsPerJob: 20,

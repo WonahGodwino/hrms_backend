@@ -7,27 +7,6 @@ interface Company {
   companyName: string;
 }
 
-interface ResetStepProps {
-  email: string;
-  otp: string;
-  newPassword: string;
-  confirmPassword: string;
-  selectedCompanyId: string;
-  companies: Company[];
-  step: number;
-  loading: boolean;
-  error: string;
-  success: string;
-  onEmailChange: (email: string) => void;
-  onOtpChange: (otp: string) => void;
-  onPasswordChange: (password: string) => void;
-  onConfirmPasswordChange: (password: string) => void;
-  onCompanySelect: (companyId: string) => void;
-  onRequestOtp: () => Promise<void>;
-  onVerifyOtp: () => Promise<void>;
-  onResetPassword: () => Promise<void>;
-  onBack: () => void;
-}
 
 const PasswordResetFlow: React.FC = () => {
   const router = useRouter();

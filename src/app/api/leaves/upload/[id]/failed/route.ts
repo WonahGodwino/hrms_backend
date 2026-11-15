@@ -1,7 +1,6 @@
 // /src/app/api/leaves/upload/[id]/failed/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { prisma } from '@/app/lib/prisma'

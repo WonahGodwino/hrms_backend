@@ -2,9 +2,7 @@
 import type {
   CustomFieldValue, 
   PayslipDisplayItem,
-  TemplateField,
-  ProcessingResult
-} from './templates/types'
+  } from './templates/types'
 
 function normalizeSection(section?: string): string {
   return (section || '').toUpperCase().replace(/[\s-]+/g, '_')
@@ -24,7 +22,7 @@ export function getPayslipDisplayFields(
 
   if (!customFields) return { earnings, deductions }
 
-  Object.entries(customFields).forEach(([key, field]) => {
+  Object.entries(customFields).forEach(([, field]) => {
     if (!field.showOnPayslip) return;
 
     const normalizedSection = normalizeSection(field.section);

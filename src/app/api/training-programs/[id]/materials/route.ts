@@ -4,6 +4,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { assertStorageQuota } from '@/app/lib/trial/guard'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -45,6 +46,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
       // Read files if any
       const files = formData.getAll('files') as File[]
+      // Free trial: 200 MB of documents per company.
+      await assertStorageQuota(companyId, files.reduce((sum, f) => sum + (f instanceof File ? f.size : 0), 0))
 
       // Map files to materialsList based on fileIndex or position
       materialsList = materialsList.map((mat, index) => {

@@ -11,7 +11,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN']);
     const body = await request.json().catch(() => ({}))
     const { searchParams } = new URL(request.url)
     const companyId = searchParams.get('companyId') || body.companyId
@@ -36,7 +36,6 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     if (!company.hrRepName) missing.push('HR Representative (hrRepName)')
     if (!company.hrRepTitle) missing.push('HR Representative Title (hrRepTitle)')
     if (!company.communicationTool) missing.push('Communication Tool (communicationTool)')
-    const responseDays = company.offerResponseDays ?? 14
     if (missing.length > 0) {
       return withCors(ApiResponse.error(
         `Cannot dispatch offer. Configure these company settings first: ${missing.join(', ')}. Go to Offer Letter Settings.`,

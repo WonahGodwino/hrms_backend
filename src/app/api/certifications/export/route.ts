@@ -19,7 +19,6 @@ async function handleExport(req: NextRequest, bodyOrParams: any) {
   if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
   const { companyId } = resolved
   const format           = (bodyOrParams.format ?? 'csv').toLowerCase()
-  const scope            = bodyOrParams.scope ?? 'all'
   const idsParam         = bodyOrParams.ids ?? bodyOrParams.certification_ids
 
   const status           = bodyOrParams.status

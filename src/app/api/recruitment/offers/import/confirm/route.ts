@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
               { code: { equals: effectiveDesignation, mode: 'insensitive' } },
               { title: { equals: effectiveDesignation, mode: 'insensitive' } },
             ],
-          },
+          },
         })
         if (!designation) { skipped++; errors.push({ email: row.email, reason: 'Unknown designation/position' }); continue }
 
@@ -177,7 +177,7 @@ export async function POST(request: NextRequest) {
             status: offerStatus,
             salary: basePay != null ? basePay : undefined,
             gradeId: designation.id,
-            gradeName: designation.seniorityBand ?? designation.title,
+            gradeName: designation.title,
             proposedStartDate: startDate ? new Date(startDate) : null,
             createdBy: actor,
             metadata: {

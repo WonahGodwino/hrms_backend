@@ -4,9 +4,7 @@ import {
   AutomationAudience,
   AutomationChannel,
   AutomationRule,
-  AutomationTrigger,
   PipIssueCategory,
-  Prisma,
 } from "@prisma/client";
 import prisma from "@/app/lib/prisma";
 import { Db } from "@/app/lib/manager-review";

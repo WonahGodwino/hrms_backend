@@ -1,19 +1,17 @@
 // /src/app/api/leaves/apply/route.ts - PRIMARY APPLICATION ENDPOINT
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { decimalToNumber } from '@/app/lib/prisma-utils'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { z } from 'zod'
 import { prisma } from '@/app/lib/db'
 import { sendLeaveNotificationEmail } from '@/app/lib/email'
+import { assertStorageQuota } from '@/app/lib/trial/guard'
 import { ensureStaffLeaveBalances } from '@/app/lib/leaves/balance-engine'
 import { startChain, notifyNextApprover } from '@/app/lib/leave/approval-chain'
 import { 
   createLeaveNotification, 
-  NOTIFICATION_TYPES,
-  getNotificationsForLeaveRequest 
-} from '@/app/lib/notifications/helpers'
+  NOTIFICATION_TYPES} from '@/app/lib/notifications/helpers'
 
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024 // 10MB
 const ALLOWED_ATTACHMENT_TYPES = new Set([
@@ -163,9 +161,9 @@ async function validateAgainstCompanyPolicy(
   leaveType: any,
   staff: any,
   startDate: Date,
-  endDate: Date,
+  _endDate: Date,
   requestedDays: number,
-  isHalfDay: boolean,
+  _isHalfDay: boolean,
   medicalData: any
 ): Promise<{ 
   isValid: boolean; 
@@ -280,7 +278,7 @@ function getWorkWeekDescription(workDays: number[]): string {
 }
 
 // Helper function for next steps
-function getNextSteps(status: string, currentStep: string, policy: any): string[] {
+function getNextSteps(status: string, currentStep: string, _policy: any): string[] {
   const steps = []
   
   if (status === 'APPROVED') {
@@ -465,6 +463,9 @@ export async function POST(request: NextRequest) {
       )
       return withCors(response, origin)
     }
+
+    // Free trial: 200 MB of documents per company.
+    if (attachmentSize > 0) await assertStorageQuota(staff.companyId, attachmentSize)
 
     // Validate leave type
     const leaveType = await prisma.leaveType.findFirst({

@@ -7,6 +7,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { assertStorageQuota } from '@/app/lib/trial/guard'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -28,7 +29,7 @@ async function resolveOwnStaff(user: any) {
 }
 
 function buildProgress(docs: any[]) {
-  const have = new Set(docs.map((d) => d.category))
+  new Set(docs.map((d) => d.category));
   const items = REQUIRED_CATEGORIES.map((cat) => {
     const doc = docs.find((d) => d.category === cat)
     return {
@@ -100,6 +101,9 @@ export async function POST(request: NextRequest) {
     }
     if (!file) return withCors(ApiResponse.error('file is required', 400), origin)
     if (file.size > MAX_BYTES) return withCors(ApiResponse.error('File exceeds the 10MB limit', 413), origin)
+
+    // Free trial: 200 MB of documents per company.
+    await assertStorageQuota(staff.companyId, file.size)
 
     const buffer = Buffer.from(await file.arrayBuffer())
 

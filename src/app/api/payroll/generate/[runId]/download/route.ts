@@ -151,12 +151,6 @@ function thinBorder(colorArgb: string = THEME.border) {
   return { top: side, left: side, bottom: side, right: side }
 }
 
-function headerStyleForSection(_section: string): { fill: string; text: string } {
-  // Uniform brand-blue header with white text — the shared reporting look.
-  void _section
-  return { fill: THEME.headerFill, text: THEME.headerText }
-}
-
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }

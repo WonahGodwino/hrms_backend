@@ -1,13 +1,11 @@
 // src/app/api/payroll/template/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/app/lib/db'
 
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
-import { XL, XLSX_MIME, addFooter, addNotes, addTitleBand, argb, attachmentDisposition, buildSubtitle, confidentialFooter, solid, addInstructionsSheet } from '@/app/lib/excel/sheet-theme'
+import { XL, XLSX_MIME, addTitleBand, argb, attachmentDisposition, buildSubtitle, solid, addInstructionsSheet } from '@/app/lib/excel/sheet-theme'
 import { PAYROLL_TEMPLATES } from '@/app/lib/payroll/templates/types'
 
 export async function OPTIONS(request: NextRequest) {
@@ -27,7 +25,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = await requireModuleAccess(token, 'PAYROLL', ['HR', 'SUPER_ADMIN','ADMIN'])
+    await requireModuleAccess(token, 'PAYROLL', ['HR', 'SUPER_ADMIN','ADMIN']);
 
     // Get template type from query parameter
     const templateTypeParam = request.nextUrl.searchParams.get('type')

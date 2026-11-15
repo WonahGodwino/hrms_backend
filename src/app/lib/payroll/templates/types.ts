@@ -59,7 +59,7 @@ export interface TemplateConfig {
 }
 
 // Interface for parsed payroll row (used in fixed templates)
-interface ParsedPayrollRow {
+export interface ParsedPayrollRow {
   rowNumber: number;
   staffId: string;
   email: string;
@@ -101,24 +101,6 @@ interface ParsedPayrollRow {
   position?: string;
 }
 
-// Interface for dynamic payroll data
-interface DynamicPayrollData {
-  staffId: string;
-  staffName: string;
-  email: string;
-  month: string;
-  year: number;
-  periodMonth: number;
-  periodYear: number;
-  customFields: Record<string, CustomFieldValue>;
-  earningsList: PayslipDisplayItem[];
-  deductionsList: PayslipDisplayItem[];
-  totals: {
-    grossPay: number;
-    totalDeductions: number;
-    netPay: number;
-  };
-}
 
 // Processing result interface (used by both fixed and dynamic processors)
 export interface ProcessingResult {
@@ -163,7 +145,7 @@ export interface ProcessingResult {
 }
 
 // Template processor interface
-interface TemplateProcessor {
+export interface TemplateProcessor {
   processFile(
     buffer: Buffer,
     fileExtension: string,

@@ -23,9 +23,9 @@ import { requireRole } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { actorFor, auditBulk } from '@/app/lib/core-setup/audit';
 import { prisma } from '@/app/lib/db';
-import { reconcileStaffDepartmentLink } from '@/app/lib/departments/department-sync';
+import { isStaffAutoLinkEnabled } from '@/app/lib/departments/auto-link';
+import { runSyncFromStaff } from '@/app/lib/departments/sync-from-staff';
 import { getUserDisplayName } from '@/app/lib/departments/department-utils';
-import { reconcileStaffDesignationLink } from '@/app/lib/designations/designation-sync';
 import {
     completeStaffBulkEditUploadRecord, createPendingStaffBulkEditUpload,
     failStaffBulkEditUploadRecord, getActiveStaffBulkEditUpload, StaffBulkEditResults
@@ -358,6 +358,8 @@ async function processStaffBulkEditInBackground({
 	const performedByName = await getUserDisplayName({ userId, role: 'HR' });
 	const pfaCodes = await loadActivePfaCodes(companyId);
 
+	const relinkStaffIds: string[] = [];
+
 	try {
 		for (let index = 0; index < data.length; index++) {
 			const row = data[index];
@@ -449,32 +451,8 @@ async function processStaffBulkEditInBackground({
 					data: { ...updateData, updatedBy: userId },
 				});
 
-				// Staff Management is the source of truth for department — only
-				// reconcile when this row actually changed it. A sync hiccup must
-				// never fail the row update itself.
-				if (updateData.department !== undefined || updateData.position !== undefined) {
-					try {
-						if (updateData.department !== undefined) {
-							await reconcileStaffDepartmentLink(
-								existing.id,
-								companyId,
-								updateData.department,
-								existing.departmentId,
-								(updateData.position as string) || existing.position,
-								userId,
-								performedByName
-							);
-						}
-						await reconcileStaffDesignationLink({
-							staffId: existing.id,
-							companyId,
-							rawPosition: (updateData.position as string) || existing.position,
-							currentDesignationId: existing.designationId,
-						});
-					} catch (syncError) {
-						console.error('[STAFF_BULK_EDIT] Department/designation sync error:', syncError);
-					}
-				}
+				// Department/designation linking runs once for every changed row after this loop, not per row.
+				if (updateData.department !== undefined || updateData.position !== undefined) relinkStaffIds.push(existing.id);
 
 				results.successful++;
 			} catch (error: any) {
@@ -482,6 +460,14 @@ async function processStaffBulkEditInBackground({
 				const message = error?.message || 'An error occurred while processing this row.';
 				results.errors.push(`Row ${displayRow}: ${message}`);
 				results.formattedErrors.push({ row: displayRow, message });
+			}
+		}
+
+		if (relinkStaffIds.length > 0 && (await isStaffAutoLinkEnabled(companyId))) {
+			try {
+				await runSyncFromStaff(companyId, userId, performedByName, undefined, { staffIds: relinkStaffIds });
+			} catch (syncError) {
+				console.error('[STAFF_BULK_EDIT] Department/designation sync error:', syncError);
 			}
 		}
 

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'

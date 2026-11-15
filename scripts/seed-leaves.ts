@@ -34,7 +34,7 @@ async function seedLeaves() {
   try {
     // Test connection with a simple query
     console.log('Testing database connection...')
-    const test = await prisma.$queryRaw`SELECT 1 as test`
+    await prisma.$queryRaw`SELECT 1 as test`;
     console.log('✅ Database connection successful')
     
     // Get companies

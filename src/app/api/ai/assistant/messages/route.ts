@@ -1,7 +1,7 @@
 // [ai-assistant] Streaming messages endpoint — POST returns SSE.
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import { handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, getCorsHeaders } from '@/app/lib/cors'
 import { aiGuard, isGuardError, logRefusal } from '@/app/lib/ai/guard'
 import { orchestrate } from '@/app/lib/ai/orchestrator'

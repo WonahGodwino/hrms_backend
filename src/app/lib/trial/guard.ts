@@ -2,6 +2,7 @@
 // or send things; the browser is never the enforcer. UNRESTRICTED companies (all
 // paid and legacy companies) pass every check with no extra query beyond one
 // company lookup.
+import { randomUUID } from 'crypto'
 import { prisma } from '@/app/lib/db'
 import {
   CAPACITY_LABEL,
@@ -138,6 +139,61 @@ export async function consumeTrialQuota(
     data: fresh.map((subjectKey) => ({ companyId, metric, subjectKey })),
     skipDuplicates: true,
   })
+  if (metric === 'payslips') {
+    const { checkPayslipBehaviour } = await import('./behavior')
+    await checkPayslipBehaviour(companyId, used + fresh.length, limit)
+  }
+}
+
+// Staff messages: a trial company may email its staff at most `staffEmailsPerDay` times a
+// day (UTC). Returns false, without throwing, when the day's allowance is used up so a
+// notification never crashes the action that triggered it. Paid companies always get true.
+export async function reserveStaffEmailSlot(companyId: string | null | undefined): Promise<boolean> {
+  if (!companyId) return true
+  const state = await getTrialState(companyId)
+  if (!state.restricted) return true
+  const day = new Date().toISOString().slice(0, 10)
+  const used = await prisma.trialUsageCounter.count({ where: { companyId, metric: 'staffEmailDay', subjectKey: { startsWith: `${day}:` } } })
+  if (used >= state.limits.staffEmailsPerDay) return false
+  await prisma.trialUsageCounter.create({ data: { companyId, metric: 'staffEmailDay', subjectKey: `${day}:${randomUUID()}` } })
+  return true
+}
+
+// Bytes of user-uploaded documents a company holds (CVs, offer templates, onboarding documents,
+// leave and recognition attachments, training files). System-generated payslips and letters are
+// not counted.
+export async function getStorageUsedBytes(companyId: string): Promise<number> {
+  const [cand, tmpl, onboarding, leave, recog, training] = await Promise.all([
+    prisma.candidateFile.aggregate({ where: { companyId }, _sum: { sizeBytes: true } }),
+    prisma.offerLetterTemplate.aggregate({ where: { companyId }, _sum: { fileSize: true } }),
+    prisma.staffOnboardingDocument.aggregate({ where: { companyId }, _sum: { sizeBytes: true } }),
+    prisma.leaveRequest.aggregate({ where: { companyId }, _sum: { attachmentSize: true } }),
+    prisma.recognition.aggregate({ where: { companyId }, _sum: { attachmentSize: true } }),
+    prisma.trainingMaterial.aggregate({ where: { companyId }, _sum: { fileSizeBytes: true } }),
+  ])
+  return (
+    (cand._sum.sizeBytes ?? 0) +
+    (tmpl._sum.fileSize ?? 0) +
+    (onboarding._sum.sizeBytes ?? 0) +
+    (leave._sum.attachmentSize ?? 0) +
+    (recog._sum.attachmentSize ?? 0) +
+    Number(training._sum.fileSizeBytes ?? 0)
+  )
+}
+
+// Call before storing an upload. Trial companies are held to `storageMb`; everyone else passes.
+export async function assertStorageQuota(companyId: string | null | undefined, incomingBytes: number): Promise<void> {
+  const state = await getTrialState(companyId)
+  if (!state.restricted || !companyId) return
+  const used = await getStorageUsedBytes(companyId)
+  const limitBytes = state.limits.storageMb * 1024 * 1024
+  if (used + incomingBytes > limitBytes) {
+    throw new TrialRestrictionError(
+      `The trial includes ${state.limits.storageMb} MB of document storage (${Math.round(used / 1024 / 1024)} MB used). Subscribe to add more.`,
+      'TRIAL_QUOTA_REACHED',
+      402,
+    )
+  }
 }
 
 // Staff cap: the higher of live records and every record ever counted, so
@@ -168,6 +224,21 @@ export async function recordStaffCreated(companyId: string | null | undefined, s
     data: [{ companyId, metric: 'staff', subjectKey: staffRecordId }],
     skipDuplicates: true,
   })
+  const { checkStaffBehaviour } = await import('./behavior')
+  await checkStaffBehaviour(companyId)
+}
+
+// Bulk form of recordStaffCreated: one trial lookup and one insert for a whole upload.
+export async function recordStaffCreatedMany(companyId: string | null | undefined, staffRecordIds: string[]): Promise<void> {
+  if (!companyId || staffRecordIds.length === 0) return
+  const state = await getTrialState(companyId)
+  if (!state.restricted) return
+  await prisma.trialUsageCounter.createMany({
+    data: staffRecordIds.map((subjectKey) => ({ companyId, metric: 'staff', subjectKey })),
+    skipDuplicates: true,
+  })
+  const { checkStaffBehaviour } = await import('./behavior')
+  await checkStaffBehaviour(companyId)
 }
 
 // Live-record counters for the structural limits in section 3 of the trial paper.

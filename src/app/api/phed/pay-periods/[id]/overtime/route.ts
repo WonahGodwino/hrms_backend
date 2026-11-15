@@ -1,6 +1,5 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { computeOvertimeEarnings } from '@/app/lib/phed/payroll-processor'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'

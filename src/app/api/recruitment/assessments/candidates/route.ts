@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     const companyId = queryCompanyId || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company ID is required', 400), origin)
 
-    const search = searchParams.get('search')
+    searchParams.get('search');
     const jobId = searchParams.get('jobId')
     const roundStatus = searchParams.get('roundStatus')
     const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     where.application = { status: 'SHORTLISTED' }
     if (jobId) where.application.jobId = jobId
 
-    const [total, assessments] = await Promise.all([
+    const [, assessments] = await Promise.all([
       prisma.recruitmentCandidateAssessment.count({ where }),
       (prisma as any).recruitmentCandidateAssessment.findMany({
         where,

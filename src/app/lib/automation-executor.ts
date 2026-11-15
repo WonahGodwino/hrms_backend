@@ -1,14 +1,11 @@
 import {
-  AutomationRule,
   AutomationRunStatus,
   Prisma,
 } from "@prisma/client";
 import prisma from "@/app/lib/prisma";
-import { Db } from "@/app/lib/manager-review";
 import { isExecutorEnabled } from "@/app/lib/automation-config";
 import {
   evaluateRule,
-  loadRuleContext,
   json,
 } from "@/app/lib/automation-eval";
 import {

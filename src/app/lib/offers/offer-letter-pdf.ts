@@ -181,7 +181,6 @@ const CONTENT_WIDTH = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT
 const LINE_HEIGHT = 15
 const PARA_SPACING = 6
 const HEADING_SPACING = 4
-const BULLET_INDENT = 14
 
 export async function htmlToPdf(html: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {

@@ -237,6 +237,26 @@ export async function processPayrollGenerationInBackground(runId: string): Promi
       )
       if (needsReview) flaggedCount += 1
 
+      // PayrollData's own uniqueness is (companyId, staffId, payPeriod) only
+      // — no template/category dimension — so a different-category template
+      // run for a staff member who already has a draft from ANOTHER
+      // template for this exact period would otherwise silently overwrite
+      // it below. Narrow guard: skip (don't touch their existing draft)
+      // rather than extend this table's uniqueness, which would ripple into
+      // the review/approval UI — full multi-category Generation support is
+      // tracked separately. Fails loudly in logs, not silently.
+      const existingDraft = await prisma.payrollData.findUnique({
+        where: { companyId_staffId_payPeriod: { companyId: run.companyId, staffId: s.id, payPeriod: run.payPeriod } },
+        select: { templateId: true },
+      })
+      if (existingDraft && existingDraft.templateId !== run.templateId) {
+        console.warn(
+          '[PAYROLL_GENERATION] Skipping staff — existing draft belongs to a different template for this period',
+          { staffId: s.id, payPeriod: run.payPeriod, existingTemplateId: existingDraft.templateId, runTemplateId: run.templateId }
+        )
+        continue
+      }
+
       const data = Object.fromEntries(
         fields.map((f) => [
           f.systemField,

@@ -554,22 +554,6 @@ function categoryAgg(payrolls: Payroll[], category: string, label: string): Cate
   }
 }
 
-const SUMMARY_COLS = [
-  { key: 'label', header: 'Payroll', type: 'text' as const, width: 18 },
-  { key: 'headCount', header: 'No. of Employee', type: 'integer' as const, width: 14 },
-  { key: 'grossPay', header: 'Gross Pay', type: 'currency' as const, width: 18 },
-  { key: 'pensionEmployer', header: "Employer's Pension Contribution", type: 'currency' as const, width: 18 },
-  { key: 'nsitf', header: 'NSITF', type: 'currency' as const, width: 14 },
-  { key: 'itf', header: 'ITF', type: 'currency' as const, width: 14 },
-  { key: 'totalPayrollCost', header: 'Total Payroll Cost', type: 'currency' as const, width: 18 },
-  { key: 'netPay', header: 'Net Pay', type: 'currency' as const, width: 16 },
-  { key: 'pensionRemittance', header: 'Total Pension Remittance', type: 'currency' as const, width: 18 },
-  { key: 'nhf', header: 'NHF', type: 'currency' as const, width: 14 },
-  { key: 'paye', header: 'PAYE', type: 'currency' as const, width: 14 },
-  { key: 'insurance', header: 'Insurance', type: 'currency' as const, width: 14 },
-  { key: 'loan', header: 'Loan', type: 'currency' as const, width: 14 },
-  { key: 'liabilities', header: 'DED/LIABILITIES', type: 'currency' as const, width: 16 },
-]
 
 function sumAggs(aggs: CategoryAgg[]): CategoryAgg {
   const z: CategoryAgg = { label: 'Total', headCount: 0, grossPay: 0, pensionEmployer: 0, nsitf: 0, itf: 0, totalPayrollCost: 0, netPay: 0, pensionRemittance: 0, nhf: 0, paye: 0, insurance: 0, loan: 0, liabilities: 0 }

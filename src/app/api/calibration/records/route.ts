@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { CalibrationStatus, Prisma } from "@prisma/client";
+import { CalibrationStatus } from "@prisma/client";
 import prisma from "@/app/lib/prisma";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";

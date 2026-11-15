@@ -114,7 +114,6 @@ const prefDto = (p: any, verified: boolean) => ({
   keywords: p?.keywords ?? [],
   location: p?.location ?? "",
   remoteOnly: p?.remoteOnly ?? false,
-  minSalary: p?.minSalary != null ? Number(p.minSalary) : null,
   frequency: p?.frequency ?? "DAILY",
   emailVerified: verified,
 });
@@ -138,16 +137,6 @@ export async function saveAlerts(account: Authed, body: any) {
         !!k && !seen.has(k.toLowerCase()) && !!seen.add(k.toLowerCase()),
     );
   if (keywords.length > 15) throw httpErr(400, "You can add up to 15 keywords");
-  let minSalary: number | null = null;
-  if (
-    body.minSalary !== null &&
-    body.minSalary !== undefined &&
-    body.minSalary !== ""
-  ) {
-    minSalary = Number(body.minSalary);
-    if (!Number.isFinite(minSalary) || minSalary < 0 || minSalary > 1e10)
-      throw httpErr(400, "Enter a valid minimum salary");
-  }
   const frequency = String(body.frequency ?? "DAILY");
   if (!FREQ.includes(frequency)) throw httpErr(400, "Invalid frequency");
   const data = {
@@ -155,7 +144,6 @@ export async function saveAlerts(account: Authed, body: any) {
     keywords,
     location: text(body.location, "Location", { max: 100 }),
     remoteOnly: body.remoteOnly === true,
-    minSalary,
     frequency: frequency as any,
   };
   const existing = await prisma.jobAlertPreference.findUnique({
@@ -259,19 +247,7 @@ export async function runJobAlerts(budgetMs = 45000) {
       orderBy: { createdAt: "desc" },
       take: 100,
     });
-    const min = p.minSalary != null ? Number(p.minSalary) : null;
-    const candidates = jobs.filter((j: any) => {
-      if (!matchesLocation(j, p.location)) return false;
-      // a job with no advertised salary is never filtered out; the minimum only applies to naira salaries
-      if (
-        min != null &&
-        j.salary != null &&
-        j.company?.baseCurrency === "NGN" &&
-        Number(j.salary) < min
-      )
-        return false;
-      return true;
-    });
+    const candidates = jobs.filter((j: any) => matchesLocation(j, p.location));
     const delivered = candidates.length
       ? new Set(
           (

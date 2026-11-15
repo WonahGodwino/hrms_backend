@@ -4,12 +4,12 @@
 // which lets a crashed or interrupted bulk send resume and lets the Mailgun
 // webhook match events to a payslip.
 //
-// These columns come from the PROPOSED migration in
-// prisma/proposed-migrations/20261110000000_payroll_scale_indexes_and_email_status
-// and are not in schema.prisma yet, so everything here goes through raw SQL and
-// first checks that the columns exist. Until the migration is applied every
-// function is a harmless no-op and callers keep their current behaviour; once it
-// is applied, resume support switches on without a code change.
+// These columns are defined on the Payslip model in schema.prisma and were
+// added by migration 20261110000000_payroll_scale_indexes_and_email_status
+// (applied). Everything here still goes through raw SQL with a column-exists
+// check first — kept defensive for any environment where that migration
+// hasn't been run yet, in which case every function here is a harmless no-op
+// and callers keep their current behaviour.
 //
 // Status values:
 //   'PENDING' - selected for a send that has started (resume candidate)

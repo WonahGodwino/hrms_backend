@@ -48,10 +48,10 @@ export async function POST(req: NextRequest) {
 
       if (errors.length > 0) {
         errorCount++
-        preview.push({ title: title || '—', code: code || '—', grade: obj.grade || '—', status: errors.join(', '), type: 'error' })
+        preview.push({ title: title || '—', code: code || '—', status: errors.join(', '), type: 'error' })
       } else {
         validCount++
-        preview.push({ title, code, grade: obj.grade || '—', status: 'Ready', type: 'valid' })
+        preview.push({ title, code, status: 'Ready', type: 'valid' })
       }
     }
 

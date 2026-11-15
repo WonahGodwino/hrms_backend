@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
 
 		const uploadedItems: any[] = [];
 		const errors: Array<{ fileName: string; message: string }> = [];
-		const timestamp = Date.now();
+		Date.now();
 
 		for (let i = 0; i < rawFiles.length; i++) {
 			const item = rawFiles[i];

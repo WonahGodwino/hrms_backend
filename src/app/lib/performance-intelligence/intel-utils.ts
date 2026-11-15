@@ -746,7 +746,6 @@ function computeCore(data: CycleData, leaders: Leader[]) {
     escalated: data.escalations.length,
   };
 }
-type Core = ReturnType<typeof computeCore>;
 
 /** Groups smaller than minGroupSize (scored employees) get no averages. */
 function summarize(group: Emp[], data: CycleData, s: IntelSettings) {

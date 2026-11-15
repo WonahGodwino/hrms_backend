@@ -20,7 +20,7 @@ async function generateDesignationCode(companyId: string, title: string): Promis
 	return candidate;
 }
 
-async function findOrCreateDesignation(companyId: string, title: string) {
+export async function findOrCreateDesignation(companyId: string, title: string) {
 	const existing = await prisma.designation.findFirst({
 		where: { companyId, title: { equals: title, mode: 'insensitive' }, status: 'Active' },
 		orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],

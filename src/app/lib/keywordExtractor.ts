@@ -124,7 +124,6 @@ export function calculateIndustryMatchScore(
   } = {}
 ): MatchResult {
   // Set defaults safely with nullish coalescing
-  const useAIServices = options.useAIServices ?? false;
   
   // Ensure all weights have defaults
   const technicalWeight = options.weights?.technical ?? 0.4;
@@ -228,12 +227,10 @@ function calculateEducationScore(cvText: string): number {
   
   const lowerText = cvText.toLowerCase();
   let maxScore = 0;
-  let matchedLevel = '';
   
   for (const level of educationLevels) {
     if (level.pattern.test(lowerText) && level.score > maxScore) {
       maxScore = level.score;
-      matchedLevel = level.pattern.source;
     }
   }
   

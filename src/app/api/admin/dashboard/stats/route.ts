@@ -105,7 +105,7 @@ export async function GET(request: NextRequest) {
 
 // SUPER_ADMIN Statistics (no changes needed)
 async function getSuperAdminStats(companyIds: string[], year: number, month: number) {
-	const currentDate = new Date();
+	new Date();
 	const currentMonthStart = new Date(year, month - 1, 1);
 	const currentMonthEnd = new Date(year, month, 0);
 	const last30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -321,7 +321,7 @@ async function getSuperAdminStats(companyIds: string[], year: number, month: num
 async function getAdminStats(userId: string, companyIds: string[], year: number, month: number) {
 	const currentMonthStart = new Date(year, month - 1, 1);
 	const currentMonthEnd = new Date(year, month, 0);
-	const last30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+	new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
 	// First get staff count separately
 	const staffCount = await prisma.staffRecord.count({
@@ -543,7 +543,7 @@ async function getAdminStats(userId: string, companyIds: string[], year: number,
 }
 
 // HR Statistics - FIXED VERSION with correct enum values
-async function getHRStats(userId: string, companyIds: string[], year: number, month: number) {
+async function getHRStats(_userId: string, companyIds: string[], year: number, month: number) {
 	const currentDate = new Date();
 	const currentMonthStart = new Date(year, month - 1, 1);
 	const currentMonthEnd = new Date(year, month, 0);
@@ -791,7 +791,7 @@ async function getHRStats(userId: string, companyIds: string[], year: number, mo
 }
 
 // STAFF Statistics (no changes needed)
-async function getStaffStats(userId: string, year: number, month: number) {
+async function getStaffStats(userId: string, _year: number, _month: number) {
 	// Get staff record for the user
 	const staffRecord = await prisma.staffRecord.findFirst({
 		where: {

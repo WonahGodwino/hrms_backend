@@ -1,4 +1,3 @@
-import fs from 'fs';
 import { NextRequest } from 'next/server';
 import path from 'path';
 

@@ -8,6 +8,18 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { PAYROLL_TEMPLATES } from '@/app/lib/payroll/templates/types'
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
 
+/** Splits the stored "Row N: message" strings into structured per-row errors for the Results step. */
+function splitRowErrors(lines: string[]) {
+  const rowErrors: { row: number; message: string }[] = []
+  const notes: string[] = []
+  for (const line of lines) {
+    const m = /^Row (\d+): ([\s\S]*)$/.exec(line)
+    if (m) rowErrors.push({ row: Number(m[1]), message: m[2] })
+    else notes.push(line)
+  }
+  return { rowErrors: rowErrors.slice(0, 1000), rowErrorsTruncated: rowErrors.length > 1000, notes }
+}
+
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
@@ -109,6 +121,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
                 : null,
           },
           emailFailures: upload.emailFailures || [],
+          ...splitRowErrors(upload.errors || []),
           failedRecordsCount: upload.failed,
           downloadLinks: {
             failedRecords: upload.processedFilePath ? `/api/payroll/download-failed/${upload.id}` : null,

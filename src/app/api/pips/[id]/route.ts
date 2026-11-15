@@ -14,7 +14,6 @@ import {
   fail,
   isUniqueViolation,
   logPip,
-  nameOf,
   notFound,
   ok,
   parseCategories,

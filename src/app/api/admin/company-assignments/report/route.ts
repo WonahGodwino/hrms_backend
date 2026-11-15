@@ -5,7 +5,7 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { withCors } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
-import { XL, XLSX_MIME, addFooter, addTitleBand, argb, attachmentDisposition, buildSubtitle, confidentialFooter, solid, writeStyledTable } from '@/app/lib/excel/sheet-theme'
+import { XL, XLSX_MIME, addFooter, addTitleBand, argb, attachmentDisposition, buildSubtitle, confidentialFooter, writeStyledTable } from '@/app/lib/excel/sheet-theme'
 
 export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
@@ -111,7 +111,7 @@ async function generateAssignmentsReport(
     currentUser: any,
     where: any,
     format: string,
-    assignedCompanyIds: string[],
+    _assignedCompanyIds: string[],
     origin: string | null
 ) {
   // Fetch assignments with related data using the proper user relation
@@ -275,7 +275,7 @@ async function generateAssignmentsReport(
 async function generateCoverageReport(
     currentUser: any,
     format: string,
-    assignedCompanyIds: string[],
+    _assignedCompanyIds: string[],
     origin: string | null
 ) {
   // Get all non-archived companies

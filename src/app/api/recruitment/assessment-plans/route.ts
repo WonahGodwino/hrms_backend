@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     if (status && ['DRAFT', 'ACTIVE', 'ARCHIVED'].includes(status)) where.status = status
     if (search) where.name = { contains: search, mode: 'insensitive' }
 
-    const [total, plans] = await Promise.all([
+    const [, plans] = await Promise.all([
       prisma.recruitmentAssessmentPlan.count({ where }),
       prisma.recruitmentAssessmentPlan.findMany({
         where,

@@ -6,6 +6,7 @@ import { requireRole } from '@/app/lib/auth';
 import { actorFor, changeSourceOf, diffFields, recordCoreSetupEvent } from '@/app/lib/core-setup/audit';
 import { withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
+import { isStaffAutoLinkEnabled } from '@/app/lib/departments/auto-link';
 import { reconcileStaffDepartmentLink } from '@/app/lib/departments/department-sync';
 import { getUserDisplayName } from '@/app/lib/departments/department-utils';
 import { cleanStaffText } from '@/app/lib/staff/placeholder-values';
@@ -865,7 +866,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 		// Staff Management is the source of truth for department — only
 		// reconcile when this edit actually changed it. A sync hiccup must
 		// never fail the edit itself.
-		if (updateData.department !== undefined || updateData.position !== undefined) {
+		if ((updateData.department !== undefined || updateData.position !== undefined) && (await isStaffAutoLinkEnabled(existingStaff.companyId))) {
 			try {
 				const performedByName = await getUserDisplayName(currentUser);
 				if (updateData.department !== undefined) {

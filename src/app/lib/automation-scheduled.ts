@@ -1,11 +1,9 @@
 import {
-  AutomationEvent,
   AutomationTrigger,
   Prisma,
 } from "@prisma/client";
 import prisma from "@/app/lib/prisma";
 import {
-  BANDS,
   deriveStage,
   kpiScore,
   OPEN_CYCLE_STATUSES,

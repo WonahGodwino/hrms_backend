@@ -22,20 +22,24 @@ import { TRIAL_LENGTH_DAYS, TRIAL_MODULE_KEYS } from '../limits';
 import {
     CODE_TTL_MS, codesMatch, generateSignupCode, hashSignupCode, MAX_CODE_ATTEMPTS
 } from './codes';
+import { RcVerdict, verifyRc } from './cac';
 import {
     domainCanReceiveMail, emailDomain, isDisposableEmail, isFreeMailDomain
 } from './disposable';
+import { canonicalEmail, domainAgeDays, hardEmailRisk } from './email-risk';
 import {
-    hashSignal, normalizeCompanyName, normalizePhone, normalizeRcNumber, normalizeTaxId, SignalKind,
-    similarity
+    hashSignal, normalizeCompanyName, normalizePersonName, normalizePhone,
+    normalizeRcNumber, normalizeTaxId, personNameSimilarity, SignalKind, similarity
 } from './normalize';
 import { checkResendLimit, checkStartLimits, checkVerifyLimit } from './rate-limit';
-import { limitsProfileFor, RiskSignals, scoreSignup } from './score';
+import { RiskSignals, scoreSignup } from './score';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SIGNAL_RETENTION_MS = 24 * 30 * DAY_MS; // ~24 months
 const NETWORK_WINDOW_MS = 7 * DAY_MS;
 const NAME_SIMILARITY_THRESHOLD = 0.85;
+const PERSON_NAME_SIMILARITY_THRESHOLD = 0.85;
+const NEW_DOMAIN_DAYS = 30;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export class SignupError extends Error {
@@ -109,28 +113,69 @@ async function hasSignal(kind: SignalKind, hash: string, since?: Date): Promise<
 	return !!row;
 }
 
+// Same person name (titles and word order ignored) already used with another email. Looks at
+// verified self sign-ups (hashed signal, exact) and at HR staff of any company (exact + fuzzy).
+async function personNameMatch(firstName: string, lastName: string): Promise<{ exact: boolean; similar: boolean }> {
+	const normalized = normalizePersonName(firstName, lastName);
+	if (!normalized) return { exact: false, similar: false };
+	if (await hasSignal('HR_NAME', hashSignal('HR_NAME', normalized))) return { exact: true, similar: true };
+
+	const tokens = normalized.split(' ').filter((t) => t.length >= 2);
+	if (!tokens.length) return { exact: false, similar: false };
+	const candidates = await prisma.staffRecord.findMany({
+		where: {
+			role: 'HR',
+			company: { NOT: { createdBy: 'SELF_SIGNUP', emailVerifiedAt: null } },
+			OR: tokens.flatMap((t) => [
+				{ firstName: { contains: t, mode: 'insensitive' as const } },
+				{ lastName: { contains: t, mode: 'insensitive' as const } },
+			]),
+		},
+		select: { firstName: true, lastName: true },
+		take: 500,
+	});
+	let similar = false;
+	for (const c of candidates) {
+		const other = normalizePersonName(c.firstName || '', c.lastName || '');
+		if (!other) continue;
+		if (other === normalized) return { exact: true, similar: true };
+		if (personNameSimilarity(other, normalized) >= PERSON_NAME_SIMILARITY_THRESHOLD) similar = true;
+	}
+	return { exact: false, similar };
+}
+
 async function gatherSignals(input: {
 	companyName: string;
 	rc: string;
+	taxId: string;
 	phone: string;
+	firstName: string;
+	lastName: string;
 	hrEmail: string;
 	companyEmail: string;
 	ip: string;
 	deviceId: string | null;
+	rcUnverified: boolean;
 }): Promise<RiskSignals> {
 	const hrDomain = emailDomain(input.hrEmail);
 	const companyDomain = emailDomain(input.companyEmail);
 	const disposableEmail = isDisposableEmail(input.hrEmail) || isDisposableEmail(input.companyEmail);
+	const badEmail = !!hardEmailRisk(input.hrEmail, { allowRole: false }) || !!hardEmailRisk(input.companyEmail, { allowRole: true });
 
-	// Custom domains must be able to receive mail; free-mail providers always can.
+	// Custom domains must be able to receive mail and should not be brand new; free-mail providers always can.
 	const customDomains = [...new Set([hrDomain, companyDomain].filter((d) => d && !isFreeMailDomain(d)))];
-	const mailable = await Promise.all(customDomains.map((d) => domainCanReceiveMail(d)));
-	const domainNoMailOrVeryNew = mailable.some((ok) => !ok);
+	const [mailable, ages] = await Promise.all([
+		Promise.all(customDomains.map((d) => domainCanReceiveMail(d))),
+		Promise.all(customDomains.map((d) => domainAgeDays(d))),
+	]);
+	const domainNoMail = mailable.some((ok) => !ok);
+	const domainVeryNew = ages.some((a) => a !== null && a < NEW_DOMAIN_DAYS);
 
 	const recent = new Date(Date.now() - NETWORK_WINDOW_MS);
-	const [rcSignal, phoneSignal, deviceSignal, networkSignal, rcLegacy, phoneLegacy, names] = await Promise.all([
+	const [rcSignal, phoneSignal, taxSignal, deviceSignal, networkSignal, rcLegacy, phoneLegacy, names, nameMatch] = await Promise.all([
 		input.rc ? hasSignal('RC_NUMBER', hashSignal('RC_NUMBER', input.rc)) : false,
 		hasSignal('PHONE', hashSignal('PHONE', input.phone)),
+		input.taxId ? hasSignal('TAX_ID', hashSignal('TAX_ID', input.taxId)) : false,
 		input.deviceId ? hasSignal('DEVICE', hashSignal('DEVICE', input.deviceId)) : false,
 		hasSignal('IP', hashSignal('IP', input.ip), recent),
 		// Companies registered before self sign-up existed carry raw values.
@@ -149,6 +194,7 @@ async function gatherSignals(input: {
 			select: { id: true },
 		}),
 		prisma.company.findMany({ select: { companyName: true }, take: 5000 }),
+		personNameMatch(input.firstName, input.lastName),
 	]);
 
 	const wanted = normalizeCompanyName(input.companyName);
@@ -156,24 +202,52 @@ async function gatherSignals(input: {
 
 	return {
 		disposableEmail,
-		domainNoMailOrVeryNew,
+		badEmail,
+		domainNoMail,
+		domainVeryNew,
 		rcNumberReused: rcSignal || !!rcLegacy,
+		rcUnverified: input.rcUnverified,
 		phoneReused: phoneSignal || !!phoneLegacy,
+		taxIdReused: taxSignal,
 		sameDevice: deviceSignal,
 		sameNetworkRecent: networkSignal,
 		similarCompanyName,
+		hrNameExact: nameMatch.exact,
+		hrNameSimilar: nameMatch.similar,
 		freeMailAddress: isFreeMailDomain(hrDomain),
-		hasRcNumber: !!input.rc,
-		companyDomainEmail: !isFreeMailDomain(hrDomain) && !disposableEmail,
+		companyDomainEmail: !isFreeMailDomain(hrDomain) && !disposableEmail && !badEmail,
 	};
 }
 
-function signalRows(companyId: string, v: Record<SignalKind, string | null>) {
+function signalRows(companyId: string, v: Partial<Record<SignalKind, string | null>>) {
 	const expiresAt = new Date(Date.now() + SIGNAL_RETENTION_MS);
 	return (Object.keys(v) as SignalKind[]).filter((k) => v[k]).map((kind) => ({ companyId, kind, valueHash: hashSignal(kind, v[kind] as string), expiresAt }));
 }
 
 // ── start ────────────────────────────────────────────────────────────────────
+
+type Db = Pick<typeof prisma, 'staffRecord' | 'company' | 'trialSignal'>;
+
+// One mailbox, one account: exact and canonical (dots/+tag removed for Gmail) matches count,
+// as do verified earlier sign-ups, so an alias of an existing address is refused too.
+async function assertEmailsFree(db: Db, hrEmail: string, hrCanon: string, companyEmail: string) {
+	const [taken, companyTaken, canonSignal] = await Promise.all([
+		db.staffRecord.findFirst({ where: { email: { in: [...new Set([hrEmail, hrCanon])] } }, select: { id: true } }),
+		db.company.findFirst({ where: { email: { in: [companyEmail, hrEmail] } }, select: { id: true } }),
+		db.trialSignal.findFirst({
+			where: {
+				kind: 'EMAIL_CANON',
+				valueHash: hashSignal('EMAIL_CANON', hrCanon),
+				expiresAt: { gt: new Date() },
+				company: { emailVerifiedAt: { not: null } },
+			},
+			select: { id: true },
+		}),
+	]);
+	if (taken || companyTaken || canonSignal) {
+		throw new SignupError('An account with this email already exists. Try logging in instead.', 409);
+	}
+}
 
 export async function startSignup(input: StartSignupInput, ctx: SignupContext) {
 	const companyName = s(input.companyName);
@@ -186,8 +260,9 @@ export async function startSignup(input: StartSignupInput, ctx: SignupContext) {
 	const taxId = normalizeTaxId(s(input.taxId));
 	const password = typeof input.password === 'string' ? input.password : '';
 
-	if (!companyName || !firstName || !lastName) throw new SignupError('Please complete all required fields.');
+	if (!companyName || !firstName || !lastName || !rc) throw new SignupError('Please complete all required fields.');
 	if (!EMAIL_RE.test(companyEmail) || !EMAIL_RE.test(hrEmail)) throw new SignupError('Please enter valid email addresses.');
+	if (companyEmail === hrEmail) throw new SignupError('Use a different address for the company and the HR account.');
 	if (phone.replace(/\D/g, '').length < 10) throw new SignupError('Please enter a valid phone number.');
 	if (password.length < 8) throw new SignupError('Password must be at least 8 characters.');
 	if (input.termsAccepted !== true) throw new SignupError('Please accept the terms to continue.');
@@ -203,28 +278,48 @@ export async function startSignup(input: StartSignupInput, ctx: SignupContext) {
 	});
 	if (pending) await prisma.company.delete({ where: { id: pending.companyId } });
 
-	const taken = await prisma.staffRecord.findFirst({ where: { email: hrEmail }, select: { id: true } });
-	const companyTaken = await prisma.company.findFirst({ where: { email: companyEmail }, select: { id: true } });
-	if (taken || companyTaken) {
-		throw new SignupError('An account with this email already exists. Try logging in instead.', 409);
+	const hrCanon = canonicalEmail(hrEmail);
+	await assertEmailsFree(prisma, hrEmail, hrCanon, companyEmail);
+
+	// Obviously fake sign-ups (test/role/look-alike addresses, made-up RC numbers) are declined
+	// with the same generic result as every other decline; the real reason is logged only.
+	const emailRisk = hardEmailRisk(hrEmail, { allowRole: false }) || hardEmailRisk(companyEmail, { allowRole: true });
+	// The (possibly paid) CAC lookup only runs once the free checks have passed.
+	const rcCheck: RcVerdict = emailRisk ? { verdict: 'self_declared' } : await verifyRc(rc, companyName);
+	if (emailRisk || rcCheck.verdict === 'rejected') {
+		console.warn('[signup] declined at validation:', emailRisk || (rcCheck.verdict === 'rejected' ? rcCheck.reason : ''));
+		return { status: 'DECLINED' as SignupStatus };
 	}
 
 	const signals = await gatherSignals({
 		companyName,
 		rc,
+		taxId,
 		phone,
+		firstName,
+		lastName,
 		hrEmail,
 		companyEmail,
 		ip: ctx.ip,
 		deviceId: ctx.deviceId,
+		rcUnverified: rcCheck.verdict === 'unavailable',
 	});
 	const risk = scoreSignup(signals);
 	if (risk.decision === 'DECLINE') return { status: 'DECLINED' as SignupStatus };
+	// What the reviewer needs to know about the CAC check.
+	if (rcCheck.verdict === 'verified') risk.reasons.push(`CAC verified: ${rcCheck.registeredName} (${rcCheck.status})`);
+	else if (rcCheck.verdict === 'self_declared') risk.reasons.push('RC number passed format checks only; not confirmed with CAC');
+	else if (rcCheck.verdict === 'unavailable') risk.reasons.push(`CAC lookup unavailable (${rcCheck.reason})`);
 
 	const hashedPassword = await bcrypt.hash(password, 10);
 	const code = generateSignupCode();
 
 	const { company, signupId } = await prisma.$transaction(async (tx) => {
+		// Serialise sign-ups for the same mailbox, then re-check inside the lock so two
+		// simultaneous requests cannot both pass.
+		await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${hashSignal('EMAIL_CANON', hrCanon)}))`;
+		await assertEmailsFree(tx, hrEmail, hrCanon, companyEmail);
+
 		const company = await tx.company.create({
 			data: {
 				companyName,
@@ -238,7 +333,7 @@ export async function startSignup(input: StartSignupInput, ctx: SignupContext) {
 				archived: 0,
 				// Locked until the email check passes; the trial clock has not started.
 				trialStatus: 'HELD',
-				trialLimitsProfile: limitsProfileFor(signals),
+				trialLimitsProfile: 'standard',
 			},
 		});
 
@@ -289,6 +384,8 @@ export async function startSignup(input: StartSignupInput, ctx: SignupContext) {
 				PHONE: phone,
 				RC_NUMBER: rc || null,
 				TAX_ID: taxId || null,
+				EMAIL_CANON: hrCanon,
+				HR_NAME: normalizePersonName(firstName, lastName) || null,
 				DEVICE: ctx.deviceId,
 				IP: ctx.ip,
 				COMPANY_NAME: normalizeCompanyName(companyName) || null,

@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
     const companyId = scope.companyId
     const whereCompany = companyId ? { companyId } : {}
 
-    const [totalActive, lastMonth, orphanedCount, recentlyAdded] = await Promise.all([
+    const [totalActive, lastMonth, orphanedCount] = await Promise.all([
       (prisma as any).designation.count({ where: { ...whereCompany, status: 'Active' } }),
       (prisma as any).designation.count({ where: { ...whereCompany, ...(companyId ? { companyId } : {}), createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } } }),
       (prisma as any).designation.count({ where: { ...whereCompany, status: 'Active', staffRecords: { none: {} } } }),

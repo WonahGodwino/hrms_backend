@@ -54,7 +54,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
 		const oldPosition = staff.position;
 
-		const updated = await prisma.staffRecord.update({
+		await prisma.staffRecord.update({
 			where: { id: params.id },
 			data: { position: body.newPosition },
 		});

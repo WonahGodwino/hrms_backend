@@ -166,8 +166,6 @@ export async function GET(request: NextRequest) {
 			// Calculate net pay if not available (for dynamic templates)
 			let netPay = payslip.netPay;
 			let grossPay = payslip.grossPay;
-			let earningsCount = 0;
-			let deductionsCount = 0;
 
 			if (isDynamic && payslip.payroll?.customFields) {
 				// For dynamic templates, calculate from custom fields
@@ -175,8 +173,6 @@ export async function GET(request: NextRequest) {
 				const totals = calculateTotals(earnings, deductions);
 				grossPay = totals.grossPay;
 				netPay = totals.netPay;
-				earningsCount = earnings.length;
-				deductionsCount = deductions.length;
 			}
 
 			// Base payslip item
@@ -189,10 +185,12 @@ export async function GET(request: NextRequest) {
 				createdAt: payslip.createdAt,
 				fileName: payslip.fileName,
 				downloadUrl: `/api/payslips/${payslip.id}/download`,
+				payslipCategory: payslip.payslipCategory,
 				// New fields for template information
 				templateType: payslip.payroll?.templateType || 'STANDARD',
 				templateName: templateName,
 				isDynamic: isDynamic,
+				notificationStatus: payslip.emailStatus ?? null,
 			};
 
 			// Include detailed breakdown if requested

@@ -3,7 +3,7 @@ import prisma from "@/app/lib/prisma";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { RouteContext } from "@/app/lib/self-appraisal";
-import { fail, nameOf, notFound, ok, readCtx, writeCtx } from "@/app/lib/pip";
+import { nameOf, notFound, ok, readCtx, writeCtx } from "@/app/lib/pip";
 import { REPORT_LABELS, canSeeReport } from "@/app/lib/comparison-report";
 
 export async function OPTIONS(request: NextRequest) {

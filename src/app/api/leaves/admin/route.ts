@@ -1,7 +1,7 @@
 // src/app/api/leaves/admin/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { requireRoleAsync, AuthUser } from '@/app/lib/auth'
+import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { decimalToNumber } from '@/app/lib/prisma-utils'

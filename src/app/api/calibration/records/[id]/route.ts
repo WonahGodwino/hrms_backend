@@ -100,7 +100,7 @@ export async function GET(
         {
           ...row,
           ...averages, // deptAverage, managerAverage (1-5, null when no submitted reviews)
-          history: history.map((h) => ({
+          history: history.map((_h) => ({
             /* unchanged */
           })),
         },

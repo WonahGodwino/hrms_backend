@@ -44,7 +44,6 @@ export async function GET(request: NextRequest) {
     // Determine target companies based on user role and input
     let targetCompanyIds: string[] = []
     let isAllCompanies = false
-    let selectedCompanyName = ''
 
     if (user.role === 'SUPER_ADMIN') {
       // SUPER_ADMIN can view all companies or specific company
@@ -59,11 +58,6 @@ export async function GET(request: NextRequest) {
       } else if (companyId) {
         // Specific company selected
         targetCompanyIds = [companyId]
-        const company = await prisma.company.findUnique({
-          where: { id: companyId },
-          select: { companyName: true }
-        })
-        selectedCompanyName = company?.companyName || companyId
       } else {
         // No company specified - return error
         return withCors(
@@ -111,13 +105,9 @@ export async function GET(request: NextRequest) {
           )
         }
         targetCompanyIds = [companyId]
-        selectedCompanyName = accessibleCompanies.find(c => c.id === companyId)?.companyName || companyId
       } else {
         // No specific company - use all accessible companies
         targetCompanyIds = accessibleCompanies.map(c => c.id)
-        if (accessibleCompanies.length === 1) {
-          selectedCompanyName = accessibleCompanies[0].companyName
-        }
       }
     } else {
       // HR users - only their own company (from token)
@@ -138,12 +128,6 @@ export async function GET(request: NextRequest) {
 
       targetCompanyIds = [user.companyId]
       
-      // Get company name for HR
-      const company = await prisma.company.findUnique({
-        where: { id: user.companyId },
-        select: { companyName: true }
-      })
-      selectedCompanyName = company?.companyName || user.companyId
     }
 
     // Get company/companies info for the report

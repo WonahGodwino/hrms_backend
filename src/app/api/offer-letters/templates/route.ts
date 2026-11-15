@@ -9,6 +9,7 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { assertStorageQuota } from '@/app/lib/trial/guard'
 import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
 import { extractVariables } from '@/app/lib/offer-letters/docxTemplate'
 
@@ -118,6 +119,9 @@ export async function POST(request: NextRequest) {
         origin
       )
     }
+
+    // Free trial: 200 MB of documents per company.
+    await assertStorageQuota(companyId, file.size)
 
     const bytes = Buffer.from(await file.arrayBuffer())
 

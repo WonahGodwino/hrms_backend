@@ -28,7 +28,7 @@ function buildStrategicInsights(goals: any[], conflictsCount: number): any[] {
   }
 
   // 2. Workload Capacity Insight
-  const highProgressGoals = goals.filter((g) => (g.progress ?? 0) >= 80);
+  goals.filter((g) => (g.progress ?? 0) >= 80);
   const delayedGoals = goals.filter((g) => g.status === "BLOCKED");
 
   if (delayedGoals.length > 0) {

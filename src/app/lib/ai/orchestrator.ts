@@ -1,10 +1,9 @@
 // [ai-assistant] Orchestrator — runs the conversation loop with tool calling.
 import type { PrismaClient } from '@prisma/client'
-import type { ChatMessage, StreamEvent, ToolDefinition as ProviderToolDef } from './providers/types'
+import type { ChatMessage, ToolDefinition as ProviderToolDef } from './providers/types'
 import type { AiProvider, ProviderErrorCode } from './providers/types'
 import { isPlatformEnabled } from './flags'
 import { decryptKey } from './keyVault'
-import { getModelInfo } from './models'
 import { createAnthropicProvider } from './providers/anthropic'
 import { createOpenAIProvider } from './providers/openai'
 import { getTools, getToolDefinitions, getAllToolNames } from './tools'

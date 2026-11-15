@@ -99,9 +99,6 @@ export async function GET(
             departmentScopes: {
               include: { department: { select: { id: true, name: true } } },
             },
-            jobLevelScopes: {
-              select: { id: true, seniorityBand: true },
-            },
           },
         },
       },

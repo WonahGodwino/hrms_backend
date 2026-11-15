@@ -1,12 +1,10 @@
 // src/app/api/admin/staff/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import {
   requireRole,
   createAuthPayloadWithCompanies,
-  signToken,
-  checkCompanyAccess
-} from '@/app/lib/auth'
+  signToken} from '@/app/lib/auth'
 import { getAccessibleCompanyIds } from '@/app/lib/access-control'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
@@ -64,7 +62,7 @@ export async function GET(request: NextRequest) {
     const user = requireRole(token, ['ADMIN', 'HR', 'SUPER_ADMIN'])
 
     const { searchParams } = new URL(request.url)
-    const includeAll = searchParams.get('includeAll') === 'true'
+    searchParams.get('includeAll') === 'true';
 
     // --- New logic: Return staff list filtered by current companyId for HR/ADMIN ---
     // Query params

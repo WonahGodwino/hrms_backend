@@ -2,7 +2,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
@@ -201,10 +200,10 @@ export async function GET(request: NextRequest) {
     })
 
     // Set column widths
-    const totalCols = Math.max(
+    Math.max(
       unifiedHeaders.length,
       5
-    )
+    );
 
     // Create workbook
     const workbook = new ExcelJS.Workbook()

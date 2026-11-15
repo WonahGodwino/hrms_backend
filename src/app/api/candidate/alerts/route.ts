@@ -8,7 +8,7 @@ export async function OPTIONS(request: NextRequest) {
 export async function GET(request: NextRequest) {
   return cpRoute(request, { auth: true }, (c) => getAlerts(c.account!));
 }
-// PUT { isActive, keywords[], location, remoteOnly, minSalary, frequency: INSTANT|DAILY|WEEKLY }
+// PUT { isActive, keywords[], location, remoteOnly, frequency: INSTANT|DAILY|WEEKLY }
 export async function PUT(request: NextRequest) {
   return cpRoute(request, { auth: true, json: true }, (c) =>
     saveAlerts(c.account!, c.body),

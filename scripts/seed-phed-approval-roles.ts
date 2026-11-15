@@ -42,6 +42,14 @@ const ROLE_ACCOUNTS: SeedRoleAccount[] = [
     position: 'Manager, Compensation & Benefits',
   },
   {
+    accessRole: 'TAX_AUDIT',
+    staffId: 'PHED-APR-TAXAUD',
+    email: 'tax.audit@phed-approvals.local',
+    firstName: 'Tax',
+    lastName: 'Audit',
+    position: 'Tax Manager',
+  },
+  {
     accessRole: 'HEAD_INTERNAL_AUDIT',
     staffId: 'PHED-APR-HIAD',
     email: 'head.internalaudit@phed-approvals.local',

@@ -16,7 +16,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
     const { searchParams } = new URL(request.url)
-    const companyId = searchParams.get('companyId')
+    searchParams.get('companyId');
     // For round operations, authorization is inherited from the plan's company
     // The plan lookup below scopes to the correct planId
 

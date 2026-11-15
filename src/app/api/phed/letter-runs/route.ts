@@ -8,7 +8,7 @@ import { requireLetterAuditAccess, requireLetterOperatorAccess } from '@/app/lib
 import { parseTemplateWorkbook } from '@/app/lib/phed/letter-workbook'
 import { validateAndRender } from '@/app/lib/phed/letter-engine/merge-engine'
 import {
-  auditLetterEvent, cleanupExpiredLetterFiles, clientIp, getOrSeedTemplate, resolveLetterCompany, resumeStuckLetterRuns, runProgress, templateToConfig,
+  auditLetterEvent, cleanupExpiredLetterFiles, clientIp, getOrSeedTemplate, resolveLetterCompany, resumeStuckLetterRuns, templateToConfig,
 } from '@/app/lib/phed/letter-service'
 import { writeRunFile } from '@/app/lib/phed/letter-storage'
 import type { RunInputs } from '@/app/lib/phed/letter-engine/types'

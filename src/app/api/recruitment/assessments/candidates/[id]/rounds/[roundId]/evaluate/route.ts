@@ -13,7 +13,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireRoleAsync(token, ['ADMIN', 'HR', 'SUPER_ADMIN', 'STAFF'])
     const { searchParams } = new URL(request.url)
-    const companyId = searchParams.get('companyId')
+    searchParams.get('companyId');
 
     const body = await request.json()
     const { scores, notes, recommendation, draft } = body

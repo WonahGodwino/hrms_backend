@@ -1,6 +1,4 @@
 // src/app/lib/payroll/templates/isurf-standard.ts
-import ExcelJS from 'exceljs'
-import { findHeaderRow } from '@/app/lib/excel/sheet-theme'
 import { prisma } from '@/app/lib/db'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
 import { logPayslipEmailAttempt } from '@/app/lib/payroll/email-log'
@@ -8,14 +6,12 @@ import { generatePayslipPdf } from '@/app/lib/payroll/generatePayslipPdf'
 import type { ParsedPayrollRow } from '@/app/lib/payroll/types'
 import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/helpers'
 import { PAYROLL_TEMPLATES } from './types'
-import {
-  toNumberOrZero as num,
-  monthNameToNumber,
-  detectMaliciousMarkup,
-} from '../utils/valueParsing'
+import { toNumberOrZero as num } from '../utils/valueParsing'
 import { isUploadCancelled, reportUploadProgress } from './utils'
 import { mapWithConcurrency } from '@/app/lib/payroll/concurrency'
-import { buildStaffIndex, matchStaff } from '../utils/staff-matching'
+import { parsePayrollFile } from '../upload/parse'
+import { validatePayrollRows, type PayrollPeriod } from '../upload/validate'
+import { upsertPayrollAndPayslip, UPLOAD_ROW_CONCURRENCY } from './shared/row-writer'
 
 function normalizeHeader(h: string) {
   return h
@@ -36,43 +32,6 @@ function toPrismaBytes(data: Uint8Array): any {
   return data as any
 }
 
-function looksLikePercentageRow(rowObj: any, canonicalMap: Record<string, string>) {
-  for (const col of ['Basic', 'Housing', 'Transport', 'Dressing', 'Leave Allowance', 'Entertainment', 'Utility', 'Medical Contribution']) {
-    const v = getCell(rowObj, col, canonicalMap)
-    if (typeof v === 'string' && v.includes('%')) return true
-  }
-  return false
-}
-
-function splitCsvLine(line: string) {
-  const result: string[] = []
-  let cur = ''
-  let inQuotes = false
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
-    if (ch === '"' && line[i + 1] === '"') {
-      cur += '"'
-      i++
-      continue
-    }
-    if (ch === '"') {
-      inQuotes = !inQuotes
-      continue
-    }
-    if (ch === ',' && !inQuotes) {
-      result.push(cur.trim())
-      cur = ''
-      continue
-    }
-    cur += ch
-  }
-  result.push(cur.trim())
-  return result
-}
-
-const UPLOAD_ROW_CONCURRENCY = 4
-
 export const processIsurfStandardTemplate = {
   async processFile(
     buffer: Buffer,
@@ -81,7 +40,8 @@ export const processIsurfStandardTemplate = {
     user: any,
     sendEmails: boolean,
     overwriteExisting: boolean = false,
-    uploadId?: string
+    uploadId?: string,
+    extra?: { expectedPeriod?: PayrollPeriod | null; legacyPeriodDefaults?: boolean }
   ) {
     const templateConfig = PAYROLL_TEMPLATES.ISURF_STANDARD
     const canonicalMap = templateConfig.canonicalHeaders
@@ -107,84 +67,12 @@ export const processIsurfStandardTemplate = {
       errors: [] as string[],
     }
 
-    let data: any[] = []
-    
-    try {
-      if (fileExtension === 'csv' || fileExtension === 'txt') {
-        const csvText = buffer.toString()
-        const lines = csvText.split(/\r?\n/).filter(l => l.trim())
-        if (!lines.length) throw new Error('Empty CSV file')
-
-        const rawHeaders = splitCsvLine(lines[0])
-        const headers = rawHeaders.map(h => canonicalMap[normalizeHeader(h)] || h)
-
-        for (let i = 1; i < lines.length; i++) {
-          const values = splitCsvLine(lines[i])
-          const rowData: any = {}
-          headers.forEach((h, idx) => {
-            rowData[h] = values[idx] ?? ''
-          })
-          
-          data.push(rowData)
-        }
-
-        if (data[0] && looksLikePercentageRow(data[0], canonicalMap)) {
-          data = data.slice(1)
-        }
-      } else {
-        const workbook = new ExcelJS.Workbook()
-        
-        // FIX: Use type assertion to bypass TypeScript error
-        await workbook.xlsx.load(buffer as any)
-        
-        const worksheet = workbook.worksheets[0]
-        if (!worksheet) throw new Error('No worksheet found in Excel file')
-
-        // The styled template carries a title banner, so find the real header row.
-        const headerRowNumber = findHeaderRow(worksheet, ['name', 'email'])
-        const headerRow = worksheet.getRow(headerRowNumber)
-        const headers: string[] = []
-        headerRow.eachCell((cell, col) => {
-          const h = String(cell.value || '').trim()
-          headers[col - 1] = canonicalMap[normalizeHeader(h)] || h
-        })
-
-        const row2 = worksheet.getRow(headerRowNumber + 1)
-        const row2Obj: any = {}
-        row2.eachCell((cell, col) => {
-          const header = headers[col - 1]
-          row2Obj[header] = cell.value
-        })
-        const skipRow2 = looksLikePercentageRow(row2Obj, canonicalMap)
-
-        worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-          if (rowNumber <= headerRowNumber || row.getCell(1).isMerged) return
-          if (skipRow2 && rowNumber === headerRowNumber + 1) return
-
-          const rowData: any = {}
-          row.eachCell((cell, colNumber) => {
-            const header = headers[colNumber - 1]
-            if (header) {
-              rowData[header] = cell.value
-            }
-          })
-
-          const hasAny = Object.values(rowData).some(v => v !== null && v !== '' && v !== undefined)
-          if (hasAny) {
-            data.push(rowData)
-          }
-        })
-      }
-
-      console.log(`[ISURF_PROCESSOR] Parsed ${data.length} rows`)
-    } catch (err: any) {
-      console.error('[ISURF_PROCESSOR] Error parsing file:', err)
-      throw new Error(`Error parsing file: ${err.message}`)
-    }
-
-    if (!data.length) {
-      throw new Error('No payroll data found in the file')
-    }
+    // Pass 1: parse and validate the whole file before writing anything. The
+    // same validator backs the dry-run endpoint, so what the user saw in the
+    // validation drawer is what runs here.
+    const parsed = await parsePayrollFile({ kind: 'ISURF_STANDARD', buffer, fileExtension })
+    const data = parsed.rows.map((r) => r.data)
+    console.log(`[ISURF_PROCESSOR] Parsed ${data.length} rows`)
 
     const company = await prisma.company.findUnique({
       where: { id: companyId },
@@ -199,17 +87,21 @@ export const processIsurfStandardTemplate = {
       }
     })
 
-    // Load all active staff for the company ONCE; match rows in memory.
-    const staffIndex = await buildStaffIndex(companyId)
+    const verdict = await validatePayrollRows({
+      kind: 'ISURF_STANDARD',
+      rows: parsed.rows,
+      headers: parsed.headers,
+      unknownColumns: parsed.unknownColumns,
+      companyId,
+      expectedPeriod: extra?.expectedPeriod,
+      overwriteExisting,
+      uploadId,
+      legacyPeriodDefaults: extra?.legacyPeriodDefaults,
+    })
+    if (verdict.fileErrors.length) throw new Error(verdict.fileErrors.join(' '))
 
-    // Guard against two rows in the same upload resolving to the same staff &
-    // period: process the first, skip the rest. Key = staffRecordId|month|year.
-    const processedKeys = new Set<string>()
-
-    // Each row is independent once the same-upload duplicate guard below has
-    // claimed its staff+period, so rows run a few at a time. The guard runs
-    // synchronously at the top of a row (no await before it) so the first row
-    // in sheet order still wins.
+    // Pass 2: write the rows that passed validation. Rows are independent, so
+    // they run a few at a time.
     const processRow = async (index: number) => {
       // Check if upload was cancelled before processing each row
       if (uploadId && isUploadCancelled(uploadId)) {
@@ -217,33 +109,34 @@ export const processIsurfStandardTemplate = {
         throw new Error('PAYROLL_CANCELLED')
       }
       const row = data[index]
-      const displayRowNumber = index + 3
+      const v = verdict.rows[index]
+      const displayRowNumber = v.sheetRow
 
       // Declare variables at the loop level so they're accessible in both try and catch blocks
-      let rawName = ''
-      let rawEmail = ''
-      let staffId = ''
+      const rawName = v.name
+      const rawEmail = v.email
 
       try {
-        rawName = getCell(row, 'Name', canonicalMap)?.toString().trim() || ''
-        rawEmail = getCell(row, 'EMAIL', canonicalMap)?.toString().trim() || ''
-        // The ISURF template has no Staff ID column by default, but honor one if
-        // present so staffId takes priority over email (matches Blueridge/Dynamic).
-        staffId = getCell(row, 'Staff ID', canonicalMap)?.toString().trim() || ''
-
-        const nameCheck = detectMaliciousMarkup(rawName)
-        if (nameCheck.isMalicious) {
-          throw new Error(`Malicious content detected in "Name" (${nameCheck.reason}) — remove it and re-upload`)
+        if (v.errors.length) {
+          if (v.skipKind === 'DUPLICATE' && v.staff) {
+            results.duplicatesSkipped++
+            results.skippedRecords.push({
+              rowNumber: displayRowNumber,
+              staffId: v.staff.staffId,
+              staffName: `${v.staff.firstName} ${v.staff.lastName}`,
+              email: v.staff.email,
+              month: v.period?.monthName,
+              year: v.period?.year,
+              reason: 'Duplicate of an earlier row for the same staff & pay period',
+            })
+            return
+          }
+          throw new Error(v.errors.map((e) => e.message).join('; '))
         }
-
-        const missingCols = templateConfig.requiredColumns.filter((col) => {
-          const v = getCell(row, col, canonicalMap)
-          return v === undefined || v === null || v === ''
-        })
-
-        if (missingCols.length > 0) {
-          throw new Error(`Missing required columns: ${missingCols.join(', ')}`)
-        }
+        const staffRecord = v.staff!
+        const monthName = v.writeMonth!
+        const year = v.period!.year
+        const periodMonth = v.period!.month
 
         const grossPay = num(getCell(row, 'Gross Pay', canonicalMap))
         const basicSalary = num(getCell(row, 'Basic', canonicalMap))
@@ -261,52 +154,8 @@ export const processIsurfStandardTemplate = {
         const daysInMonth = num(getCell(row, 'No of Working Days in the Month', canonicalMap))
         const daysWorked = num(getCell(row, 'No of days Worked', canonicalMap))
 
-        if (netSalary < 0) {
-          throw new Error('Net Salary cannot be negative')
-        }
-
-        // Match by staffId first, then email (case-insensitive). Never by name.
-        const staffRecord = matchStaff(staffIndex, { staffId, email: rawEmail })
-
-        if (!staffRecord) {
-          throw new Error(`Staff record not found for ${staffId || rawEmail || rawName}`)
-        }
-
-        const monthName = getCell(row, 'Month', canonicalMap)?.toString() || 
-                         getCell(row, 'MONTH', canonicalMap)?.toString() || 
-                         new Date().toLocaleString('en-US', { month: 'long' })
-        const year = parseInt(
-          getCell(row, 'Year', canonicalMap)?.toString() || 
-          getCell(row, 'YEAR', canonicalMap)?.toString() || 
-          new Date().getFullYear().toString(),
-          10
-        )
-        const periodMonth = monthNameToNumber(monthName)
-
-        // Skip a second row in this upload that resolves to the same staff &
-        // period — it would otherwise create a duplicate payslip.
-        const dedupeKey = `${staffRecord.id}|${monthName}|${year}`
-        if (processedKeys.has(dedupeKey)) {
-          results.duplicatesSkipped++
-          results.skippedRecords.push({
-            rowNumber: displayRowNumber,
-            staffId: staffRecord.staffId,
-            staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
-            email: staffRecord.email,
-            month: monthName,
-            year,
-            reason: 'Duplicate of an earlier row for the same staff & pay period',
-          })
-          console.warn(`[ISURF_PROCESSOR] Row ${displayRowNumber}: skipped duplicate for ${staffRecord.staffId} ${monthName} ${year}`)
-          return
-        }
-        processedKeys.add(dedupeKey)
 
         const payrollData = {
-          companyId: companyId,
-          staffRecordId: staffRecord.id,
-          month: monthName,
-          year,
           grossPay,
           proratedGrossPay: num(getCell(row, 'Prorated Gross Pay', canonicalMap)),
           basicSalary,
@@ -341,23 +190,6 @@ export const processIsurfStandardTemplate = {
           pensionPfaCodeSnapshot: staffRecord.pfaCode,
           pensionEmployerCodeSnapshot: staffRecord.pensionEmployerCode,
           pensionSnapshotAt: new Date(),
-        }
-
-        // Always update an existing payroll for this (staff, month, year) in
-        // place rather than creating a duplicate — regardless of
-        // overwriteExisting — so re-uploads stay idempotent per pay period.
-        let payrollRecord
-        const existingPayroll = await prisma.payroll.findFirst({
-          where: { staffRecordId: staffRecord.id, month: monthName, year, companyId: companyId },
-          orderBy: { createdAt: 'desc' },
-        })
-        if (existingPayroll) {
-          payrollRecord = await prisma.payroll.update({
-            where: { id: existingPayroll.id },
-            data: { ...payrollData, updatedAt: new Date() },
-          })
-        } else {
-          payrollRecord = await prisma.payroll.create({ data: payrollData })
         }
 
         let payslipId = ''
@@ -427,47 +259,30 @@ export const processIsurfStandardTemplate = {
           draft: !sendEmails,
         }
 
-        // Always update an existing payslip for this (staff, month, year) in
-        // place rather than creating a duplicate — regardless of
-        // overwriteExisting — so re-uploads stay idempotent per pay period.
-        const existingPayslip = await prisma.payslip.findFirst({
-          where: {
-            staffRecordId: staffRecord.id,
-            month: monthName,
-            year,
-            companyId: companyId,
-          },
-          orderBy: { createdAt: 'desc' },
+        // Atomically upsert the Payroll + Payslip row for this staff/period
+        // (category is always SALARY for this engine — isurf-standard has no
+        // category selector yet), keyed on the real DB unique constraint
+        // instead of a race-prone findFirst-then-branch. Also checkpoints the
+        // row in the same transaction for crash-safe resume.
+        const writeResult = await upsertPayrollAndPayslip({
+          staffRecordId: staffRecord.id,
+          companyId,
+          month: monthName,
+          year,
+          category: 'SALARY',
+          payrollData,
+          payslipData: { ...payslipData, createdBy: user.userId, updatedBy: user.userId },
+          uploadId,
+          rowIndex: index,
         })
-        if (existingPayslip) {
-          isUpdate = true
-          payslipId = existingPayslip.id
-          // payrollId is intentionally omitted here: the existing payslip
-          // for this staff/period already points at the payroll record for
-          // that same period (payrollRecord, updated in place above), so it
-          // never needs to change on an update.
-          await prisma.payslip.update({
-            where: { id: existingPayslip.id },
-            data: { ...payslipData, updatedBy: user.userId, updatedAt: new Date() },
-          })
+        const payrollRecordId = writeResult.payrollId
+        payslipId = writeResult.payslipId
+        isUpdate = writeResult.wasPayslipUpdate
+        if (isUpdate) {
           results.payslipsUpdated++
-        } else {
-          const newPayslip = await prisma.payslip.create({
-            data: {
-              ...payslipData,
-              payrollId: payrollRecord.id,
-              staffRecordId: staffRecord.id,
-              companyId: companyId,
-              month: monthName,
-              year,
-              createdBy: user.userId,
-              updatedBy: user.userId,
-            },
-          })
-          payslipId = newPayslip.id
         }
 
-        if (sendEmails) {
+        if (sendEmails && writeResult.priorEmailStatus !== 'SENT') {
           results.emailAttempts++
           try {
             const staffDataForEmail = {
@@ -498,7 +313,7 @@ export const processIsurfStandardTemplate = {
                 companyId: staffRecord.companyId,
                 staffId: staffRecord.id,
                 payslipId,
-                payrollId: payrollRecord.id,
+                payrollId: payrollRecordId,
                 recipient: staffRecord.email,
                 emailType: 'PAYSLIP_UPLOAD',
                 success: true,
@@ -516,7 +331,7 @@ export const processIsurfStandardTemplate = {
               companyId: staffRecord.companyId,
               staffId: staffRecord.id,
               payslipId,
-              payrollId: payrollRecord.id,
+              payrollId: payrollRecordId,
               recipient: staffRecord.email,
               emailType: 'PAYSLIP_UPLOAD',
               success: false,
@@ -545,7 +360,7 @@ export const processIsurfStandardTemplate = {
             month: monthName,
             year,
             payslipId,
-            payrollId: payrollRecord.id,
+            payrollId: payrollRecordId,
             companyName: company?.companyName || null
           },
           companyId

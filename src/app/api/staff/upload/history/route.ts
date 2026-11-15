@@ -211,7 +211,6 @@ export async function GET(request: NextRequest) {
         : 'Unknown Staff'
 
       const email = uploader?.email || null
-      const staffId = uploader?.staffId || null
 
       // Short reference like #SU-10524 (last 5 chars)
       const shortRef = `#SU-${upload.id.slice(-5).toUpperCase()}`

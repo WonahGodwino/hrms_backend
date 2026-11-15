@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { requireRole, getUserFromToken } from '@/app/lib/auth'
+import { getUserFromToken } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveScopedCompanyId } from '@/app/lib/company-scope'
@@ -20,7 +20,6 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const search = searchParams.get('search') || ''
     const status = searchParams.get('status') || ''
-    const grade = searchParams.get('grade') || ''
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
     // Pickers/dropdowns request the full list (limit=1000); a 100 cap silently truncated them.
     const limit = Math.min(1000, Math.max(1, parseInt(searchParams.get('limit') || '20') || 20))
@@ -39,14 +38,6 @@ export async function GET(req: NextRequest) {
     if (search) where.OR = [{ title: { contains: search, mode: 'insensitive' } }, { code: { contains: search, mode: 'insensitive' } }]
     // Status is stored capitalized ("Active"/"Inactive"); accept any casing.
     if (status) where.status = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()
-    if (grade) {
-      const upperGrade = grade.toUpperCase()
-      if (['ENTRY', 'JUNIOR', 'MID', 'SENIOR', 'LEAD', 'DIRECTOR', 'EXECUTIVE'].includes(upperGrade)) {
-        where.seniorityBand = upperGrade
-      } else {
-        where.title = { contains: grade, mode: 'insensitive' }
-      }
-    }
 
     const [total, designations] = await Promise.all([
       (prisma as any).designation.count({ where }),
@@ -54,7 +45,7 @@ export async function GET(req: NextRequest) {
         where,
         skip,
         take: limit,
-        orderBy: [{ rank: 'asc' }, { title: 'asc' }],
+        orderBy: [{ title: 'asc' }],
         include: {
           department: { select: { id: true, name: true } },
           _count: { select: { staffRecords: true } },
@@ -69,17 +60,11 @@ export async function GET(req: NextRequest) {
         code: d.code,
         departmentId: d.departmentId,
         department: d.department?.name || null,
-        rank: d.rank ?? 1,
-        seniorityBand: d.seniorityBand,
-        grade: d.seniorityBand || '—',
-        hasGradeLevel: false,
         usage: d._count?.staffRecords || d.staffCount || 0,
         status: d.status,
         description: d.description,
         basePay: d.basePay ?? null,
         basePayFrequency: d.basePayFrequency ?? null,
-        minSalary: d.minSalary != null ? Number(d.minSalary) : null,
-        maxSalary: d.maxSalary != null ? Number(d.maxSalary) : null,
         benefits: d.benefits ?? null,
         createdAt: d.createdAt,
       }

@@ -11,7 +11,7 @@ import {
   AlignmentType,
 } from 'docx'
 import { parseHtml, parseInline } from '@/app/lib/offers/offer-letter-pdf'
-import type { Block, InlineSegment } from '@/app/lib/offers/offer-letter-pdf'
+import type { InlineSegment } from '@/app/lib/offers/offer-letter-pdf'
 
 // Extracts the company name from the letterhead portion of the HTML.
 function extractCompanyName(html: string): string {

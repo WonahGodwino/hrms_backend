@@ -17,7 +17,6 @@ export async function OPTIONS(req: NextRequest) {
 }
 
 function htmlPage(title: string, message: string, ok: boolean): NextResponse {
-  const color = ok ? '#16a34a' : '#dc2626'
   const html = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${title}</title></head>

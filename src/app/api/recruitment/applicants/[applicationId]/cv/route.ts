@@ -2,7 +2,6 @@
 // to download applicant CV for a particular job within a company
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/app/lib/db";
-import { requireRole } from "@/app/lib/auth";
 import { requireModuleAccess } from "@/app/lib/module-access";
 import { ApiResponse, formatError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";

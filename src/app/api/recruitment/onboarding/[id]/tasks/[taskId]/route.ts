@@ -27,7 +27,6 @@ export async function PATCH(
     const { id, taskId } = await params
     const companyId = new URL(request.url).searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
-    const actor = user.userId || user.email || 'system'
 
     const { onboarding, task } = await loadTask(id, taskId, companyId)
     if (!onboarding) return withCors(ApiResponse.error('Onboarding not found', 404), origin)

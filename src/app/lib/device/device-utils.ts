@@ -45,6 +45,7 @@ export function parseUserAgent(userAgent: string | null): { deviceName: string; 
 
 export type StaffActivityAction =
   | 'LOGIN_SUCCESS'
+  | 'SSO_LOGIN_SUCCESS'
   | 'LOGIN_BLOCKED_ATTEMPT'
   | 'DEVICE_REGISTERED'
   | 'DEVICE_EVICTED'

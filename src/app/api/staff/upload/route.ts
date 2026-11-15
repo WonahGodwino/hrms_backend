@@ -8,18 +8,18 @@ import { requireRole } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { logBulkChange } from '@/app/lib/core-setup/audit';
 import { prisma } from '@/app/lib/db';
-import { reconcileStaffDepartmentLink } from '@/app/lib/departments/department-sync';
-import { buildSubtitle, confidentialFooter, findHeaderRow, toneCell, writeStyledTable, addInstructionsSheet, attachmentDisposition, safeFileName, XLSX_MIME } from '@/app/lib/excel/sheet-theme';
+import { isStaffAutoLinkEnabled } from '@/app/lib/departments/auto-link';
+import { runSyncFromStaff } from '@/app/lib/departments/sync-from-staff';
+import { buildSubtitle, confidentialFooter, toneCell, writeStyledTable, addInstructionsSheet, attachmentDisposition, safeFileName, XLSX_MIME } from '@/app/lib/excel/sheet-theme';
 import { STAFF_PENSION_COLUMNS, STAFF_GROSS_COLUMN, PENSION_SAMPLE, PENSION_NOTES } from '@/app/lib/staff/pension-fields';
 import { getUserDisplayName } from '@/app/lib/departments/department-utils';
-import { reconcileStaffDesignationLink } from '@/app/lib/designations/designation-sync';
-import { createNotification, NOTIFICATION_TYPES } from '@/app/lib/notifications/helpers';
-import { saveInitialGrossCompensation } from '@/app/lib/staff/gross-compensation';
+import { createNotificationsBulk, NOTIFICATION_TYPES } from '@/app/lib/notifications/helpers';
+import { saveInitialGrossCompensationMany } from '@/app/lib/staff/gross-compensation';
 import { resolveStaffUploadContext } from '@/app/lib/staff/upload-access';
 import { parseStaffUpload } from '@/app/lib/staff/upload-parser';
 import { missingRequiredColumns, validateStaffRows } from '@/app/lib/staff/upload-validator';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
-import { assertStaffCapacity, recordStaffCreated } from '@/app/lib/trial/guard';
+import { assertStaffCapacity, recordStaffCreatedMany } from '@/app/lib/trial/guard';
 
 function getRelativePath(absolutePath: string): string {
 	const projectRoot = process.cwd();
@@ -79,6 +79,9 @@ export async function POST(request: NextRequest) {
 
 		const performedByName = await getUserDisplayName(authUser);
 
+		const createdStaffIds: string[] = [];
+		const createdForBatch: { staffRecord: { id: string; firstName: string; lastName: string; staffId: string }; gross: unknown }[] = [];
+
 		for (const item of validated) {
 			const row = item.raw;
 			const displayRow = item.sheetRow;
@@ -117,58 +120,12 @@ export async function POST(request: NextRequest) {
 					},
 				});
 
-				await recordStaffCreated(companyId, staffRecord.id);
+				// Trial-usage counter, welcome notification and the Gross seed are written for the whole file after this loop.
 
-				// In-app welcome notification for newly onboarded staff.
-				await createNotification(
-					staffRecord.id,
-					NOTIFICATION_TYPES.WELCOME_STAFF,
-					`Welcome to ${company.companyName}`,
-					`Hi ${staffRecord.firstName} ${staffRecord.lastName}, welcome to ${company.companyName}. We are excited to have you on board.`,
-					{
-						source: 'STAFF_UPLOAD',
-						companyName: company.companyName,
-						staffId: staffRecord.staffId,
-					},
-					companyId as string
-				);
+				// Department/designation linking is done once for the whole file after this loop (runSyncFromStaff), not per row.
+				createdStaffIds.push(staffRecord.id);
 
-				// Staff Management is the source of truth for department — auto-
-				// create/link the matching Department. A sync hiccup must never
-				// fail the staff creation itself.
-				try {
-					await reconcileStaffDepartmentLink(
-						staffRecord.id,
-						companyId!,
-						staffRecord.department,
-						staffRecord.departmentId,
-						staffRecord.position,
-						authUser.userId,
-						performedByName
-					);
-					await reconcileStaffDesignationLink({
-						staffId: staffRecord.id,
-						companyId: companyId!,
-						rawPosition: staffRecord.position,
-						currentDesignationId: staffRecord.designationId,
-					});
-				} catch (syncError) {
-					console.error('[STAFF_UPLOAD] Department/designation sync error:', syncError);
-				}
-
-				// Seed the Compensation profile with Gross when the column was
-				// filled in — optional, and a sync hiccup (e.g. no payroll
-				// template configured yet) must never fail the row's import.
-				try {
-					await saveInitialGrossCompensation({
-						staffId: staffRecord.id,
-						companyId: companyId!,
-						gross,
-						updatedBy: authUser.userId,
-					});
-				} catch (grossError) {
-					console.error('[STAFF_UPLOAD] Gross compensation seed error:', grossError);
-				}
+				createdForBatch.push({ staffRecord, gross });
 
 				results.records.push(staffRecord);
 				results.successful++;
@@ -201,7 +158,46 @@ export async function POST(request: NextRequest) {
 			}
 		}
 
-		const { baseDir, uploadsDir } = await ensureUploadDirectories();
+		// Side effects of the rows that were created, each in one grouped write. None of them may fail the upload.
+		if (createdForBatch.length > 0) {
+			const ids = createdForBatch.map((c) => c.staffRecord.id);
+			try {
+				await recordStaffCreatedMany(companyId, ids);
+			} catch (e) {
+				console.error('[STAFF_UPLOAD] Trial usage counter error:', e);
+			}
+			await createNotificationsBulk(
+				createdForBatch.map(({ staffRecord }) => ({
+					userId: staffRecord.id,
+					type: NOTIFICATION_TYPES.WELCOME_STAFF,
+					title: `Welcome to ${company.companyName}`,
+					message: `Hi ${staffRecord.firstName} ${staffRecord.lastName}, welcome to ${company.companyName}. We are excited to have you on board.`,
+					data: { source: 'STAFF_UPLOAD', companyName: company.companyName, staffId: staffRecord.staffId },
+					companyId: companyId as string,
+				})),
+			);
+			try {
+				await saveInitialGrossCompensationMany({
+					companyId: companyId!,
+					updatedBy: authUser.userId,
+					rows: createdForBatch.map((c) => ({ staffId: c.staffRecord.id, gross: c.gross })),
+				});
+			} catch (grossError) {
+				console.error('[STAFF_UPLOAD] Gross compensation seed error:', grossError);
+			}
+		}
+
+		// Staff Management is the source of truth for department and designation: auto-create/link them for every row that was
+		// created, in one grouped pass. A sync hiccup must never fail the upload itself.
+		if (createdStaffIds.length > 0 && (await isStaffAutoLinkEnabled(companyId))) {
+			try {
+				await runSyncFromStaff(companyId!, authUser.userId, performedByName, undefined, { staffIds: createdStaffIds });
+			} catch (syncError) {
+				console.error('[STAFF_UPLOAD] Department/designation sync error:', syncError);
+			}
+		}
+
+		const { uploadsDir } = await ensureUploadDirectories();
 		const staffDir = path.join(uploadsDir, 'staff');
 		await mkdir(staffDir, { recursive: true });
 

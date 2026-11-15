@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const user = await requireRole(token, ['SUPER_ADMIN', 'HR', 'ADMIN'])
+    await requireRole(token, ['SUPER_ADMIN', 'HR', 'ADMIN'])
 
     // Create CSV template
     const headers = ['Name', 'Rank', 'Steps', 'Base Pay', 'Base Pay Frequency', 'Auto Progression', 'Progression Timeline (months)']

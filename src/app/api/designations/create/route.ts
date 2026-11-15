@@ -4,7 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { getUserFromToken } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { logRecordChange, logBulkChange } from '@/app/lib/core-setup/audit'
+import { logRecordChange } from '@/app/lib/core-setup/audit'
 import { normalizeFrequency } from '@/app/lib/designations/helpers'
 
 export async function OPTIONS(req: NextRequest) {
@@ -29,12 +29,7 @@ export async function POST(req: NextRequest) {
     const {
       title,
       code,
-      grade,
       description,
-      rank,
-      seniorityBand,
-      minSalary,
-      maxSalary,
       basePay,
       basePayFrequency,
       benefits,
@@ -73,29 +68,12 @@ export async function POST(req: NextRequest) {
       );
 
     await assertTrialCapacity(companyId, 'designations')
-    // Determine seniorityBand
-    const validBands = ['ENTRY', 'JUNIOR', 'MID', 'SENIOR', 'LEAD', 'DIRECTOR', 'EXECUTIVE'];
-    let effectiveBand = 'MID';
-    if (seniorityBand && validBands.includes(String(seniorityBand).toUpperCase())) {
-      effectiveBand = String(seniorityBand).toUpperCase();
-    } else if (grade && validBands.includes(String(grade).toUpperCase())) {
-      effectiveBand = String(grade).toUpperCase();
-    }
-
-    const effectiveRank = rank !== undefined && rank !== null && !isNaN(Number(rank))
-      ? Math.max(1, Number(rank))
-      : 1;
-
     const designation = await (prisma as any).designation.create({
       data: {
         companyId,
         title,
         code,
         departmentId: departmentId || null,
-        rank: effectiveRank,
-        seniorityBand: effectiveBand,
-        minSalary: minSalary != null && minSalary !== "" ? Number(minSalary) : null,
-        maxSalary: maxSalary != null && maxSalary !== "" ? Number(maxSalary) : null,
         basePay: basePay != null && basePay !== "" ? Number(basePay) : null,
         basePayFrequency: normalizeFrequency(basePayFrequency),
         benefits: benefits ?? undefined,
@@ -112,14 +90,8 @@ export async function POST(req: NextRequest) {
           id: designation.id,
           title: designation.title,
           code: designation.code,
-          rank: designation.rank,
-          seniorityBand: designation.seniorityBand,
-          grade: designation.seniorityBand,
-          hasGradeLevel: false,
           basePay: designation.basePay ?? null,
           basePayFrequency: designation.basePayFrequency ?? null,
-          minSalary: designation.minSalary != null ? Number(designation.minSalary) : null,
-          maxSalary: designation.maxSalary != null ? Number(designation.maxSalary) : null,
           benefits: designation.benefits ?? null,
           status: designation.status,
         },

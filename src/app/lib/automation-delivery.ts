@@ -1,7 +1,6 @@
 import {
   AutomationAudience,
   AutomationChannel,
-  Prisma,
 } from "@prisma/client";
 import prisma from "@/app/lib/prisma";
 import { createNotification } from "@/app/lib/notifications/helpers";

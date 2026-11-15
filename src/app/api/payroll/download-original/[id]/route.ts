@@ -8,11 +8,8 @@ import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { readFile } from 'fs/promises'
 import path from 'path'
+import { decompressFileBufferIfNeeded } from '@/app/lib/payroll/templates/shared/file-compression'
 
-// Define a custom error type
-interface SystemError extends Error {
-  code?: string
-}
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -98,23 +95,28 @@ export async function GET(
       }
     }
 
-    // Check if file exists
-    if (!uploadRecord.filePath) {
+    // Prefer the durable DB copy (survives a host restart/redeploy) over the
+    // local-disk file, which does not. Rows uploaded before fileData existed
+    // fall back to disk and may 404 if that host has since restarted.
+    let fileBuffer: Buffer
+    if (uploadRecord.fileData) {
+      // Rows written before compression was introduced store the raw
+      // buffer; decompressFileBufferIfNeeded detects gzip's magic bytes
+      // rather than assuming every row is compressed.
+      fileBuffer = decompressFileBufferIfNeeded(Buffer.from(uploadRecord.fileData))
+    } else if (uploadRecord.filePath) {
+      const projectRoot = process.cwd()
+      const absolutePath = path.isAbsolute(uploadRecord.filePath)
+        ? uploadRecord.filePath
+        : path.join(projectRoot, uploadRecord.filePath)
+      fileBuffer = await readFile(absolutePath)
+    } else {
       return withCors(
         ApiResponse.error('Original file not found', 404),
         origin
       )
     }
 
-    // Construct absolute path
-    const projectRoot = process.cwd()
-    const absolutePath = path.isAbsolute(uploadRecord.filePath) 
-      ? uploadRecord.filePath 
-      : path.join(projectRoot, uploadRecord.filePath)
-
-    // Read the file
-    const fileBuffer = await readFile(absolutePath)
-    
     // Determine content type based on file extension
     const fileExt = path.extname(uploadRecord.fileName).toLowerCase()
     let contentType = 'application/octet-stream'
@@ -127,7 +129,7 @@ export async function GET(
       contentType = 'text/csv'
     }
 
-    const response = new NextResponse(fileBuffer, {
+    const response = new NextResponse(new Uint8Array(fileBuffer), {
       status: 200,
       headers: {
         'Content-Type': contentType,

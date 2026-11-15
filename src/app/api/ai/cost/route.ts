@@ -1,5 +1,5 @@
 // src/app/api/ai/cost/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { getUserFromToken } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'

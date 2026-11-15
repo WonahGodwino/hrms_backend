@@ -3,7 +3,7 @@ import { prisma } from '@/app/lib/db'
 import { getUserFromToken } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { logRecordChange, logBulkChange } from '@/app/lib/core-setup/audit'
+import { logRecordChange } from '@/app/lib/core-setup/audit'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 

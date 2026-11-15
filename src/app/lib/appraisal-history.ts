@@ -13,8 +13,6 @@ import { resolveSelf, Self } from "@/app/lib/feedback";
 // Rules
 // ---------------------------------------------------------------------------
 export const MIN_BENCHMARK_GROUP = 5; // department / company averages need at least this many finalized people
-// A grade move counts as a promotion when the new GradeLevel.rank is higher. Flip if rank 1 is your top grade.
-export const HIGHER_RANK_IS_HIGHER_GRADE = true;
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 function avg(xs: number[]): number | null {
@@ -444,17 +442,15 @@ async function loadCareerMoves(companyId: string, staffRecordId: string) {
       id: true,
       effectiveDate: true,
       reason: true,
-      newDesignation: { select: { title: true, rank: true, seniorityBand: true } },
-      previousDesignation: { select: { title: true, rank: true, seniorityBand: true } },
+      promotionRecId: true,
+      newDesignation: { select: { title: true } },
+      previousDesignation: { select: { title: true } },
     },
   });
 }
 type CareerMove = Awaited<ReturnType<typeof loadCareerMoves>>[number];
-const isPromotion = (h: CareerMove) =>
-  !!h.previousDesignation &&
-  (HIGHER_RANK_IS_HIGHER_GRADE
-    ? h.newDesignation.rank > h.previousDesignation.rank
-    : h.newDesignation.rank < h.previousDesignation.rank);
+// A career move is a promotion when it came from an approved promotion recommendation.
+const isPromotion = (h: CareerMove) => !!h.previousDesignation && !!h.promotionRecId;
 
 async function countIncrements(companyId: string, staffRecordId: string) {
   const rows = await prisma.employeeSalary.findMany({
@@ -857,7 +853,7 @@ export async function buildTimeline(
       date: m.effectiveDate,
       title: `Promoted to ${m.newDesignation.title}`,
       impact: "Level Up",
-      description: `Moved from ${m.previousDesignation?.title ?? "a previous role"} to ${m.newDesignation.title} (${m.newDesignation.seniorityBand}).`,
+      description: `Moved from ${m.previousDesignation?.title ?? "a previous role"} to ${m.newDesignation.title}.`,
       details: m.reason || "Promotion enacted.",
     });
   }

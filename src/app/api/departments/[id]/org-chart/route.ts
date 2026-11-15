@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { withCors } from '@/app/lib/cors'
 import { getDepartmentWithAccess } from '@/app/lib/departments/department-utils'
 
 async function buildOrgChart(departmentId: string, companyId: string) {

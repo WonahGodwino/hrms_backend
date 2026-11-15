@@ -7,6 +7,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
+import { consumeTrialQuota } from '@/app/lib/trial/guard'
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
 import { findIdentifierHolder, describeIdentifierCollision } from '@/app/lib/staff/identifierCollision'
 
@@ -186,6 +187,9 @@ export async function POST(request: NextRequest) {
         origin
       )
     }
+
+    // Free trial: payslips sent are a lifetime quota counted per recipient.
+    await consumeTrialQuota(companyId, 'payslips', [staff.id])
 
     // 6b) Publish: sending is the HR/SUPER_ADMIN approval action, so this
     // payslip becomes visible to staff as soon as the send is triggered.

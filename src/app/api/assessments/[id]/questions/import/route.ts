@@ -17,7 +17,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const body = await req.json()
-    const { questions, duplicateHandling } = body
+    const { questions } = body
 
     const resolved = await resolveRequestCompanyId(user, body.companyId ?? new URL(req.url).searchParams.get('companyId'))
     if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)

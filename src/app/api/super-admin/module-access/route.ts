@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 
 import { requireRole } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';

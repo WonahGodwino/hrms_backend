@@ -65,7 +65,7 @@ function isEmptyValue(raw: any): boolean {
  * opposed to `0`, which is a real, distinct value that must not be confused
  * with "couldn't parse this".
  */
-function parseNumericValue(raw: any): number | null {
+export function parseNumericValue(raw: any): number | null {
   const v = unwrapCellValue(raw)
   if (v === null || v === undefined) return null
   if (typeof v === 'boolean') return null

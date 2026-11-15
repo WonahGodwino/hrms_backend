@@ -7,6 +7,7 @@
 import { NextRequest } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/app/lib/db'
+import { AUTO_LINK_RULE_ID, invalidateStaffAutoLink } from '@/app/lib/departments/auto-link'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
@@ -83,6 +84,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { ruleId
       })
       return row
     })
+
+    if (ruleId === AUTO_LINK_RULE_ID) invalidateStaffAutoLink(companyId)
 
     return withCors(
       ApiResponse.success(

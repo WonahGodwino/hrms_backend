@@ -3,7 +3,6 @@ import { NextRequest } from 'next/server'
 import { archiveJobs } from '@/app/lib/jobs'
 import type { UserContext } from '@/app/lib/jobs/types'
 
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'

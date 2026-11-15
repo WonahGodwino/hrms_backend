@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
     // stale selection (e.g. a letter deleted after the picker loaded).
     const letters = await prisma.generatedOfferLetter.findMany({
       where: { id: { in: letterIds }, companyId },
-      select: { id: true },
+      select: { id: true, recipientEmail: true },
     })
     if (letters.length === 0) {
       return withCors(ApiResponse.error('None of the selected offer letters were found for this company', 404), origin)
@@ -86,8 +86,8 @@ export async function POST(request: NextRequest) {
 
     const validLetterIds = letters.map((l) => l.id)
 
-    // Free trial: offer letters sent are a lifetime quota.
-    await consumeTrialQuota(companyId, 'offerLetters', validLetterIds)
+    // Free trial: offer letters sent are a lifetime quota, counted per recipient.
+    await consumeTrialQuota(companyId, 'offerLetters', letters.map((l) => l.recipientEmail.trim().toLowerCase()))
 
     const job = await createPendingOfferLetterBulkJob(companyId, 'EMAIL_SEND', null, null, user.userId, validLetterIds.length, {
       letterIds: validLetterIds,

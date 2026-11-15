@@ -29,6 +29,7 @@ import { watermarkPdfIfTrial } from '@/app/lib/trial/watermark';
 import { monthNameToNumber } from '../utils/valueParsing';
 import { findDaysInMonthField, findDaysWorkedField } from './field-resolver';
 import { markDueLoanRepaymentsPaid } from '@/app/lib/staff-loans-benefits/payroll-integration';
+import { upsertPayrollAndPayslip } from '../templates/shared/row-writer';
 
 import type { PayrollTemplate, PayrollTemplateField, StaffRecord, PayrollData } from '@prisma/client';
 
@@ -209,20 +210,13 @@ export async function finalizeOneStaffRow(params: FinalizeOneStaffRowParams): Pr
 	const vatOnManagementFee = invoicingEnabled && managementFee !== null ? round2(managementFee * (vatPercent / 100)) : null;
 	const totalInvoiceValue = invoicingEnabled && managementFee !== null && vatOnManagementFee !== null ? round2(proratedSubTotal + managementFee + vatOnManagementFee) : null;
 
-	// One final Payroll/Payslip per staff/period regardless of source — a
-	// re-approve (or a post-approval edit/recompute/include) after further
-	// changes updates in place rather than duplicating, same reasoning as the
-	// upload path's overwriteExisting=true.
-	const existingPayroll = await prisma.payroll.findFirst({
-		where: { staffRecordId: staffRecord.id, month: monthName, year, companyId },
-		orderBy: { createdAt: 'desc' },
-	});
-
+	// One final Payroll/Payslip per staff/period/category regardless of
+	// source — a re-approve (or a post-approval edit/recompute/include) after
+	// further changes updates in place rather than duplicating, same
+	// reasoning as the upload path's overwriteExisting=true. Category comes
+	// from the template this run used, so a different-category template for
+	// the same staff/period creates its own row instead of colliding.
 	const payrollData = {
-		companyId,
-		staffRecordId: staffRecord.id,
-		month: monthName,
-		year,
 		status: 'PROCESSED',
 		uploadedBy: approvedBy,
 		templateType: 'DYNAMIC',
@@ -248,10 +242,6 @@ export async function finalizeOneStaffRow(params: FinalizeOneStaffRowParams): Pr
 		pensionEmployerCodeSnapshot: staffRecord.pensionEmployerCode,
 		pensionSnapshotAt: new Date(),
 	};
-
-	const payrollRecord = existingPayroll
-		? await prisma.payroll.update({ where: { id: existingPayroll.id }, data: { ...payrollData, updatedAt: new Date() } })
-		: await prisma.payroll.create({ data: payrollData });
 
 	// Staff Loans & Benefits linkage — mark any loan installment(s) due this
 	// period as paid now that the payslip reflecting that deduction is being
@@ -357,31 +347,21 @@ export async function finalizeOneStaffRow(params: FinalizeOneStaffRowParams): Pr
 		draft: !sendEmails,
 	};
 
-	const existingPayslip = await prisma.payslip.findFirst({
-		where: { staffRecordId: staffRecord.id, month: monthName, year, companyId },
-		orderBy: { createdAt: 'desc' },
+	// Atomically upsert the Payroll + Payslip row for this staff/period/
+	// category, keyed on the real DB unique constraint instead of a
+	// race-prone findFirst-then-branch (same fix as the manual-upload path).
+	const writeResult = await upsertPayrollAndPayslip({
+		staffRecordId: staffRecord.id,
+		companyId,
+		month: monthName,
+		year,
+		category: template.category,
+		payrollData,
+		payslipData: { ...payslipData, createdBy: approvedBy, updatedBy: approvedBy },
 	});
-
-	let payslipId: string;
-	const isUpdate = Boolean(existingPayslip);
-	if (existingPayslip) {
-		await prisma.payslip.update({ where: { id: existingPayslip.id }, data: { ...payslipData, updatedBy: approvedBy, updatedAt: new Date() } });
-		payslipId = existingPayslip.id;
-	} else {
-		const created = await prisma.payslip.create({
-			data: {
-				...payslipData,
-				payrollId: payrollRecord.id,
-				staffRecordId: staffRecord.id,
-				companyId,
-				month: monthName,
-				year,
-				createdBy: approvedBy,
-				updatedBy: approvedBy,
-			},
-		});
-		payslipId = created.id;
-	}
+	const payrollRecord = { id: writeResult.payrollId };
+	const payslipId = writeResult.payslipId;
+	const isUpdate = writeResult.wasPayslipUpdate;
 
 	let emailSent = false;
 	let emailError: string | undefined;

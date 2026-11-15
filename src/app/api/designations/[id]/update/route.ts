@@ -32,12 +32,7 @@ export async function PATCH(
     const {
       title,
       code,
-      grade,
       description,
-      rank,
-      seniorityBand,
-      minSalary,
-      maxSalary,
       basePay,
       basePayFrequency,
       benefits,
@@ -79,23 +74,6 @@ export async function PATCH(
       ...(benefits !== undefined ? { benefits } : {}),
     };
 
-    const validBands = ['ENTRY', 'JUNIOR', 'MID', 'SENIOR', 'LEAD', 'DIRECTOR', 'EXECUTIVE'];
-    if (seniorityBand && validBands.includes(String(seniorityBand).toUpperCase())) {
-      data.seniorityBand = String(seniorityBand).toUpperCase();
-    } else if (grade && validBands.includes(String(grade).toUpperCase())) {
-      data.seniorityBand = String(grade).toUpperCase();
-    }
-
-    if (rank !== undefined && rank !== null && !isNaN(Number(rank))) {
-      data.rank = Math.max(1, Number(rank));
-    }
-
-    if (minSalary !== undefined) {
-      data.minSalary = minSalary === null || minSalary === "" ? null : Number(minSalary);
-    }
-    if (maxSalary !== undefined) {
-      data.maxSalary = maxSalary === null || maxSalary === "" ? null : Number(maxSalary);
-    }
     if (basePay !== undefined) {
       data.basePay = basePay === null || basePay === "" ? null : Number(basePay);
     }
@@ -113,10 +91,6 @@ export async function PATCH(
       title: d.title,
       code: d.code,
       description: d.description,
-      rank: d.rank,
-      seniorityBand: d.seniorityBand,
-      minSalary: d.minSalary != null ? Number(d.minSalary) : null,
-      maxSalary: d.maxSalary != null ? Number(d.maxSalary) : null,
       basePay: d.basePay,
       basePayFrequency: d.basePayFrequency,
       status: d.status,
@@ -142,14 +116,8 @@ export async function PATCH(
           id: updated.id,
           title: updated.title,
           code: updated.code,
-          rank: updated.rank,
-          seniorityBand: updated.seniorityBand,
-          grade: updated.seniorityBand,
-          hasGradeLevel: false,
           basePay: updated.basePay ?? null,
           basePayFrequency: updated.basePayFrequency ?? null,
-          minSalary: updated.minSalary != null ? Number(updated.minSalary) : null,
-          maxSalary: updated.maxSalary != null ? Number(updated.maxSalary) : null,
           benefits: updated.benefits ?? null,
           description: updated.description,
           status: updated.status,

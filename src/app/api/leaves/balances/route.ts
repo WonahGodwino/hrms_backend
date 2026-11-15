@@ -1,7 +1,6 @@
 // /src/app/api/leaves/balances/route.ts - COMPLETE FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server'
 
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { ensureStaffLeaveBalances } from '@/app/lib/leaves/balance-engine'

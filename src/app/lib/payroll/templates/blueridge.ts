@@ -1,6 +1,4 @@
 // src/app/lib/payroll/templates/blueridge.ts
-import ExcelJS from 'exceljs'
-import { findHeaderRow } from '@/app/lib/excel/sheet-theme'
 import { prisma } from '@/app/lib/db'
 import { sendPayrollNotificationEmail } from '@/app/lib/email'
 import { logPayslipEmailAttempt } from '@/app/lib/payroll/email-log'
@@ -10,14 +8,10 @@ import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/
 import { PAYROLL_TEMPLATES } from './types'
 import { isUploadCancelled, reportUploadProgress } from './utils'
 import { mapWithConcurrency } from '@/app/lib/payroll/concurrency'
-import {
-  toNumberOrZero as num,
-  monthNameToNumber,
-  extractYearFromValue as getYearFromMonth,
-  getMonthNameFromNumber,
-  detectMaliciousMarkup,
-} from '../utils/valueParsing'
-import { buildStaffIndex, matchStaff, normalizeEmail } from '../utils/staff-matching'
+import { toNumberOrZero as num } from '../utils/valueParsing'
+import { parsePayrollFile } from '../upload/parse'
+import { validatePayrollRows, type PayrollPeriod } from '../upload/validate'
+import { upsertPayrollAndPayslip, UPLOAD_ROW_CONCURRENCY } from './shared/row-writer'
 
 function normalizeHeader(h: string) {
   return h
@@ -36,38 +30,6 @@ function getCell(row: any, header: string, canonicalMap: Record<string, string>)
   return row[actualKey]
 }
 
-function toPrismaBytes(data: Uint8Array): Buffer {
-  return Buffer.from(data.buffer, data.byteOffset, data.byteLength)
-}
-
-function splitCsvLine(line: string): string[] {
-  const result: string[] = []
-  let cur = ''
-  let inQuotes = false
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
-    if (ch === '"' && line[i + 1] === '"') {
-      cur += '"'
-      i++
-      continue
-    }
-    if (ch === '"') {
-      inQuotes = !inQuotes
-      continue
-    }
-    if (ch === ',' && !inQuotes) {
-      result.push(cur.trim())
-      cur = ''
-      continue
-    }
-    cur += ch
-  }
-  result.push(cur.trim())
-  return result
-}
-
-const UPLOAD_ROW_CONCURRENCY = 4
 
 export const processBlueridgeTemplate = {
   async processFile(
@@ -77,7 +39,8 @@ export const processBlueridgeTemplate = {
     user: any,
     sendEmails: boolean,
     overwriteExisting: boolean = false,
-    uploadId?: string
+    uploadId?: string,
+    extra?: { expectedPeriod?: PayrollPeriod | null; legacyPeriodDefaults?: boolean }
   ) {
     const templateConfig = PAYROLL_TEMPLATES.BLUERIDGE
     const canonicalMap = templateConfig.canonicalHeaders
@@ -103,73 +66,11 @@ export const processBlueridgeTemplate = {
       errors: [] as string[],
     }
 
-    let data: any[] = []
-    
-    try {
-      if (fileExtension === 'csv' || fileExtension === 'txt') {
-        const csvText = buffer.toString()
-        const lines = csvText.split(/\r?\n/).filter(l => l.trim())
-        if (!lines.length) throw new Error('Empty CSV file')
-
-        const rawHeaders = splitCsvLine(lines[0])
-        const headers = rawHeaders.map(h => canonicalMap[normalizeHeader(h)] || h)
-
-        for (let i = 1; i < lines.length; i++) {
-          const values = splitCsvLine(lines[i])
-          const rowData: any = {}
-          headers.forEach((h, idx) => {
-            rowData[h] = values[idx] ?? ''
-          })
-          
-          const hasData = Object.values(rowData).some(v => v !== null && v !== '' && v !== undefined)
-          if (hasData) {
-            data.push(rowData)
-          }
-        }
-      } else {
-        const workbook = new ExcelJS.Workbook()
-        const uint8Array = new Uint8Array(buffer)
-        await workbook.xlsx.load(uint8Array as any)
-        
-        const worksheet = workbook.worksheets[0]
-        if (!worksheet) throw new Error('No worksheet found in Excel file')
-
-        // The styled template carries a title banner, so find the real header row.
-        const headerRowNumber = findHeaderRow(worksheet, ['staffid', 'name'])
-        const headerRow = worksheet.getRow(headerRowNumber)
-        const headers: string[] = []
-        headerRow.eachCell((cell, col) => {
-          const h = String(cell.value || '').trim()
-          headers[col - 1] = canonicalMap[normalizeHeader(h)] || h
-        })
-
-        console.log('[BLUERIDGE_PROCESSOR] Headers found:', headers)
-
-        worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-          if (rowNumber <= headerRowNumber || row.getCell(1).isMerged) return
-
-          const rowData: any = {}
-          row.eachCell((cell, colNumber) => {
-            const header = headers[colNumber - 1]
-            if (header) {
-              rowData[header] = cell.value
-            }
-          })
-
-          const hasData = Object.values(rowData).some(v => v !== null && v !== '' && v !== undefined)
-          if (hasData) {
-            data.push(rowData)
-          }
-        })
-      }
-    } catch (err: any) {
-      console.error('[BLUERIDGE_PROCESSOR] Error parsing file:', err)
-      throw new Error(`Error parsing file: ${err.message}`)
-    }
-
-    if (!data.length) {
-      throw new Error('No payroll data found in the file')
-    }
+    // Pass 1: parse and validate the whole file before writing anything. The
+    // same validator backs the dry-run endpoint, so what the user saw in the
+    // validation drawer is what runs here.
+    const parsed = await parsePayrollFile({ kind: 'BLUERIDGE', buffer, fileExtension })
+    const data = parsed.rows.map((r) => r.data)
 
     console.log(`[BLUERIDGE_PROCESSOR] Total rows to process: ${data.length}`)
 
@@ -186,18 +87,21 @@ export const processBlueridgeTemplate = {
       }
     })
 
-    // Load all active staff for the company ONCE; match rows in memory.
-    const staffIndex = await buildStaffIndex(companyId)
+    const verdict = await validatePayrollRows({
+      kind: 'BLUERIDGE',
+      rows: parsed.rows,
+      headers: parsed.headers,
+      unknownColumns: parsed.unknownColumns,
+      companyId,
+      expectedPeriod: extra?.expectedPeriod,
+      overwriteExisting,
+      uploadId,
+      legacyPeriodDefaults: extra?.legacyPeriodDefaults,
+    })
+    if (verdict.fileErrors.length) throw new Error(verdict.fileErrors.join(' '))
 
-    // Guard against two rows in the same upload resolving to the same staff &
-    // period (e.g. the same person entered twice): process the first, skip the
-    // rest. Key = staffRecordId|month|year.
-    const processedKeys = new Set<string>()
-
-    // Each row is independent once the same-upload duplicate guard below has
-    // claimed its staff+period, so rows run a few at a time. The guard runs
-    // synchronously at the top of a row (no await before it) so the first row
-    // in sheet order still wins.
+    // Pass 2: write the rows that passed validation. Rows are independent, so
+    // they run a few at a time.
     const processRow = async (index: number) => {
       // Check if upload was cancelled before processing each row
       if (uploadId && isUploadCancelled(uploadId)) {
@@ -205,56 +109,36 @@ export const processBlueridgeTemplate = {
         throw new Error('PAYROLL_CANCELLED')
       }
       const row = data[index]
-      const displayRowNumber = index + 2
-      let rawName = ''
-      let rawEmail = ''
-      let staffId = ''
-      let monthValue = ''
+      const v = verdict.rows[index]
+      const displayRowNumber = v.sheetRow
+      const rawName = v.name
+      const rawEmail = v.email
+      const staffId = v.staffId
+      const monthValue = getCell(row, 'Month', canonicalMap)?.toString().trim() || ''
       
       try {
-        monthValue = getCell(row, 'Month', canonicalMap)?.toString().trim() || ''
-        staffId = getCell(row, 'Staff ID', canonicalMap)?.toString().trim() || ''
-        rawName = getCell(row, 'Name', canonicalMap)?.toString().trim() || ''
-        rawEmail = getCell(row, 'Email', canonicalMap)?.toString().trim() || ''
-
-        const nameCheck = detectMaliciousMarkup(rawName)
-        if (nameCheck.isMalicious) {
-          throw new Error(`Malicious content detected in "Name" (${nameCheck.reason}) — remove it and re-upload`)
+        if (v.errors.length) {
+          if (v.skipKind === 'DUPLICATE' && v.staff) {
+            results.duplicatesSkipped++
+            results.skippedRecords.push({
+              rowNumber: displayRowNumber,
+              staffId: v.staff.staffId,
+              staffName: `${v.staff.firstName} ${v.staff.lastName}`,
+              email: v.staff.email,
+              month: v.period?.monthName,
+              year: v.period?.year,
+              reason: 'Duplicate of an earlier row for the same staff & pay period',
+            })
+            return
+          }
+          throw new Error(v.errors.map((e) => e.message).join('; '))
         }
+        const staffRecord = v.staff!
+        const monthName = v.writeMonth!
+        const year = v.period!.year
+        const periodMonth = v.period!.month
 
-        const missingCols = templateConfig.requiredColumns.filter((col) => {
-          const v = getCell(row, col, canonicalMap)
-          return v === undefined || v === null || v === ''
-        })
-
-        if (missingCols.length > 0) {
-          throw new Error(`Missing required columns: ${missingCols.join(', ')}`)
-        }
-
-        let monthName = ''
-        let year = 0
-        let periodMonth = 0
-        
-        if (monthValue) {
-          periodMonth = monthNameToNumber(monthValue)
-          year = getYearFromMonth(monthValue)
-          monthName = getMonthNameFromNumber(periodMonth)
-        }
-        
-        if (!periodMonth || periodMonth === 0) {
-          const now = new Date()
-          periodMonth = now.getMonth() + 1
-          year = now.getFullYear()
-          monthName = getMonthNameFromNumber(periodMonth)
-        }
-
-        // FIXED: Get position
         const position = getCell(row, 'Position verify (coe)', canonicalMap)?.toString().trim() || ''
-
-        const positionCheck = detectMaliciousMarkup(position)
-        if (positionCheck.isMalicious) {
-          throw new Error(`Malicious content detected in "Position" (${positionCheck.reason}) — remove it and re-upload`)
-        }
 
         // FIXED: Try multiple ways to get working days - handle HTML tags properly
         let workingDaysRaw = getCell(row, 'Working Days', canonicalMap)
@@ -331,31 +215,6 @@ export const processBlueridgeTemplate = {
         const entertainmentAllowance = num(getCell(row, 'Entertainment Allowance', canonicalMap))
         const utilityAllowance = num(getCell(row, 'Utility Allowance', canonicalMap))
 
-        // Match by staffId first, then email (case-insensitive). Never by name.
-        const staffRecord = matchStaff(staffIndex, { staffId, email: rawEmail })
-
-        if (!staffRecord) {
-          throw new Error(`Staff record not found for ${staffId || rawEmail || rawName}`)
-        }
-
-        // Skip a second row in this upload that resolves to the same staff &
-        // period — it would otherwise create a duplicate payslip.
-        const dedupeKey = `${staffRecord.id}|${monthName}|${year}`
-        if (processedKeys.has(dedupeKey)) {
-          results.duplicatesSkipped++
-          results.skippedRecords.push({
-            rowNumber: displayRowNumber,
-            staffId: staffRecord.staffId,
-            staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
-            email: staffRecord.email,
-            month: monthName,
-            year,
-            reason: 'Duplicate of an earlier row for the same staff & pay period',
-          })
-          console.warn(`[BLUERIDGE_PROCESSOR] Row ${displayRowNumber}: skipped duplicate for ${staffRecord.staffId} ${monthName} ${year}`)
-          return
-        }
-        processedKeys.add(dedupeKey)
 
         // Update staff record with position from template
         if (position && staffRecord.position !== position) {
@@ -366,10 +225,6 @@ export const processBlueridgeTemplate = {
         }
 
         const payrollData = {
-          companyId: companyId,
-          staffRecordId: staffRecord.id,
-          month: monthName,
-          year,
           grossPay,
           basicSalary,
           housing,
@@ -406,23 +261,6 @@ export const processBlueridgeTemplate = {
           pensionPfaCodeSnapshot: staffRecord.pfaCode,
           pensionEmployerCodeSnapshot: staffRecord.pensionEmployerCode,
           pensionSnapshotAt: new Date(),
-        }
-
-        // Always update an existing payroll for this (staff, month, year) in
-        // place rather than creating a duplicate — regardless of
-        // overwriteExisting — so re-uploads stay idempotent per pay period.
-        let payrollRecord
-        const existingPayroll = await prisma.payroll.findFirst({
-          where: { staffRecordId: staffRecord.id, month: monthName, year, companyId: companyId },
-          orderBy: { createdAt: 'desc' },
-        })
-        if (existingPayroll) {
-          payrollRecord = await prisma.payroll.update({
-            where: { id: existingPayroll.id },
-            data: { ...payrollData, updatedAt: new Date() },
-          })
-        } else {
-          payrollRecord = await prisma.payroll.create({ data: payrollData })
         }
 
         let payslipId = ''
@@ -521,47 +359,31 @@ export const processBlueridgeTemplate = {
           draft: !sendEmails,
         }
 
-        // Always update an existing payslip for this (staff, month, year) in
-        // place rather than creating a duplicate — regardless of
-        // overwriteExisting — so re-uploads stay idempotent per pay period.
-        const existingPayslip = await prisma.payslip.findFirst({
-          where: {
-            staffRecordId: staffRecord.id,
-            month: monthName,
-            year,
-            companyId: companyId,
-          },
-          orderBy: { createdAt: 'desc' },
+        // Atomically upsert the Payroll + Payslip row for this staff/period
+        // (category is always SALARY for this engine — blueridge has no
+        // category selector yet), keyed on the real DB unique constraint
+        // instead of a race-prone findFirst-then-branch — this is the fix
+        // for the 12,500+ duplicate-row chains this engine's old racy
+        // findFirst/create path produced in production.
+        const writeResult = await upsertPayrollAndPayslip({
+          staffRecordId: staffRecord.id,
+          companyId,
+          month: monthName,
+          year,
+          category: 'SALARY',
+          payrollData,
+          payslipData: { ...payslipData, createdBy: user.userId, updatedBy: user.userId },
+          uploadId,
+          rowIndex: index,
         })
-        if (existingPayslip) {
-          isUpdate = true
-          payslipId = existingPayslip.id
-          // payrollId is intentionally omitted here: the existing payslip
-          // for this staff/period already points at the payroll record for
-          // that same period (payrollRecord, updated in place above), so it
-          // never needs to change on an update.
-          await prisma.payslip.update({
-            where: { id: existingPayslip.id },
-            data: { ...payslipData, updatedBy: user.userId, updatedAt: new Date() },
-          })
+        const payrollRecord = { id: writeResult.payrollId }
+        payslipId = writeResult.payslipId
+        isUpdate = writeResult.wasPayslipUpdate
+        if (isUpdate) {
           results.payslipsUpdated++
-        } else {
-          const newPayslip = await prisma.payslip.create({
-            data: {
-              ...payslipData,
-              payrollId: payrollRecord.id,
-              staffRecordId: staffRecord.id,
-              companyId: companyId,
-              month: monthName,
-              year,
-              createdBy: user.userId,
-              updatedBy: user.userId,
-            },
-          })
-          payslipId = newPayslip.id
         }
 
-        if (sendEmails) {
+        if (sendEmails && writeResult.priorEmailStatus !== 'SENT') {
           results.emailAttempts++
           try {
             const staffDataForEmail = {

@@ -4,7 +4,7 @@ import { getCorsHeaders, handleCorsOptions } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { requireModuleAccess } from '@/app/lib/module-access';
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company';
-import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { handleApiError } from '@/app/lib/utils';
 
 export async function OPTIONS(req: NextRequest) {
 	return handleCorsOptions(req);

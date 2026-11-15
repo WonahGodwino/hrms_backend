@@ -1,7 +1,6 @@
 // src/app/api/leaves/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
@@ -288,7 +287,6 @@ function parseSheetData(sheet: ExcelJS.Worksheet, specs: ColumnSpec[]): any[] {
       
       // Handle Excel date numbers
       if (typeof cell.value === 'number' && cell.value > 40000 && cell.value < 100000) {
-        const date = ExcelJS.ValueType.Date;
         if (cell.type === ExcelJS.ValueType.Date) {
           value = cell.value.toString()
         }
@@ -345,7 +343,7 @@ async function parseCSVToWorkbook(csvText: string): Promise<ExcelJS.Workbook> {
 }
 
 // Generate error suggestions
-function getPolicyErrorSuggestion(error: string, policyData: any): string {
+function getPolicyErrorSuggestion(error: string, _policyData: any): string {
   if (error.includes('Maximum Days') || error.includes('maxDays')) {
     return 'Enter a positive number (e.g., 30)'
   }
@@ -1167,7 +1165,7 @@ export async function POST(request: NextRequest) {
       return withCors(response, origin)
     }
 
-    const { uploadsDir, leavesDir } = await ensureUploadDirectories()
+    const { leavesDir } = await ensureUploadDirectories()
     const fileName = `leave-upload-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
     const savedFilePath = path.join(leavesDir, fileName)
     const relativeFilePath = getRelativePath(savedFilePath)

@@ -70,7 +70,6 @@ export async function POST(
         cycle: { select: { id: true, name: true, status: true } },
         version: { select: { versionNumber: true } },
         departmentScopes: { select: { departmentId: true } },
-        jobLevelScopes: { select: { seniorityBand: true } },
       },
     });
     const upcoming = live.filter((a) =>
@@ -149,8 +148,6 @@ export async function POST(
             phaseType: a.phaseType,
             scopeType: a.scopeType,
             departmentCount: a.departmentScopes.length,
-            seniorityBandCount: a.jobLevelScopes.length,
-            gradeLevelCount: a.jobLevelScopes.length,
           })),
           companyId,
           cycleId,

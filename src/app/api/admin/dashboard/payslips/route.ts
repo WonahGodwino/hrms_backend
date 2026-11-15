@@ -22,6 +22,10 @@ interface AdminPayslipItem {
   // GENERATED payslips are edited from their generation run instead of the
   // generic in-place editor (see PATCH /api/payslips/[id]).
   source: string;
+  // Which payslip this is (Salary, Transport Allowance, Bonus, ...) — see
+  // Payroll.payslipCategory. Null for rows written before categories
+  // existed; the UI shows those as "Salary" (today's only real category).
+  payslipCategory: string | null;
   staffRecord: {
     id: string;
     staffId: string;
@@ -64,6 +68,7 @@ export async function GET(request: NextRequest) {
     const requestedCompanyId = searchParams.get('companyId')
     const month = searchParams.get('month')
     const year = searchParams.get('year')
+    const templateId = searchParams.get('templateId')
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '50')
     const showOnlyMine = searchParams.get('showOnlyMine') === 'true'
@@ -213,6 +218,11 @@ export async function GET(request: NextRequest) {
       whereClause.year = parseInt(year)
     }
 
+    // Filter by the payroll template that produced the payslip
+    if (templateId) {
+      whereClause.payroll = { templateId }
+    }
+
     // Get total count for pagination
     const totalCount = await prisma.payslip.count({
       where: whereClause,
@@ -268,6 +278,7 @@ export async function GET(request: NextRequest) {
       downloadUrl: `/api/payslips/${p.id}/download`,
       companyId: p.companyId,
       source: p.payroll.source,
+      payslipCategory: p.payslipCategory,
       staffRecord: {
         id: p.staffRecord.id,
         staffId: p.staffRecord.staffId,

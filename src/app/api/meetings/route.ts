@@ -33,7 +33,6 @@ async function generateRecurringInstances(companyId: string, parent: any, partic
 	const start = new Date(parent.scheduledAt);
 	const maxOccurrences = Math.min(occurrences || 52, 365);
 	const end = endDate ? new Date(endDate) : new Date(start.getTime() + 365 * 24 * 60 * 60 * 1000);
-	const durationMs = parent.durationMins ? parent.durationMins * 60 * 1000 : 60 * 60 * 1000;
 	const instances: Date[] = [];
 
 	const advance = (d: Date, freq: string, intervalNum: number) => {

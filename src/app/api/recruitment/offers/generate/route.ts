@@ -45,13 +45,13 @@ export async function POST(request: NextRequest) {
     let requiresException = false
     let gradeName: string | null = null
     if (gradeId) {
-      // Standalone grade levels were replaced by designation seniority bands;
+      // Standalone grade levels no longer exist;
       // gradeId now carries the designation id.
       const designation = await prisma.designation.findFirst({
         where: { id: gradeId, companyId },
-        select: { title: true, seniorityBand: true },
+        select: { title: true },
       })
-      if (designation) gradeName = designation.seniorityBand ?? designation.title
+      if (designation) gradeName = designation.title
       // No step ladder exists any more, so only an explicit client-approved
       // ceiling can trigger an exception.
       if (step != null && maxApprovedStep != null && step > maxApprovedStep) requiresException = true

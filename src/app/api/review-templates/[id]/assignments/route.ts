@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/app/lib/db";
-import { AssignmentScopeType, AssignmentStatus, SeniorityBand } from "@prisma/client";
+import { AssignmentScopeType, AssignmentStatus } from "@prisma/client";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -100,7 +100,7 @@ export async function GET(
 }
 
 // POST /api/review-templates/:id/assignments
-// body: { companyId, versionId, cycleId, phaseType?, scopeType?, departmentIds?, gradeLevelIds? }
+// body: { companyId, versionId, cycleId, phaseType?, scopeType?, departmentIds? }
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } },
@@ -150,16 +150,6 @@ export async function POST(
       scopeType === "SPECIFIC_DEPARTMENTS"
         ? [...new Set<string>(body.departmentIds ?? [])]
         : [];
-    const rawBands = (body.seniorityBands ?? body.gradeLevelIds ?? []) as string[];
-    const seniorityBands = [
-      ...new Set<SeniorityBand>(
-        rawBands
-          .map((b) => (typeof b === "string" ? b.toUpperCase() : ""))
-          .filter((b): b is SeniorityBand =>
-            Object.values(SeniorityBand).includes(b as SeniorityBand),
-          ),
-      ),
-    ];
     if (scopeType === "SPECIFIC_DEPARTMENTS" && departmentIds.length === 0) {
       return reject(400, {
         message:
@@ -248,11 +238,6 @@ export async function POST(
         }
       }
     }
-    if (rawBands.length > 0 && seniorityBands.length === 0) {
-      return reject(400, {
-        message: "Invalid seniority level(s) provided. Expected values like ENTRY, JUNIOR, MID, SENIOR, LEAD, DIRECTOR, EXECUTIVE.",
-      });
-    }
 
     const result = await prisma.$transaction(async (tx) => {
       // Compare-and-set on status: re-validates the cycle and locks its row until we commit,
@@ -280,10 +265,9 @@ export async function POST(
           departmentScopes: {
             include: { department: { select: { name: true } } },
           },
-          jobLevelScopes: { select: { seniorityBand: true } },
         },
       });
-      const next = { scopeType, departmentIds, seniorityBands, gradeLevelIds: seniorityBands };
+      const next = { scopeType, departmentIds };
       const clash = existing.find((e) => scopesOverlap(toScope(e), next));
       if (clash) {
         const names = new Map(
@@ -311,11 +295,6 @@ export async function POST(
                 create: departmentIds.map((departmentId) => ({ departmentId })),
               }
             : undefined,
-          jobLevelScopes: seniorityBands.length
-            ? {
-                create: seniorityBands.map((seniorityBand) => ({ seniorityBand })),
-              }
-            : undefined,
         },
         include: ASSIGNMENT_INCLUDE,
       });
@@ -332,7 +311,6 @@ export async function POST(
           phaseType,
           scopeType,
           departmentIds,
-          seniorityBands,
         },
       });
       await logCycleAction(tx, {
@@ -347,8 +325,6 @@ export async function POST(
           phaseType,
           scopeType,
           departmentCount: departmentIds.length,
-          seniorityBandCount: seniorityBands.length,
-          gradeLevelCount: seniorityBands.length,
         },
       });
       return assignment;

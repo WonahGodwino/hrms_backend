@@ -5,7 +5,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
 import { buildITFSchedule } from '@/app/lib/phed/reports'
-import { exportReportToExcel, exportReportToPdf, exportWorkbook, STATUTORY_COLS } from '@/app/lib/phed/report-export'
+import { exportReportToPdf, exportWorkbook, STATUTORY_COLS } from '@/app/lib/phed/report-export'
 import { buildStatutorySheet, periodLabels } from '@/app/lib/phed/payroll-sheets'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }

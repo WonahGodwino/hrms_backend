@@ -5,8 +5,8 @@ import { prisma } from '@/app/lib/db'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
+import { checkJobPermission } from '@/app/lib/recruitment/companyScope'
 
 // Define allowed status transitions
 const ALLOWED_STATUSES = ['ACTIVE', 'CLOSED', 'DRAFT', 'EXPIRED'] as const
@@ -72,6 +72,7 @@ export async function GET(
       select: {
         id: true,
         companyId: true,
+        createdBy: true,
         status: true,
         title: true,
         updatedAt: true,
@@ -86,7 +87,7 @@ export async function GET(
     }
 
     // Check permissions
-    const hasPermission = await checkJobPermission(user, job.companyId)
+    const hasPermission = await checkJobPermission(user, job.companyId, job.createdBy)
     if (!hasPermission) {
       return withCors(ApiResponse.error('Access denied', 403), origin)
     }
@@ -164,6 +165,7 @@ export async function PATCH(
         id: true, 
         status: true, 
         companyId: true,
+        createdBy: true,
         title: true,
         expirationDate: true,
       },
@@ -174,7 +176,7 @@ export async function PATCH(
     }
 
     // Check permissions
-    const hasPermission = await checkJobPermission(user, job.companyId)
+    const hasPermission = await checkJobPermission(user, job.companyId, job.createdBy)
     if (!hasPermission) {
       return withCors(ApiResponse.error('Access denied', 403), origin)
     }
@@ -295,25 +297,4 @@ export async function PATCH(
     console.error('[JOB_STATUS] Error:', error)
     return withCors(ApiResponse.error(message || 'Error updating job status', 500), origin)
   }
-}
-
-// Helper function for permission checking
-async function checkJobPermission(user: any, companyId: string): Promise<boolean> {
-  if (user.role === 'SUPER_ADMIN') {
-    return true
-  } 
-  else if (user.role === 'ADMIN') {
-    const userCompany = await prisma.userCompany.findFirst({
-      where: {
-        userId: user.userId,
-        companyId: companyId,
-        role: { in: ['ADMIN', 'ALL'] }
-      }
-    })
-    return !!userCompany
-  }
-  else if (user.role === 'HR') {
-    return user.companyId === companyId
-  }
-  return false
 }

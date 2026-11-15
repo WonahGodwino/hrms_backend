@@ -1,10 +1,9 @@
 // src/app/api/attendance/daily/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { requireRole } from "@/app/lib/auth";
 import { requireModuleAccess } from "@/app/lib/module-access";
 import { withCors, handleCorsOptions } from "@/app/lib/cors";
 import { canManageAttendance } from "@/app/lib/attendance/access";
-import { startOfBusinessDay, businessDateKey, addBusinessDays } from "@/app/lib/attendance/business-day";
+import { startOfBusinessDay, businessDateKey } from "@/app/lib/attendance/business-day";
 import { ensureHolidayAttendance, HOLIDAY_METHOD, getWorkSettings, checkClockOutWindow } from "@/app/lib/attendance/work-calendar";
 import { fillMissingAddresses, parseClockLocation, signInLocationData, signOutLocationData, locationView, LOCATION_REQUIRED_MESSAGE } from "@/app/lib/attendance/clock-location";
 import { isLate } from "@/app/lib/attendance/lateness";

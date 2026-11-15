@@ -1,6 +1,5 @@
 // src/app/lib/departments/department-utils.ts
 import { prisma } from '@/app/lib/db';
-import { StaffRecord } from '@prisma/client';
 
 export interface PositionCapacity {
 	position: string;

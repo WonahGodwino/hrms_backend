@@ -16,6 +16,7 @@ import {
   validAttachmentUrl,
 } from "@/app/lib/feedback";
 import { readUploadedBuffer } from "@/app/lib/goals/evidence-files";
+import { assertStorageQuota } from "@/app/lib/trial/guard";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -192,6 +193,8 @@ export async function POST(request: NextRequest) {
     if (parsed.attachment?.fileUrl) {
       bufInfo = await readUploadedBuffer(parsed.attachment.fileUrl, companyId);
     }
+    // Free trial: 200 MB of documents per company.
+    await assertStorageQuota(companyId, bufInfo?.sizeBytes ?? 0);
 
     const created = await prisma.$transaction(async (tx) => {
       const rec = await tx.recognition.create({

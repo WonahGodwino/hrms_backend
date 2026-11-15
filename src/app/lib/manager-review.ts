@@ -735,7 +735,6 @@ const PARTICIPANT_INCLUDE = {
       lastName: true,
       position: true,
       avatarUrl: true,
-      designation: { select: { seniorityBand: true, rank: true } },
     },
   },
   phases: {
@@ -811,10 +810,6 @@ export async function seedCompetencies(p: LoadedParticipant) {
   const template = await resolveTemplateCompetencies(prisma, {
     cycleId: p.cycleId,
     departmentId: p.departmentId,
-    seniorityBand:
-      p.seniorityBand ??
-      p.staffRecord.designation?.seniorityBand ??
-      null,
     audience: "MANAGER",
   });
   if (template && template.competencies.length > 0) {

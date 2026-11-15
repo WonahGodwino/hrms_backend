@@ -3,10 +3,10 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { checkJobPermission } from '@/app/lib/recruitment/companyScope'
 
 function extractBearerToken(authHeader: string | null): string | null {
   if (!authHeader) return null
@@ -20,20 +20,6 @@ function mapAuthErrorStatus(message: string): number {
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
-}
-
-// Permission check shared with status/edit routes.
-async function checkJobPermission(user: any, companyId: string): Promise<boolean> {
-  if (user.role === 'SUPER_ADMIN') return true
-  if (user.role === 'ADMIN') {
-    const userCompany = await prisma.userCompany.findFirst({
-      where: { userId: user.userId, companyId, role: { in: ['ADMIN', 'ALL'] } },
-      select: { id: true },
-    })
-    return !!userCompany
-  }
-  if (user.role === 'HR') return user.companyId === companyId
-  return false
 }
 
 // Handle GET request for a single job (any status — needed so HR can view/edit
@@ -68,7 +54,7 @@ export async function GET(request: NextRequest, context: { params: { id: string 
       return withCors(ApiResponse.error('Job not found', 404), origin)
     }
 
-    const hasPermission = await checkJobPermission(user, job.companyId)
+    const hasPermission = await checkJobPermission(user, job.companyId, job.createdBy)
     if (!hasPermission) {
       return withCors(ApiResponse.error('You do not have permission to view this job', 403), origin)
     }
@@ -105,17 +91,11 @@ export async function PUT(request: NextRequest, context: { params: { id: string 
 
     let user
     try {
-      user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'SUPER_ADMIN'])
+      user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'ADMIN', 'SUPER_ADMIN'])
     } catch (authError) {
       const message = formatError(authError)
       return withCors(ApiResponse.error(message, mapAuthErrorStatus(message)), origin)
     }
-
-    if (!user.companyId) {
-      return withCors(ApiResponse.error('Company context missing for this user', 400), origin)
-    }
-
-    const companyId = user.companyId as string
 
     // Get job data from request
     const { title, description, department, position, expirationDate } = await request.json()
@@ -126,7 +106,8 @@ export async function PUT(request: NextRequest, context: { params: { id: string 
       return withCors(ApiResponse.error('Job not found', 404), origin)
     }
 
-    if (job.companyId !== companyId) {
+    const hasPermission = await checkJobPermission(user, job.companyId, job.createdBy)
+    if (!hasPermission) {
       return withCors(ApiResponse.error('You cannot update this job', 403), origin)
     }
 
@@ -163,17 +144,11 @@ export async function DELETE(request: NextRequest, context: { params: { id: stri
 
     let user
     try {
-      user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'SUPER_ADMIN'])
+      user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'ADMIN', 'SUPER_ADMIN'])
     } catch (authError) {
       const message = formatError(authError)
       return withCors(ApiResponse.error(message, mapAuthErrorStatus(message)), origin)
     }
-
-    if (!user.companyId) {
-      return withCors(ApiResponse.error('Company context missing for this user', 400), origin)
-    }
-
-    const companyId = user.companyId as string
 
     // Check if job exists and belongs to the user's company
     const job = await prisma.job.findUnique({ where: { id } })
@@ -181,7 +156,8 @@ export async function DELETE(request: NextRequest, context: { params: { id: stri
       return withCors(ApiResponse.error('Job not found', 404), origin)
     }
 
-    if (job.companyId !== companyId) {
+    const hasPermission = await checkJobPermission(user, job.companyId, job.createdBy)
+    if (!hasPermission) {
       return withCors(ApiResponse.error('You cannot delete this job', 403), origin)
     }
 

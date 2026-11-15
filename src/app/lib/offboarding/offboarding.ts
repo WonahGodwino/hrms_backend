@@ -3,7 +3,7 @@ import { z } from 'zod';
 // Enums as const for validation
 const OffboardingTypeEnum = z.enum(['RESIGNATION', 'TERMINATION']);
 const OffboardingStatusEnum = z.enum(['PENDING_REVIEW', 'HANDOVER_REQUESTED', 'HANDOVER_SUBMITTED', 'COMPLETED', 'REJECTED']);
-const InitiatedByEnum = z.enum(['STAFF', 'HR']);
+z.enum(['STAFF', 'HR']);
 
 // Submit Resignation Schema
 export const SubmitResignationSchema = z.object({
@@ -56,10 +56,3 @@ export const OffboardingFiltersSchema = z.object({
 	page: z.coerce.number().int().positive().default(1),
 	limit: z.coerce.number().int().positive().max(100).default(20),
 });
-// Types
-type SubmitResignationInput = z.infer<typeof SubmitResignationSchema>;
-type InitiateTerminationInput = z.infer<typeof InitiateTerminationSchema>;
-type ReviewResignationInput = z.infer<typeof ReviewResignationSchema>;
-type UploadHandoverInput = z.infer<typeof UploadHandoverSchema>;
-type ApproveOffboardingInput = z.infer<typeof ApproveOffboardingSchema>;
-type OffboardingFilters = z.infer<typeof OffboardingFiltersSchema>;

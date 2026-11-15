@@ -2,7 +2,6 @@
 import { assertTrialCapacity } from '@/app/lib/trial/guard'
 import { NextRequest } from "next/server";
 import { prisma } from "@/app/lib/db";
-import { requireRole } from "@/app/lib/auth";
 import { requireModuleAccess } from "@/app/lib/module-access";
 import { ApiResponse, formatError } from "@/app/lib/utils";
 import ExcelJS from "exceljs";
@@ -15,19 +14,6 @@ export async function OPTIONS(request: NextRequest) {
 
 type RawRow = Record<string, unknown>;
 
-type ValidatedJobRow = {
-  designation: string; // designation title or code from the sheet
-  title?: string; // optional — defaults to the designation title
-  description: string;
-  department: string;
-  employmentType?: string;
-  workplaceType?: string;
-  experienceLevel?: string;
-  salary?: number;
-  locations?: { state: string; lga: string; city?: string }[];
-  expirationDate: Date | null;
-  status: "DRAFT" | "ACTIVE" | "CLOSED" | "EXPIRED" | null;
-};
 
 const normalizeHeader = (h: string) =>
   h

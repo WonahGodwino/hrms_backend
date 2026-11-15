@@ -79,7 +79,7 @@ export class OffboardingService {
 		});
 	}
 
-	static async createTermination(hrStaffId: string, companyId: string, data: { staffId: string; handoverRequired: boolean }) {
+	static async createTermination(_hrStaffId: string, companyId: string, data: { staffId: string; handoverRequired: boolean }) {
 		// Verify HR/Admin has access to this staff
 		const staff = await prisma.staffRecord.findUnique({
 			where: { id: data.staffId, companyId },

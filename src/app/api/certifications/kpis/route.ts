@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
 
     const now = new Date()
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 86_400_000)
-    const sixtyDaysAgo  = new Date(now.getTime() - 60 * 86_400_000)
+    new Date(now.getTime() - 60 * 86_400_000);
     const sevenDaysFromNow = new Date(now.getTime() + 7 * 86_400_000)
 
     // Base active filter (exclude Archived)

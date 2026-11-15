@@ -9,7 +9,7 @@
 // tab under Company Offer Letter Settings).
 import { prisma } from '@/app/lib/db';
 
-import { decryptMailSecret, encryptMailSecret } from '../../crypto/mailSecret';
+import { decryptMailSecret } from '../../crypto/mailSecret';
 
 export interface ResolvedOfferLetterMailConfig {
 	fromName: string;

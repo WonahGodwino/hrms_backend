@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const body = await req.json()
-    const { companyId: requestedCompanyId, trainingProgramId, scope, departments } = body
+    const { companyId: requestedCompanyId, scope, departments } = body
 
     const resolved = await resolveRequestCompanyId(
       user,

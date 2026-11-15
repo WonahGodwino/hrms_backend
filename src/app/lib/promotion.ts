@@ -9,7 +9,6 @@ import { BANDS } from "@/app/lib/manager-review";
 import type { Actor, Db } from "@/app/lib/manager-review";
 import { resolveRatingBounds } from "@/app/lib/self-appraisal";
 import { toFive } from "@/app/lib/calibration";
-import { HIGHER_RANK_IS_HIGHER_GRADE } from "@/app/lib/appraisal-history";
 import { DAY, isoDate, nameOf, person, startOfUtcDay } from "@/app/lib/pip";
 
 // ---------------------------------------------------------------------------
@@ -147,8 +146,6 @@ export async function loadScopedStaff(
         select: {
           id: true,
           title: true,
-          rank: true,
-          seniorityBand: true,
           basePay: true,
         },
       },
@@ -259,8 +256,6 @@ const ASSESS_SELECT = {
         select: {
           id: true,
           title: true,
-          rank: true,
-          seniorityBand: true,
           basePay: true,
         },
       },
@@ -302,10 +297,7 @@ export type Assessment = {
   managerId: string | null;
   roleTitle: string | null;
   designationId: string | null;
-  rank: number;
-  seniorityBand: string;
   basePay: number | null;
-  gradeId: string | null;
   departmentId: string | null;
   departmentName: string | null;
   hireDate: Date | null;
@@ -422,10 +414,7 @@ export async function loadAssessments(
         managerId: s.managerId,
         roleTitle: s.designation?.title ?? s.position ?? null,
         designationId: s.designationId,
-        rank: s.designation?.rank ?? 1,
-        seniorityBand: s.designation?.seniorityBand ?? "MID",
         basePay: s.designation?.basePay ? Number(s.designation.basePay) : null,
-        gradeId: null,
         departmentId: s.departmentId,
         departmentName: s.departments?.name ?? s.department ?? null,
         hireDate: s.hireDate,
@@ -636,8 +625,6 @@ export const REC_INCLUDE = {
         select: {
           id: true,
           title: true,
-          rank: true,
-          seniorityBand: true,
           basePay: true,
         },
       },
@@ -649,8 +636,6 @@ export const REC_INCLUDE = {
     select: {
       id: true,
       title: true,
-      rank: true,
-      seniorityBand: true,
       basePay: true,
     },
   },
@@ -658,11 +643,7 @@ export const REC_INCLUDE = {
     select: {
       id: true,
       title: true,
-      rank: true,
-      seniorityBand: true,
       basePay: true,
-      minSalary: true,
-      maxSalary: true,
     },
   },
   attachments: {
@@ -728,18 +709,9 @@ export function serializeRec(r: RecRow, actor: Actor) {
       ? {
           id: r.currentDesignation.id,
           title: r.currentDesignation.title,
-          rank: r.currentDesignation.rank,
-          seniorityBand: r.currentDesignation.seniorityBand,
           basePay: r.currentDesignation.basePay
             ? Number(r.currentDesignation.basePay)
             : null,
-        }
-      : null,
-    currentGrade: r.currentDesignation
-      ? {
-          id: r.currentDesignation.id,
-          name: r.currentDesignation.title,
-          rank: r.currentDesignation.rank,
         }
       : null,
     departmentName: r.departmentName,
@@ -749,24 +721,9 @@ export function serializeRec(r: RecRow, actor: Actor) {
       ? {
           id: r.targetDesignation.id,
           title: r.targetDesignation.title,
-          rank: r.targetDesignation.rank,
-          seniorityBand: r.targetDesignation.seniorityBand,
           basePay: r.targetDesignation.basePay
             ? Number(r.targetDesignation.basePay)
             : null,
-          minSalary: r.targetDesignation.minSalary
-            ? Number(r.targetDesignation.minSalary)
-            : null,
-          maxSalary: r.targetDesignation.maxSalary
-            ? Number(r.targetDesignation.maxSalary)
-            : null,
-        }
-      : null,
-    targetGrade: r.targetDesignation
-      ? {
-          id: r.targetDesignation.id,
-          name: r.targetDesignation.title,
-          rank: r.targetDesignation.rank,
         }
       : null,
     projectedSalaryChange: r.projectedSalaryChange
@@ -810,7 +767,7 @@ export function validateEffectiveDate(d: Date): string | null {
   return null;
 }
 
-// Target designation and rank hierarchy (decision 8).
+// The target designation must exist, be active and differ from the current one.
 export async function validateTarget(
   db: Db,
   companyId: string,
@@ -823,8 +780,6 @@ export async function validateTarget(
       designation: {
         id: string;
         title: string;
-        rank: number;
-        seniorityBand: string;
         basePay: number | null;
       };
       targetGradeId: null;
@@ -836,8 +791,6 @@ export async function validateTarget(
     select: {
       id: true,
       title: true,
-      rank: true,
-      seniorityBand: true,
       basePay: true,
     },
   });
@@ -847,19 +800,6 @@ export async function validateTarget(
       error: "The target role must differ from the current role",
       status: 409,
     };
-
-  if (p.currentDesignationId) {
-    const cur = await db.designation.findFirst({
-      where: { id: p.currentDesignationId, companyId },
-      select: { id: true, rank: true, title: true },
-    });
-    if (cur && d.rank <= cur.rank) {
-      return {
-        error: `The target role (${d.title}, Rank ${d.rank}) must have a higher rank than the current role (${cur.title}, Rank ${cur.rank})`,
-        status: 409,
-      };
-    }
-  }
 
   return { designation: d, targetGradeId: null };
 }

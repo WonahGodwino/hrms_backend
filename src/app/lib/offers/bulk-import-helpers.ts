@@ -22,7 +22,6 @@ export const OFFER_IMPORT_COLUMNS = [
   { key: 'requiresApproval', header: 'Requires Approval', note: 'Enter Yes/True/1 if this offer must pass through the approval workflow before dispatch. Leave blank or enter No/False/0 to skip approval (default for already-hired candidates).' },
 ] as const
 
-type OfferImportKey = (typeof OFFER_IMPORT_COLUMNS)[number]['key']
 
 export interface OfferImportRow {
   country: string

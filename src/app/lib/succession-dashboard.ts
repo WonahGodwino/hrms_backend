@@ -4,7 +4,6 @@ import type { PotentialLevel, SuccessionReadiness } from "@prisma/client";
 import prisma from "@/app/lib/prisma";
 import { BANDS } from "@/app/lib/manager-review";
 import type { Actor } from "@/app/lib/manager-review";
-import { HIGHER_RANK_IS_HIGHER_GRADE } from "@/app/lib/appraisal-history";
 import { toFive } from "@/app/lib/calibration";
 import {
   createNotification,
@@ -991,7 +990,7 @@ export async function buildReadiness(
   };
 }
 
-// Compensation impact (decision 5): estimate only. Basic pay vs target designation basePay or minSalary.
+// Compensation impact (decision 5): estimate only. Basic pay vs target designation basePay.
 export async function estimateCompensation(
   companyId: string,
   staffRecordId: string,
@@ -1006,11 +1005,11 @@ export async function estimateCompensation(
     }),
     prisma.designation.findFirst({
       where: { id: targetDesignationId, companyId },
-      select: { basePay: true, minSalary: true, maxSalary: true },
+      select: { basePay: true },
     }),
   ]);
   const current = cur ? Number(cur.basicSalary) : null;
-  const target = desig?.basePay ? Number(desig.basePay) : desig?.minSalary ? Number(desig.minSalary) : null;
+  const target = desig?.basePay ? Number(desig.basePay) : null;
   if (current === null || target === null || !(current > 0)) return null;
   return {
     estimated: true,
@@ -1175,11 +1174,11 @@ async function loadMovements(companyId: string, w: Win) {
         companyId,
         effectiveDate: range,
         previousDesignationId: { not: null },
+        // A career move counts as a promotion when it came from an approved recommendation.
+        promotionRecId: { not: null },
       },
       select: {
         effectiveDate: true,
-        newDesignation: { select: { rank: true } },
-        previousDesignation: { select: { rank: true } },
       },
       take: 20000,
     }),
@@ -1195,15 +1194,7 @@ async function loadMovements(companyId: string, w: Win) {
     }),
   ]);
   return {
-    promotions: careers
-      .filter(
-        (c) =>
-          c.previousDesignation &&
-          (HIGHER_RANK_IS_HIGHER_GRADE
-            ? c.newDesignation.rank > c.previousDesignation.rank
-            : c.newDesignation.rank < c.previousDesignation.rank),
-      )
-      .map((c) => c.effectiveDate),
+    promotions: careers.map((c) => c.effectiveDate),
     transfers: transfers.map((t) => t.effectiveDate),
     exits: exits.flatMap((e) =>
       e.completedAt ? [{ at: e.completedAt, type: e.type }] : [],

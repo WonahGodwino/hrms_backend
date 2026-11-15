@@ -2,7 +2,6 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
@@ -148,14 +147,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Publish: sending is the HR/Admin approval action, so these payslips
-    // become visible to staff as soon as the send is triggered — independent
-    // of whether the notification email below actually succeeds per-row.
-    await prisma.payslip.updateMany({
-      where: { id: { in: payslips.map((p) => p.id) }, companyId },
-      data: { draft: false },
-    })
-
     // FIX: Fetch payroll data separately for payslips that have payrollId
     const payrollIds = payslips
       .filter(p => p.payrollId)
@@ -196,7 +187,8 @@ export async function POST(request: NextRequest) {
         year: number,
         isRegistered: boolean,
         success: boolean,
-        error?: string
+        error?: string,
+        publishWarning?: string
       }>
     }
 
@@ -204,7 +196,9 @@ export async function POST(request: NextRequest) {
       const staff = payslip.staffRecord
       const payroll = payslip.payrollId ? payrollsMap.get(payslip.payrollId) : null
       const staffName = `${staff.firstName} ${staff.lastName}`
-      
+      let emailSucceeded = false
+      let detail: (typeof results.details)[number] | null = null
+
       try {
         // Check if staff has email
         if (!staff.email) {
@@ -247,8 +241,9 @@ export async function POST(request: NextRequest) {
 
         if (emailResult.success) {
           results.successful++
+          emailSucceeded = true
           await markPayslipEmailResult(payslip.id, { success: true, messageId: (emailResult as any)?.data?.id ? String((emailResult as any).data.id).replace(/^<|>$/g, '') : null })
-          results.details.push({
+          detail = {
             payslipId: payslip.id,
             staffName,
             staffEmail: staff.email,
@@ -256,7 +251,8 @@ export async function POST(request: NextRequest) {
             year: payslip.year,
             isRegistered: staffForEmail.isRegistered,
             success: true
-          })
+          }
+          results.details.push(detail)
 
           // Log the email sending
           try {
@@ -289,7 +285,7 @@ export async function POST(request: NextRequest) {
       } catch (error: any) {
         results.failed++
         await markPayslipEmailResult(payslip.id, { success: false })
-        results.details.push({
+        detail = {
           payslipId: payslip.id,
           staffName,
           staffEmail: staff.email || 'No email',
@@ -298,7 +294,8 @@ export async function POST(request: NextRequest) {
           isRegistered: staff.isRegistered,
           success: false,
           error: error.message || 'Unknown error'
-        })
+        }
+        results.details.push(detail)
 
         // Log the failed attempt
         try {
@@ -322,6 +319,26 @@ export async function POST(request: NextRequest) {
           })
         } catch (logError) {
           console.error('Failed to log email failure (non-critical):', logError)
+        }
+      }
+
+      // Publish regardless of email outcome, and only AFTER the email
+      // attempt above — a staff member isn't denied their own payslip just
+      // because their email bounced, but it shouldn't appear before HR has
+      // actually tried to notify them (see bulk-send/route.ts for the same
+      // pattern applied to the async whole-period send).
+      try {
+        await prisma.payslip.update({ where: { id: payslip.id }, data: { draft: false } })
+      } catch (publishError) {
+        console.error('[SEND_SELECTED_EMAILS] Failed to publish payslip after send attempt:', {
+          payslipId: payslip.id,
+          staffId: staff.id,
+          error: publishError,
+        })
+        if (detail) {
+          detail.publishWarning = emailSucceeded
+            ? 'Email sent, but the payslip failed to publish — it is still hidden from the staff member. Retry sending this payslip.'
+            : 'Email failed and the payslip failed to publish — it is still hidden from the staff member. Retry sending this payslip.'
         }
       }
     }

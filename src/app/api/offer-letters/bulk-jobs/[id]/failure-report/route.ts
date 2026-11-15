@@ -16,7 +16,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
 import ExcelJS from 'exceljs'
-import { writeStyledTable, buildSubtitle, confidentialFooter, toneCell, attachmentDisposition, safeFileName, addInstructionsSheet, findHeaderRow, XLSX_MIME } from '@/app/lib/excel/sheet-theme'
+import { writeStyledTable, buildSubtitle, confidentialFooter, toneCell, attachmentDisposition, safeFileName, XLSX_MIME } from '@/app/lib/excel/sheet-theme'
 import { buildOfferLetterFieldLabels, BASE_FIELD_KEYS } from '@/app/lib/offer-letters/variableLabels'
 
 export async function OPTIONS(request: NextRequest) {

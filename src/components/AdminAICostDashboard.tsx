@@ -211,7 +211,7 @@ export function AdminAICostDashboard() {
   }
 
   // Simple chart rendering without Recharts
-  const renderSimpleBarChart = (title: string, data: Array<{name: string, value: number, color?: string}>) => {
+  (title: string, data: Array<{name: string, value: number, color?: string}>) => {
     const maxValue = Math.max(...data.map(d => d.value), 1)
     
     return (
@@ -235,7 +235,7 @@ export function AdminAICostDashboard() {
         </div>
       </div>
     )
-  }
+  };
 
   // Render daily trends
   const renderDailyTrends = () => {

@@ -105,6 +105,13 @@ model Company {
   offerLetterMailboxMessages OfferLetterMailboxMessage[]
   offerLetterMailConfig      OfferLetterMailConfig?
 
+  // CV Screening module (standalone), reuses the recruitment AI scoring engine
+  // but is not linked to Job/Candidate/JobApplication; see lib/cv-screening.
+  cvScreeningProfiles  ScreeningProfile[]
+  cvScreeningRuns      ScreeningRun[]
+  cvScreeningCvResults ScreeningCvResult[]
+  cvScreeningUsageLogs ScreeningUsageLog[]
+
   // AI & Settings
   aiSettings  AISettings?
   aiUsageLogs AIUsageLog[]
@@ -454,6 +461,9 @@ model CompanyExchangeRate {
 model StaffRecord {
   id                       String    @id @default(cuid())
   staffId                  String
+  // Sample employee added by "Add demo staff" in a free trial. Counts toward the staff cap and
+  // is removed when the company subscribes.
+  isDemo                   Boolean   @default(false)
   email                    String
   firstName                String
   lastName                 String
@@ -870,6 +880,16 @@ model Payroll {
   customFields      Json?
   templateId        String? // Reference to the dynamic template used
 
+  // Which payslip category this row represents (Salary, Transport Allowance,
+  // Bonus, ...), snapshotted from PayrollTemplate.category AT THE MOMENT this
+  // row was written — never re-derived live via templateId, so editing a
+  // template's category later never relabels old rows. NULL on every row
+  // written before this field existed; those rows are never backfilled (see
+  // the @@unique below — Postgres never treats two NULLs as colliding, so
+  // historical data stays completely untouched and unaffected by the new
+  // constraint). Only rows written by the fixed processors get a real value.
+  payslipCategory String?
+
   // Pension identity snapshot — captures what StaffRecord.rsaPin/pfaCode/
   // pensionEmployerCode held AT THE MOMENT this payroll row was created, since
   // StaffRecord itself is never versioned. Powers the Pension Schedule
@@ -908,6 +928,13 @@ model Payroll {
   payslips      Payslip[]
   emailLogs     EmailLog[]
 
+  @@unique([staffRecordId, month, year, companyId, payslipCategory])
+  // Keep the old composite index for "all categories this period" lookups
+  // (reports). The new @@unique below is the real collision guard: it only
+  // blocks a true duplicate once payslipCategory is a real (non-null) value,
+  // because Postgres never considers two NULLs equal in a unique constraint —
+  // so all 43k+ pre-existing historical rows (payslipCategory IS NULL) are
+  // invisible to it and cannot violate it, by construction.
   @@index([staffRecordId, month, year, companyId])
   @@index([companyId, year, month])
   @@index([templateType])
@@ -917,34 +944,38 @@ model Payroll {
 }
 
 model Payslip {
-  id             String      @id @default(cuid())
-  payrollId      String
-  staffRecordId  String
-  companyId      String
-  fileData       Bytes?
-  fileName       String
-  fileType       String      @default("application/pdf")
-  fileSize       Int?
-  filePath       String?
-  month          String
-  year           Int
-  grossPay       Decimal?    @db.Decimal(18, 2)
-  netPay         Decimal?    @db.Decimal(18, 2)
-  draft          Boolean     @default(true)
+  id              String      @id @default(cuid())
+  payrollId       String
+  staffRecordId   String
+  companyId       String
+  fileData        Bytes?
+  fileName        String
+  fileType        String      @default("application/pdf")
+  fileSize        Int?
+  filePath        String?
+  month           String
+  year            Int
+  // Same meaning and same NULL-means-untouched-legacy-row guarantee as
+  // Payroll.payslipCategory — see that field's comment.
+  payslipCategory String?
+  grossPay        Decimal?    @db.Decimal(18, 2)
+  netPay          Decimal?    @db.Decimal(18, 2)
+  draft           Boolean     @default(true)
   // Per-payslip email outcome so a crashed bulk send can resume and the Mailgun
   // delivery webhook can match events. emailStatus: 'SENT' | 'FAILED' | null (never attempted).
-  emailStatus    String?
-  emailSentAt    DateTime?
-  emailMessageId String? // Mailgun message id, without angle brackets
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @default(now()) @updatedAt
-  updatedBy      String?
-  createdBy      String?
-  company        Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  payroll        Payroll     @relation(fields: [payrollId], references: [id], onDelete: Cascade)
-  staffRecord    StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
-  emailLogs      EmailLog[]
+  emailStatus     String?
+  emailSentAt     DateTime?
+  emailMessageId  String? // Mailgun message id, without angle brackets
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @default(now()) @updatedAt
+  updatedBy       String?
+  createdBy       String?
+  company         Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payroll         Payroll     @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+  staffRecord     StaffRecord @relation(fields: [staffRecordId], references: [id], onDelete: Cascade)
+  emailLogs       EmailLog[]
 
+  @@unique([staffRecordId, month, year, companyId, payslipCategory])
   @@index([staffRecordId, year, month])
   @@index([staffRecordId, draft])
   @@index([companyId, year, month])
@@ -985,39 +1016,64 @@ enum StaffUploadStatus {
 }
 
 model PayrollUpload {
-  id                String              @id @default(cuid())
+  id                String                   @id @default(cuid())
   companyId         String
   fileName          String
-  filePath          String
+  filePath          String // legacy disk path; kept so pre-migration rows can still be looked up (they will 404 — not backfilled)
+  fileData          Bytes? // the original uploaded .xlsx/.csv stored durably in Postgres (mirrors Payslip.fileData) — survives a Render restart/redeploy, unlike filePath's local-disk file. NULL for rows uploaded before this field existed.
   processedFilePath String?
   processedFileName String?
-  templateType      String              @default("ISURF_STANDARD")
+  templateType      String                   @default("ISURF_STANDARD")
   templateId        String?
-  sendEmails        Boolean             @default(true)
-  totalRecords      Int                 @default(0) // ← ADD THIS
-  successful        Int                 @default(0) // ← ADD THIS
-  failed            Int                 @default(0) // ← ADD THIS
+  sendEmails        Boolean                  @default(true)
+  totalRecords      Int                      @default(0) // ← ADD THIS
+  successful        Int                      @default(0) // ← ADD THIS
+  failed            Int                      @default(0) // ← ADD THIS
   payslipsGenerated Int? // ← ADD THIS
   payslipsUpdated   Int?
   emailsSent        Int?
   emailAttempts     Int?
   emailFailures     Json?
-  overwriteExisting Boolean             @default(false) // ← ADD THIS
+  overwriteExisting Boolean                  @default(false) // ← ADD THIS
   errors            String[]
   uploadedBy        String
-  status            PayrollUploadStatus @default(PENDING)
+  status            PayrollUploadStatus      @default(PENDING)
   failureReason     String?
   startedAt         DateTime?
   completedAt       DateTime?
   lastHeartbeatAt   DateTime? // written by the running job so stalled-job checks work across server instances
-  createdAt         DateTime            @default(now())
-  company           Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  template          PayrollTemplate?    @relation(fields: [templateId], references: [id])
+  createdAt         DateTime                 @default(now())
+  company           Company                  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  template          PayrollTemplate?         @relation(fields: [templateId], references: [id])
   payrolls          Payroll[]
+  rowResults        PayrollUploadRowResult[]
 
   @@index([companyId, status])
   @@index([companyId, createdAt])
   @@map("payroll_uploads")
+}
+
+// Per-row checkpoint for a PayrollUpload, written inside the same DB
+// transaction as that row's Payroll/Payslip upsert (not after) — so "a row
+// result exists" is proof the row's DB writes durably committed, and a
+// restart can resume processing from the first rowIndex with no result
+// instead of re-running the whole file or leaving it stuck. Deliberately a
+// plain table, not a queue — this module stays in-process, no new infra.
+model PayrollUploadRowResult {
+  id           String   @id @default(cuid())
+  uploadId     String
+  rowIndex     Int // 0-based position in the parsed sheet; stable because the source file is now durable (PayrollUpload.fileData), not re-read from a possibly-gone disk file
+  status       String // 'SUCCESS' | 'FAILED'
+  staffId      String?
+  category     String?
+  errorMessage String?
+  createdAt    DateTime @default(now())
+
+  upload PayrollUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@unique([uploadId, rowIndex])
+  @@index([uploadId, status])
+  @@map("payroll_upload_row_results")
 }
 
 enum PayrollUploadStatus {
@@ -1614,7 +1670,6 @@ model JobAlertPreference {
   keywords   String[]          @default([])
   location   String?
   remoteOnly Boolean           @default(false)
-  minSalary  Decimal?          @db.Decimal(18, 2) // naira
   frequency  JobAlertFrequency @default(DAILY)
 
   activatedFrom    DateTime  @default(now()) // only jobs published after this are alerted; reset when switched back on
@@ -2845,6 +2900,13 @@ model PayrollTemplate {
   templateName       String
   sections           Json
   isSystem           Boolean  @default(false)
+  // Which payslip category this template produces (Salary, Transport
+  // Allowance, Bonus, ...) — free-text and company-defined, not a fixed enum,
+  // since companies invent their own categories. Snapshotted onto every
+  // Payroll/Payslip row this template writes (see Payroll.payslipCategory) —
+  // editing this field later never relabels rows already written. Normalize
+  // (trim + case-fold) before comparing/writing, everywhere this is read.
+  category           String   @default("SALARY")
   payslipCompanyName String?
   createdBy          String
   updatedBy          String?
@@ -5174,16 +5236,6 @@ enum FilingStatus {
   CONFIRMED
 }
 
-enum SeniorityBand {
-  ENTRY
-  JUNIOR
-  MID
-  SENIOR
-  LEAD
-  EXECUTIVE
-  DIRECTOR
-}
-
 enum BasePayFrequency {
   Yearly
   Monthly
@@ -5203,11 +5255,6 @@ model Designation {
   status       String                  @default("Active")
   staffCount   Int                     @default(0)
 
-  // Seniority & hierarchy (Workaround A: embeds seniority & pay bands, replaces standalone GradeLevel)
-  rank             Int               @default(1)
-  seniorityBand    SeniorityBand     @default(MID)
-  minSalary        Decimal?          @db.Decimal(18, 2)
-  maxSalary        Decimal?          @db.Decimal(18, 2)
   basePay          Float?
   basePayFrequency BasePayFrequency? @default(Monthly)
   benefits         Json?
@@ -5228,8 +5275,6 @@ model Designation {
   @@unique([companyId, code])
   @@index([companyId])
   @@index([companyId, status])
-  @@index([companyId, rank])
-  @@index([companyId, seniorityBand])
 }
 
 // Workaround A: Tracks designation and seniority transitions over time (replaces StaffGradeHistory)
@@ -5936,7 +5981,6 @@ model TemplateAssignment {
   cycle    AppraisalCycle        @relation(fields: [cycleId], references: [id])
 
   departmentScopes TemplateAssignmentDepartmentScope[]
-  jobLevelScopes   TemplateAssignmentJobLevelScope[]
 
   @@index([cycleId])
   @@index([templateId])
@@ -5955,19 +5999,6 @@ model TemplateAssignmentDepartmentScope {
 
   @@unique([assignmentId, departmentId])
   @@index([departmentId])
-}
-
-// From the "Job Levels" checkboxes (Seniority Bands: Entry / Junior / Mid / Senior / Lead / Executive / Director)
-model TemplateAssignmentJobLevelScope {
-  id            String         @id @default(cuid())
-  assignmentId  String
-  seniorityBand SeniorityBand?
-
-  assignment TemplateAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
-
-  @@unique([assignmentId, seniorityBand])
-  @@index([assignmentId])
-  @@index([seniorityBand])
 }
 
 model TemplateHistory {
@@ -6192,7 +6223,6 @@ model AppraisalCycleParticipant {
   location           Location?             @relation(fields: [locationId], references: [id])
   selfAppraisal      SelfAppraisal?
   designationId      String? // snapshot of StaffRecord.designationId at activation
-  seniorityBand      SeniorityBand? // snapshot of Designation.seniorityBand at activation
   designation        Designation?          @relation(fields: [designationId], references: [id])
   skipLevelManagerId String? // the manager's manager at enrolment
   departmentHeadId   String? // Department head at enrolment
@@ -10052,6 +10082,8 @@ model TrialReview {
   company    Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   score      Int       @default(0)
   reasons    Json?
+  // SIGNUP = held at registration, EXTENSION = HR asked for more time, BEHAVIOUR = flagged after sign-up.
+  kind       String    @default("SIGNUP") @db.VarChar(20)
   status     String    @default("PENDING") @db.VarChar(20)
   decision   String?   @db.VarChar(30)
   note       String?   @db.Text
@@ -10218,4 +10250,134 @@ model CustomAutomationRule {
 
   @@index([companyId, enabled])
   @@map("custom_automation_rules")
+}
+
+// --- CV Screening module (standalone) ---------------------------------
+// Separate from recruitment's Job/Candidate/JobApplication on purpose: CVs
+// screened here are not tied to an open requisition. The AI scoring engine
+// (lib/aiCVReview.ts, lib/keywordExtractor.ts) is reused as-is; these models
+// only track this module's own profiles, batch runs, and per-CV results.
+
+// A saved, reusable, company-scoped screening rubric. description is
+// required, it doubles as the AI's job-description-equivalent anchor text
+// (there is no job posting to screen against in this module).
+model ScreeningProfile {
+  id                String   @id @default(cuid())
+  companyId         String
+  name              String
+  description       String   @db.Text
+  status            String   @default("ACTIVE") // ACTIVE | ARCHIVED
+  criteria          Json // [{ key: 'technical'|'experience'|'education'|'softSkills', label, weight }], weights sum to ~1.0 (validated in the API layer)
+  defaultAiService  String?
+  defaultAiModel    String?
+  defaultStrictness String?
+  createdBy         String
+  updatedBy         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  runs    ScreeningRun[]
+
+  @@index([companyId, status])
+  @@map("cv_screening_profiles")
+}
+
+// One batch/run of CV screening against a profile. Mirrors the async
+// start-now/process-in-background pattern used by payroll generation
+// (lib/payroll/generation/generate-payroll.ts); totalCandidates/*Count are
+// updated as processScreeningRunInBackground works through the results.
+model ScreeningRun {
+  id              String    @id @default(cuid())
+  companyId       String
+  profileId       String
+  mode            String // BULK | QUICK
+  status          String    @default("PROCESSING") // PROCESSING | COMPLETED | FAILED
+  totalCandidates Int
+  processedCount  Int       @default(0)
+  succeededCount  Int       @default(0)
+  failedCount     Int       @default(0)
+  useAI           Boolean   @default(true)
+  aiService       String?
+  aiModel         String?
+  strictness      String?
+  triggeredBy     String
+  startedAt       DateTime  @default(now())
+  completedAt     DateTime?
+  errorMessage    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  company Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  profile ScreeningProfile    @relation(fields: [profileId], references: [id])
+  results ScreeningCvResult[]
+
+  @@index([companyId, status])
+  @@index([profileId])
+  @@map("cv_screening_runs")
+}
+
+// One uploaded CV within a run, plus its score once processed. companyId is
+// denormalized (also reachable via run) to match the CandidateFile pattern
+// of scoping file-blob rows directly.
+model ScreeningCvResult {
+  id              String    @id @default(cuid())
+  companyId       String
+  runId           String
+  fileName        String
+  mimeType        String
+  sizeBytes       Int
+  data            Bytes
+  candidateName   String?
+  candidateEmail  String?
+  status          String    @default("PENDING") // PENDING | PROCESSING | SCORED | FAILED
+  errorMessage    String?
+  overallScore    Float?
+  technicalScore  Float?
+  experienceScore Float?
+  educationScore  Float?
+  softSkillsScore Float?
+  culturalFit     Float?
+  growthPotential Float?
+  aiSummary       String?   @db.Text
+  aiDetails       Json? // strengths/weaknesses/suggestions/riskFactors/timeToProductivity/keywords/skillGaps/recommendations
+  scoredAt        DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  company Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  run     ScreeningRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([companyId, runId])
+  @@index([runId, status])
+  @@index([runId, overallScore])
+  @@map("cv_screening_cv_results")
+}
+
+// AI usage/cost audit for this module, mirroring AIUsageLog's shape but
+// keyed by run/result instead of applicationId, to keep this module fully
+// independent of recruitment's tables.
+model ScreeningUsageLog {
+  id           String   @id @default(cuid())
+  companyId    String
+  runId        String?
+  resultId     String?
+  service      String
+  model        String
+  tokensUsed   Int
+  cost         Float
+  actualCost   Float    @default(0)
+  endpoint     String
+  inputLength  Int
+  outputLength Int
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([createdAt])
+  @@index([companyId, service, createdAt])
+  @@map("cv_screening_usage_logs")
 }

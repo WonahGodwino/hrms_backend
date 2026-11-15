@@ -1,5 +1,5 @@
 // app/lib/jobs/types.ts
-import { Job, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
 export interface UserContext {
   userId: string;

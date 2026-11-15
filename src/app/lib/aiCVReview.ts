@@ -51,6 +51,12 @@ export interface AICVReviewOptions {
   includeCulturalFit?: boolean;
   includeGrowthPotential?: boolean;
   enableDetailedAnalysis?: boolean;
+  weights?: {
+    technical?: number;
+    experience?: number;
+    education?: number;
+    softSkills?: number;
+  };
 }
 
 // Add interface for AI Analysis response
@@ -82,7 +88,8 @@ export async function calculateAICVReviewScore(
   try {
     // Get base industry scores
     const baseResult = calculateIndustryMatchScore(jobDescription, cvText, {
-      useAIServices: options.useOpenAI || options.useAnthropic || options.useGemini
+      useAIServices: options.useOpenAI || options.useAnthropic || options.useGemini,
+      weights: options.weights
     });
 
     // Initialize AI-enhanced result
@@ -155,10 +162,14 @@ export async function calculateAICVReviewScore(
   } catch (error) {
     console.error('AI CV review failed, falling back to industry standard:', error);
     // Fallback to base industry algorithm
+    const fallbackResult = calculateIndustryMatchScore(jobDescription, cvText, {
+      useAIServices: false,
+      weights: options.weights
+    });
     return {
-      ...calculateIndustryMatchScore(jobDescription, cvText, { useAIServices: false }),
+      ...fallbackResult,
       skillGapAnalysis: {
-        ...calculateIndustryMatchScore(jobDescription, cvText, { useAIServices: false }).skillGapAnalysis,
+        ...fallbackResult.skillGapAnalysis,
         aiIdentified: []
       }
     };
@@ -515,9 +526,9 @@ function adjustSoftSkillsScore(baseScore: number, aiAnalysis: AIAnalysisResponse
  * Calculate cultural fit score
  */
 async function calculateCulturalFit(
-  jobDescription: string,
+  _jobDescription: string,
   cvText: string,
-  options: AICVReviewOptions
+  _options: AICVReviewOptions
 ): Promise<number> {
   // Simple implementation - can be enhanced with AI
   const culturalKeywords = [
@@ -539,7 +550,7 @@ async function calculateCulturalFit(
  */
 async function calculateGrowthPotential(
   cvText: string,
-  options: AICVReviewOptions
+  _options: AICVReviewOptions
 ): Promise<number> {
   // Simple implementation - can be enhanced with AI
   const growthIndicators = [

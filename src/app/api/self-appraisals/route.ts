@@ -113,11 +113,6 @@ export async function GET(request: NextRequest) {
             },
           },
         },
-        staffRecord: {
-          select: {
-            designation: { select: { seniorityBand: true, rank: true } },
-          },
-        },
       },
     });
     if (!participant || participant.companyId !== companyId)
@@ -143,10 +138,6 @@ export async function GET(request: NextRequest) {
       const template = await resolveTemplateCompetencies(prisma, {
         cycleId,
         departmentId: participant.departmentId,
-        seniorityBand:
-          participant.seniorityBand ??
-          participant.staffRecord.designation?.seniorityBand ??
-          null,
       });
       if (!template)
         return withCors(

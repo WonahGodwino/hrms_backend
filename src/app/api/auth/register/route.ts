@@ -5,16 +5,20 @@ import { NextRequest } from 'next/server';
 import { checkCompanyAccess, requireRole, signToken } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
+import { isStaffAutoLinkEnabled } from '@/app/lib/departments/auto-link';
 import { reconcileStaffDepartmentLink } from '@/app/lib/departments/department-sync';
 import { getUserDisplayName } from '@/app/lib/departments/department-utils';
 import { reconcileStaffDesignationLink } from '@/app/lib/designations/designation-sync';
 import { createNotification, NOTIFICATION_TYPES } from '@/app/lib/notifications/helpers';
 import { saveInitialGrossCompensation } from '@/app/lib/staff/gross-compensation';
-import { ApiResponse, handleApiError } from '@/app/lib/utils';
 import { assertStaffCapacity, assertTrialCapacity, recordStaffCreated } from '@/app/lib/trial/guard';
+import { ApiResponse, handleApiError } from '@/app/lib/utils';
 
 // Roles that count toward the trial's admin-user cap.
 const ADMIN_ROLES = ['ADMIN', 'HR'];
+
+// Thrown to leave the auto-link block when the Automation setting is off; not an error.
+class SkipAutoLink extends Error {}
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
@@ -150,7 +154,10 @@ export async function POST(request: NextRequest) {
 
 		const hireDateValue = hireDate ? new Date(hireDate) : null;
 		const dateOfBirthValue = dateOfBirth ? new Date(dateOfBirth) : null;
-		const dependantsValue = numberOfPrimaryDependants !== undefined && numberOfPrimaryDependants !== null && numberOfPrimaryDependants !== '' ? Math.trunc(Number(numberOfPrimaryDependants)) : null;
+		const dependantsValue =
+			numberOfPrimaryDependants !== undefined && numberOfPrimaryDependants !== null && numberOfPrimaryDependants !== ''
+				? Math.trunc(Number(numberOfPrimaryDependants))
+				: null;
 
 		// All optional — only included when provided, so activating an existing
 		// staff record never overwrites a value it already has with a blank.
@@ -242,6 +249,7 @@ export async function POST(request: NextRequest) {
 		// create/link the matching Department. A sync hiccup must never block
 		// registration.
 		try {
+			if (!(await isStaffAutoLinkEnabled(targetCompanyId))) throw new SkipAutoLink();
 			const performedByName = await getUserDisplayName(admin);
 			await reconcileStaffDepartmentLink(
 				staffRecord.id,
@@ -259,7 +267,7 @@ export async function POST(request: NextRequest) {
 				currentDesignationId: staffRecord.designationId,
 			});
 		} catch (syncError) {
-			console.error('[REGISTER] Department/designation sync error:', syncError);
+			if (!(syncError instanceof SkipAutoLink)) console.error('[REGISTER] Department/designation sync error:', syncError);
 		}
 
 		// Seed the Compensation profile with Gross when provided — a sync
@@ -333,10 +341,11 @@ export async function POST(request: NextRequest) {
 						role: staffRecord.role,
 						companyId: staffRecord.companyId,
 						staffId: staffRecord.staffId,
-						department: staffRecord.department,							position: staffRecord.position,
-							phone: staffRecord.phone,
-							hireDate: staffRecord.hireDate,
-							createdBy: staffRecord.createdBy,
+						department: staffRecord.department,
+						position: staffRecord.position,
+						phone: staffRecord.phone,
+						hireDate: staffRecord.hireDate,
+						createdBy: staffRecord.createdBy,
 					},
 					company: {
 						id: targetCompany.id,

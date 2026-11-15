@@ -1,5 +1,5 @@
 // src/app/api/auth/me/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { assertSessionValid, requireAuth } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'

@@ -179,15 +179,6 @@ export async function GET(
           tenureMonths === null
             ? null
             : Math.round((tenureMonths / 12) * 10) / 10,
-        rank: staff.designation?.rank ?? 1,
-        seniorityBand: staff.designation?.seniorityBand ?? "MID",
-        grade: staff.designation
-          ? {
-              id: staff.designation.id,
-              name: staff.designation.title,
-              rank: staff.designation.rank,
-            }
-          : null,
       },
       eligible: !!a?.eligible,
       ineligibleReason: reason,

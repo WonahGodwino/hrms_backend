@@ -307,8 +307,6 @@ export async function resolveTemplateCompetencies(
   p: {
     cycleId: string;
     departmentId: string | null;
-    gradeLevelId?: string | null;
-    seniorityBand?: string | null;
     audience?: "SELF" | "MANAGER";
   },
 ) {
@@ -323,7 +321,6 @@ export async function resolveTemplateCompetencies(
     orderBy: { assignedAt: "desc" },
     include: {
       departmentScopes: { select: { departmentId: true } },
-      jobLevelScopes: { select: { seniorityBand: true } },
       version: {
         select: {
           id: true,
@@ -355,19 +352,13 @@ export async function resolveTemplateCompetencies(
   });
 
   // CUSTOM_GROUP is skipped: the schema has no member table for it yet.
-  const targetBand = p.seniorityBand ?? p.gradeLevelId;
-  const match = assignments.find((a) => {
-    const deptOk =
+  const match = assignments.find(
+    (a) =>
       a.scopeType === "ALL_DEPARTMENTS" ||
       (a.scopeType === "SPECIFIC_DEPARTMENTS" &&
         !!p.departmentId &&
-        a.departmentScopes.some((d) => d.departmentId === p.departmentId));
-    const levelOk =
-      a.jobLevelScopes.length === 0 ||
-      (!!targetBand &&
-        a.jobLevelScopes.some((j) => j.seniorityBand === targetBand));
-    return deptOk && levelOk;
-  });
+        a.departmentScopes.some((d) => d.departmentId === p.departmentId)),
+  );
   if (!match) return null;
 
   const seen = new Set<string>();

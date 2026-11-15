@@ -7,7 +7,7 @@ import { prisma } from '@/app/lib/db'
 import { PhedAccessRole, PhedApprovalMemo } from '@prisma/client'
 import { createNotification, NOTIFICATION_TYPES } from '@/app/lib/notifications/helpers'
 import { sendPhedApprovalNotificationEmail } from '@/app/lib/phed/email'
-import { getStageDef, FINAL_STAGE } from '@/app/lib/phed/approval-stages'
+import { getStageDef } from '@/app/lib/phed/approval-stages'
 import { signEmailActionToken } from '@/app/lib/phed/email-action-token'
 import { buildApprovalMemoPdfBuffer } from '@/app/lib/phed/approval-memo-pdf'
 

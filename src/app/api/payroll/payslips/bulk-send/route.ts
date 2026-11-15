@@ -1,9 +1,14 @@
 // src/app/api/payroll/payslips/bulk-send/route.ts
 //
-// POST — publishes (draft → false) and emails every draft payslip for a
-// given company + month + year in one action. The company scope always comes
-// from the current company in view on the frontend, matching how the rest of
-// the app works — there's no cross-company "send for all companies" option.
+// POST — emails and publishes (draft → false) every draft payslip for a
+// given company + month + year in one action. Per staff member, the
+// notification email is attempted FIRST, then that specific payslip is
+// published — regardless of whether the email succeeded — so a staff
+// member's payslip only appears in their dashboard once HR has actually
+// tried to notify them, but isn't withheld just because their own email
+// bounced. The company scope always comes from the current company in view
+// on the frontend, matching how the rest of the app works — there's no
+// cross-company "send for all companies" option.
 //
 // Counting draft payslips is fast and happens synchronously so an empty
 // result gets an immediate 400. Actually sending — up to thousands of emails
@@ -195,21 +200,20 @@ async function processBulkSendInBackground({
       : []
     const payrollsMap = new Map(payrolls.map((p) => [p.id, p]))
 
-    // Publish first, as a single batch update — sending is the HR/Admin
-    // approval action, so these payslips become visible to staff as soon as
-    // the batch is accepted, independent of whether each notification email
-    // below actually succeeds.
-    await prisma.payslip.updateMany({
-      where: { id: { in: payslips.map((p) => p.id) }, companyId },
-      data: { draft: false },
-    })
     // Mark everything selected as PENDING: if the process dies from here on, the
-    // unsent ones are findable and a re-run resumes exactly those.
+    // unsent ones are findable and a re-run resumes exactly those. Publishing
+    // (draft -> false) now happens per-payslip inside processOne, AFTER that
+    // specific staff member's email attempt — not as one upfront batch
+    // update — so "send, then publish" holds per staff. A payslip still
+    // becomes visible whether its email succeeds or fails (a staff member
+    // isn't denied their payslip because of a bad email address), but it no
+    // longer appears before HR has even tried to notify them.
     await markPayslipsPending(payslips.map((p) => p.id))
 
     const processOne = async (payslip: (typeof payslips)[number]) => {
       const staff = payslip.staffRecord
       const staffName = `${staff.firstName} ${staff.lastName}`
+      let emailSucceeded = false
 
       try {
         if (!staff.email) {
@@ -244,6 +248,7 @@ async function processBulkSendInBackground({
         }
 
         results.sent++
+        emailSucceeded = true
         await markPayslipEmailResult(payslip.id, { success: true, messageId: (emailResult as any)?.data?.id ? String((emailResult as any).data.id).replace(/^<|>$/g, '') : null })
 
         try {
@@ -292,6 +297,35 @@ async function processBulkSendInBackground({
         } catch (logError) {
           console.error('[PAYSLIP_BULK_SEND] Failed to write EmailLog (non-critical):', logError)
         }
+      }
+
+      // Publish regardless of email outcome — the notification attempt has
+      // already been made and recorded above either way, and a staff member
+      // shouldn't be denied their own payslip just because their email
+      // bounced or their address was wrong. This is deliberately AFTER the
+      // email attempt (not before, and not one upfront batch update), so a
+      // payslip only becomes visible once HR has actually tried to notify
+      // that specific staff member.
+      try {
+        await prisma.payslip.update({ where: { id: payslip.id }, data: { draft: false } })
+      } catch (publishError) {
+        // Distinct from an email failure: the notification went out (or was
+        // attempted) but the payslip may still be hidden from the staff
+        // member. Left as draft:true, so the next bulk-send run for this
+        // period picks it up and retries publishing automatically.
+        console.error('[PAYSLIP_BULK_SEND] Failed to publish payslip after send attempt:', {
+          payslipId: payslip.id,
+          staffId: staff.id,
+          error: publishError,
+        })
+        results.emailFailures.push({
+          payslipId: payslip.id,
+          email: staff.email || '',
+          staffName,
+          error: emailSucceeded
+            ? 'Email sent, but the payslip failed to publish — it is still hidden from the staff member. Re-run bulk send to retry.'
+            : 'Email failed and the payslip failed to publish — it is still hidden from the staff member. Re-run bulk send to retry.',
+        })
       }
     }
 

@@ -5,21 +5,21 @@ import { logPayslipEmailAttempt } from '@/app/lib/payroll/email-log'
 import { generateEnhancedPayslipPdf, type GeneratePayslipInput } from '../generateEnhancedPayslipPdf'
 import { generatePayslipPdfUnified, getActivePresetHtml } from '../payslip-preset-renderer'
 import { watermarkPdfIfTrial } from '@/app/lib/trial/watermark'
+import { consumeTrialQuota, TrialRestrictionError } from '@/app/lib/trial/guard'
 import type { ProcessingResult } from './types'
-import ExcelJS from 'exceljs'
 import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/helpers'
 import {
   toNumberOrZero as num,
   sanitizeTextValue as valueToString,
-  monthNameToNumber,
-  extractYearFromValue as getYearFromMonth,
-  getMonthNameFromNumber,
   detectMaliciousMarkup,
 } from '../utils/valueParsing'
 import { isUploadCancelled, reportUploadProgress } from './utils'
 import { mapWithConcurrency } from '@/app/lib/payroll/concurrency'
 import { statutorySchemeForField } from '../statutory-columns'
-import { buildStaffIndex, matchStaff } from '../utils/staff-matching'
+import { parsePayrollFile } from '../upload/parse'
+import { validatePayrollRows, type PayrollPeriod } from '../upload/validate'
+import { detectDynamicIdentityFields } from '../upload/dynamic-fields'
+import { upsertPayrollAndPayslip, UPLOAD_ROW_CONCURRENCY } from './shared/row-writer'
 
 function normalizeHeader(h: string): string {
   return h
@@ -37,11 +37,6 @@ function normalizeSection(section: string): string {
   return (section || '').toUpperCase().replace(/[\s-]+/g, '_')
 }
 
-function isMetaRowMarker(value: any): boolean {
-  const normalized = normalizeHeader(value?.toString() || '')
-  return normalized === 'instructions' || normalized === 'templatefields'
-}
-
 function normalizeWords(input: string): string[] {
   return input
     .toLowerCase()
@@ -51,34 +46,6 @@ function normalizeWords(input: string): string[] {
     .filter(Boolean)
 }
 
-function splitCsvLine(line: string): string[] {
-  const result: string[] = []
-  let cur = ''
-  let inQuotes = false
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
-    if (ch === '"' && line[i + 1] === '"') {
-      cur += '"'
-      i++
-      continue
-    }
-    if (ch === '"') {
-      inQuotes = !inQuotes
-      continue
-    }
-    if (ch === ',' && !inQuotes) {
-      result.push(cur.trim())
-      cur = ''
-      continue
-    }
-    cur += ch
-  }
-  result.push(cur.trim())
-  return result
-}
-
-const UPLOAD_ROW_CONCURRENCY = 4
 
 export const processDynamicTemplate = {
   async processFile(
@@ -89,7 +56,8 @@ export const processDynamicTemplate = {
     sendEmails: boolean,
     templateId?: string,
     overwriteExisting: boolean = false,
-    uploadId?: string
+    uploadId?: string,
+    extra?: { expectedPeriod?: PayrollPeriod | null; legacyPeriodDefaults?: boolean }
   ): Promise<ProcessingResult> {
     const results: ProcessingResult = {
       successful: 0,
@@ -134,162 +102,11 @@ export const processDynamicTemplate = {
       sections: [...new Set(template.fields.map(f => f.section))]
     })
 
-    // Build header mapping using ONLY template fields
-    const headerMap: { [key: string]: any } = {}
-    
-    template.fields.forEach(field => {
-      // Map the display name
-      const normalizedDisplay = normalizeHeader(field.displayName)
-      headerMap[normalizedDisplay] = field
-      
-      // Map aliases if they exist
-      if (field.aliases && Array.isArray(field.aliases)) {
-        field.aliases.forEach((alias) => {
-          if (typeof alias !== 'string') return
-          const normalizedAlias = normalizeHeader(alias)
-          headerMap[normalizedAlias] = field
-        })
-      }
-    })
-
-    // Parse file
-    let data: any[] = []
-    
-    try {
-      if (fileExtension === 'csv' || fileExtension === 'txt') {
-        const csvText = buffer.toString()
-        const lines = csvText.split(/\r?\n/).filter(l => l.trim())
-        if (!lines.length) throw new Error('Empty CSV file')
-
-        let headerRowIndex = -1
-        let headerMapping: { colIndex: number; field: any }[] = []
-
-        // Find first row that matches template headers (supports title rows before headers).
-        for (let i = 0; i < lines.length; i++) {
-          const candidateHeaders = splitCsvLine(lines[i])
-          const candidateMapping: { colIndex: number; field: any }[] = []
-
-          candidateHeaders.forEach((header, idx) => {
-            const normalized = normalizeHeader(header)
-            const field = headerMap[normalized]
-            if (field) {
-              candidateMapping.push({ colIndex: idx, field })
-            }
-          })
-
-          if (candidateMapping.length > 0) {
-            headerRowIndex = i
-            headerMapping = candidateMapping
-            break
-          }
-        }
-
-        if (headerRowIndex === -1) {
-          throw new Error('Could not find recognizable header row in CSV file')
-        }
-
-        // Process data rows
-        for (let i = headerRowIndex + 1; i < lines.length; i++) {
-          const values = splitCsvLine(lines[i])
-
-          if (isMetaRowMarker(values[0])) {
-            break
-          }
-
-          const rowData: any = {}
-          
-          headerMapping.forEach(mapping => {
-            rowData[mapping.field.systemField] = values[mapping.colIndex] ?? ''
-          })
-          
-          const hasData = Object.values(rowData).some(v => v !== null && v !== '' && v !== undefined)
-          if (hasData) {
-            data.push(rowData)
-          }
-        }
-      } else {
-        const workbook = new ExcelJS.Workbook()
-        const uint8Array = new Uint8Array(buffer)
-        await workbook.xlsx.load(uint8Array as any)
-        
-        const worksheet = workbook.worksheets[0]
-        if (!worksheet) throw new Error('No worksheet found in Excel file')
-
-        // Find the header row: the first non-merged row (skipping the title banner) in which
-        // at least one cell matches a template field. Matching on field names, rather than
-        // "first row with several cells", is what lets the styled banner sit above the headers.
-        let headerRowIndex = -1
-        let dataStartRow = -1
-
-        const scanLimit = Math.min(worksheet.rowCount, 30)
-        for (let r = 1; r <= scanLimit && headerRowIndex === -1; r++) {
-          const candidate = worksheet.getRow(r)
-          if (candidate.getCell(1).isMerged) continue
-          let matches = 0
-          candidate.eachCell((cell) => {
-            const v = cell.value?.toString() || ''
-            if (v && headerMap[normalizeHeader(v)]) matches++
-          })
-          if (matches > 0) headerRowIndex = r
-        }
-
-        if (headerRowIndex === -1) {
-          throw new Error('Could not find header row in Excel file')
-        }
-
-        // Get headers and map to template fields
-        const headerRow = worksheet.getRow(headerRowIndex)
-        const headerMapping: { colNumber: number; field: any }[] = []
-        
-        headerRow.eachCell((cell, colNumber) => {
-          const headerValue = cell.value?.toString() || ''
-          if (headerValue) {
-            const normalized = normalizeHeader(headerValue)
-            const field = headerMap[normalized]
-            if (field) {
-              headerMapping.push({ colNumber, field })
-            }
-          }
-        })
-
-        // Data starts after header row
-        dataStartRow = headerRowIndex + 1
-
-        let stopAtMetaSection = false
-
-        // Process data rows
-        worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-          if (stopAtMetaSection) return
-          if (rowNumber < dataStartRow) return
-
-          const firstCell = row.getCell(1).value?.toString() || ''
-          // Merged rows below the data are the styled notes/footer block, not payroll rows.
-          if (row.getCell(1).isMerged || isMetaRowMarker(firstCell)) {
-            stopAtMetaSection = true
-            return
-          }
-
-          const rowData: any = {}
-          
-          headerMapping.forEach(mapping => {
-            const cell = row.getCell(mapping.colNumber)
-            rowData[mapping.field.systemField] = cell.value
-          })
-          
-          const hasData = Object.values(rowData).some(v => v !== null && v !== '' && v !== undefined)
-          if (hasData) {
-            data.push(rowData)
-          }
-        })
-      }
-    } catch (err: any) {
-      console.error('[DYNAMIC_PROCESSOR] Error parsing file:', err)
-      throw new Error(`Error parsing file: ${err.message}`)
-    }
-
-    if (!data.length) {
-      throw new Error('No payroll data found in the file')
-    }
+    // Pass 1: parse and validate the whole file before writing anything. The
+    // same validator backs the dry-run endpoint, so what the user saw in the
+    // validation drawer is what runs here. Only template fields are mapped.
+    const parsed = await parsePayrollFile({ kind: 'DYNAMIC', buffer, fileExtension, templateFields: template.fields })
+    const data = parsed.rows.map((r) => r.data)
 
     console.log(`[DYNAMIC_PROCESSOR] Total rows to process: ${data.length}`)
 
@@ -402,17 +219,7 @@ export const processDynamicTemplate = {
       return bestField
     }
 
-    const staffIdField = getTemplateField(['staffid', 'employeeid'])
-    const nameField = getTemplateField(['staffname', 'employeename', 'fullname', 'name'])
-    const emailField = getTemplateField(['email'])
-    const payPeriodField = getFieldByIntent(['payperiod', 'salarymonth', 'paymonth'])
-      || template.fields.find((f) => {
-        const normalizedSystem = normalizeHeader(f.systemField || '')
-        const normalizedDisplay = normalizeHeader(f.displayName || '')
-        const containsMonth = normalizedSystem.includes('month') || normalizedDisplay.includes('month')
-        const isDaysInMonth = normalizedSystem.includes('daysinmonth') || normalizedDisplay.includes('daysinmonth')
-        return containsMonth && !isDaysInMonth
-      })
+    const { staffIdField, nameField, emailField, payPeriodField } = detectDynamicIdentityFields(template.fields)
     const strictDaysInMonthField = getFieldByIntent(
       ['numberofdaysinamonth', 'daysinmonth', 'noofdaysinamonth', 'daysinthemonth', 'monthdays'],
       ['daysworked', 'numberofdaysworked', 'noofdaysworked', 'dayspresent', 'workingdays']
@@ -442,17 +249,22 @@ export const processDynamicTemplate = {
         .map((f) => f.systemField)
     )
 
-    // Load all active staff for the company ONCE; match rows in memory.
-    const staffIndex = await buildStaffIndex(companyId)
+    const verdict = await validatePayrollRows({
+      kind: 'DYNAMIC',
+      rows: parsed.rows,
+      headers: parsed.headers,
+      unknownColumns: parsed.unknownColumns,
+      companyId,
+      template,
+      expectedPeriod: extra?.expectedPeriod,
+      overwriteExisting,
+      uploadId,
+      legacyPeriodDefaults: extra?.legacyPeriodDefaults,
+    })
+    if (verdict.fileErrors.length) throw new Error(verdict.fileErrors.join(' '))
 
-    // Guard against two rows in the same upload resolving to the same staff &
-    // period: process the first, skip the rest. Key = staffRecordId|month|year.
-    const processedKeys = new Set<string>()
-
-    // Each row is independent once the same-upload duplicate guard below has
-    // claimed its staff+period, so rows run a few at a time. The guard runs
-    // synchronously at the top of a row (no await before it) so the first row
-    // in sheet order still wins.
+    // Pass 2: write the rows that passed validation. Rows are independent, so
+    // they run a few at a time.
     const processRow = async (index: number) => {
       // Check if upload was cancelled before processing each row
       if (uploadId && isUploadCancelled(uploadId)) {
@@ -460,34 +272,36 @@ export const processDynamicTemplate = {
         throw new Error('PAYROLL_CANCELLED')
       }
       const row = data[index]
-      const displayRowNumber = index + 2
-      let rawName = ''
-      let rawEmail = ''
-      let staffId = ''
-      let monthValue = ''
+      const v = verdict.rows[index]
+      const displayRowNumber = v.sheetRow
+      const rawName = v.name
+      const rawEmail = v.email
+      const staffId = v.staffId
+      const monthValue = payPeriodField ? valueToString(row[payPeriodField.systemField]) : ''
       let daysInMonth = 0
       let daysWorked = 0
       
       try {
-        if (staffIdField) {
-          staffId = valueToString(row[staffIdField.systemField])
-        }
-        
-        if (nameField) {
-          rawName = valueToString(row[nameField.systemField])
-          const nameCheck = detectMaliciousMarkup(rawName)
-          if (nameCheck.isMalicious) {
-            throw new Error(`Malicious content detected in "${nameField.displayName}" (${nameCheck.reason}) — remove it and re-upload`)
+        if (v.errors.length) {
+          if (v.skipKind === 'DUPLICATE' && v.staff) {
+            results.duplicatesSkipped++
+            results.skippedRecords.push({
+              rowNumber: displayRowNumber,
+              staffId: v.staff.staffId,
+              staffName: `${v.staff.firstName} ${v.staff.lastName}`,
+              email: v.staff.email,
+              month: v.period?.monthName,
+              year: v.period?.year,
+              reason: 'Duplicate of an earlier row for the same staff & pay period',
+            })
+            return
           }
+          throw new Error(v.errors.map((e) => e.message).join('; '))
         }
-
-        if (emailField) {
-          rawEmail = valueToString(row[emailField.systemField])
-        }
-        
-        if (payPeriodField) {
-          monthValue = valueToString(row[payPeriodField.systemField])
-        }
+        const staffRecord = v.staff!
+        const monthName = v.writeMonth!
+        const year = v.period!.year
+        const periodMonth = v.period!.month
 
         if (daysInMonthField) {
           daysInMonth = num(row[daysInMonthField.systemField])
@@ -497,71 +311,9 @@ export const processDynamicTemplate = {
           daysWorked = num(row[daysWorkedField.systemField])
         }
 
-        // Validate required fields from template
-        const missingFields: string[] = []
-        template.fields
-          .filter(f => f.required)
-          .forEach(field => {
-            const value = row[field.systemField]
-            if (value === undefined || value === null || value === '') {
-              missingFields.push(field.displayName)
-            }
-          })
-
-        if (missingFields.length > 0) {
-          throw new Error(`Missing required fields: ${missingFields.join(', ')}`)
-        }
-
-        // Parse month and year
-        let periodMonth = 0
-        let year = 0
-        let monthName = ''
-        
-        if (monthValue) {
-          periodMonth = monthNameToNumber(monthValue)
-          year = getYearFromMonth(monthValue)
-          monthName = getMonthNameFromNumber(periodMonth)
-        }
-        
-        if (!periodMonth || periodMonth === 0) {
-          const now = new Date()
-          periodMonth = now.getMonth() + 1
-          year = now.getFullYear()
-          monthName = getMonthNameFromNumber(periodMonth)
-        }
-
-        // Match by staffId first, then email (case-insensitive). Never by name.
-        const staffRecord = matchStaff(staffIndex, { staffId, email: rawEmail })
-
-        if (!staffRecord) {
-          throw new Error(`Staff record not found for ${staffId || rawEmail || rawName}`)
-        }
-
-        // Skip a second row in this upload that resolves to the same staff &
-        // period — it would otherwise create a duplicate payslip.
-        const dedupeKey = `${staffRecord.id}|${monthName}|${year}`
-        if (processedKeys.has(dedupeKey)) {
-          results.duplicatesSkipped++
-          results.skippedRecords.push({
-            rowNumber: displayRowNumber,
-            staffId: staffRecord.staffId,
-            staffName: `${staffRecord.firstName} ${staffRecord.lastName}`,
-            email: staffRecord.email,
-            month: monthName,
-            year,
-            reason: 'Duplicate of an earlier row for the same staff & pay period',
-          })
-          console.warn(`[DYNAMIC] Row ${displayRowNumber}: skipped duplicate for ${staffRecord.staffId} ${monthName} ${year}`)
-          return
-        }
-        processedKeys.add(dedupeKey)
 
         // Prepare data for storage - ONLY template fields
         const templateData: any = {
-          companyId: companyId,
-          staffRecordId: staffRecord.id,
-          month: monthName,
-          year,
           status: 'PROCESSED',
           uploadedBy: user.userId,
           templateType: 'DYNAMIC',
@@ -606,23 +358,7 @@ export const processDynamicTemplate = {
           if (scheme && field.dataType === 'Number') templateData[scheme] = customFields[field.systemField]?.value ?? 0
         })
 
-        // Create or update payroll record with ONLY customFields.
-        // Always update an existing payroll for this (staff, month, year) in
-        // place rather than creating a duplicate — regardless of
-        // overwriteExisting — so re-uploads stay idempotent per pay period.
-        let payrollRecord
-        const existingPayroll = await prisma.payroll.findFirst({
-          where: { staffRecordId: staffRecord.id, month: monthName, year, companyId: companyId },
-          orderBy: { createdAt: 'desc' },
-        })
-        if (existingPayroll) {
-          payrollRecord = await prisma.payroll.update({
-            where: { id: existingPayroll.id },
-            data: { ...templateData, customFields: customFields, updatedAt: new Date() },
-          })
-        } else {
-          payrollRecord = await prisma.payroll.create({ data: { ...templateData, customFields: customFields } })
-        }
+        templateData.customFields = customFields
 
         // Prepare data for payslip - ONLY fields marked for payslip display
         const earningsForPayslip: any[] = []
@@ -775,47 +511,41 @@ export const processDynamicTemplate = {
           draft: !sendEmails,
         }
 
-        // Always update an existing payslip for this (staff, month, year) in
-        // place rather than creating a duplicate — regardless of
-        // overwriteExisting — so re-uploads stay idempotent per pay period.
-        const existingPayslip = await prisma.payslip.findFirst({
-          where: {
-            staffRecordId: staffRecord.id,
-            month: monthName,
-            year,
-            companyId: companyId,
-          },
-          orderBy: { createdAt: 'desc' },
+        // Atomically upsert the Payroll + Payslip row for this staff/period/
+        // category, keyed on the real DB unique constraint instead of a
+        // race-prone findFirst-then-branch. Category comes from the
+        // template this upload used — normalized inside the helper.
+        const writeResult = await upsertPayrollAndPayslip({
+          staffRecordId: staffRecord.id,
+          companyId,
+          month: monthName,
+          year,
+          category: template.category,
+          payrollData: templateData,
+          payslipData: { ...payslipData, createdBy: user.userId, updatedBy: user.userId },
+          uploadId,
+          rowIndex: index,
         })
-        if (existingPayslip) {
-          isUpdate = true
-          payslipId = existingPayslip.id
-          // payrollId is intentionally omitted here: the existing payslip
-          // for this staff/period already points at the payroll record for
-          // that same period (payrollRecord, updated in place above), so it
-          // never needs to change on an update.
-          await prisma.payslip.update({
-            where: { id: existingPayslip.id },
-            data: { ...payslipData, updatedBy: user.userId, updatedAt: new Date() },
-          })
+        const payrollRecord = { id: writeResult.payrollId }
+        payslipId = writeResult.payslipId
+        isUpdate = writeResult.wasPayslipUpdate
+        if (isUpdate) {
           results.payslipsUpdated++
-        } else {
-          const newPayslip = await prisma.payslip.create({
-            data: {
-              ...payslipData,
-              payrollId: payrollRecord.id,
-              staffRecordId: staffRecord.id,
-              companyId: companyId,
-              month: monthName,
-              year,
-              createdBy: user.userId,
-              updatedBy: user.userId,
-            },
-          })
-          payslipId = newPayslip.id
         }
 
-        if (sendEmails) {
+        // Free trial: only the first few recipients get an email; the rest are generated and
+        // viewable on screen. A quota or read-only refusal skips the email, not the whole run.
+        let withinTrialQuota = true
+        if (sendEmails && writeResult.priorEmailStatus !== 'SENT') {
+          try {
+            await consumeTrialQuota(companyId, 'payslips', [staffRecord.id])
+          } catch (e) {
+            if (!(e instanceof TrialRestrictionError)) throw e
+            withinTrialQuota = false
+          }
+        }
+
+        if (sendEmails && withinTrialQuota && writeResult.priorEmailStatus !== 'SENT') {
           results.emailAttempts++
           try {
             const staffDataForEmail = {

@@ -143,6 +143,11 @@ export async function fetchPayrollPayslips(params: AggregatePayrollPeriodParams)
             }
           }
         : {}),
+      // This aggregate already keeps only one payslip per staff/month
+      // (monthStaffDedup below) — once a staff has separate Salary/TA/Bonus
+      // rows for a month, only Salary should be the one that wins that
+      // dedup, not whichever upload happened to run most recently.
+      OR: [{ payslipCategory: null }, { payslipCategory: 'SALARY' }],
     },
     select: PAYSLIP_AGGREGATE_SELECT,
     orderBy: [{ year: 'desc' }, { createdAt: 'desc' }]

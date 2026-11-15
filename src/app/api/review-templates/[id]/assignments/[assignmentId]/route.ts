@@ -59,7 +59,6 @@ export async function DELETE(
         version: { select: { versionNumber: true } },
         cycle: { select: { id: true, name: true, status: true } },
         departmentScopes: { select: { departmentId: true } },
-        jobLevelScopes: { select: { seniorityBand: true } },
       },
     });
     if (!assignment)
@@ -98,8 +97,6 @@ export async function DELETE(
             phaseType: assignment.phaseType,
             scopeType: assignment.scopeType,
             departmentCount: assignment.departmentScopes.length,
-            seniorityBandCount: assignment.jobLevelScopes.length,
-            gradeLevelCount: assignment.jobLevelScopes.length,
           },
         ],
         companyId,

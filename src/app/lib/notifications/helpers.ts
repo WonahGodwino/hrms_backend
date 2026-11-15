@@ -99,6 +99,31 @@ export async function createNotification(
   }
 }
 
+// Bulk form of createNotification for uploads: one insert for many recipients. Like the single form it never throws; a
+// failure is logged and the caller carries on.
+export async function createNotificationsBulk(
+  items: { userId: string; type: string; title: string; message: string; data?: Record<string, any>; companyId: string }[],
+) {
+  if (items.length === 0) return 0
+  try {
+    const result = await prisma.notification.createMany({
+      data: items.map((i) => ({
+        userId: i.userId,
+        type: i.type,
+        title: i.title,
+        message: i.message,
+        companyId: i.companyId,
+        read: false,
+        ...(i.data && Object.keys(i.data).length > 0 ? { data: JSON.stringify(i.data) } : {}),
+      })),
+    })
+    return result.count
+  } catch (error) {
+    console.error("Error creating notifications in bulk:", error)
+    return 0
+  }
+}
+
 // Create leave-specific notification (includes leaveRequestId in data)
 export async function createLeaveNotification(
   userId: string,

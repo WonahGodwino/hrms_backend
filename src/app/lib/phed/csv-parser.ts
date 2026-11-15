@@ -340,9 +340,8 @@ async function parseMembershipBuffer(
 
   const rows: Record<string, string>[] = []
   let headers: string[] = []
-  let headerRowNum = -1
 
-  ws.eachRow((row, rowNum) => {
+  ws.eachRow((row, _rowNum) => {
     const values = row.values as (string | number | null | undefined)[]
     const cells  = values.slice(1) // ExcelJS row.values[0] is undefined
 
@@ -352,7 +351,6 @@ async function parseMembershipBuffer(
       const firstNonEmpty = cells.find(c => String(c ?? '').trim() !== '')
       if (firstNonEmpty !== undefined && normalizeHeader(String(firstNonEmpty)) === 'staffid') {
         headers = cells.map(c => String(c ?? '').trim())
-        headerRowNum = rowNum
       }
       return
     }

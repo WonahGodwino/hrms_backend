@@ -3,22 +3,9 @@
 import { prisma } from "@/app/lib/db";
 import { UserContext, resolveActorStaffId } from "@/app/lib/access-control";
 import {
-  GoalLevel,
-  GoalStatus,
-  GoalConflictStatus,
-  GoalConflictResolutionAction,
-  GoalActivityType,
   HeroStats,
   GoalHierarchyNode,
-  GoalDetail,
-  ConflictCardData,
-  FeedItemData,
-  TrendDataPoint,
-  TopPerformer,
-  AiStrategyInsight,
   RiskAlert,
-  LinkedKpiItem,
-  DependencyItem,
 } from "./team-goal-types";
 import { isOverdue } from "@/app/lib/goals/goal-utils";
 
@@ -256,7 +243,7 @@ export function buildGoalHierarchy(
  */
 export function calculateHeroStats(
   goals: any[],
-  departments: Array<{ id: string; name: string }>
+  _departments: Array<{ id: string; name: string }>
 ): HeroStats {
   if (!goals || goals.length === 0) {
     return {

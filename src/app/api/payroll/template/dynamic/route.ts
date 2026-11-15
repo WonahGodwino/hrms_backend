@@ -3,7 +3,6 @@ import { assertTrialCapacity, trialErrorBody } from '@/app/lib/trial/guard'
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
-import { requireRole } from '@/app/lib/auth'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
@@ -82,6 +81,22 @@ function normalizeCalculationBaseField(body: any): { data: Record<string, any>; 
       return { data, error: `pensionCalculationBase must be "BHT" or "STANDARD"` }
     }
     data.pensionCalculationBase = value
+  }
+  return { data, error: null }
+}
+
+// Which payslip category this template produces (Salary, Transport
+// Allowance, Bonus, ...) — free-text, company-defined (see schema comment on
+// PayrollTemplate.category). Upload/Generate pick this up automatically from
+// whichever template is selected; there's no separate category control
+// anywhere else in the flow. Blank/omitted falls back to the column default
+// ("SALARY") rather than erroring, since most templates are the single,
+// unambiguous payslip a company runs.
+function normalizeCategoryField(body: any): { data: Record<string, any>; error: string | null } {
+  const data: Record<string, any> = {}
+  if (body.category !== undefined) {
+    const trimmed = String(body.category || '').trim()
+    if (trimmed) data.category = trimmed
   }
   return { data, error: null }
 }
@@ -311,6 +326,7 @@ export async function POST(request: NextRequest) {
     if (calcBase.error) {
       return withCors(ApiResponse.error(calcBase.error, 400), origin)
     }
+    const category = normalizeCategoryField(body)
 
     // Validation
     if (!companyId) {
@@ -396,7 +412,8 @@ export async function POST(request: NextRequest) {
           payslipPresetId: resolvedPayslipPresetId,
           createdBy: user.userId,
           ...billing.data,
-          ...calcBase.data
+          ...calcBase.data,
+          ...category.data
         }
       })
 
@@ -509,6 +526,7 @@ export async function PUT(request: NextRequest) {
     if (calcBase.error) {
       return withCors(ApiResponse.error(calcBase.error, 400), origin)
     }
+    const category = normalizeCategoryField(body)
 
     if (!templateId) {
       return withCors(ApiResponse.error('Template ID is required', 400), origin)
@@ -574,6 +592,7 @@ export async function PUT(request: NextRequest) {
           payslipPresetId: payslipPresetId !== undefined ? payslipPresetId || null : existingTemplate.payslipPresetId,
           ...billing.data,
           ...calcBase.data,
+          ...category.data,
           updatedBy: user.userId,
           updatedAt: new Date()
         }

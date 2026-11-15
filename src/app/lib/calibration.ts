@@ -265,7 +265,7 @@ export const RECORD_SELECT = {
       lastName: true,
       position: true,
       avatarUrl: true,
-      designation: { select: { title: true, rank: true, seniorityBand: true } },
+      designation: { select: { title: true } },
     },
   },
   participant: {
@@ -351,10 +351,7 @@ export async function buildRows(
       name: `${r.staffRecord.firstName} ${r.staffRecord.lastName}`.trim(),
       role: r.staffRecord.position,
       dept: r.participant.department?.name ?? null,
-      level:
-        r.staffRecord.designation?.seniorityBand ??
-        r.staffRecord.designation?.title ??
-        null,
+      level: r.staffRecord.designation?.title ?? null,
       manager: mgr ? `${mgr.firstName} ${mgr.lastName}`.trim() : null,
       avatarUrl: r.staffRecord.avatarUrl,
       scores: {

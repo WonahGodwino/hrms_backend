@@ -4,7 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { getUserFromToken } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { logRecordChange, logBulkChange } from '@/app/lib/core-setup/audit'
+import { logBulkChange } from '@/app/lib/core-setup/audit'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -41,30 +41,19 @@ export async function POST(req: NextRequest) {
       const existing = await (prisma as any).designation.findFirst({ where: { code, companyId: companyId || null } })
       if (existing) { skipped++; continue }
 
-      const validBands = ['ENTRY', 'JUNIOR', 'MID', 'SENIOR', 'LEAD', 'DIRECTOR', 'EXECUTIVE'];
-      let seniorityBand = 'MID';
-      const rawBand = (obj.seniorityband || obj.grade || '').toUpperCase();
-      if (validBands.includes(rawBand)) {
-        seniorityBand = rawBand;
-      }
-
-      const rank = obj.rank && !isNaN(Number(obj.rank)) ? Math.max(1, Number(obj.rank)) : 1;
       const basePay = obj.basepay || obj.salary || obj.basesalary;
 
+      await assertTrialCapacity(companyId, 'designations')
       await (prisma as any).designation.create({
         data: {
           companyId,
           title,
           code,
-          rank,
-          seniorityBand,
           basePay: basePay && !isNaN(Number(basePay)) ? Number(basePay) : null,
           description: obj.description || '',
           status: 'Active',
         },
       });
-      await assertTrialCapacity(companyId, 'designations')
-      await (prisma as any).designation.create({ data: { companyId, title, code, description: obj.description || '', status: 'Active' } })
       created++
     }
 

@@ -5,7 +5,7 @@ import { UserContext } from './types';
 /**
  * Restore archived job (SUPER_ADMIN only)
  */
-async function restoreJob(
+export async function restoreJob(
   user: UserContext,
   jobId: string
 ) {

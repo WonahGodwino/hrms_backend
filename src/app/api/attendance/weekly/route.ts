@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireRole } from "@/app/lib/auth";
 import { requireModuleAccess } from "@/app/lib/module-access";
 import { withCors, handleCorsOptions } from "@/app/lib/cors";
 import { canManageAttendance } from "@/app/lib/attendance/access";
@@ -277,7 +276,7 @@ async function calculateStaffAttendanceStats(
   companyId: string,
   startDate: Date,
   endDate: Date,
-  totalStaff: number
+  _totalStaff: number
 ): Promise<any[]> {
   const { prisma } = await import("@/app/lib/prisma");
 

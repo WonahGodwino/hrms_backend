@@ -32,7 +32,6 @@ import path from 'path'
 import type { 
   CustomFieldValue, 
   PayslipDisplayItem,
-  TemplateField,
   ProcessingResult
 } from './types'
 
@@ -80,7 +79,7 @@ export function getPayslipDisplayFields(
 
   if (!customFields) return { earnings, deductions }
 
-  Object.entries(customFields).forEach(([key, field]) => {
+  Object.entries(customFields).forEach(([, field]) => {
     if (!field.showOnPayslip) return
     
     // Parse value to number
@@ -180,6 +179,16 @@ export async function getActivePayrollUpload(companyId: string) {
     ? Date.now() - lastBeat > STALE_NO_PROGRESS_MS
     : Date.now() - startedAt.getTime() > ORPHANED_UPLOAD_GRACE_MS
   if (isStale) {
+    // A restart (not a hang) is the common case for "no heartbeat at all" —
+    // the file's bytes are durable now (PayrollUpload.fileData), so try to
+    // safely re-run the whole thing before giving up on it. Dynamic import
+    // to avoid a circular dependency (resume.ts imports from this file).
+    const { tryResumeOrphanedPayrollUpload } = await import('./resume')
+    const cutoff = new Date(Date.now() - (lastBeat != null ? STALE_NO_PROGRESS_MS : ORPHANED_UPLOAD_GRACE_MS))
+    const resumed = await tryResumeOrphanedPayrollUpload(active.id, cutoff)
+    if (resumed) {
+      return active
+    }
     await failPayrollUploadRecord(active.id, 'Processing was interrupted (server restarted or timed out)')
     return null
   }
@@ -207,13 +216,15 @@ export async function createPendingPayrollUpload(
   userId: string,
   templateId?: string | null,
   overwriteExisting?: boolean,
-  estimatedRecordCount?: number | null
+  estimatedRecordCount?: number | null,
+  fileData?: Buffer | null
 ) {
   const created = await prisma.payrollUpload.create({
     data: {
       companyId,
       fileName,
       filePath,
+      fileData: fileData ? new Uint8Array(fileData) : null,
       templateType,
       templateId: templateId || null,
       sendEmails,
@@ -287,6 +298,12 @@ export async function completePayrollUploadRecord(
       emailFailures: sendEmails && results.emailFailures.length > 0 ? (results.emailFailures as any) : undefined,
       errors: results.errors,
       status: 'COMPLETED',
+      // Clear any reason the stale-job watchdog set on an earlier pass — a
+      // run that reaches here truly finished, so a leftover "Processing was
+      // interrupted" string must not survive on a COMPLETED row (confirmed
+      // false-positive in production: watchdog fired, then the still-running
+      // job finished normally and overwrote status without ever clearing this).
+      failureReason: null,
       completedAt: new Date(),
     },
     select: { companyId: true },
@@ -349,7 +366,7 @@ async function detectAndNotifyDuplicates(
   companyId: string,
   month: string,
   year: number,
-  uploadedByStaffId?: string | null
+  _uploadedByStaffId?: string | null
 ) {
   try {
     console.log('[PAYROLL_DUPLICATE_DETECT] Starting detection', { companyId, month, year })

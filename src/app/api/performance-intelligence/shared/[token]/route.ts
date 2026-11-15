@@ -1,6 +1,4 @@
 import { NextRequest } from "next/server";
-import { ApiResponse, handleApiError } from "@/app/lib/utils";
-import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { createHash } from "crypto";
 import { readFile } from "fs/promises";
 import { NextResponse } from "next/server";

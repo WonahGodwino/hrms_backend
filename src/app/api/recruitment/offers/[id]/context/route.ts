@@ -1,6 +1,6 @@
 // GET /api/recruitment/offers/:id/context
 // Returns the requisition context the Offer Builder needs: the candidate/job,
-// the grade's real step ladder + pay, the benefit catalog, and the offer's
+// the benefit catalog, and the offer's
 // current builder values. Read-only.
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
@@ -10,7 +10,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-const money = (n: number) => `₦${Math.round(n).toLocaleString('en-NG')}`
+(n: number) => `₦${Math.round(n).toLocaleString('en-NG')}`;
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const origin = req.headers.get('origin')
@@ -36,9 +36,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const job = (offer as any).application?.job || null
     const jobDefaults = (job?.offerDefaults && typeof job.offerDefaults === 'object') ? job.offerDefaults : {}
 
-    // Standalone grade levels (and their step ladders) were replaced by
-    // designation seniority bands, so there are no steps to offer.
-    const grade: any = null
+    // There is no step ladder any more, so no steps are offered.
     const steps: Array<{ id: number; label: string; basePay: number }> = []
     const maxApprovedStep = jobDefaults.maxApprovedStep ?? null
 
@@ -72,12 +70,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         residentialState: offer.candidate?.locationState || null,
       },
       job: job ? { id: job.id, title: job.title, department: job.department, description: job.description } : null,
-      grade: {
-        id: offer.gradeId || null,
-        name: grade?.name || offer.gradeName || null,
-        maxApprovedStep,
-        steps,
-      },
+      maxApprovedStep,
+      steps,
       benefits,
       customComponentTypes: ['Relocation Allowance', 'Sign-on Bonus', 'Education Stipend', 'Retention Bonus', 'Other'],
       offer: {

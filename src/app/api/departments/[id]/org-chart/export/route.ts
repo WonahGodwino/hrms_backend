@@ -5,7 +5,6 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { getDepartmentWithAccess } from '@/app/lib/departments/department-utils'
-import puppeteer from 'puppeteer'
 
 // Types
 interface OrgChartNode {
@@ -35,7 +34,7 @@ interface OrgChartData {
 }
 
 // Helper function to build org chart data
-async function buildOrgChartData(departmentId: string, companyId: string): Promise<OrgChartData> {
+async function buildOrgChartData(departmentId: string, _companyId: string): Promise<OrgChartData> {
   const department = await prisma.department.findUnique({
     where: { id: departmentId },
     include: {

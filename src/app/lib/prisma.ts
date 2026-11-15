@@ -151,7 +151,7 @@ function createPrismaClient() {
     // Dummy proxy prevents crashes during build
     // But also provides basic mock functionality for build
     return new Proxy({} as PrismaClient, {
-      get(target, prop) {
+      get(_target, prop) {
         // Allow certain properties during build
         if (prop === '$connect' || prop === '$disconnect' || prop === '$on') {
           return async () => {}
