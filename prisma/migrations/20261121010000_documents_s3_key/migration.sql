@@ -9,4 +9,4 @@ ALTER TABLE "offer_letter_mailbox_attachments" ADD COLUMN IF NOT EXISTS "s3Key" 
 ALTER TABLE "candidate_files" ADD COLUMN IF NOT EXISTS "s3Key" TEXT;
 ALTER TABLE "candidate_account_document_blobs" ADD COLUMN IF NOT EXISTS "s3Key" TEXT;
 ALTER TABLE "staff_onboarding_documents" ADD COLUMN IF NOT EXISTS "s3Key" TEXT;
-ALTER TABLE "screening_cv_results" ADD COLUMN IF NOT EXISTS "s3Key" TEXT;
+ALTER TABLE "cv_screening_cv_results" ADD COLUMN IF NOT EXISTS "s3Key" TEXT;
