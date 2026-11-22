@@ -9,6 +9,9 @@ RUN npm ci --ignore-scripts
 FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+# Next.js type-checking on this large route tree exceeds Node's default ~4 GB
+# heap; raise the ceiling so `next build` doesn't OOM during "checking types".
+ENV NODE_OPTIONS="--max-old-space-size=8192"
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 # Accept DB URL during build so prisma generate can run
