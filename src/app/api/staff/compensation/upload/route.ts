@@ -28,6 +28,7 @@ import { cellToString } from '@/app/lib/offer-letters/excelCell'
 import ExcelJS from 'exceljs'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
+import { uploadFileToS3 } from '@/app/lib/storage/upload-files'
 
 function getRelativePath(absolutePath: string): string {
   const projectRoot = process.cwd()
@@ -170,6 +171,7 @@ export async function POST(request: NextRequest) {
     const savedFileName = `staff-compensation-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
     const savedFilePath = path.join(uploadsDir, savedFileName)
     await writeFile(savedFilePath, buffer)
+    await uploadFileToS3(path.relative(process.cwd(), savedFilePath), buffer)
 
     type ParsedRow = { staffId: string; values: Record<string, string> }
     const rows: ParsedRow[] = []

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFile } from "fs/promises";
 import { prisma } from "@/app/lib/db";
 import { verifyCompanyAccess } from "@/app/lib/access-control";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -10,11 +9,7 @@ import {
   withGoalAuth,
 } from "@/app/lib/goals/goal-access";
 import { HttpError } from "@/app/lib/goals/goal-utils";
-import {
-  CONTENT_TYPES,
-  evidenceDiskPath,
-  parseEvidenceUrl,
-} from "@/app/lib/goals/evidence-files";
+import { readUploadedBuffer } from "@/app/lib/goals/evidence-files";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -55,32 +50,11 @@ export const GET = withGoalAuth<{ id: string; evidenceId: string }>(
     if (evidence.data && evidence.data.length > 0) {
       buffer = Buffer.from(evidence.data);
     } else if (evidence.fileUrl) {
-      // 2. Fallback to local disk storage for legacy or pre-migration records
-      const parsed = parseEvidenceUrl(evidence.fileUrl);
-      if (parsed && parsed.companyId === evidence.goal.companyId) {
-        try {
-          buffer = await readFile(
-            evidenceDiskPath(parsed.companyId, parsed.storedName),
-          );
-          if (parsed.ext && CONTENT_TYPES[parsed.ext]) {
-            contentType = CONTENT_TYPES[parsed.ext];
-          }
-          // Opportunistically backfill binary into PostgreSQL so future reads are pure DB queries
-          prisma.goalEvidence
-            .update({
-              where: { id: evidence.id },
-              data: {
-                data: new Uint8Array(buffer),
-                mimeType: contentType,
-                sizeBytes: buffer.length,
-              },
-            })
-            .catch((err) => {
-              console.warn("Could not backfill goal evidence binary into database:", err);
-            });
-        } catch {
-          // File not found on disk
-        }
+      // 2. Object storage (S3) first, local disk fallback for legacy records
+      const bufInfo = await readUploadedBuffer(evidence.fileUrl, evidence.goal.companyId);
+      if (bufInfo) {
+        buffer = bufInfo.buffer;
+        contentType = bufInfo.mimeType;
       }
     }
 

@@ -112,7 +112,7 @@ export function isRunExpired(run: { filesExpireAt?: Date | string | null } | nul
 }
 
 async function expireRun(run: { id: string; companyId: string }): Promise<void> {
-  try { deleteRunFiles(run.companyId, run.id) } catch (e) { console.warn('[letter] file purge failed:', e) }
+  try { await deleteRunFiles(run.companyId, run.id) } catch (e) { console.warn('[letter] file purge failed:', e) }
   await (prisma as any).phedLetterRun.update({ where: { id: run.id }, data: { status: 'EXPIRED' } })
   // PII minimisation: purge per-row values once files are gone (findings kept).
   await (prisma as any).phedLetterRunRow.updateMany({
@@ -202,7 +202,7 @@ async function generateRunInner(runId: string): Promise<void> {
     try {
       const pdf = await buildLetterPdf(renderModel, config)
       const fileName = letterFileName(renderModel.staff_id, renderModel.staff_name)
-      const storageKey = writeRunFile(run.companyId, runId, fileName, pdf)
+      const storageKey = await writeRunFile(run.companyId, runId, fileName, pdf)
       await (prisma as any).phedLetterRunRow.update({
         where: { id: row.id },
         data: { status: 'GENERATED', outputKey: storageKey },

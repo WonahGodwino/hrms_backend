@@ -12,6 +12,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { assertStorageQuota } from '@/app/lib/trial/guard'
 import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
 import { extractVariables } from '@/app/lib/offer-letters/docxTemplate'
+import { offerLetterTemplateKey, uploadDocumentObject } from '@/app/lib/storage/documents'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -165,6 +166,13 @@ export async function POST(request: NextRequest) {
         createdAt: true,
       },
     })
+
+    await uploadDocumentObject(
+      offerLetterTemplateKey(companyId, template.id),
+      bytes,
+      (key) => prisma.offerLetterTemplate.update({ where: { id: template.id }, data: { s3Key: key } }),
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ).catch(() => {})
 
     return withCors(ApiResponse.success(template, 'Template uploaded — variables detected'), origin)
   } catch (error) {

@@ -10,6 +10,7 @@ import path from 'path'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/app/lib/prisma'
 import { randomUUID } from 'crypto'
+import { uploadFileToS3 } from '@/app/lib/storage/upload-files'
 
 // Define types for failed records
 interface FailedRecord {
@@ -1171,7 +1172,9 @@ export async function POST(request: NextRequest) {
     const relativeFilePath = getRelativePath(savedFilePath)
 
     const bytes = await file.arrayBuffer()
-    await writeFile(savedFilePath, Buffer.from(bytes))
+    const buffer = Buffer.from(bytes)
+    await writeFile(savedFilePath, buffer)
+    await uploadFileToS3(relativeFilePath, buffer)
 
     const processResult = await processLeaveUpload(companyId, file, user.userId, file.name, relativeFilePath)
 

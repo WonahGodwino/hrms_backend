@@ -18,6 +18,7 @@ import {
   resolveRange,
 } from "@/app/lib/performance-intelligence/intel-utils";
 import { renderReportPdf } from "@/app/lib/performance-intelligence/intel-report";
+import { uploadFileToS3 } from "@/app/lib/storage/upload-files";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -137,6 +138,7 @@ export async function POST(request: NextRequest) {
         throw new Error("Invalid storage path");
       await mkdir(path.dirname(full), { recursive: true });
       await writeFile(full, pdf, { flag: "wx" });
+      await uploadFileToS3(storagePath, pdf, "application/pdf");
 
       const fileName = `${
         title

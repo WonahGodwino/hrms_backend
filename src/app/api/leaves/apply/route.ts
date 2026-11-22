@@ -9,6 +9,7 @@ import { sendLeaveNotificationEmail } from '@/app/lib/email'
 import { assertStorageQuota } from '@/app/lib/trial/guard'
 import { ensureStaffLeaveBalances } from '@/app/lib/leaves/balance-engine'
 import { startChain, notifyNextApprover } from '@/app/lib/leave/approval-chain'
+import { leaveAttachmentKey, uploadDocumentObject } from '@/app/lib/storage/documents'
 import { 
   createLeaveNotification, 
   NOTIFICATION_TYPES} from '@/app/lib/notifications/helpers'
@@ -836,6 +837,16 @@ export async function POST(request: NextRequest) {
         policyDetails: policyValidation.policyDetails
       }
     })
+
+    // Best-effort: push the leave attachment to object storage.
+    if (attachmentBuffer && result.leaveRequest.id) {
+      await uploadDocumentObject(
+        leaveAttachmentKey(staff.companyId, result.leaveRequest.id),
+        attachmentBuffer,
+        (key) => prisma.leaveRequest.update({ where: { id: result.leaveRequest.id }, data: { s3Key: key } }),
+        attachmentMimeType || 'application/octet-stream',
+      ).catch(() => {})
+    }
 
     // Send notifications (keep the existing notification code)
     try {

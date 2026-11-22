@@ -14,6 +14,7 @@ import { getResponseDeadline, isResponseExpired } from '@/app/lib/offers/respons
 import { CANDIDATE_REQUIRED_DOCS, REQUIRED_CATEGORIES, docFor } from '@/app/lib/offers/candidate-documents'
 import { promises as fs } from 'fs'
 import * as path from 'path'
+import { uploadFileToS3 } from '@/app/lib/storage/upload-files'
 
 const ipLimiter = rateLimit({ interval: 60 * 1000, uniqueTokenPerInterval: 5000 })
 
@@ -117,6 +118,7 @@ export async function POST(request: NextRequest) {
     const fileName = `${Date.now()}_${safeName}`
     await fs.writeFile(path.join(dir, fileName), buffer)
     const relativePath = `/candidate-docs/${offer.candidateId}/${category}/${fileName}`
+    await uploadFileToS3(relativePath, buffer)
 
     // Link to an onboarding if one already exists for this offer.
     const onboarding = await prisma.onboarding.findUnique({ where: { offerId: offer.id }, select: { id: true } }).catch(() => null)

@@ -4,11 +4,11 @@
 // images). Filenames are server-generated UUIDs, so only module members with a
 // valid token can fetch them.
 import { NextRequest, NextResponse } from 'next/server'
-import { readFile } from 'fs/promises'
 import path from 'path'
 
 import { requireModuleAccess, ALL_ROLES } from '@/app/lib/module-access'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
+import { readUploadFile } from '@/app/lib/storage/upload-files'
 
 const MIME_BY_EXT: Record<string, string> = {
   '.pdf': 'application/pdf',
@@ -41,19 +41,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const documentsDir = path.join(process.cwd(), 'uploads', 'loan-documents')
     const filePath = path.join(documentsDir, fileName)
 
-    try {
-      const buffer = await readFile(filePath)
-      const contentType = MIME_BY_EXT[path.extname(fileName).toLowerCase()] || 'application/octet-stream'
-      return new NextResponse(new Uint8Array(buffer), {
-        status: 200,
-        headers: {
-          'Content-Type': contentType,
-          'Content-Disposition': `inline; filename="${fileName}"`,
-        },
-      })
-    } catch {
+    const bytes = await readUploadFile(path.join('uploads', 'loan-documents', fileName), filePath)
+    if (!bytes) {
       return withCors(NextResponse.json({ success: false, message: 'Document not found' }, { status: 404 }), origin)
     }
+    const contentType = MIME_BY_EXT[path.extname(fileName).toLowerCase()] || 'application/octet-stream'
+    return new NextResponse(bytes, {
+      status: 200,
+      headers: {
+        'Content-Type': contentType,
+        'Content-Disposition': `inline; filename="${fileName}"`,
+      },
+    })
   } catch (error: any) {
     console.error('Error fetching loan document:', error)
     return withCors(

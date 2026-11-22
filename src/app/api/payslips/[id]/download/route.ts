@@ -8,6 +8,7 @@ import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { getPayslipDisplayFields, calculateTotals } from '@/app/lib/payroll/templates/utils'
 import type { CustomFieldValue } from '@/app/lib/payroll/templates/types'
+import { getPayslipObject } from '@/app/lib/storage/payslip-storage'
 
 type RouteParams = {
   params: {
@@ -58,6 +59,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         fileType: true,
         fileSize: true,
         fileData: true,
+        s3Key: true,
         month: true,
         year: true,
         grossPay: true,
@@ -219,10 +221,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         )
     }
 
-    // Check if file data exists
-    if (!payslip.fileData) {
+    // Resolve bytes: object storage (S3) first, then the DB blob fallback.
+    let fileBytes: Uint8Array | null = null
+    if (payslip.s3Key) {
+      fileBytes = await getPayslipObject(payslip.s3Key)
+    }
+    if (!fileBytes && payslip.fileData) {
+      fileBytes = new Uint8Array(payslip.fileData)
+    }
+    if (!fileBytes) {
       return withCors(
-        ApiResponse.error('Payslip file not found in database', 404),
+        ApiResponse.error('Payslip file not found', 404),
         origin
       )
     }
@@ -279,9 +288,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    // Convert Buffer to Uint8Array for Response
-    const fileBuffer = payslip.fileData
-    const uint8Array = new Uint8Array(fileBuffer)
+    // Normalize to a fresh Uint8Array<ArrayBuffer> for the response body.
+    const uint8Array = new Uint8Array(fileBytes)
 
     // Determine content type
     const extension = payslip.fileName.toLowerCase().endsWith('.pdf') ? '.pdf' : 

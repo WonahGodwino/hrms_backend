@@ -12,6 +12,7 @@ import { verifyOfferResponseToken } from '@/app/lib/offers/response-token'
 import { getResponseDeadline, isResponseExpired } from '@/app/lib/offers/response-window'
 import { promises as fs } from 'fs'
 import * as path from 'path'
+import { uploadFileToS3 } from '@/app/lib/storage/upload-files'
 
 const ipLimiter = rateLimit({ interval: 60 * 1000, uniqueTokenPerInterval: 5000 })
 
@@ -77,6 +78,7 @@ export async function POST(request: NextRequest) {
     const fileName = `${Date.now()}_${safeName}`
     await fs.writeFile(path.join(uploadDir, fileName), buffer)
     const relativePath = `/offers/executed/${offer.id}/${fileName}`
+    await uploadFileToS3(relativePath, buffer, 'application/pdf')
 
     const now = new Date()
     const meta = (offer.metadata && typeof offer.metadata === 'object') ? offer.metadata as any : {}

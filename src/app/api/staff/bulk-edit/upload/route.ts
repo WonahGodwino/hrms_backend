@@ -34,6 +34,7 @@ import {
     describeIdentifierCollision, findIdentifierHolder
 } from '@/app/lib/staff/identifierCollision';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { uploadFileToS3 } from '@/app/lib/storage/upload-files';
 
 // -----------------------------
 // Helpers (mirrors staff/upload/route.ts's cell parsing)
@@ -292,6 +293,7 @@ export async function POST(request: NextRequest) {
 		const fileName = `staff-bulk-edit-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
 		const savedFilePath = path.join(staffDir, fileName);
 		await writeFile(savedFilePath, buffer);
+		await uploadFileToS3(getRelativePath(savedFilePath), buffer);
 
 		const uploadRecord = await createPendingStaffBulkEditUpload(companyId, `[Bulk Edit] ${file.name}`, getRelativePath(savedFilePath), authUser.userId, data.length);
 

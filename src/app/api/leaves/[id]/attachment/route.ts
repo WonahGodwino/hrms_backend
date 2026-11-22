@@ -12,6 +12,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { readFile } from 'fs/promises'
 import path from 'path'
+import { readDocumentObject } from '@/app/lib/storage/documents'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -45,6 +46,7 @@ export async function GET(
         attachmentData: true,
         attachmentUrl: true,
         hasAttachment: true,
+        s3Key: true,
       },
     })
 
@@ -85,15 +87,18 @@ export async function GET(
     const disposition = forceDownload ? 'attachment' : 'inline'
     const fileName = leave.fileName || 'leave-attachment'
 
-    if (leave.attachmentData) {
+    let bytes: Uint8Array<ArrayBuffer> | null = null
+    if (leave.s3Key) bytes = await readDocumentObject(leave.s3Key)
+    if (!bytes && leave.attachmentData) bytes = new Uint8Array(leave.attachmentData)
+    if (bytes) {
       return withCors(
-        new NextResponse(leave.attachmentData as any, {
+        new NextResponse(bytes, {
           status: 200,
           headers: {
             'Content-Type': leave.attachmentMimeType || 'application/octet-stream',
             'Content-Disposition': `${disposition}; filename="${fileName}"`,
             'Cache-Control': 'private, no-cache',
-            'Content-Length': String(leave.attachmentSize ?? (leave.attachmentData as Buffer).length),
+            'Content-Length': String(leave.attachmentSize ?? bytes.length),
           },
         }),
         origin

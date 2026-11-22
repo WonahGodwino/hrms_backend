@@ -12,6 +12,7 @@ import { getAPIKey, getDefaultModel } from '@/app/lib/aiConfig'
 import { extractCandidateCvText, validateCvFile, MAX_FILES_PER_RUN } from './cvIntake'
 import { buildWeightsFromCriteria, type ScreeningCriterion } from './weights'
 import { getScreeningProfile } from './profiles'
+import { screeningCvResultKey, uploadDocumentObject } from '@/app/lib/storage/documents'
 
 export const STALE_RUN_THRESHOLD_MS = 15 * 60 * 1000
 
@@ -86,17 +87,26 @@ export async function startScreeningRun(params: StartRunParams): Promise<StartRu
     },
   })
 
-  await prisma.screeningCvResult.createMany({
-    data: files.map((file, i) => ({
-      companyId,
-      runId: run.id,
-      fileName: file.fileName,
-      mimeType: detectedMimeTypes[i],
-      sizeBytes: file.sizeBytes,
-      data: new Uint8Array(file.buffer),
-      status: 'PENDING',
-    })),
-  })
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]
+    const created = await prisma.screeningCvResult.create({
+      data: {
+        companyId,
+        runId: run.id,
+        fileName: file.fileName,
+        mimeType: detectedMimeTypes[i],
+        sizeBytes: file.sizeBytes,
+        data: new Uint8Array(file.buffer),
+        status: 'PENDING',
+      },
+    })
+    await uploadDocumentObject(
+      screeningCvResultKey(companyId, created.id),
+      file.buffer,
+      (key) => prisma.screeningCvResult.update({ where: { id: created.id }, data: { s3Key: key } }),
+      detectedMimeTypes[i] || 'application/octet-stream',
+    ).catch(() => {})
+  }
 
   return { runId: run.id, totalCandidates: files.length }
 }

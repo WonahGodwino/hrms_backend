@@ -8,6 +8,7 @@
 // guarantees are implemented exactly once.
 import { prisma } from '@/app/lib/db'
 import type { Prisma } from '@prisma/client'
+import { uploadPayslipToS3 } from '@/app/lib/storage/payslip-storage'
 
 /**
  * Per-row concurrency for upload processors — was hardcoded to 4 in each of
@@ -85,7 +86,7 @@ export async function upsertPayrollAndPayslip(
     payslipCategory: category,
   }
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const existingPayroll = await tx.payroll.findUnique({
       where: { staffRecordId_month_year_companyId_payslipCategory: keyWhere },
       select: { id: true },
@@ -131,4 +132,22 @@ export async function upsertPayrollAndPayslip(
       priorEmailStatus: existingPayslip?.emailStatus ?? null,
     }
   })
+
+  // Object storage (S3): best-effort upload after commit — never blocks or
+  // fails the DB write; reads fall back to fileData while storage is off.
+  try {
+    const fileData = (input.payslipData as any).fileData as Uint8Array | Buffer | null | undefined
+    if (fileData) {
+      await uploadPayslipToS3({
+        payslipId: result.payslipId,
+        companyId: input.companyId,
+        payrollId: result.payrollId,
+        bytes: fileData,
+      })
+    }
+  } catch (e) {
+    console.warn('[payslips] S3 upload skipped/failed', e)
+  }
+
+  return result
 }

@@ -9,8 +9,8 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
-import fs from 'fs/promises'
 import path from 'path'
+import { readUploadFile } from '@/app/lib/storage/upload-files'
 import { attachmentDisposition } from '@/app/lib/excel/sheet-theme'
 
 export async function OPTIONS(request: NextRequest) {
@@ -41,12 +41,11 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
     const fullPath = path.isAbsolute(uploadRecord.filePath) ? uploadRecord.filePath : path.join(process.cwd(), uploadRecord.filePath)
 
-    let fileBuffer: Buffer
-    try {
-      fileBuffer = await fs.readFile(fullPath)
-    } catch {
+    const bytes = await readUploadFile(uploadRecord.filePath, fullPath)
+    if (!bytes) {
       return withCors(ApiResponse.error('The original file is no longer available on the server.', 404), origin)
     }
+    const fileBuffer = Buffer.from(bytes)
 
     const response = new NextResponse(new Uint8Array(fileBuffer), {
       headers: {

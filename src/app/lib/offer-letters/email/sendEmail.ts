@@ -9,6 +9,8 @@ import MailComposer from 'nodemailer/lib/mail-composer';
 
 import { prisma } from '@/app/lib/db';
 
+import { offerLetterEmailAttachmentKey, uploadDocumentObject } from '@/app/lib/storage/documents';
+
 import { appendOfferLetterToSent } from './mailbox';
 import { substituteEmailVariables } from './templateSubstitution';
 import { getOfferLetterSenderIdentity, getOfferLetterSmtpTransport } from './transport';
@@ -170,16 +172,24 @@ export async function sendOfferLetterEmail(params: SendOfferLetterEmailParams) {
 	});
 
 	if (status === 'SENT' && attachmentInputs.length > 0) {
-		await prisma.offerLetterEmailAttachment.createMany({
-			data: attachmentInputs.map((a) => ({
-				emailId: emailRow.id,
-				fileName: a.fileName,
-				fileSize: a.data.length,
-				mimeType: a.mimeType,
-				fileData: a.data as any,
-				source: a.source,
-			})),
-		});
+		for (const a of attachmentInputs) {
+			const att = await prisma.offerLetterEmailAttachment.create({
+				data: {
+					emailId: emailRow.id,
+					fileName: a.fileName,
+					fileSize: a.data.length,
+					mimeType: a.mimeType,
+					fileData: a.data as any,
+					source: a.source,
+				},
+			});
+			await uploadDocumentObject(
+				offerLetterEmailAttachmentKey(att.id),
+				a.data,
+				(key) => prisma.offerLetterEmailAttachment.update({ where: { id: att.id }, data: { s3Key: key } }),
+				a.mimeType,
+			).catch(() => {});
+		}
 	}
 
 	return emailRow;

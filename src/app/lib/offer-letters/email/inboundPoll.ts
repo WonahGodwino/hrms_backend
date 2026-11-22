@@ -39,6 +39,8 @@ import { simpleParser } from 'mailparser';
 
 import { prisma } from '@/app/lib/db';
 
+import { offerLetterEmailAttachmentKey, offerLetterMailboxAttachmentKey, uploadDocumentObject } from '@/app/lib/storage/documents';
+
 import { isAbortedError, raceWithAbort } from './abortUtil';
 import { getOfferLetterMailConfig } from './mailConfig';
 import { createOfferLetterImapClient } from './mailbox';
@@ -253,16 +255,24 @@ async function processFolder(
 				});
 
 				if (parsed.attachments?.length) {
-					await prisma.offerLetterEmailAttachment.createMany({
-						data: parsed.attachments.map((a) => ({
-							emailId: created.id,
-							fileName: a.filename || 'attachment',
-							fileSize: a.size ?? a.content.length,
-							mimeType: a.contentType || 'application/octet-stream',
-							fileData: a.content as any,
-							source: direction === 'OUTBOUND' ? 'USER_UPLOADED' : 'CANDIDATE_REPLY',
-						})),
-					});
+					for (const a of parsed.attachments) {
+						const att = await prisma.offerLetterEmailAttachment.create({
+							data: {
+								emailId: created.id,
+								fileName: a.filename || 'attachment',
+								fileSize: a.size ?? a.content.length,
+								mimeType: a.contentType || 'application/octet-stream',
+								fileData: a.content as any,
+								source: direction === 'OUTBOUND' ? 'USER_UPLOADED' : 'CANDIDATE_REPLY',
+							},
+						});
+						await uploadDocumentObject(
+							offerLetterEmailAttachmentKey(att.id),
+							a.content as Buffer,
+							(key) => prisma.offerLetterEmailAttachment.update({ where: { id: att.id }, data: { s3Key: key } }),
+							a.contentType || 'application/octet-stream',
+						).catch(() => {});
+					}
 				}
 
 				await prisma.offerLetterMailboxMessage.create({
@@ -310,15 +320,23 @@ async function processFolder(
 					},
 				});
 				if (parsed.attachments?.length) {
-					await prisma.offerLetterMailboxAttachment.createMany({
-						data: parsed.attachments.map((attachment) => ({
-							messageId: staged.id,
-							fileName: attachment.filename || 'attachment',
-							fileSize: attachment.size ?? attachment.content.length,
-							mimeType: attachment.contentType || 'application/octet-stream',
-							fileData: attachment.content as any,
-						})),
-					});
+					for (const attachment of parsed.attachments) {
+						const att = await prisma.offerLetterMailboxAttachment.create({
+							data: {
+								messageId: staged.id,
+								fileName: attachment.filename || 'attachment',
+								fileSize: attachment.size ?? attachment.content.length,
+								mimeType: attachment.contentType || 'application/octet-stream',
+								fileData: attachment.content as any,
+							},
+						});
+						await uploadDocumentObject(
+							offerLetterMailboxAttachmentKey(att.id),
+							attachment.content as Buffer,
+							(key) => prisma.offerLetterMailboxAttachment.update({ where: { id: att.id }, data: { s3Key: key } }),
+							attachment.contentType || 'application/octet-stream',
+						).catch(() => {});
+					}
 				}
 				outcome.imported++;
 				outcome.unmatched++;

@@ -6,6 +6,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
 import { renderDocx, MissingOfferLetterVariableError } from '@/app/lib/offer-letters/docxTemplate'
+import { generatedOfferLetterKey, uploadDocumentObject } from '@/app/lib/storage/documents'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -162,6 +163,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         },
       })
     })
+
+    await uploadDocumentObject(
+      generatedOfferLetterKey(existing.companyId, id),
+      generatedBytes,
+      (key) => prisma.generatedOfferLetter.update({ where: { id }, data: { s3Key: key } }),
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ).catch(() => {})
 
     return withCors(ApiResponse.success(updated, 'Offer letter updated'), origin)
   } catch (error) {

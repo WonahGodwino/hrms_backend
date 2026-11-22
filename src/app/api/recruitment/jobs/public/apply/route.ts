@@ -8,6 +8,7 @@ import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { fileTypeFromBuffer } from "file-type";
 import { extractCvText } from "@/app/lib/recruitment/cvText";
 import { mail, receivedMail } from "@/app/lib/candidate-portal/emails";
+import { candidateFileKey, uploadDocumentObject } from "@/app/lib/storage/documents";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -283,6 +284,13 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    await uploadDocumentObject(
+      candidateFileKey(job.companyId, cvFileData.id),
+      cvUint8Array,
+      (key) => prisma.candidateFile.update({ where: { id: cvFileData.id }, data: { s3Key: key } }),
+      cvFileType?.mime || "application/octet-stream",
+    ).catch(() => {});
+
     // Save cover letter file if provided
     let coverLetterFileDataId: string | null = null;
     if (coverLetterFileBuffer && coverLetterFile) {
@@ -301,6 +309,13 @@ export async function POST(request: NextRequest) {
         },
       });
       coverLetterFileDataId = coverLetterFileData.id;
+
+      await uploadDocumentObject(
+        candidateFileKey(job.companyId, coverLetterFileData.id),
+        coverLetterUint8Array,
+        (key) => prisma.candidateFile.update({ where: { id: coverLetterFileData.id }, data: { s3Key: key } }),
+        coverLetterFileType?.mime || "application/octet-stream",
+      ).catch(() => {});
     }
 
     await assertApplicantCapacity(job.companyId, job.id)

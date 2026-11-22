@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
 import { createHash } from "crypto";
-import { readFile } from "fs/promises";
 import { NextResponse } from "next/server";
 import prisma from "@/app/lib/prisma";
 import { RouteContext } from "@/app/lib/self-appraisal";
+import { readUploadFile } from "@/app/lib/storage/upload-files";
 import {
   logReportEvent,
   reportFilePath,
@@ -60,12 +60,13 @@ export async function GET(
     });
     if (claimed.count !== 1) return deny("limit reached");
 
-    let file: Buffer;
+    let file: Uint8Array<ArrayBuffer> | null;
     try {
-      file = await readFile(reportFilePath(r.storagePath));
+      file = await readUploadFile(r.storagePath, reportFilePath(r.storagePath));
     } catch {
       return deny("file missing");
     }
+    if (!file) return deny("file missing");
     await logReportEvent({
       reportId: r.id,
       companyId: share.companyId,
@@ -73,7 +74,7 @@ export async function GET(
       shareId: share.id,
       ipAddress: ip,
     });
-    return new NextResponse(new Uint8Array(file), {
+    return new NextResponse(file, {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${r.fileName ?? "report.pdf"}"`,

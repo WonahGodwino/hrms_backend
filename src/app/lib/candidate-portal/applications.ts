@@ -1,5 +1,6 @@
 import { prisma } from "@/app/lib/db";
 import { extractCvText } from "@/app/lib/recruitment/cvText";
+import { candidateFileKey, uploadDocumentObject } from "@/app/lib/storage/documents";
 import {
   Authed,
   httpErr,
@@ -387,6 +388,21 @@ export async function applyWithProfile(account: Authed, body: any) {
       },
       { timeout: 30000, maxWait: 10000 },
     );
+
+    // Best-effort: push the copied CV / cover letter into object storage.
+    const copiedFiles = await prisma.candidateFile.findMany({
+      where: { applicationId: app.id },
+      select: { id: true, data: true, mimeType: true },
+    });
+    for (const f of copiedFiles) {
+      await uploadDocumentObject(
+        candidateFileKey(job.companyId, f.id),
+        f.data ? new Uint8Array(f.data) : null,
+        (key) => prisma.candidateFile.update({ where: { id: f.id }, data: { s3Key: key } }),
+        f.mimeType || undefined,
+      ).catch(() => {});
+    }
+
     await mail(
       acc.email,
       receivedMail(

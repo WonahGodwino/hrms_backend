@@ -4,8 +4,8 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { readFile } from 'fs/promises'
 import path from 'path'
+import { readUploadFile } from '@/app/lib/storage/upload-files'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -79,7 +79,14 @@ export async function GET(
       ? uploadRecord.filePath
       : path.join(projectRoot, uploadRecord.filePath)
 
-    const fileBuffer = await readFile(absolutePath)
+    const bytes = await readUploadFile(uploadRecord.filePath, absolutePath)
+    if (!bytes) {
+      return withCors(
+        ApiResponse.error('Original file not found', 404),
+        origin
+      )
+    }
+    const fileBuffer = Buffer.from(bytes)
 
     const fileExt = path.extname(uploadRecord.fileName).toLowerCase()
     let contentType = 'application/octet-stream'

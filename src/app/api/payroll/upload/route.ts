@@ -20,6 +20,7 @@ import { compressFileBuffer, decompressFileBufferIfNeeded } from '@/app/lib/payr
 import { MAX_PAYROLL_UPLOAD_BYTES } from '@/app/lib/payroll/upload/parse'
 import { hashUpload, parseAndValidatePayroll, parseExpectedPeriod } from '@/app/lib/payroll/upload/run'
 import { getRelativePath, ensureUploadDirectories, processPayrollUploadInBackground } from '@/app/lib/payroll/upload/background'
+import { uploadFileToS3, uploadFileS3Key } from '@/app/lib/storage/upload-files'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -257,6 +258,7 @@ export async function POST(request: NextRequest) {
     const originalFilePath = path.join(payrollDir, originalFileName)
     await writeFile(originalFilePath, buffer)
     const relativeOriginalPath = getRelativePath(originalFilePath)
+    await uploadFileToS3(relativeOriginalPath, buffer)
 
     // Gzip before the DB write — spreadsheets are the common case and
     // compress poorly (already-zipped OOXML), but CSV uploads shrink
@@ -286,6 +288,11 @@ export async function POST(request: NextRequest) {
       // transparently gunzips based on the gzip magic bytes.
       compressedBuffer
     )
+
+    await prisma.payrollUpload.update({
+      where: { id: uploadRecord.id },
+      data: { s3Key: uploadFileS3Key(relativeOriginalPath) },
+    }).catch(() => {})
 
     // Respond immediately; actual row-by-row processing (DB writes, PDF
     // generation, emails) continues after the response is sent. This process

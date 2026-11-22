@@ -58,9 +58,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       orderBy: { excelRow: 'asc' },
     })
 
-    const entries = generated
-      .filter((r: any) => r.outputKey)
-      .map((r: any) => ({ name: path.basename(r.outputKey), data: readRunFile(r.outputKey) }))
+    const entries: { name: string; data: Buffer }[] = []
+    for (const r of generated) {
+      if (!r.outputKey) continue
+      const data = await readRunFile(r.outputKey)
+      if (data) entries.push({ name: path.basename(r.outputKey), data })
+    }
 
     const report = await buildRunReportXlsx(run, allRows)
     entries.push({ name: 'run-report.xlsx', data: report })

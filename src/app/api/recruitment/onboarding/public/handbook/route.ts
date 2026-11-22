@@ -2,12 +2,12 @@
 //   GET ?token=... → streams the company's handbook PDF for the candidate
 //                     named on this onboarding's token.
 import { NextRequest, NextResponse } from 'next/server'
-import { promises as fs } from 'fs'
 import * as path from 'path'
 import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { verifyOnboardingResponseToken } from '@/app/lib/onboarding/response-token'
+import { readUploadFile } from '@/app/lib/storage/upload-files'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     }
 
     const fullPath = path.join(process.cwd(), 'public', onboarding.company.handbookPath)
-    const buffer = await fs.readFile(fullPath).catch(() => null)
+    const buffer = await readUploadFile(onboarding.company.handbookPath, fullPath)
     if (!buffer) return withCors(ApiResponse.error('Handbook file not found', 404), origin)
 
     return withCors(

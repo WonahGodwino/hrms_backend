@@ -4,8 +4,8 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import * as fs from 'fs'
 import * as path from 'path'
+import { readUploadFile } from '@/app/lib/storage/upload-files'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -28,13 +28,12 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const offerLetterPath = offer.offerLetterPath || offer.draftPdfPath
     if (!offerLetterPath) return withCors(ApiResponse.error('Offer document not found', 404), origin)
 
-    // Try to read from disk
+    // Try object storage first, then local disk.
     const fullPath = path.join(process.cwd(), 'public', offerLetterPath)
-    if (!fs.existsSync(fullPath)) return withCors(ApiResponse.error('Offer document not found', 404), origin)
+    const fileBytes = await readUploadFile(offerLetterPath, fullPath)
+    if (!fileBytes) return withCors(ApiResponse.error('Offer document not found', 404), origin)
 
-    const fileBuffer = fs.readFileSync(fullPath)
-
-    return new NextResponse(fileBuffer, {
+    return new NextResponse(fileBytes, {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',

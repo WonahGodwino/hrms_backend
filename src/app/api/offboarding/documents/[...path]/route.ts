@@ -4,13 +4,13 @@
 // when it is attached to an offboarding record the caller may see: HR and
 // admins within their company, staff only for their own records.
 import { NextRequest, NextResponse } from 'next/server';
-import { readFile } from 'fs/promises';
 import path from 'path';
 
 import { requireRoleAsync } from '@/app/lib/auth';
 import { withCors, handleCorsOptions } from '@/app/lib/cors';
 import { handleApiError } from '@/app/lib/utils';
 import { prisma } from '@/app/lib/prisma';
+import { readUploadFile } from '@/app/lib/storage/upload-files';
 
 const MIME_BY_EXT: Record<string, string> = {
 	'.pdf': 'application/pdf',
@@ -49,19 +49,19 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 			return withCors(NextResponse.json({ success: false, message: 'Document not found' }, { status: 404 }), origin);
 		}
 
-		try {
-			const buffer = await readFile(path.join(process.cwd(), 'uploads', 'offboarding-documents', fileName));
-			const contentType = MIME_BY_EXT[path.extname(fileName).toLowerCase()] || 'application/octet-stream';
-			return withCors(
-				new NextResponse(new Uint8Array(buffer), {
-					status: 200,
-					headers: { 'Content-Type': contentType, 'Content-Disposition': `inline; filename="${fileName}"` },
-				}),
-				origin
-			);
-		} catch {
+		const rel = path.join('uploads', 'offboarding-documents', fileName);
+		const bytes = await readUploadFile(rel, path.join(process.cwd(), rel));
+		if (!bytes) {
 			return withCors(NextResponse.json({ success: false, message: 'Document not found' }, { status: 404 }), origin);
 		}
+		const contentType = MIME_BY_EXT[path.extname(fileName).toLowerCase()] || 'application/octet-stream';
+		return withCors(
+			new NextResponse(bytes, {
+				status: 200,
+				headers: { 'Content-Type': contentType, 'Content-Disposition': `inline; filename="${fileName}"` },
+			}),
+			origin
+		);
 	} catch (error) {
 		console.error('[GET /api/offboarding/documents] Error:', error);
 		return withCors(handleApiError(error), origin);

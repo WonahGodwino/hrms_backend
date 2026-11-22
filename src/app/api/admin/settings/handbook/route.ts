@@ -10,6 +10,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { getAccessibleCompanyIds, pickTargetCompanyId, mapCompanyAccessError, CompanyAccessUser } from '@/app/lib/company/company-access'
+import { uploadFileToS3 } from '@/app/lib/storage/upload-files'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -64,6 +65,7 @@ export async function POST(req: NextRequest) {
 		const fileName = `${Date.now()}_${safeName}`
 		await fs.writeFile(path.join(uploadDir, fileName), buffer)
 		const relativePath = `/company/${companyId}/handbook/${fileName}`
+		await uploadFileToS3(relativePath, buffer, 'application/pdf')
 
 		// Best-effort cleanup of the previous file — never block the upload on this.
 		const previous = await prisma.company.findUnique({ where: { id: companyId }, select: { handbookPath: true } })

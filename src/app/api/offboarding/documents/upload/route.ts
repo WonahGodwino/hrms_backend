@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto';
 import { requireRoleAsync } from '@/app/lib/auth';
 import { withCors, handleCorsOptions } from '@/app/lib/cors';
 import { handleApiError } from '@/app/lib/utils';
+import { uploadFileToS3 } from '@/app/lib/storage/upload-files';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB, the largest cap the UI states
 const ALLOWED_EXT = ['.pdf', '.doc', '.docx', '.xls', '.xlsx'];
@@ -50,7 +51,9 @@ export async function POST(request: NextRequest) {
 
 		const sanitized = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
 		const fileName = `offboarding-${randomUUID()}-${sanitized}`;
-		await writeFile(path.join(documentsDir, fileName), Buffer.from(await file.arrayBuffer()));
+		const bytes = Buffer.from(await file.arrayBuffer());
+		await writeFile(path.join(documentsDir, fileName), bytes);
+		await uploadFileToS3(path.join('uploads', 'offboarding-documents', fileName), bytes);
 
 		return withCors(
 			NextResponse.json({

@@ -21,6 +21,7 @@ import {
 } from '@/app/lib/payroll/templates/utils'
 import { neutralizeRowForSpreadsheet } from '@/app/lib/payroll/utils/valueParsing'
 import type { PayrollPeriod } from '@/app/lib/payroll/upload/validate'
+import { uploadFileToS3 } from '@/app/lib/storage/upload-files'
 
 export function getRelativePath(absolutePath: string): string {
   const projectRoot = process.cwd()
@@ -78,9 +79,12 @@ async function generateFailedRecordsFile(
   const failedFilePath = path.join(payrollDir, failedFileName)
 
   const failedBuffer = await failedWorkbook.xlsx.writeBuffer()
-  await writeFile(failedFilePath, Buffer.from(failedBuffer as any))
+  const failedBytes = Buffer.from(failedBuffer as any)
+  await writeFile(failedFilePath, failedBytes)
 
-  return getRelativePath(failedFilePath)
+  const rel = getRelativePath(failedFilePath)
+  await uploadFileToS3(rel, failedBytes)
+  return rel
 }
 
 export async function processPayrollUploadInBackground({

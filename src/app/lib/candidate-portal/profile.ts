@@ -1,6 +1,7 @@
 import path from "path";
 import { fileTypeFromBuffer } from "file-type";
 import { prisma } from "@/app/lib/db";
+import { candidateAccountDocumentKey, readDocumentObject, uploadDocumentObject } from "@/app/lib/storage/documents";
 import {
   accountDto,
   httpErr,
@@ -362,6 +363,12 @@ export async function uploadDocument(accountId: string, form: FormData) {
     },
     { timeout: 30000, maxWait: 10000 },
   );
+  await uploadDocumentObject(
+    candidateAccountDocumentKey(doc.id),
+    buf,
+    (key) => prisma.candidateAccountDocumentBlob.update({ where: { documentId: doc.id }, data: { s3Key: key } }),
+    mimeType,
+  ).catch(() => {});
   return docDto(doc);
 }
 
@@ -371,8 +378,12 @@ export async function downloadDocument(accountId: string, id: string) {
     include: { blob: true },
   });
   if (!d || !d.blob) throw httpErr(404, "Document not found");
+  let bytes: Uint8Array | null = null;
+  if (d.blob.s3Key) bytes = await readDocumentObject(d.blob.s3Key);
+  if (!bytes && d.blob.data) bytes = new Uint8Array(d.blob.data);
+  if (!bytes) throw httpErr(404, "Document not found");
   const ascii = d.fileName.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
-  return new Response(new Uint8Array(d.blob.data), {
+  return new Response(new Uint8Array(bytes), {
     status: 200,
     headers: {
       "Content-Type": d.mimeType,

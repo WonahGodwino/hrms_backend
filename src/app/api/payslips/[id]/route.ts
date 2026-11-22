@@ -6,6 +6,7 @@ import { prisma } from '@/app/lib/db';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils';
 import { regeneratePayslipPdf } from '@/app/lib/payroll/buildPayslipPdfInput';
+import { uploadPayslipToS3 } from '@/app/lib/storage/payslip-storage';
 
 type RouteParams = {
 	params: {
@@ -258,6 +259,18 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 				updatedAt: new Date()
 			}
 		});
+
+		// Best-effort object storage (S3) — never blocks the DB update.
+		try {
+			await uploadPayslipToS3({
+				payslipId: payslip.id,
+				companyId: payslip.companyId,
+				payrollId: payslip.payrollId,
+				bytes: pdfBuffer,
+			});
+		} catch (e) {
+			console.warn('[payslips] S3 upload skipped/failed', e);
+		}
 
 		return withCors(
 			ApiResponse.success(

@@ -7,6 +7,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveCvScreeningCompanyId } from '@/app/lib/cv-screening/companyScope'
+import { readDocumentObject } from '@/app/lib/storage/documents'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -34,13 +35,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const result = await prisma.screeningCvResult.findFirst({
       where: { id, companyId: scope.companyId as string },
-      select: { fileName: true, mimeType: true, sizeBytes: true, data: true },
+      select: { fileName: true, mimeType: true, sizeBytes: true, data: true, s3Key: true },
     })
 
     if (!result) return withCors(ApiResponse.error('CV file not found', 404), origin)
 
+    let bytes: Uint8Array<ArrayBuffer> | null = null
+    if (result.s3Key) bytes = await readDocumentObject(result.s3Key)
+    if (!bytes && result.data) bytes = new Uint8Array(result.data)
+    if (!bytes) return withCors(ApiResponse.error('CV file not found', 404), origin)
+
     const filename = sanitizeFilename(result.fileName || 'cv')
-    const res = new NextResponse(result.data, {
+    const res = new NextResponse(bytes, {
       status: 200,
       headers: {
         'Content-Type': result.mimeType || 'application/octet-stream',

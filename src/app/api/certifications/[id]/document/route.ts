@@ -1,4 +1,3 @@
-import fs from 'fs';
 import { NextRequest } from 'next/server';
 import path from 'path';
 
@@ -7,6 +6,7 @@ import { prisma } from '@/app/lib/db';
 import { requireModuleAccess } from '@/app/lib/module-access';
 import { validateAndStoreFile } from '@/app/lib/uploadUtils';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { readUploadFile } from '@/app/lib/storage/upload-files';
 
 export async function OPTIONS(req: NextRequest) {
 	return handleCorsOptions(req);
@@ -51,12 +51,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 		if (download && document.fileUrl && !document.fileUrl.startsWith('http://') && !document.fileUrl.startsWith('https://')) {
 			const resolvedPath = path.isAbsolute(document.fileUrl) ? document.fileUrl : path.join(process.cwd(), document.fileUrl);
 
-			if (fs.existsSync(resolvedPath)) {
-				const fileBuffer = fs.readFileSync(resolvedPath);
+			const bytes = await readUploadFile(document.fileUrl.replace(/^\/+/, ''), resolvedPath);
+			if (bytes) {
 				const fileName = document.fileName ?? `${record.certificationType.name}_Certificate.pdf`;
 				const contentType = document.fileType ?? 'application/pdf';
 
-				return new Response(fileBuffer, {
+				return new Response(bytes, {
 					headers: {
 						'Content-Type': contentType,
 						'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,

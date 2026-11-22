@@ -8,6 +8,7 @@ import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { assertStorageQuota } from '@/app/lib/trial/guard'
+import { staffOnboardingDocumentKey, uploadDocumentObject } from '@/app/lib/storage/documents'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -127,6 +128,13 @@ export async function POST(request: NextRequest) {
         uploadedBy: user.userId,
       },
     })
+
+    await uploadDocumentObject(
+      staffOnboardingDocumentKey(staff.companyId, saved.id),
+      buffer,
+      (key) => (prisma as any).staffOnboardingDocument.update({ where: { id: saved.id }, data: { s3Key: key } }),
+      file.type || 'application/octet-stream',
+    ).catch(() => {})
 
     const docs = await (prisma as any).staffOnboardingDocument.findMany({
       where: { staffId: staff.id },

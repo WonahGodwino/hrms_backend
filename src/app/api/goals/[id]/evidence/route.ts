@@ -15,13 +15,10 @@ import {
   logGoalAction,
   parseText,
 } from "@/app/lib/goals/goal-utils";
-import { readFile } from "fs/promises";
 import {
   assertUploadedFile,
   sanitizeFileName,
-  parseEvidenceUrl,
-  evidenceDiskPath,
-  CONTENT_TYPES,
+  readUploadedBuffer,
 } from "@/app/lib/goals/evidence-files";
 
 export async function OPTIONS(request: NextRequest) {
@@ -67,19 +64,9 @@ export const POST = withGoalAuth<{ id: string }>(
       progressUpdateId = update.id;
     }
 
-    const parsed = parseEvidenceUrl(fileUrl);
-    let buffer: Buffer | null = null;
-    let mimeType: string | null = null;
-    if (parsed) {
-      mimeType = CONTENT_TYPES[parsed.ext] || "application/octet-stream";
-      try {
-        buffer = await readFile(
-          evidenceDiskPath(parsed.companyId, parsed.storedName),
-        );
-      } catch {
-        // buffer remains null
-      }
-    }
+    const bufInfo = await readUploadedBuffer(fileUrl, companyId);
+    const buffer: Buffer | null = bufInfo ? bufInfo.buffer : null;
+    const mimeType: string | null = bufInfo ? bufInfo.mimeType : null;
 
     const evidence = await prisma.$transaction(async (tx) => {
       const created = await tx.goalEvidence.create({

@@ -10,6 +10,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { promoteCandidateToStaff, PromoteCandidateError } from '@/app/lib/staff/promote-candidate-to-staff'
 import { promises as fs } from 'fs'
 import * as path from 'path'
+import { readUploadFile, uploadFileToS3 } from '@/app/lib/storage/upload-files'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -33,11 +34,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     const fullPath = path.join(process.cwd(), 'public', offer.executedPdfPath)
-    const buffer = await fs.readFile(fullPath).catch(() => null)
-    if (!buffer) return withCors(ApiResponse.error('Executed contract file not found', 404), origin)
+    const bytes = await readUploadFile(offer.executedPdfPath, fullPath)
+    if (!bytes) return withCors(ApiResponse.error('Executed contract file not found', 404), origin)
 
     return withCors(
-      new NextResponse(buffer, {
+      new NextResponse(bytes, {
         status: 200,
         headers: {
           'Content-Type': 'application/pdf',
@@ -86,6 +87,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const fileName = `${Date.now()}_${safeName}`
     await fs.writeFile(path.join(uploadDir, fileName), buffer)
     const relativePath = `/offers/executed/${offer.id}/${fileName}`
+    await uploadFileToS3(relativePath, buffer, 'application/pdf')
 
     const now = new Date()
     const meta = (offer.metadata && typeof offer.metadata === 'object') ? offer.metadata as any : {}

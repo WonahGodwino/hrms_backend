@@ -4,8 +4,8 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import fs from 'fs'
 import path from 'path'
+import { readUploadFile } from '@/app/lib/storage/upload-files'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -43,12 +43,12 @@ export async function GET(req: NextRequest, { params }: { params: { documentId: 
         ? document.fileUrl
         : path.join(process.cwd(), document.fileUrl)
 
-      if (fs.existsSync(resolvedPath)) {
-        const fileBuffer = fs.readFileSync(resolvedPath)
+      const bytes = await readUploadFile(document.fileUrl.replace(/^\/+/, ''), resolvedPath)
+      if (bytes) {
         const fileName = document.fileName ?? 'certificate-document.pdf'
         const contentType = document.fileType ?? 'application/pdf'
 
-        return new Response(fileBuffer, {
+        return new Response(bytes, {
           headers: {
             'Content-Type': contentType,
             'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,

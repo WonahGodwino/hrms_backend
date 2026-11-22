@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { uploadFileToS3 } from '@/app/lib/storage/upload-files';
 
 const DEFAULT_MAX_BYTES = parseInt(process.env.MAX_UPLOAD_BYTES || '') || 5 * 1024 * 1024; // 5 MB
 const DEFAULT_ALLOWED_MIME = [
@@ -42,6 +43,7 @@ export async function validateAndStoreFile(rawFile: any, uploadsDir: string, opt
 	const filePath = path.join(uploadsDir, storedFileName);
 
 	fs.writeFileSync(filePath, buffer);
+	await uploadFileToS3(`uploads/certifications/${storedFileName}`, buffer, rawFile.type || 'application/octet-stream');
 
 	return {
 		fileName: rawFile.name || sanitizedName,

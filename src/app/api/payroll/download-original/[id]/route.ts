@@ -6,9 +6,10 @@ import { requireRole } from '@/app/lib/auth'
 import { hasModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { readFile } from 'fs/promises'
 import path from 'path'
 import { decompressFileBufferIfNeeded } from '@/app/lib/payroll/templates/shared/file-compression'
+import { readUploadFile } from '@/app/lib/storage/upload-files'
+import { readDocumentObject } from '@/app/lib/storage/documents'
 
 
 export async function OPTIONS(request: NextRequest) {
@@ -95,22 +96,27 @@ export async function GET(
       }
     }
 
-    // Prefer the durable DB copy (survives a host restart/redeploy) over the
-    // local-disk file, which does not. Rows uploaded before fileData existed
-    // fall back to disk and may 404 if that host has since restarted.
-    let fileBuffer: Buffer
-    if (uploadRecord.fileData) {
+    // Prefer object storage (S3), then the durable DB copy, then local disk.
+    let fileBuffer: Buffer | null = null
+    if (uploadRecord.s3Key) {
+      const s3b = await readDocumentObject(uploadRecord.s3Key)
+      if (s3b) fileBuffer = Buffer.from(s3b)
+    }
+    if (!fileBuffer && uploadRecord.fileData) {
       // Rows written before compression was introduced store the raw
       // buffer; decompressFileBufferIfNeeded detects gzip's magic bytes
       // rather than assuming every row is compressed.
       fileBuffer = decompressFileBufferIfNeeded(Buffer.from(uploadRecord.fileData))
-    } else if (uploadRecord.filePath) {
+    }
+    if (!fileBuffer && uploadRecord.filePath) {
       const projectRoot = process.cwd()
       const absolutePath = path.isAbsolute(uploadRecord.filePath)
         ? uploadRecord.filePath
         : path.join(projectRoot, uploadRecord.filePath)
-      fileBuffer = await readFile(absolutePath)
-    } else {
+      const s3Bytes = await readUploadFile(uploadRecord.filePath, absolutePath)
+      if (s3Bytes) fileBuffer = Buffer.from(s3Bytes)
+    }
+    if (!fileBuffer) {
       return withCors(
         ApiResponse.error('Original file not found', 404),
         origin

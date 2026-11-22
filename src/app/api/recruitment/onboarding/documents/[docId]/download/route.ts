@@ -6,8 +6,8 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { promises as fs } from 'fs'
 import * as path from 'path'
+import { readUploadFile } from '@/app/lib/storage/upload-files'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -29,8 +29,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // (e.g. /candidate-docs/{candidateId}/{category}/{filename}).
     // Resolve the full path relative to the public directory.
     const fullPath = path.join(process.cwd(), 'public', doc.filePath.replace(/^\//, ''))
-    const buffer = await fs.readFile(fullPath).catch(() => null)
-    if (!buffer) return withCors(ApiResponse.error('Document file not found on disk', 404), origin)
+    const buffer = await readUploadFile(doc.filePath, fullPath)
+    if (!buffer) return withCors(ApiResponse.error('Document file not found', 404), origin)
 
     const ext = (doc.fileName || '').split('.').pop()?.toLowerCase() || ''
     const MIME_BY_EXT: Record<string, string> = {

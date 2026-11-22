@@ -6,6 +6,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { readDocumentObject } from '@/app/lib/storage/documents'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -27,7 +28,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return withCors(ApiResponse.error('Forbidden', 403), origin)
     }
 
-    const res = new NextResponse(new Uint8Array(doc.data), {
+    let bytes: Uint8Array<ArrayBuffer> | null = null
+    if (doc.s3Key) bytes = await readDocumentObject(doc.s3Key)
+    if (!bytes && doc.data) bytes = new Uint8Array(doc.data)
+    if (!bytes) return withCors(ApiResponse.error('Document not found', 404), origin)
+
+    const res = new NextResponse(bytes, {
       status: 200,
       headers: {
         'Content-Type': doc.mimeType || 'application/octet-stream',

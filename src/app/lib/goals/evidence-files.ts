@@ -3,6 +3,7 @@ import { stat, readFile } from "fs/promises";
 import { NextResponse } from "next/server";
 import { withCors } from "@/app/lib/cors";
 import { HttpError } from "./goal-utils";
+import { isS3Configured, getS3Object, putS3Object } from "@/app/lib/storage/s3";
 
 export const UPLOAD_ROOT =
   process.env.GOAL_EVIDENCE_UPLOAD_DIR || "/var/app-uploads/goal-evidence";
@@ -44,6 +45,26 @@ export function evidenceDiskPath(companyId: string, storedName: string) {
   return full;
 }
 
+/** S3 object key for an uploaded evidence file, derived from its canonical fileUrl. */
+export function evidenceS3Key(fileUrl: string): string {
+  const p = fileUrl.replace(/^\/+/, "")
+  return p.startsWith('goal-evidence/') ? p : `goal-evidence/${p}`
+}
+
+/** Best-effort upload of an evidence file to object storage. Never throws. */
+export async function uploadEvidenceToS3(
+  fileUrl: string,
+  bytes: Uint8Array | Buffer,
+  mimeType?: string,
+): Promise<void> {
+  if (!isS3Configured() || !fileUrl) return;
+  try {
+    await putS3Object(evidenceS3Key(fileUrl), new Uint8Array(bytes), mimeType || undefined);
+  } catch (e) {
+    console.warn("[evidence] S3 upload skipped/failed", e);
+  }
+}
+
 export async function assertUploadedFile(
   value: unknown,
   companyId: string,
@@ -55,6 +76,12 @@ export async function assertUploadedFile(
       400,
       "fileUrl must come from the evidence upload endpoint",
     );
+
+  // S3 first (object storage), then local disk for pre-migration files.
+  if (isS3Configured()) {
+    const bytes = await getS3Object(evidenceS3Key(fileUrl));
+    if (bytes) return fileUrl;
+  }
   try {
     await stat(evidenceDiskPath(parsed.companyId, parsed.storedName));
   } catch {
@@ -85,10 +112,24 @@ export async function readUploadedBuffer(
   const parsed = parseEvidenceUrl(fileUrl);
   if (!parsed) return null;
   if (expectedCompanyId && parsed.companyId !== expectedCompanyId) return null;
+
+  const mimeType = CONTENT_TYPES[parsed.ext] || "application/octet-stream";
+
+  // S3 first (object storage), then local disk for pre-migration files.
+  if (isS3Configured()) {
+    const bytes = await getS3Object(evidenceS3Key(fileUrl));
+    if (bytes) {
+      return { buffer: Buffer.from(bytes), mimeType, sizeBytes: bytes.length };
+    }
+  }
+
   try {
     const full = evidenceDiskPath(parsed.companyId, parsed.storedName);
     const buffer = await readFile(full);
-    const mimeType = CONTENT_TYPES[parsed.ext] || "application/octet-stream";
+    // Opportunistic backfill: push pre-migration disk files into object storage.
+    if (isS3Configured()) {
+      await uploadEvidenceToS3(fileUrl, buffer, mimeType);
+    }
     return { buffer, mimeType, sizeBytes: buffer.length };
   } catch {
     return null;

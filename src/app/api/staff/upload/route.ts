@@ -20,6 +20,7 @@ import { parseStaffUpload } from '@/app/lib/staff/upload-parser';
 import { missingRequiredColumns, validateStaffRows } from '@/app/lib/staff/upload-validator';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 import { assertStaffCapacity, recordStaffCreatedMany } from '@/app/lib/trial/guard';
+import { uploadFileToS3 } from '@/app/lib/storage/upload-files';
 
 function getRelativePath(absolutePath: string): string {
 	const projectRoot = process.cwd();
@@ -239,8 +240,10 @@ export async function POST(request: NextRequest) {
 			const failedFileName = `staff-upload-failed-${Date.now()}.xlsx`;
 			const failedFilePath = path.join(staffDir, failedFileName);
 			const failedBuffer = await failedWorkbook.xlsx.writeBuffer();
-			await writeFile(failedFilePath, Buffer.from(failedBuffer as any));
+			const failedBytes = Buffer.from(failedBuffer as any);
+			await writeFile(failedFilePath, failedBytes);
 			failedRecordsFilePath = getRelativePath(failedFilePath);
+			await uploadFileToS3(failedRecordsFilePath, failedBytes);
 		}
 
 		const uploadRecord = await prisma.staffUpload.create({
@@ -262,6 +265,7 @@ export async function POST(request: NextRequest) {
 		});
 
 		await writeFile(savedFilePath, buffer);
+		await uploadFileToS3(relativeFilePath, buffer);
 
 		if (companyId && (results.successful || results.failed)) {
 			await logBulkChange(request, authUser, { companyId, label: 'Staff upload', created: results.successful, skipped: results.failed, area: 'staff' });

@@ -7,7 +7,7 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validateCompanyAccess } from '@/app/lib/departments/department-utils'
-import fs from 'fs/promises'
+import { readUploadFile } from '@/app/lib/storage/upload-files'
 import { attachmentDisposition } from '@/app/lib/excel/sheet-theme'
 import path from 'path'
 
@@ -41,12 +41,11 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
     const fullPath = path.isAbsolute(job.filePath) ? job.filePath : path.join(process.cwd(), job.filePath)
 
-    let fileBuffer: Buffer
-    try {
-      fileBuffer = await fs.readFile(fullPath)
-    } catch {
+    const bytes = await readUploadFile(job.filePath, fullPath)
+    if (!bytes) {
       return withCors(ApiResponse.error('The export file is no longer available on the server.', 404), origin)
     }
+    const fileBuffer = Buffer.from(bytes)
 
     const response = new NextResponse(new Uint8Array(fileBuffer), {
       headers: {

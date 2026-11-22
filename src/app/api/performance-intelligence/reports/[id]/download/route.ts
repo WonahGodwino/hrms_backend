@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
-import { readFile } from "fs/promises";
 import { NextResponse } from "next/server";
 import prisma from "@/app/lib/prisma";
 import { RouteContext } from "@/app/lib/self-appraisal";
+import { readUploadFile } from "@/app/lib/storage/upload-files";
 import {
   authorizeSuper,
   logReportEvent,
@@ -39,7 +39,8 @@ export async function GET(
     )
       return withCors(ApiResponse.notFound("Report not available"), origin);
 
-    const file = await readFile(reportFilePath(report.storagePath));
+    const bytes = await readUploadFile(report.storagePath, reportFilePath(report.storagePath));
+    if (!bytes) return withCors(ApiResponse.notFound("Report not available"), origin);
     await logReportEvent({
       reportId: id,
       companyId,
@@ -47,7 +48,7 @@ export async function GET(
       actorId,
     });
     return withCors(
-      new NextResponse(new Uint8Array(file), {
+      new NextResponse(bytes, {
         headers: {
           "Content-Type": "application/pdf",
           "Content-Disposition": `attachment; filename="${report.fileName ?? "report.pdf"}"`,

@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto'
 
 import { requireModuleAccess, ALL_ROLES } from '@/app/lib/module-access'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
+import { uploadFileToS3 } from '@/app/lib/storage/upload-files'
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024 // 5MB — matches the wizard's stated cap
 const ALLOWED_MIME = ['application/pdf', 'image/jpeg', 'image/png']
@@ -45,7 +46,9 @@ export async function POST(request: NextRequest) {
 
     const sanitized = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
     const fileName = `loan-doc-${randomUUID()}-${sanitized}`
-    await writeFile(path.join(documentsDir, fileName), Buffer.from(await file.arrayBuffer()))
+    const bytes = Buffer.from(await file.arrayBuffer())
+    await writeFile(path.join(documentsDir, fileName), bytes)
+    await uploadFileToS3(path.join('uploads', 'loan-documents', fileName), bytes, file.type)
 
     return withCors(
       NextResponse.json({

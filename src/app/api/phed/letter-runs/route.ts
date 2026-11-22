@@ -149,7 +149,7 @@ export async function POST(req: NextRequest) {
 
     // Persist the source workbook (purged with the run on expiry).
     const safeName = file.name.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120) || 'source.xlsx'
-    const sourceStorageKey = writeRunFile(companyId, run.id, `source_${safeName}`, buffer)
+    const sourceStorageKey = await writeRunFile(companyId, run.id, `source_${safeName}`, buffer)
     await (prisma as any).phedLetterRun.update({ where: { id: run.id }, data: { storageKey: sourceStorageKey } })
 
     await auditLetterEvent(companyId, user.userId, 'UPLOAD_VALIDATE', run.id,

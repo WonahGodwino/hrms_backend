@@ -18,6 +18,7 @@ import ExcelJS from 'exceljs'
 import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
 import { prisma } from '@/app/lib/db'
+import { uploadFileToS3 } from '@/app/lib/storage/upload-files'
 import { XL, argb, buildSubtitle, confidentialFooter, safeFileName, solid, writeStyledTable } from '@/app/lib/excel/sheet-theme'
 
 export const EXPORT_DOMAINS = [
@@ -752,6 +753,7 @@ export async function generateCompanyExport(jobId: string): Promise<void> {
     const fileName = `Company Data (${safeFileName(company.companyName)}) ${new Date().toISOString().slice(0, 10)}.xlsx`
     const absoluteFilePath = path.join(dir, `${jobId}.xlsx`)
     await writeFile(absoluteFilePath, Buffer.from(buffer as ArrayBuffer))
+    await uploadFileToS3(path.relative(process.cwd(), absoluteFilePath), Buffer.from(buffer as ArrayBuffer))
 
     await prisma.companyExportJob.update({
       where: { id: jobId },

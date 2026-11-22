@@ -9,6 +9,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import fs from 'fs/promises'
 import path from 'path'
 import ExcelJS from 'exceljs'
+import { readUploadFile, uploadFileToS3 } from '@/app/lib/storage/upload-files'
 import { attachmentDisposition, buildSubtitle, confidentialFooter, safeFileName, toneCell, writeStyledTable } from '@/app/lib/excel/sheet-theme'
 
 type RouteParams = {
@@ -175,7 +176,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       const fullFilePath = resolveFilePath(filePathToUse)
       console.log(`[DOWNLOAD_FAILED] Resolved path: ${fullFilePath}`)
 
-      try {
+      // Object storage (S3) first, then local disk.
+      const s3Bytes = await readUploadFile(filePathToUse, fullFilePath)
+      if (s3Bytes) {
+        fileBuffer = Buffer.from(s3Bytes)
+        foundPath = fullFilePath
+      } else try {
         fileBuffer = await fs.readFile(fullFilePath)
         foundPath = fullFilePath
         console.log(`[DOWNLOAD_FAILED] File found at: ${foundPath}`)
@@ -238,6 +244,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
         // Save the generated file for future use
         await fs.writeFile(generatedFilePath, fileBuffer)
+        await uploadFileToS3(path.relative(process.cwd(), generatedFilePath), fileBuffer)
 
         // Update the database with the new path
         await prisma.payrollUpload.update({
