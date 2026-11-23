@@ -57,6 +57,9 @@ certs/
 *.key
 *.crt
 
+# QA/test credentials (not for version control)
+scripts/submodule-credentials-map.js
+
 # User uploads (generated at runtime)
 uploads/
 
