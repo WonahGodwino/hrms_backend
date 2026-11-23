@@ -5,6 +5,7 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { decimalToNumber } from '@/app/lib/prisma-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -65,10 +66,9 @@ export async function POST(
         )
       }
     } else if (user.role !== 'SUPER_ADMIN') {
-      const userAssignment = await prisma.userCompany.findFirst({
+      const userAssignment = await forCompany(leave.companyId).userCompany.findFirst({
         where: {
           userId: user.userId,
-          companyId: leave.companyId,
           role: { in: ['HR', 'ADMIN', 'ALL'] },
         },
       })

@@ -8,7 +8,8 @@ import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // GET /api/phed/cooperatives/:id — returns cooperative details + member list with amounts
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
   if (rl) return withCors(rl, origin)
@@ -16,13 +17,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const coop = await (prisma as any).phedCooperative.findUnique({
+    const coop = await prisma.phedCooperative.findUnique({
       where: { id: params.id },
       select: { id: true, name: true, isActive: true, companyId: true },
     })
     if (!coop) return withCors(ApiResponse.notFound('Cooperative not found'), origin)
 
-    const memberships = await (prisma as any).phedStaffCooperative.findMany({
+    const memberships = await prisma.phedStaffCooperative.findMany({
       where:   { cooperativeId: params.id },
       include: {
         staff: {
@@ -54,7 +55,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -62,7 +64,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
     const { name, isActive } = await req.json()
-    const coop = await (prisma as any).phedCooperative.update({
+    const coop = await prisma.phedCooperative.update({
       where: { id: params.id },
       data: {
         ...(name     !== undefined && { name }),
@@ -73,14 +75,15 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
-    await (prisma as any).phedCooperative.update({ where: { id: params.id }, data: { isActive: false } })
+    await prisma.phedCooperative.update({ where: { id: params.id }, data: { isActive: false } })
     return withCors(ApiResponse.success(null, 'Cooperative deactivated'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }

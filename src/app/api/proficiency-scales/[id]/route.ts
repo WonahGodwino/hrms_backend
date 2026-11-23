@@ -4,6 +4,7 @@ import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { verifyCompanyAccess } from "@/app/lib/access-control";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -20,10 +21,8 @@ async function loadScaleWithAccess(
 }
 
 // GET /api/proficiency-scales/:id
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -71,10 +70,8 @@ export async function GET(
 // PUT /api/proficiency-scales/:id
 // Bulk-syncs levels to match the modal's edit-in-place + single "Save Scales" behavior:
 // existing levels are updated, new ones (no id) are created, removed ones are deleted.
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function PUT(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -297,10 +294,8 @@ export async function PUT(
 }
 
 // DELETE /api/proficiency-scales/:id  (soft delete — archives, doesn't drop data)
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -335,10 +330,9 @@ export async function DELETE(
       );
     }
 
-    const inUse = await prisma.competency.findMany({
+    const inUse = await forCompany(scale.companyId).competency.findMany({
       where: {
         scaleId: params.id,
-        companyId: scale.companyId,
         status: { not: "ARCHIVED" },
       },
       select: { name: true },
@@ -346,10 +340,9 @@ export async function DELETE(
     });
 
     if (inUse.length > 0) {
-      const total = await prisma.competency.count({
+      const total = await forCompany(scale.companyId).competency.count({
         where: {
           scaleId: params.id,
-          companyId: scale.companyId,
           status: { not: "ARCHIVED" },
         },
       });
@@ -367,10 +360,9 @@ export async function DELETE(
       prisma.templateQuestion.count({
         where: { proficiencyScaleId: params.id },
       }),
-      prisma.questionBankItem.count({
+      forCompany(scale.companyId).questionBankItem.count({
         where: {
           proficiencyScaleId: params.id,
-          companyId: scale.companyId,
           isActive: true,
         },
       }),

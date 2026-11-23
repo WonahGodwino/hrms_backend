@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
 import { handleCorsOptions } from "@/app/lib/cors";
 import type { RouteContext } from "@/app/lib/self-appraisal";
 import { fbRoute, httpErr, staffNames, deptNames } from "@/app/lib/fraud-bias";
 import { serializeSignal, SIGNAL_INCLUDE } from "@/app/lib/fraud-bias-engine";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -17,8 +17,8 @@ export async function GET(
 ) {
   return fbRoute(request, {}, async (ctx) => {
     const { id } = await context.params;
-    const s: any = await prisma.fairnessSignal.findFirst({
-      where: { id, companyId: ctx.companyId },
+    const s: any = await forCompany(ctx.companyId).fairnessSignal.findFirst({
+      where: { id },
       include: {
         ...SIGNAL_INCLUDE,
         history: { orderBy: { createdAt: "desc" }, take: 50 },

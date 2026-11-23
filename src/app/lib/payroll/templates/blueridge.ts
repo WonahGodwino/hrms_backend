@@ -40,7 +40,7 @@ export const processBlueridgeTemplate = {
     sendEmails: boolean,
     overwriteExisting: boolean = false,
     uploadId?: string,
-    extra?: { expectedPeriod?: PayrollPeriod | null; legacyPeriodDefaults?: boolean }
+    extra?: { expectedPeriod?: PayrollPeriod | null; legacyPeriodDefaults?: boolean; suppressSideEffects?: boolean }
   ) {
     const templateConfig = PAYROLL_TEMPLATES.BLUERIDGE
     const canonicalMap = templateConfig.canonicalHeaders
@@ -217,7 +217,7 @@ export const processBlueridgeTemplate = {
 
 
         // Update staff record with position from template
-        if (position && staffRecord.position !== position) {
+        if (!extra?.suppressSideEffects && position && staffRecord.position !== position) {
           await prisma.staffRecord.update({
             where: { id: staffRecord.id },
             data: { position }
@@ -451,7 +451,8 @@ export const processBlueridgeTemplate = {
           }
         }
 
-        await createNotification(
+        // Backfill runs (historical re-creation of drafts) must not notify staff.
+        if (!extra?.suppressSideEffects) await createNotification(
           staffRecord.id,
           NOTIFICATION_TYPES.PAYSLIP_UPLOADED,
           `Payslip Uploaded (${monthName} ${year})`,

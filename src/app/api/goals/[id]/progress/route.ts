@@ -15,6 +15,7 @@ import {
   parseProgress,
   parseText,
 } from "@/app/lib/goals/goal-utils";
+import { emitAutomationEvent, kickAutomation } from "@/app/lib/automation-events";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -44,7 +45,6 @@ export const POST = withGoalAuth<{ id: string }>(
         source: access.isOwner || access.isAssignee ? "SELF" : "MANAGER",
       });
       try {
-        const { emitAutomationEvent } = require("@/app/lib/automation-events");
         await emitAutomationEvent(tx, {
           companyId,
           trigger: "GOAL_UPDATED",
@@ -54,14 +54,13 @@ export const POST = withGoalAuth<{ id: string }>(
           subjectStaffRecordId: res.goal.staffRecordId,
           payload: { goalId: res.goal.id, progress: res.goal.progress },
         });
-      } catch {}
+      } catch { /* ignored: best-effort, failure is non-fatal */ }
       return res;
     });
 
     try {
-      const { kickAutomation } = require("@/app/lib/automation-events");
       kickAutomation(companyId);
-    } catch {}
+    } catch { /* ignored: best-effort, failure is non-fatal */ }
 
     return ok(result, "Progress updated successfully");
   },

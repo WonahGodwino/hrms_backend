@@ -7,6 +7,7 @@ import { prisma } from '@/app/lib/db'
 import { limitsForProfile } from './limits'
 import { raiseBehaviourFlag } from './review'
 import { hashSignal } from './signup/normalize'
+import { forCompany } from '@/app/lib/data/tenant'
 
 const MIN_LIST_SIZE = 3
 const FAST_CAP_MS = 30 * 60 * 1000
@@ -37,7 +38,7 @@ export async function checkStaffBehaviour(companyId: string, now = new Date()) {
     })
     if (!company || company.trialStatus !== 'TRIAL') return
 
-    const staff = await prisma.staffRecord.findMany({ where: { companyId }, select: { email: true, role: true, isDemo: true } })
+    const staff = await forCompany(companyId).staffRecord.findMany({ where: { }, select: { email: true, role: true, isDemo: true } })
     const limit = limitsForProfile(company.trialLimitsProfile).staff
     // Demo staff come from a button, so only real records count towards "filled it in minutes".
     if (staff.filter((s) => !s.isDemo).length >= limit && isWithin(company.trialStartsAt, now, FAST_CAP_MS)) {
@@ -52,7 +53,7 @@ export async function checkStaffBehaviour(companyId: string, now = new Date()) {
     })
     if (earlier) await raiseBehaviourFlag(companyId, FLAG_LIST_MATCH)
     // Keep one current fingerprint per company.
-    await prisma.trialSignal.deleteMany({ where: { companyId, kind: 'STAFF_LIST' } })
+    await forCompany(companyId).trialSignal.deleteMany({ where: { kind: 'STAFF_LIST' } })
     await prisma.trialSignal.create({
       data: { companyId, kind: 'STAFF_LIST', valueHash: fingerprint, expiresAt: new Date(now.getTime() + SIGNAL_RETENTION_MS) },
     })

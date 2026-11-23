@@ -14,10 +14,10 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access'
 import ExcelJS from 'exceljs'
 import { writeStyledTable, buildSubtitle, confidentialFooter, toneCell, attachmentDisposition, safeFileName, XLSX_MIME } from '@/app/lib/excel/sheet-theme'
-import { buildOfferLetterFieldLabels, BASE_FIELD_KEYS } from '@/app/lib/offer-letters/variableLabels'
+import { buildOfferLetterFieldLabels, BASE_FIELD_KEYS } from '@/app/lib/offers/letters/variableLabels'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)

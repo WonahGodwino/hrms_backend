@@ -6,6 +6,7 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveBUAccessById, logBUAudit } from '@/app/lib/business-units/bu-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -20,10 +21,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (access.error) return withCors(ApiResponse.error(access.error.message, access.error.status), origin)
     const companyId = access.companyId as string
 
-    const bu = await (prisma as any).businessUnit.findFirst({ where: { id, companyId }, select: { id: true, name: true } })
+    const bu = await forCompany(companyId).businessUnit.findFirst({ where: { id }, select: { id: true, name: true } })
     if (!bu) return withCors(ApiResponse.error('Business unit not found', 404), origin)
 
-    await (prisma as any).businessUnit.update({
+    await prisma.businessUnit.update({
       where: { id },
       data: { status: 'Active', updatedBy: user.userId },
     })

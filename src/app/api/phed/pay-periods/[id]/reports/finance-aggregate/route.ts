@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requirePhedReadAccess } from '@/app/lib/phed/access-role'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { buildFinanceAggregateComparison } from '@/app/lib/phed/reports'
 import {
   exportFinanceAggregateToExcel,
   exportFinanceAggregateToPdf,
 } from '@/app/lib/phed/report-export'
+import { forCompany } from '@/app/lib/data/tenant'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -16,7 +18,11 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 //
 // Returns Finance Payroll Summary for the current period compared against
 // the immediately preceding period with variance rows (Payroll Cost section).
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req);
+  if (deferred) return deferred;
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -27,7 +33,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const format = new URL(req.url).searchParams.get('format') ?? 'json'
 
-    const currentPeriod = await (prisma as any).phedPayPeriod.findUnique({
+    const currentPeriod = await prisma.phedPayPeriod.findUnique({
       where:  { id: params.id },
       select: { id: true, periodName: true, month: true, year: true, companyId: true,
                 company: { select: { companyName: true } } },
@@ -35,9 +41,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     if (!currentPeriod) return withCors(ApiResponse.notFound('Pay period not found'), origin)
 
     // Find the immediately preceding period (same company, must have computed payrolls)
-    const previousPeriod = await (prisma as any).phedPayPeriod.findFirst({
+    const previousPeriod = await forCompany(currentPeriod.companyId).phedPayPeriod.findFirst({
       where: {
-        companyId: currentPeriod.companyId,
         computedPayrolls: { some: {} },
         OR: [
           { year: { lt: currentPeriod.year } },
@@ -53,9 +58,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     // Company-wide entity definitions (same for both periods)
     const [allUnions, allCoops, allDeductions] = await Promise.all([
-      (prisma as any).phedUnion.findMany({ where: { companyId: currentPeriod.companyId, isActive: true }, orderBy: { name: 'asc' } }),
-      (prisma as any).phedCooperative.findMany({ where: { companyId: currentPeriod.companyId, isActive: true }, orderBy: { name: 'asc' } }),
-      (prisma as any).phedDeductionLiability.findMany({ where: { companyId: currentPeriod.companyId, isActive: true }, orderBy: { name: 'asc' } }),
+      forCompany(currentPeriod.companyId).phedUnion.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+      forCompany(currentPeriod.companyId).phedCooperative.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+      forCompany(currentPeriod.companyId).phedDeductionLiability.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
     ])
 
     const unions       = allUnions.map((u: any) => ({ id: u.id, name: u.name, percentage: Number(u.percentage) }))
@@ -63,12 +68,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const deductions   = allDeductions.map((d: any) => ({ id: d.id, name: d.name }))
 
     // Current period data
-    const currentPayrolls = await (prisma as any).phedComputedPayroll.findMany({ where: { payPeriodId: currentPeriod.id } })
+    const currentPayrolls = await prisma.phedComputedPayroll.findMany({ where: { payPeriodId: currentPeriod.id } })
     const currentStaffIds = currentPayrolls.map((r: any) => r.staffId)
     const [currentStaffUnions, currentStaffCoops, currentStaffDeds] = await Promise.all([
-      (prisma as any).phedStaffUnion.findMany({ where: { staffId: { in: currentStaffIds } } }),
-      (prisma as any).phedStaffCooperative.findMany({ where: { staffId: { in: currentStaffIds } } }),
-      (prisma as any).phedStaffDeductionLiability.findMany({ where: { staffId: { in: currentStaffIds } } }),
+      prisma.phedStaffUnion.findMany({ where: { staffId: { in: currentStaffIds } } }),
+      prisma.phedStaffCooperative.findMany({ where: { staffId: { in: currentStaffIds } } }),
+      prisma.phedStaffDeductionLiability.findMany({ where: { staffId: { in: currentStaffIds } } }),
     ])
 
     // Previous period data
@@ -78,12 +83,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     let previousStaffDeds: any[]   = []
 
     if (previousPeriod) {
-      previousPayrolls = await (prisma as any).phedComputedPayroll.findMany({ where: { payPeriodId: previousPeriod.id } })
+      previousPayrolls = await prisma.phedComputedPayroll.findMany({ where: { payPeriodId: previousPeriod.id } })
       const prevStaffIds = previousPayrolls.map((r: any) => r.staffId)
       ;[previousStaffUnions, previousStaffCoops, previousStaffDeds] = await Promise.all([
-        (prisma as any).phedStaffUnion.findMany({ where: { staffId: { in: prevStaffIds } } }),
-        (prisma as any).phedStaffCooperative.findMany({ where: { staffId: { in: prevStaffIds } } }),
-        (prisma as any).phedStaffDeductionLiability.findMany({ where: { staffId: { in: prevStaffIds } } }),
+        prisma.phedStaffUnion.findMany({ where: { staffId: { in: prevStaffIds } } }),
+        prisma.phedStaffCooperative.findMany({ where: { staffId: { in: prevStaffIds } } }),
+        prisma.phedStaffDeductionLiability.findMany({ where: { staffId: { in: prevStaffIds } } }),
       ])
     }
 
@@ -106,7 +111,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         headers: {
           'Content-Type':        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'Content-Disposition': `attachment; filename="finance-aggregate-${safeName}.xlsx"`,
-          'Access-Control-Allow-Origin': origin ?? '*',
+          ...getCorsHeaders(origin),
         },
       })
     }
@@ -118,7 +123,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         headers: {
           'Content-Type':        'application/pdf',
           'Content-Disposition': `attachment; filename="finance-aggregate-${safeName}.pdf"`,
-          'Access-Control-Allow-Origin': origin ?? '*',
+          ...getCorsHeaders(origin),
         },
       })
     }

@@ -8,9 +8,9 @@ import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { promoteCandidateToStaff, PromoteCandidateError } from '@/app/lib/staff/promote-candidate-to-staff'
-import { promises as fs } from 'fs'
-import * as path from 'path'
-import { readUploadFile, uploadFileToS3 } from '@/app/lib/storage/upload-files'
+import { detectAllowedType, readCandidateDoc, saveCandidateDoc } from '@/app/lib/recruitment/candidate-doc-storage'
+import { canAccessCompany } from '@/app/lib/access/company-access'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -23,9 +23,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const { id } = await params
     const companyId = new URL(request.url).searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
+    // SEC-003: the requested company must be one the caller can access.
+    if (!(await canAccessCompany(user, companyId))) return withCors(ApiResponse.error('Offer not found', 404), origin)
 
-    const offer = await prisma.offer.findFirst({
-      where: { id, companyId },
+    const offer = await forCompany(companyId).offer.findFirst({
+      where: { id },
       select: { id: true, executedPdfPath: true },
     })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)
@@ -33,12 +35,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return withCors(ApiResponse.error('No executed contract has been uploaded for this offer', 404), origin)
     }
 
-    const fullPath = path.join(process.cwd(), 'public', offer.executedPdfPath)
-    const bytes = await readUploadFile(offer.executedPdfPath, fullPath)
-    if (!bytes) return withCors(ApiResponse.error('Executed contract file not found', 404), origin)
+    const buffer = await readCandidateDoc(offer.executedPdfPath)
+    if (!buffer) return withCors(ApiResponse.error('Executed contract file not found', 404), origin)
 
     return withCors(
-      new NextResponse(bytes, {
+      new NextResponse(buffer, {
         status: 200,
         headers: {
           'Content-Type': 'application/pdf',
@@ -63,9 +64,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const formCompanyId = (formData.get('companyId') as string | null) || undefined
     const effectiveCompanyId = formCompanyId || new URL(request.url).searchParams.get('companyId') || user.companyId
     if (!effectiveCompanyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
+    if (!(await canAccessCompany(user, effectiveCompanyId))) return withCors(ApiResponse.error('Offer not found', 404), origin)
     const actor = user.userId || user.email || 'system'
 
-    const offer = await prisma.offer.findFirst({ where: { id, companyId: effectiveCompanyId } })
+    const offer = await forCompany(effectiveCompanyId).offer.findFirst({ where: { id } })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)
     if (!['APPROVED', 'AWAITING_SIGNATURE', 'SENT', 'ACCEPTED'].includes(offer.status)) {
       return withCors(ApiResponse.error('This offer has not been dispatched for signature yet', 400), origin)
@@ -75,19 +77,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const promoteToStaff = String(formData.get('initiateOnboarding') ?? 'true') !== 'false'
     if (!file) return withCors(ApiResponse.error('No file uploaded', 400), origin)
 
-    const ext = (file.name.split('.').pop() || '').toLowerCase()
-    const isPdf = ext === 'pdf' || file.type === 'application/pdf'
-    if (!isPdf) return withCors(ApiResponse.error('The executed contract must be a PDF', 400), origin)
-
-    // Persist the file under public/ (same convention as other uploads).
+    // SEC-003: the bytes must really be a PDF; stored privately, not under public/.
     const buffer = Buffer.from(await file.arrayBuffer())
-    const uploadDir = path.join(process.cwd(), 'public', 'offers', 'executed', offer.id)
-    await fs.mkdir(uploadDir, { recursive: true })
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-    const fileName = `${Date.now()}_${safeName}`
-    await fs.writeFile(path.join(uploadDir, fileName), buffer)
-    const relativePath = `/offers/executed/${offer.id}/${fileName}`
-    await uploadFileToS3(relativePath, buffer, 'application/pdf')
+    const detected = await detectAllowedType(buffer, 'pdf')
+    if (!detected) return withCors(ApiResponse.error('The executed contract must be a PDF', 400), origin)
+    const relativePath = await saveCandidateDoc(['offers', 'executed', offer.id], file.name, detected.ext, buffer)
 
     const now = new Date()
     const meta = (offer.metadata && typeof offer.metadata === 'object') ? offer.metadata as any : {}

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { isExecutorEnabled } from "@/app/lib/automation-config";
 import {

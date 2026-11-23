@@ -4,7 +4,7 @@ import { NextRequest } from 'next/server';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { requireModuleAccess } from '@/app/lib/module-access';
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access';
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 
 export async function OPTIONS(request: NextRequest) {

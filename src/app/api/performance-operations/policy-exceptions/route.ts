@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -14,6 +14,7 @@ import {
   MUTABLE_CYCLE_STATUSES,
   parseDueDate,
 } from "@/app/lib/performance-operations/ops-actions-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -125,8 +126,8 @@ export async function POST(request: NextRequest) {
         origin,
       );
 
-    const cycle = await prisma.appraisalCycle.findFirst({
-      where: { id: cycleId, companyId },
+    const cycle = await forCompany(companyId).appraisalCycle.findFirst({
+      where: { id: cycleId },
       select: { id: true, status: true },
     });
     if (!cycle)
@@ -144,8 +145,8 @@ export async function POST(request: NextRequest) {
       );
 
     // Cross-company / cross-cycle check on every participant id.
-    const found = await prisma.appraisalCycleParticipant.count({
-      where: { id: { in: participantIds }, cycleId, companyId },
+    const found = await forCompany(companyId).appraisalCycleParticipant.count({
+      where: { id: { in: participantIds }, cycleId },
     });
     if (found !== participantIds.length)
       return withCors(

@@ -10,12 +10,14 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { sendEmail } from '@/app/lib/email'
 import { OFFER_DISPLAY_STATUS, readOfferMetadata } from '@/app/lib/offers/ad-hoc-helpers'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -38,8 +40,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return withCors(ApiResponse.error('subject is required for automated dispatch', 400), origin)
     }
 
-    const offer = await prisma.offer.findFirst({
-      where: { id: params.id, companyId },
+    const offer = await forCompany(companyId).offer.findFirst({
+      where: { id: params.id },
       include: { candidate: true },
     })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)
@@ -58,8 +60,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     // Automated: email the attached PDF to the candidate.
     if (method === 'automated') {
       const offerFile = meta.offerFileId
-        ? await prisma.candidateFile.findFirst({
-            where: { id: meta.offerFileId, companyId },
+        ? await forCompany(companyId).candidateFile.findFirst({
+            where: { id: meta.offerFileId },
             select: { fileName: true, mimeType: true, data: true },
           })
         : null

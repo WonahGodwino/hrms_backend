@@ -1,31 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-// import { jwtVerify } from 'jose'
+import { jwtVerify } from 'jose'
+import { trialInternalKey } from '@/app/lib/trial/internal-key'
+import { REQUEST_ID_HEADER, resolveRequestId } from '@/app/lib/observability/request-id'
 
-// JWT verification for Edge Runtime using Web Crypto API
-async function verifyJwt(token: string, secret: string): Promise<any> {
-  // Only supports HS256
-  const [headerB64, payloadB64, signatureB64] = token.split('.')
-  if (!headerB64 || !payloadB64 || !signatureB64) throw new Error('Invalid JWT format')
-
-  const encoder = new TextEncoder()
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['verify']
-  )
-
-  const data = encoder.encode(`${headerB64}.${payloadB64}`)
-  const signature = Uint8Array.from(atob(signatureB64.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0))
-
-  const valid = await crypto.subtle.verify('HMAC', key, signature, data)
-  if (!valid) throw new Error('Invalid signature')
-
-  const payloadJson = atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/'))
-  return { payload: JSON.parse(payloadJson) }
+// SEC-013: verify with jose, which checks the signature, the HS256 algorithm
+// and the expiry. The previous hand-written verifier ignored both `alg` and `exp`.
+async function verifyJwt(token: string, secret: string): Promise<{ payload: Record<string, unknown> }> {
+  if (!secret) throw new Error('JWT secret not configured')
+  const { payload } = await jwtVerify(token, new TextEncoder().encode(secret), { algorithms: ['HS256'] })
+  return { payload: payload as Record<string, unknown> }
 }
 import { getCorsHeaders, handleCorsOptions } from '@/app/lib/cors'
+import { fetchWithTimeout, TIMEOUTS } from '@/app/lib/http/fetch-with-timeout'
 
 // ── Module route map ──────────────────────────────────────────────────────────
 // Maps URL path prefixes to module keys.
@@ -129,9 +115,15 @@ async function trialStateFor(req: NextRequest, companyId: string): Promise<{ rea
   const hit = trialCache.get(companyId)
   if (hit && Date.now() - hit.at < TRIAL_CACHE_MS) return hit
   try {
-    const res = await fetch(`${req.nextUrl.origin}/api/trial/status?companyId=${encodeURIComponent(companyId)}`, {
-      headers: { 'x-trial-internal': process.env.JWT_SECRET ?? '' },
-    })
+    // SEC-013: never send JWT_SECRET itself; send a derived key that only
+    // unlocks this lookup. INTERNAL_API_ORIGIN, when set, pins the target so it
+    // never depends on request headers.
+    const internalKey = await trialInternalKey()
+    if (!internalKey) return { readOnly: false, restricted: false }
+    const base = process.env.INTERNAL_API_ORIGIN || req.nextUrl.origin
+    const res = await fetchWithTimeout(`${base}/api/trial/status?companyId=${encodeURIComponent(companyId)}`, {
+      headers: { 'x-trial-internal': internalKey },
+    }, TIMEOUTS.lookup)
     if (!res.ok) return { readOnly: false, restricted: false }
     const body = await res.json()
     const state = { readOnly: !!body?.data?.readOnly, restricted: !!body?.data?.restricted }
@@ -154,7 +146,7 @@ async function trialBlock(req: NextRequest, pathname: string): Promise<{ message
   try {
     const { payload } = await verifyJwt(rawToken, process.env.JWT_SECRET ?? '')
     if (payload.role === 'SUPER_ADMIN' || !payload.companyId) return null
-    const state = await trialStateFor(req, payload.companyId)
+    const state = await trialStateFor(req, String(payload.companyId))
     if (isExport && state.restricted) {
       return { message: 'Exports and downloads are not included in the trial. You can review everything on screen.', code: 'TRIAL_EXPORT_DISABLED' }
     }
@@ -167,7 +159,18 @@ async function trialBlock(req: NextRequest, pathname: string): Promise<{ message
   }
 }
 
+// REL-002: every /api request gets a correlation id. The route handler sees it
+// as the x-request-id request header and every response (errors and CORS
+// preflight included) returns it, so a user-reported failure can be matched to
+// the server log line.
 export async function middleware(req: NextRequest) {
+  const requestId = resolveRequestId(req.headers.get(REQUEST_ID_HEADER))
+  const response = await handle(req, requestId)
+  response.headers.set(REQUEST_ID_HEADER, requestId)
+  return response
+}
+
+async function handle(req: NextRequest, requestId: string): Promise<Response> {
   const { pathname } = req.nextUrl
   const origin = req.headers.get('origin')
 
@@ -211,7 +214,9 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  const response = NextResponse.next()
+  const forwarded = new Headers(req.headers)
+  forwarded.set(REQUEST_ID_HEADER, requestId)
+  const response = NextResponse.next({ request: { headers: forwarded } })
   const corsHeaders = getCorsHeaders(origin)
   Object.entries(corsHeaders).forEach(([k, v]) => response.headers.set(k, v))
   return response

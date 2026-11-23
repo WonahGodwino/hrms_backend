@@ -4,10 +4,12 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -16,8 +18,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const companyId = searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company ID is required', 400), origin)
 
-    const offer = await prisma.offer.findFirst({
-      where: { id: params.id, companyId },
+    const offer = await forCompany(companyId).offer.findFirst({
+      where: { id: params.id },
       include: { approvals: { orderBy: { step: 'asc' } } },
     })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)
@@ -39,31 +41,36 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return withCors(ApiResponse.error('It is not your turn yet — an earlier approver must approve first.', 409), origin)
     }
 
-    // Approve this step
-    await prisma.recruitmentOfferApproval.update({
-      where: { id: userStep.id },
-      data: { status: 'APPROVED', notes: body.notes || null, actedAt: new Date() },
-    })
-
-    // Check if all steps are now approved
-    const updatedSteps = await prisma.recruitmentOfferApproval.findMany({
-      where: { offerId: params.id }, orderBy: { step: 'asc' },
-    })
-    const allApproved = updatedSteps.every(s => s.status === 'APPROVED')
-
-    if (allApproved) {
-      await prisma.offer.update({
-        where: { id: params.id }, data: { status: 'APPROVED' },
+    // DB-002: approving a step, then approving the offer or unlocking the next
+    // approver, happen together so the chain never stalls half-updated.
+    const allApproved = await prisma.$transaction(async (tx) => {
+      // Approve this step
+      await tx.recruitmentOfferApproval.update({
+        where: { id: userStep.id },
+        data: { status: 'APPROVED', notes: body.notes || null, actedAt: new Date() },
       })
-    } else {
-      // Unlock next sequential approver
-      const nextStep = updatedSteps.find(s => s.status === 'AWAITING_PREVIOUS')
-      if (nextStep) {
-        await prisma.recruitmentOfferApproval.update({
-          where: { id: nextStep.id }, data: { status: 'PENDING' },
+
+      // Check if all steps are now approved
+      const updatedSteps = await tx.recruitmentOfferApproval.findMany({
+        where: { offerId: params.id }, orderBy: { step: 'asc' },
+      })
+      const done = updatedSteps.every(s => s.status === 'APPROVED')
+
+      if (done) {
+        await tx.offer.update({
+          where: { id: params.id }, data: { status: 'APPROVED' },
         })
+      } else {
+        // Unlock next sequential approver
+        const nextStep = updatedSteps.find(s => s.status === 'AWAITING_PREVIOUS')
+        if (nextStep) {
+          await tx.recruitmentOfferApproval.update({
+            where: { id: nextStep.id }, data: { status: 'PENDING' },
+          })
+        }
       }
-    }
+      return done
+    })
 
     return withCors(ApiResponse.success({
       offerId: offer.id, status: allApproved ? 'APPROVED' : 'PENDING_APPROVAL',

@@ -13,6 +13,7 @@
 // which despite their plain names are exclusively PHED's "Pay Period
 // Workflow" data — confirmed via their only call sites being
 // backend/src/app/api/phed/pay-periods/**).
+import type { Prisma } from '@prisma/client'
 import { prisma } from '@/app/lib/db'
 import { getAccessibleCompanies } from '@/app/lib/reporting/access'
 import { findIdentifierHolder, describeIdentifierCollision } from '@/app/lib/staff/identifierCollision'
@@ -38,7 +39,21 @@ export type BulkTransferInput = {
 export type ActingUser = { userId: string; role: string }
 
 // [Prisma model accessor, FK field on that model, human label for the UI/audit log]
-const OWN_RECORD_TABLES: Array<{ model: string; field: string; label: string }> = [
+// The models whose rows move with the staff member. Typed as real client
+// properties, so a misspelt or removed model fails the type check.
+type OwnRecordModel =
+  | 'payroll' | 'payslip' | 'attendance' | 'leaveRequest' | 'notification' | 'emailLog' | 'payrollData'
+  | 'employeeTaxProfile' | 'assessmentAttempt' | 'participantProgress' | 'certificationRecord'
+  | 'roleElevation' | 'loanRequest' | 'benefitRequest' | 'benefitAllocation'
+
+// The two operations used on those models, with the shape every one of them accepts.
+type OwnRecordDelegate = {
+  count(args: { where: Record<string, unknown> }): Promise<number>
+  updateMany(args: { where: Record<string, unknown>; data: { companyId: string } }): Promise<{ count: number }>
+}
+const ownRecords = (client: Prisma.TransactionClient, model: OwnRecordModel) => client[model] as unknown as OwnRecordDelegate
+
+const OWN_RECORD_TABLES: Array<{ model: OwnRecordModel; field: string; label: string }> = [
   { model: 'payroll', field: 'staffRecordId', label: 'Payroll' },
   { model: 'payslip', field: 'staffRecordId', label: 'Payslips' },
   { model: 'attendance', field: 'staffId', label: 'Attendance' },
@@ -123,7 +138,7 @@ export async function previewStaffTransfer(actingUser: ActingUser, input: Transf
 
   const counts: Record<string, number> = {}
   for (const table of OWN_RECORD_TABLES) {
-    const count = await (prisma as any)[table.model].count({
+    const count = await ownRecords(prisma, table.model).count({
       where: { [table.field]: staff.id, companyId: staff.companyId }
     })
     counts[table.label] = count
@@ -172,7 +187,7 @@ export async function executeStaffTransfer(actingUser: ActingUser, input: Transf
 
     const recordCounts: Record<string, number> = {}
     for (const table of OWN_RECORD_TABLES) {
-      const updateResult = await (tx as any)[table.model].updateMany({
+      const updateResult = await ownRecords(tx, table.model).updateMany({
         where: { [table.field]: staff.id, companyId: staff.companyId },
         data: { companyId: input.toCompanyId }
       })

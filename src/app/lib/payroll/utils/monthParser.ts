@@ -50,7 +50,7 @@ export function parseMonthFromString(monthInput: string): number {
     if (!isNaN(date.getTime())) {
       return date.getMonth() + 1
     }
-  } catch {}
+  } catch { /* ignored: best-effort, failure is non-fatal */ }
   
   return 0
 }

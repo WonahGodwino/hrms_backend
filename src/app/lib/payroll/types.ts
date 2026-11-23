@@ -54,7 +54,7 @@ export type ParsedPayrollRow = {
   position?: string
   
   // raw original row (for debugging / failed records)
-  rawRow: any
+  rawRow: unknown
 }
 
 export type GeneratePayslipInput = {

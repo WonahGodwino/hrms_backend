@@ -17,7 +17,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const user = await requireRoleAsync(token, ['STAFF', 'HR', 'ADMIN', 'SUPER_ADMIN'])
     const { id } = await params
 
-    const doc = await (prisma as any).staffOnboardingDocument.findUnique({ where: { id } })
+    const doc = await prisma.staffOnboardingDocument.findUnique({ where: { id } })
     if (!doc) return withCors(ApiResponse.error('Document not found', 404), origin)
 
     // Access control.

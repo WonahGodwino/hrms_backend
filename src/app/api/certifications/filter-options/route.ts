@@ -1,9 +1,9 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -24,26 +24,23 @@ export async function GET(req: NextRequest) {
 
     const [deptRows, roleRows, certTypesRows, authorityRows] = await Promise.all([
       // Department list
-      prisma.department.findMany({
-        where: { companyId },
+      forCompany(companyId).department.findMany({
         select: { name: true },
         orderBy: { name: 'asc' },
       }),
       // Staff roles list
-      prisma.staffRecord.findMany({
-        where: { companyId },
+      forCompany(companyId).staffRecord.findMany({
         select: { role: true },
         distinct: ['role'],
       }),
       // Certification types list
-      prisma.certificationType.findMany({
-        where: { companyId, isActive: true },
+      forCompany(companyId).certificationType.findMany({
+        where: { isActive: true },
         select: { id: true, name: true, type: true, authority: true },
         orderBy: { name: 'asc' },
       }),
       // Distinct authorities from certification types
-      prisma.certificationType.findMany({
-        where: { companyId },
+      forCompany(companyId).certificationType.findMany({
         select: { authority: true },
         distinct: ['authority'],
       }),

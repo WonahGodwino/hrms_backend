@@ -7,6 +7,7 @@ import { verifyToken, checkCompanyAccess } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { generateLocationCode, updateCompanyLocation } from '@/app/lib/companies/location-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -34,15 +35,15 @@ async function authorize(request: NextRequest, companyId: string, origin: string
 }
 
 // List a company's locations (including country), for the profile Locations tab.
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const companyId = params.id
     const auth = await authorize(request, companyId, origin)
     if ('error' in auth) return auth.error
 
-    const locations = await prisma.location.findMany({
-      where: { companyId },
+    const locations = await forCompany(companyId).location.findMany({
       orderBy: [{ type: 'asc' }, { name: 'asc' }],
       select: {
         id: true,
@@ -77,7 +78,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const companyId = params.id
@@ -120,7 +122,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   }
 }
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const companyId = params.id

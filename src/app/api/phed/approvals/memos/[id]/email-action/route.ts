@@ -8,11 +8,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { verifyEmailActionToken } from '@/app/lib/phed/email-action-token'
 import { applyEmailDecision } from '@/app/lib/phed/approval-email-actions'
+import { getCorsHeaders } from '@/app/lib/cors'
 
 export async function OPTIONS(req: NextRequest) {
   return new NextResponse(null, {
     status: 204,
-    headers: { 'Access-Control-Allow-Origin': req.headers.get('origin') ?? '*' },
+    headers: { ...getCorsHeaders(req.headers.get('origin'))},
   })
 }
 
@@ -34,7 +35,8 @@ function htmlPage(title: string, message: string, ok: boolean): NextResponse {
   })
 }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const rl = phedRateLimit(req, 'write')
   if (rl) {
     return htmlPage('Too many requests', 'Please wait a moment and try the link again.', false)

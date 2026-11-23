@@ -9,6 +9,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveRecruitmentCompanyId } from '@/app/lib/recruitment/companyScope'
 import { notifyPlanInstance } from '@/app/lib/assessments/panel-notify'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -38,8 +39,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const companyId = scope.companyId as string
 
     // Plan must exist, be in this company, and be published.
-    const plan = await prisma.recruitmentAssessmentPlan.findFirst({
-      where: { id, companyId },
+    const plan = await forCompany(companyId).recruitmentAssessmentPlan.findFirst({
+      where: { id },
       include: { rounds: { orderBy: { order: 'asc' }, select: { id: true, requiredInterviewers: true } } },
     })
     if (!plan) return withCors(ApiResponse.error('Assessment plan not found', 404), origin)
@@ -51,18 +52,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return withCors(ApiResponse.error('Select a job or a designation to re-use this plan for', 400), origin)
     }
     if (jobId) {
-      const job = await prisma.job.findFirst({ where: { id: jobId, companyId }, select: { id: true } })
+      const job = await forCompany(companyId).job.findFirst({ where: { id: jobId }, select: { id: true } })
       if (!job) return withCors(ApiResponse.error('Selected job not found for this company', 400), origin)
     }
     if (designationId) {
-      const des = await (prisma as any).designation.findFirst({ where: { id: designationId, companyId }, select: { id: true } })
+      const des = await forCompany(companyId).designation.findFirst({ where: { id: designationId }, select: { id: true } })
       if (!des) return withCors(ApiResponse.error('Selected designation not found for this company', 400), origin)
     }
 
     // Panel per round: use the provided (edited) panel, else default from the
     // plan template's requiredInterviewers.
     const roundIds = new Set(plan.rounds.map((r) => r.id))
-    let panelByRound: Record<string, any[]> = {}
+    const panelByRound: Record<string, any[]> = {}
     if (body.panelByRound && typeof body.panelByRound === 'object') {
       for (const [rid, members] of Object.entries(body.panelByRound as Record<string, any>)) {
         if (roundIds.has(rid)) panelByRound[rid] = cleanMembers(members)
@@ -77,7 +78,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       where: { id: user.userId }, select: { firstName: true, lastName: true },
     })
 
-    const instance = await (prisma as any).assessmentPlanInstance.create({
+    const instance = await prisma.assessmentPlanInstance.create({
       data: {
         companyId,
         planId: id,
@@ -117,8 +118,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (scope.error) return withCors(ApiResponse.error(scope.error.message, scope.error.status), origin)
     const companyId = scope.companyId as string
 
-    const instances: any[] = await (prisma as any).assessmentPlanInstance.findMany({
-      where: { companyId, planId: id, status: 'ACTIVE' },
+    const instances: any[] = await forCompany(companyId).assessmentPlanInstance.findMany({
+      where: { planId: id, status: 'ACTIVE' },
       orderBy: { createdAt: 'desc' },
     })
 
@@ -126,7 +127,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const desIds = Array.from(new Set(instances.map((i) => i.designationId).filter(Boolean)))
     const [jobs, designations] = await Promise.all([
       jobIds.length ? prisma.job.findMany({ where: { id: { in: jobIds } }, select: { id: true, title: true } }) : Promise.resolve([]),
-      desIds.length ? (prisma as any).designation.findMany({ where: { id: { in: desIds } }, select: { id: true, title: true } }) : Promise.resolve([]),
+      desIds.length ? prisma.designation.findMany({ where: { id: { in: desIds } }, select: { id: true, title: true } }) : Promise.resolve([]),
     ])
     const jobById = new Map(jobs.map((j: any) => [j.id, j.title]))
     const desById = new Map((designations as any[]).map((d) => [d.id, d.title]))

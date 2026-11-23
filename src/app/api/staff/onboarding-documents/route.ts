@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
       staffId = target.id
     }
 
-    const docs = await (prisma as any).staffOnboardingDocument.findMany({
+    const docs = await prisma.staffOnboardingDocument.findMany({
       where: { staffId },
       select: { id: true, category: true, fileName: true, sizeBytes: true, mimeType: true, updatedAt: true },
     })
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
 
     const buffer = Buffer.from(await file.arrayBuffer())
 
-    const saved = await (prisma as any).staffOnboardingDocument.upsert({
+    const saved = await prisma.staffOnboardingDocument.upsert({
       where: { staffId_category: { staffId: staff.id, category } },
       update: {
         fileName: file.name,
@@ -132,12 +132,11 @@ export async function POST(request: NextRequest) {
     await uploadDocumentObject(
       staffOnboardingDocumentKey(staff.companyId, saved.id),
       buffer,
-      (key) => (prisma as any).staffOnboardingDocument.update({ where: { id: saved.id }, data: { s3Key: key } }),
+      (key) => prisma.staffOnboardingDocument.update({ where: { id: saved.id }, data: { s3Key: key } }),
       file.type || 'application/octet-stream',
     ).catch(() => {})
 
-    const docs = await (prisma as any).staffOnboardingDocument.findMany({
-      where: { staffId: staff.id },
+    const docs = await prisma.staffOnboardingDocument.findMany({
       select: { id: true, category: true, fileName: true, sizeBytes: true, mimeType: true, updatedAt: true },
     })
 

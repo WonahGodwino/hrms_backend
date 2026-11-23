@@ -3,14 +3,11 @@
 // used to opt a candidate out of adverts — never for auth. Signed with the app
 // JWT_SECRET (same pattern as the offer-response token).
 import jwt from 'jsonwebtoken'
+import { getSecret } from '@/app/lib/business-units/import-token'
 
 const PURPOSE = 'talent-pool-unsubscribe'
 
-function getSecret(): string {
-  const secret = process.env.JWT_SECRET
-  if (!secret) throw new Error('JWT_SECRET environment variable is not set')
-  return secret
-}
+
 
 export function signUnsubscribeToken(
   candidateId: string,

@@ -1,11 +1,11 @@
 // GET /api/business-units/:id/composition
 // The departments mapped to a Business Unit plus a rolled-up staff headcount.
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveBUAccessById, staffName } from '@/app/lib/business-units/bu-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -20,8 +20,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (access.error) return withCors(ApiResponse.error(access.error.message, access.error.status), origin)
     const companyId = access.companyId as string
 
-    const departments = await (prisma as any).department.findMany({
-      where: { companyId, businessUnitId: id },
+    const departments = await forCompany(companyId).department.findMany({
+      where: { businessUnitId: id },
       orderBy: { name: 'asc' },
       select: {
         id: true, name: true, code: true, status: true, activeHeadcount: true,

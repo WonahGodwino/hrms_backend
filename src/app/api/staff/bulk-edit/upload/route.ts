@@ -14,6 +14,7 @@
 import ExcelJS from 'exceljs';
 import { loadActivePfaCodes, parsePensionRow } from '@/app/lib/staff/pension-fields';
 import { parseHireDateCell, parseNsitfIdentityRow } from '@/app/lib/staff/nsitf-identity-fields';
+import { formatPersonName } from '@/app/lib/staff/nameFormat';
 import { mkdir, writeFile } from 'fs/promises';
 // large staff lists. Poll GET /staff/bulk-edit/upload/status/[id] for progress.
 import { NextRequest } from 'next/server';
@@ -34,83 +35,22 @@ import {
     describeIdentifierCollision, findIdentifierHolder
 } from '@/app/lib/staff/identifierCollision';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { publicErrorMessage } from '@/app/lib/errors/public-error';
+import { forCompany } from '@/app/lib/data/tenant';
+import { getRelativePath } from '@/app/lib/storage/relative-path';
+import { cellToString, cleanEmail, isValidEmail, splitCsvLine } from '@/app/lib/staff/upload-parser';
+import { ensureUploadDirectories } from '@/app/lib/staff/route-helpers';
 import { uploadFileToS3 } from '@/app/lib/storage/upload-files';
 
 // -----------------------------
 // Helpers (mirrors staff/upload/route.ts's cell parsing)
-// -----------------------------
 
-function splitCsvLine(line: string) {
-	const result: string[] = [];
-	let cur = '';
-	let inQuotes = false;
 
-	for (let i = 0; i < line.length; i++) {
-		const ch = line[i];
-		if (ch === '"' && line[i + 1] === '"') {
-			cur += '"';
-			i++;
-			continue;
-		}
-		if (ch === '"') {
-			inQuotes = !inQuotes;
-			continue;
-		}
-		if (ch === ',' && !inQuotes) {
-			result.push(cur);
-			cur = '';
-			continue;
-		}
-		cur += ch;
-	}
-	result.push(cur);
-	return result.map((s) => s.trim());
-}
 
-function cellToString(value: any): string {
-	if (value === null || value === undefined) return '';
-	if (typeof value === 'object' && Array.isArray(value?.richText)) {
-		return value.richText
-			.map((t: any) => t?.text || '')
-			.join('')
-			.trim();
-	}
-	if (typeof value === 'object' && value?.text !== undefined && value?.text !== null) {
-		if (typeof value.text === 'object' && Array.isArray(value.text?.richText)) {
-			return value.text.richText
-				.map((t: any) => t?.text || '')
-				.join('')
-				.trim();
-		}
-		if (typeof value.text !== 'object') {
-			return String(value.text).trim();
-		}
-	}
-	if (typeof value === 'object' && value?.result !== undefined) {
-		return String(value.result).trim();
-	}
-	if (typeof value === 'object') return '';
-	return String(value).trim();
-}
 
-function cleanEmail(raw: any): string {
-	let s = cellToString(raw);
-	if (!s && typeof raw === 'object' && raw?.hyperlink) {
-		s = String(raw.hyperlink);
-	}
-	s = s.replace(/ /g, ' ').trim();
-	if (s.toLowerCase().startsWith('mailto:')) {
-		s = s.slice('mailto:'.length).trim();
-	}
-	s = s.replace(/^<|>$/g, '').trim();
-	return s.toLowerCase();
-}
 
-function isValidEmail(email: string): boolean {
-	if (!email) return false;
-	if (email.length > 254) return false;
-	return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
+
+
 
 function normalizeHeader(h: string) {
 	return h.toString().replace(/ /g, ' ').replace(/\s+/g, ' ').replace(/\n/g, ' ').trim().toLowerCase();
@@ -131,20 +71,9 @@ function pick(row: any, keys: string[]) {
 	return undefined;
 }
 
-function getRelativePath(absolutePath: string): string {
-	const projectRoot = process.cwd();
-	if (absolutePath.startsWith(projectRoot)) {
-		return path.relative(projectRoot, absolutePath);
-	}
-	return absolutePath;
-}
 
-async function ensureUploadDirectories() {
-	const baseDir = process.cwd();
-	const uploadsDir = path.join(baseDir, 'uploads');
-	await mkdir(uploadsDir, { recursive: true });
-	return { baseDir, uploadsDir };
-}
+
+
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
@@ -171,15 +100,15 @@ export async function POST(request: NextRequest) {
 		}
 
 		if (authUser.role === 'HR') {
-			const hasAccess = await prisma.userCompany.findFirst({
-				where: { userId: authUser.userId, companyId, role: { in: ['HR', 'ALL'] } },
+			const hasAccess = await forCompany(companyId).userCompany.findFirst({
+				where: { userId: authUser.userId, role: { in: ['HR', 'ALL'] } },
 			});
 			if (!hasAccess) {
 				return withCors(ApiResponse.error('You do not have HR access for this company', 403), origin);
 			}
 		} else if (authUser.role === 'ADMIN') {
-			const hasAccess = await prisma.userCompany.findFirst({
-				where: { userId: authUser.userId, companyId, role: { in: ['ADMIN', 'ALL'] } },
+			const hasAccess = await forCompany(companyId).userCompany.findFirst({
+				where: { userId: authUser.userId, role: { in: ['ADMIN', 'ALL'] } },
 			});
 			if (!hasAccess) {
 				return withCors(ApiResponse.error('You do not have access to this company', 403), origin);
@@ -215,7 +144,7 @@ export async function POST(request: NextRequest) {
 		const bytes = await file.arrayBuffer();
 		const buffer = Buffer.from(bytes);
 
-		let data: any[] = [];
+		const data: any[] = [];
 
 		try {
 			if (isCsv) {
@@ -374,8 +303,8 @@ async function processStaffBulkEditInBackground({
 					throw new Error('Staff ID is required for every row.');
 				}
 
-				const existing = await prisma.staffRecord.findFirst({
-					where: { companyId, staffId, isActive: true },
+				const existing = await forCompany(companyId).staffRecord.findFirst({
+					where: { staffId, isActive: true },
 				});
 
 				if (!existing) {
@@ -415,7 +344,8 @@ async function processStaffBulkEditInBackground({
 				for (const [field, keys] of fieldMap) {
 					const raw = pick(row, keys);
 					if (raw === undefined) continue;
-					const value = cellToString(raw);
+					const cell = cellToString(raw);
+					const value = field === 'firstName' || field === 'lastName' ? formatPersonName(cell) : cell;
 					if (value !== '' && value !== (existing as any)[field]) {
 						updateData[field] = value;
 					}
@@ -459,7 +389,7 @@ async function processStaffBulkEditInBackground({
 				results.successful++;
 			} catch (error: any) {
 				results.failed++;
-				const message = error?.message || 'An error occurred while processing this row.';
+				const message = publicErrorMessage(error, 'An error occurred while processing this row.');
 				results.errors.push(`Row ${displayRow}: ${message}`);
 				results.formattedErrors.push({ row: displayRow, message });
 			}

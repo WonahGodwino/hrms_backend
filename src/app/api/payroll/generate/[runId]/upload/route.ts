@@ -25,7 +25,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
-import { cellToString } from '@/app/lib/offer-letters/excelCell'
+import { cellToString } from '@/app/lib/offers/letters/excelCell'
 import {
   STAFF_RECORD_DERIVED_SYSTEM_FIELDS,
   PERIOD_DERIVED_SYSTEM_FIELDS,
@@ -36,6 +36,8 @@ import {
   type PayrollTemplateFieldLike
 } from '@/app/lib/payroll/generation/field-resolver'
 import ExcelJS from 'exceljs'
+import { forCompany } from '@/app/lib/data/tenant'
+import { normalizeHeader } from '@/app/lib/shared/route-helpers'
 
 type StoredField = {
   value: unknown
@@ -54,21 +56,14 @@ type StoredField = {
 // headers — same lockdown as the single-row edit endpoint.
 const LOCKED_SYSTEM_FIELDS = new Set<string>([...STAFF_RECORD_DERIVED_SYSTEM_FIELDS, ...PERIOD_DERIVED_SYSTEM_FIELDS])
 
-function normalizeHeader(h: string): string {
-  return h
-    .toString()
-    .replace(/\[[^\]]*\]/g, ' ')
-    .replace(/<[^>]*>/g, ' ')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '')
-}
+
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function POST(request: NextRequest, { params }: { params: { runId: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ runId: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -154,7 +149,7 @@ export async function POST(request: NextRequest, { params }: { params: { runId: 
       return withCors(ApiResponse.error('Could not find a header row with a Staff ID column and at least one matching field column.', 400), origin)
     }
 
-    const staffRows = await prisma.staffRecord.findMany({ where: { companyId: run.companyId }, select: { id: true, staffId: true } })
+    const staffRows = await forCompany(run.companyId).staffRecord.findMany({ select: { id: true, staffId: true } })
     const staffByStaffId = new Map(staffRows.map((s) => [s.staffId, s.id]))
     // Raw (un-prorated) Gross from each Compensation Profile, used to
     // re-prorate when an uploaded Days Worked changes.

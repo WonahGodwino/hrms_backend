@@ -11,6 +11,8 @@ import { sendEmail } from '@/app/lib/email';
 import { saveInitialGrossCompensation } from '@/app/lib/staff/gross-compensation';
 import { describeIdentifierCollision, findIdentifierHolder } from '@/app/lib/staff/identifierCollision';
 import { assertStaffCapacity, recordStaffCreated } from '@/app/lib/trial/guard';
+import { buildRegistrationUrl } from '@/app/lib/auth/registration-token';
+import { forCompany } from '@/app/lib/data/tenant';
 
 const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk';
 
@@ -26,8 +28,8 @@ function jobCodePrefix(job: { title?: string | null; department?: string | null 
 // then guards against collisions within the company.
 async function generateStaffId(companyId: string, job: any): Promise<string> {
 	const prefix = jobCodePrefix(job);
-	const existing = await prisma.staffRecord.findMany({
-		where: { companyId, staffId: { startsWith: `${prefix}-` } },
+	const existing = await forCompany(companyId).staffRecord.findMany({
+		where: { staffId: { startsWith: `${prefix}-` } },
 		select: { staffId: true },
 	});
 	let max = 0;
@@ -39,8 +41,8 @@ async function generateStaffId(companyId: string, job: any): Promise<string> {
 	let n = max + 1;
 	let candidate = `${prefix}-${String(n).padStart(4, '0')}`;
 	// Defensive: ensure the id isn't already taken in this company.
-	// eslint-disable-next-line no-await-in-loop
-	while (await prisma.staffRecord.findFirst({ where: { companyId, staffId: candidate }, select: { id: true } })) {
+	 
+	while (await forCompany(companyId).staffRecord.findFirst({ where: { staffId: candidate }, select: { id: true } })) {
 		n += 1;
 		candidate = `${prefix}-${String(n).padStart(4, '0')}`;
 	}
@@ -217,7 +219,12 @@ export async function promoteCandidateToStaff(
 	const comp = await prisma.company.findUnique({ where: { id: companyId }, select: { companyName: true } }).catch(() => null);
 	const companyName = comp?.companyName || 'the company';
 	const staffName = `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() || 'Valued Staff';
-	const setupUrl = `${FRONTEND_URL}/complete-registration?email=${encodeURIComponent(email)}&staffId=${encodeURIComponent(created.staffId)}`;
+	const setupUrl = buildRegistrationUrl(FRONTEND_URL, {
+		id: created.id,
+		email,
+		staffId: created.staffId,
+		companyId,
+	});
 
 	const welcomeHtml = `
     <!DOCTYPE html>

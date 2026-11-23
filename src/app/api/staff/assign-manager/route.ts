@@ -4,6 +4,8 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { readJsonBody } from '@/app/lib/validation/request-body'
+import { assignManagerBodySchema } from '@/app/lib/validation/payroll-staff-schemas'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -30,7 +32,9 @@ export async function POST(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN']);
 
-    const body = await request.json()
+    const parsedBody = await readJsonBody(request, assignManagerBodySchema)
+    if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.message, 400), origin)
+    const body = parsedBody.data
     const { staffIds, managerId } = body
 
     if (!Array.isArray(staffIds) || staffIds.length === 0 || !managerId) {

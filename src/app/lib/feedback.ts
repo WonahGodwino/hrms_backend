@@ -5,10 +5,11 @@ import {
   RecognitionCategory,
   RecognitionVisibility,
 } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { UserContext } from "@/app/lib/access-control";
 import { MAX_LONG_TEXT, resolveRatingBounds } from "@/app/lib/self-appraisal";
 import { resolveActor } from "@/app/lib/manager-review";
+import { forCompany } from '@/app/lib/data/tenant';
 
 // ---------------------------------------------------------------------------
 // Fixed lists and rules
@@ -372,8 +373,8 @@ export async function buildHero(self: Self, companyId: string) {
 
   const [received, pendingCount, recs, reviews, activeStaff, quarterCounts] =
     await Promise.all([
-      prisma.feedback.findMany({
-        where: { companyId, recipientId: self.id },
+      forCompany(companyId).feedback.findMany({
+        where: { recipientId: self.id },
         select: {
           authorId: true,
           sentiment: true,
@@ -381,11 +382,11 @@ export async function buildHero(self: Self, companyId: string) {
           acknowledgedAt: true,
         },
       }),
-      prisma.feedbackRequest.count({
-        where: { companyId, requesterId: self.id, status: "PENDING" },
+      forCompany(companyId).feedbackRequest.count({
+        where: { requesterId: self.id, status: "PENDING" },
       }),
-      prisma.recognition.findMany({
-        where: { companyId, recipientId: self.id },
+      forCompany(companyId).recognition.findMany({
+        where: { recipientId: self.id },
         orderBy: { createdAt: "desc" },
         select: {
           createdAt: true,
@@ -400,8 +401,8 @@ export async function buildHero(self: Self, companyId: string) {
           },
         },
       }),
-      prisma.managerReview.findMany({
-        where: { companyId, staffRecordId: self.id, status: "SUBMITTED" },
+      forCompany(companyId).managerReview.findMany({
+        where: { staffRecordId: self.id, status: "SUBMITTED" },
         orderBy: { submittedAt: "desc" },
         take: 6,
         select: {
@@ -417,7 +418,7 @@ export async function buildHero(self: Self, companyId: string) {
           },
         },
       }),
-      prisma.staffRecord.count({ where: { companyId, isActive: true } }),
+      forCompany(companyId).staffRecord.count({ where: { isActive: true } }),
       prisma.recognition.groupBy({
         by: ["recipientId"],
         where: { companyId, createdAt: { gte: qStart, lt: qEnd } },
@@ -588,12 +589,12 @@ export async function buildAnalytics(
   }));
 
   const [feedback, recs] = await Promise.all([
-    prisma.feedback.findMany({
-      where: { companyId, recipientId: self.id, createdAt: { gte: start } },
+    forCompany(companyId).feedback.findMany({
+      where: { recipientId: self.id, createdAt: { gte: start } },
       select: { createdAt: true, sentiment: true, authorId: true },
     }),
-    prisma.recognition.findMany({
-      where: { companyId, recipientId: self.id, createdAt: { gte: start } },
+    forCompany(companyId).recognition.findMany({
+      where: { recipientId: self.id, createdAt: { gte: start } },
       select: { coreValues: true },
     }),
   ]);

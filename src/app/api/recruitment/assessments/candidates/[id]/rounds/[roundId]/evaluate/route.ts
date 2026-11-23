@@ -7,7 +7,11 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string; roundId: string } }) {
+export async function POST(
+  request: NextRequest,
+  props: { params: Promise<{ id: string; roundId: string }> }
+) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -46,154 +50,163 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     // Upsert either way: a draft may already occupy this interviewer/round's
     // unique row, so finalizing it must UPDATE that row (stamping submittedAt)
     // rather than INSERT a new one, which would violate the unique constraint.
-    if (isDraft) {
-      await prisma.recruitmentScorecard.upsert({
-        where: { candidateAssessmentId_roundId_interviewerId: { candidateAssessmentId: params.id, roundId: params.roundId, interviewerId: user.userId } },
-        create: {
-          candidateAssessmentId: params.id, roundId: params.roundId, interviewerId: user.userId,
-          scores: scores as any, notes: notes || null,
-          recommendation: recommendation === 'hire' ? 'HIRE' : recommendation === 'no_hire' ? 'NO_HIRE' : 'MAYBE',
-          submittedAt: null,
-        },
-        update: {
-          scores: scores as any, notes: notes || null,
-          recommendation: recommendation === 'hire' ? 'HIRE' : recommendation === 'no_hire' ? 'NO_HIRE' : 'MAYBE',
-          submittedAt: null,
-        },
-      })
-    } else {
-      await prisma.recruitmentScorecard.upsert({
-        where: { candidateAssessmentId_roundId_interviewerId: { candidateAssessmentId: params.id, roundId: params.roundId, interviewerId: user.userId } },
-        create: {
-          candidateAssessmentId: params.id, roundId: params.roundId, interviewerId: user.userId,
-          scores: scores as any, notes: notes || null,
-          recommendation: recommendation === 'hire' ? 'HIRE' : recommendation === 'no_hire' ? 'NO_HIRE' : 'MAYBE',
-          submittedAt: new Date(),
-        },
-        update: {
-          scores: scores as any, notes: notes || null,
-          recommendation: recommendation === 'hire' ? 'HIRE' : recommendation === 'no_hire' ? 'NO_HIRE' : 'MAYBE',
-          submittedAt: new Date(),
-        },
-      })
-    }
-
-    // Only count final (non-draft) submissions for round completion
-    const requiredInterviewers = (round.requiredInterviewers || []) as string[]
-    const allScorecards = await prisma.recruitmentScorecard.findMany({
-      where: { candidateAssessmentId: params.id, roundId: params.roundId },
-      select: { id: true, submittedAt: true },
-    })
-    const submitted = allScorecards.filter((s) => s.submittedAt !== null).length
-
-    // When no specific panel was assigned to this round, there's no fixed
-    // headcount to wait for — the first final submission completes it.
-    // Without this fallback, a round with an empty/unset requiredInterviewers
-    // list could never complete (0 > 0 is always false), leaving the
-    // candidate stuck at SCHEDULED forever regardless of recommendation.
-    let isRoundComplete = requiredInterviewers.length > 0
-      ? submitted >= requiredInterviewers.length
-      : submitted >= 1
-
-    // Deadline bypass: if round has evaluationDeadlineHours set and assessment
-    // was scheduled, check whether the deadline has passed.
-    if (!isRoundComplete && round.evaluationDeadlineHours && assessment.scheduledAt) {
-      const deadline = new Date(assessment.scheduledAt.getTime() + round.evaluationDeadlineHours * 3600000)
-      if (new Date() >= deadline) {
-        isRoundComplete = true
+    // DB-002: the scorecard and the round completion are saved together, so a
+    // failure cannot leave a submitted scorecard on a round that never completes
+    // (the interviewer could not resubmit and the candidate would be stuck).
+    const outcome = await prisma.$transaction(async (tx) => {
+      if (isDraft) {
+        await tx.recruitmentScorecard.upsert({
+          where: { candidateAssessmentId_roundId_interviewerId: { candidateAssessmentId: params.id, roundId: params.roundId, interviewerId: user.userId } },
+          create: {
+            candidateAssessmentId: params.id, roundId: params.roundId, interviewerId: user.userId,
+            scores: scores as any, notes: notes || null,
+            recommendation: recommendation === 'hire' ? 'HIRE' : recommendation === 'no_hire' ? 'NO_HIRE' : 'MAYBE',
+            submittedAt: null,
+          },
+          update: {
+            scores: scores as any, notes: notes || null,
+            recommendation: recommendation === 'hire' ? 'HIRE' : recommendation === 'no_hire' ? 'NO_HIRE' : 'MAYBE',
+            submittedAt: null,
+          },
+        })
+      } else {
+        await tx.recruitmentScorecard.upsert({
+          where: { candidateAssessmentId_roundId_interviewerId: { candidateAssessmentId: params.id, roundId: params.roundId, interviewerId: user.userId } },
+          create: {
+            candidateAssessmentId: params.id, roundId: params.roundId, interviewerId: user.userId,
+            scores: scores as any, notes: notes || null,
+            recommendation: recommendation === 'hire' ? 'HIRE' : recommendation === 'no_hire' ? 'NO_HIRE' : 'MAYBE',
+            submittedAt: new Date(),
+          },
+          update: {
+            scores: scores as any, notes: notes || null,
+            recommendation: recommendation === 'hire' ? 'HIRE' : recommendation === 'no_hire' ? 'NO_HIRE' : 'MAYBE',
+            submittedAt: new Date(),
+          },
+        })
       }
-    }
 
-    if (isRoundComplete) {
-      // Aggregate all scorecards for this round
-      const allScorecards = await prisma.recruitmentScorecard.findMany({
+      // Only count final (non-draft) submissions for round completion
+      const requiredInterviewers = (round.requiredInterviewers || []) as string[]
+      const allScorecards = await tx.recruitmentScorecard.findMany({
         where: { candidateAssessmentId: params.id, roundId: params.roundId },
-        select: { scores: true, recommendation: true, interviewerId: true, notes: true, submittedAt: true },
+        select: { id: true, submittedAt: true },
       })
+      const submitted = allScorecards.filter((s) => s.submittedAt !== null).length
 
-      // Compute aggregated average scores
-      const aggregatedScores: Record<string, number> = {}
-      const scoreKeys = Object.keys(scores)
-      for (const key of scoreKeys) {
-        const values = allScorecards
-          .map((sc) => (sc.scores as any)?.[key])
-          .filter((v) => typeof v === 'number') as number[]
-        aggregatedScores[key] = values.length > 0
-          ? parseFloat((values.reduce((a, b) => a + b, 0) / values.length).toFixed(1))
+      // When no specific panel was assigned to this round, there's no fixed
+      // headcount to wait for — the first final submission completes it.
+      // Without this fallback, a round with an empty/unset requiredInterviewers
+      // list could never complete (0 > 0 is always false), leaving the
+      // candidate stuck at SCHEDULED forever regardless of recommendation.
+      let isRoundComplete = requiredInterviewers.length > 0
+        ? submitted >= requiredInterviewers.length
+        : submitted >= 1
+
+      // Deadline bypass: if round has evaluationDeadlineHours set and assessment
+      // was scheduled, check whether the deadline has passed.
+      if (!isRoundComplete && round.evaluationDeadlineHours && assessment.scheduledAt) {
+        const deadline = new Date(assessment.scheduledAt.getTime() + round.evaluationDeadlineHours * 3600000)
+        if (new Date() >= deadline) {
+          isRoundComplete = true
+        }
+      }
+
+      if (isRoundComplete) {
+        // Aggregate all scorecards for this round
+        const allScorecards = await tx.recruitmentScorecard.findMany({
+          where: { candidateAssessmentId: params.id, roundId: params.roundId },
+          select: { scores: true, recommendation: true, interviewerId: true, notes: true, submittedAt: true },
+        })
+
+        // Compute aggregated average scores
+        const aggregatedScores: Record<string, number> = {}
+        const scoreKeys = Object.keys(scores)
+        for (const key of scoreKeys) {
+          const values = allScorecards
+            .map((sc) => (sc.scores as any)?.[key])
+            .filter((v) => typeof v === 'number') as number[]
+          aggregatedScores[key] = values.length > 0
+            ? parseFloat((values.reduce((a, b) => a + b, 0) / values.length).toFixed(1))
+            : 0
+        }
+
+        // Compute average overall score and dominant recommendation
+        const avgScore = Object.values(aggregatedScores).length > 0
+          ? parseFloat((Object.values(aggregatedScores).reduce((a, b) => a + b, 0) / Object.values(aggregatedScores).length).toFixed(1))
           : 0
-      }
 
-      // Compute average overall score and dominant recommendation
-      const avgScore = Object.values(aggregatedScores).length > 0
-        ? parseFloat((Object.values(aggregatedScores).reduce((a, b) => a + b, 0) / Object.values(aggregatedScores).length).toFixed(1))
-        : 0
+        // Candidate-level FINAL score: `averageScore` used to be overwritten with
+        // just this round's average, silently discarding earlier rounds' scores
+        // when a candidate progressed through multiple rounds. Instead, average
+        // this round's score together with every other already-completed
+        // round's average (each round's own average, computed from ITS
+        // persisted scorecards) so earlier panel evaluations still count.
+        const priorRoundScorecards = await tx.recruitmentScorecard.findMany({
+          where: { candidateAssessmentId: params.id, roundId: { not: params.roundId }, submittedAt: { not: null } },
+          select: { roundId: true, scores: true },
+        })
+        const priorRoundScoreLists = new Map<string, number[]>()
+        for (const sc of priorRoundScorecards) {
+          const values = Object.values(sc.scores as any).filter((v): v is number => typeof v === 'number')
+          if (values.length === 0) continue
+          if (!priorRoundScoreLists.has(sc.roundId)) priorRoundScoreLists.set(sc.roundId, [])
+          priorRoundScoreLists.get(sc.roundId)!.push(values.reduce((a, b) => a + b, 0) / values.length)
+        }
+        const priorRoundAverages = Array.from(priorRoundScoreLists.values())
+          .map((vals) => vals.reduce((a, b) => a + b, 0) / vals.length)
+        const allRoundAverages = [...priorRoundAverages, avgScore]
+        const overallAverageScore = parseFloat(
+          (allRoundAverages.reduce((a, b) => a + b, 0) / allRoundAverages.length).toFixed(1)
+        )
 
-      // Candidate-level FINAL score: `averageScore` used to be overwritten with
-      // just this round's average, silently discarding earlier rounds' scores
-      // when a candidate progressed through multiple rounds. Instead, average
-      // this round's score together with every other already-completed
-      // round's average (each round's own average, computed from ITS
-      // persisted scorecards) so earlier panel evaluations still count.
-      const priorRoundScorecards = await prisma.recruitmentScorecard.findMany({
-        where: { candidateAssessmentId: params.id, roundId: { not: params.roundId }, submittedAt: { not: null } },
-        select: { roundId: true, scores: true },
-      })
-      const priorRoundScoreLists = new Map<string, number[]>()
-      for (const sc of priorRoundScorecards) {
-        const values = Object.values(sc.scores as any).filter((v): v is number => typeof v === 'number')
-        if (values.length === 0) continue
-        if (!priorRoundScoreLists.has(sc.roundId)) priorRoundScoreLists.set(sc.roundId, [])
-        priorRoundScoreLists.get(sc.roundId)!.push(values.reduce((a, b) => a + b, 0) / values.length)
-      }
-      const priorRoundAverages = Array.from(priorRoundScoreLists.values())
-        .map((vals) => vals.reduce((a, b) => a + b, 0) / vals.length)
-      const allRoundAverages = [...priorRoundAverages, avgScore]
-      const overallAverageScore = parseFloat(
-        (allRoundAverages.reduce((a, b) => a + b, 0) / allRoundAverages.length).toFixed(1)
-      )
+        const hire = allScorecards.filter((s) => s.recommendation === 'HIRE').length
+        const noHire = allScorecards.filter((s) => s.recommendation === 'NO_HIRE').length
+        const maybe = allScorecards.filter((s) => s.recommendation === 'MAYBE').length
+        const finalRecommendation = hire > noHire && hire > maybe ? 'HIRE'
+          : noHire > hire && noHire > maybe ? 'NO_HIRE'
+          : 'MAYBE'
 
-      const hire = allScorecards.filter((s) => s.recommendation === 'HIRE').length
-      const noHire = allScorecards.filter((s) => s.recommendation === 'NO_HIRE').length
-      const maybe = allScorecards.filter((s) => s.recommendation === 'MAYBE').length
-      const finalRecommendation = hire > noHire && hire > maybe ? 'HIRE'
-        : noHire > hire && noHire > maybe ? 'NO_HIRE'
-        : 'MAYBE'
+        await tx.recruitmentCandidateAssessment.update({
+          where: { id: params.id },
+          data: {
+            roundStatus: 'COMPLETED',
+            averageScore: overallAverageScore,
+          },
+        })
 
-      await prisma.recruitmentCandidateAssessment.update({
-        where: { id: params.id },
-        data: {
-          roundStatus: 'COMPLETED',
+      return { complete: true as const, body: {
+          isRoundComplete: true,
+          roundStatus: 'completed',
+          pendingInterviewers: 0,
+          roundAverageScore: avgScore,
           averageScore: overallAverageScore,
-        },
-      })
+          finalRecommendation,
+          scoreBreakdown: allScorecards.map((sc) => ({
+            interviewerId: sc.interviewerId,
+            scores: sc.scores,
+            recommendation: sc.recommendation,
+            notes: sc.notes,
+            submittedAt: sc.submittedAt,
+          })),
+          aggregatedScores,
+          message: submitted < requiredInterviewers.length
+            ? 'Round completed — evaluation deadline has passed. Bypassed panelists who did not submit.'
+            : 'All panelists have submitted. Evaluation complete.',
+      } }
+      }
 
-      return withCors(ApiResponse.success({
-        isRoundComplete: true,
-        roundStatus: 'completed',
-        pendingInterviewers: 0,
-        roundAverageScore: avgScore,
-        averageScore: overallAverageScore,
-        finalRecommendation,
-        scoreBreakdown: allScorecards.map((sc) => ({
-          interviewerId: sc.interviewerId,
-          scores: sc.scores,
-          recommendation: sc.recommendation,
-          notes: sc.notes,
-          submittedAt: sc.submittedAt,
-        })),
-        aggregatedScores,
-        message: submitted < requiredInterviewers.length
-          ? 'Round completed — evaluation deadline has passed. Bypassed panelists who did not submit.'
-          : 'All panelists have submitted. Evaluation complete.',
-      }), origin)
-    }
+    return { complete: false as const, submitted, requiredCount: requiredInterviewers.length }
+    }, { timeout: 15000 })
+
+    if (outcome.complete) return withCors(ApiResponse.success(outcome.body), origin)
 
     // Round still awaiting other panelists — the scorecard was saved
     // successfully, this just isn't the round-completing submission.
     return withCors(ApiResponse.success({
       isRoundComplete: false,
       roundStatus: isDraft ? 'draft_saved' : 'pending_feedback',
-      pendingInterviewers: Math.max(requiredInterviewers.length - submitted, 0),
+      pendingInterviewers: Math.max(outcome.requiredCount - outcome.submitted, 0),
     }, isDraft ? 'Draft saved.' : 'Evaluation submitted successfully.'), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }
 }

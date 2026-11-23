@@ -2,7 +2,7 @@
 // ZIP packaging for letter runs (archiver, streaming).
 // ============================================================
 
-import archiver from 'archiver'
+import { ZipArchive } from 'archiver'
 
 export interface ZipEntry {
   name: string
@@ -11,7 +11,7 @@ export interface ZipEntry {
 
 export function createZip(entries: ZipEntry[]): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const archive = archiver('zip', { zlib: { level: 9 } })
+    const archive = new ZipArchive({ zlib: { level: 9 } })
     const chunks: Buffer[] = []
     archive.on('data', (chunk: Buffer) => chunks.push(chunk))
     archive.on('end', () => resolve(Buffer.concat(chunks)))

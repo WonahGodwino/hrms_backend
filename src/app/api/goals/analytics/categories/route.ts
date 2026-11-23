@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -10,6 +9,7 @@ import {
 } from "@/app/lib/access-control";
 import { average } from "@/app/lib/goals/analytics-utils";
 import { VALID_PERFORMANCE_CATEGORIES } from "@/app/lib/goals/goal-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -81,9 +81,8 @@ export async function GET(request: NextRequest) {
         origin,
       );
 
-    const goals = await prisma.goal.findMany({
+    const goals = await forCompany(companyId).goal.findMany({
       where: {
-        companyId,
         staffRecordId,
         isArchived: false,
         performanceCategory: { not: null },

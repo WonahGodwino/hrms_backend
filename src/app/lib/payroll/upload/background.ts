@@ -21,15 +21,9 @@ import {
 } from '@/app/lib/payroll/templates/utils'
 import { neutralizeRowForSpreadsheet } from '@/app/lib/payroll/utils/valueParsing'
 import type { PayrollPeriod } from '@/app/lib/payroll/upload/validate'
+import { forCompany } from '@/app/lib/data/tenant'
+import { getRelativePath } from '@/app/lib/storage/relative-path'
 import { uploadFileToS3 } from '@/app/lib/storage/upload-files'
-
-export function getRelativePath(absolutePath: string): string {
-  const projectRoot = process.cwd()
-  if (absolutePath.startsWith(projectRoot)) {
-    return path.relative(projectRoot, absolutePath)
-  }
-  return absolutePath
-}
 
 export async function ensureUploadDirectories() {
   const baseDir = process.cwd()
@@ -198,10 +192,8 @@ export async function processPayrollUploadInBackground({
   if (isUploadCancelled(uploadId)) {
     console.log('[PAYROLL_UPLOAD] Upload was cancelled, cleaning up payslips', { uploadId })
     // Delete any payslips whose Payroll records were created during this upload
-    const stalePayrolls = await prisma.payroll.findMany({
-      where: {
-        companyId,
-        // Only rows this upload created (see cancel/route.ts).
+    const stalePayrolls = await forCompany(companyId).payroll.findMany({
+      where: { // Only rows this upload created (see cancel/route.ts).
         payrollUploadId: uploadId,
         createdAt: { gte: new Date(startTime) },
       },

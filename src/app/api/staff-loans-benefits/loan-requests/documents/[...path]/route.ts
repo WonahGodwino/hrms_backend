@@ -8,6 +8,7 @@ import path from 'path'
 
 import { requireModuleAccess, ALL_ROLES } from '@/app/lib/module-access'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
 import { readUploadFile } from '@/app/lib/storage/upload-files'
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -53,10 +54,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         'Content-Disposition': `inline; filename="${fileName}"`,
       },
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error fetching loan document:', error)
     return withCors(
-      NextResponse.json({ success: false, message: error?.message || 'Failed to fetch document' }, { status: 500 }),
+      NextResponse.json({ success: false, message: publicErrorMessage(error, 'Failed to fetch document') }, { status: 500 }),
       origin
     )
   }

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { withTransaction } from "@/app/lib/data/transaction";
 import { handleCorsOptions } from "@/app/lib/cors";
 import type { RouteContext } from "@/app/lib/self-appraisal";
 import { fbRoute, httpErr } from "@/app/lib/fraud-bias";
@@ -15,7 +15,7 @@ export async function POST(
 ) {
   return fbRoute(request, { write: true }, async (ctx) => {
     const id = (await context.params).id;
-    await prisma.$transaction(async (tx) => {
+    await withTransaction(async (tx) => {
       const r = await tx.fairnessReport.updateMany({
         where: { id, companyId: ctx.companyId, status: "GENERATED" },
         data: { status: "ARCHIVED", archivedAt: new Date() },

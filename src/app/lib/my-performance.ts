@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { withCors } from "@/app/lib/cors";
@@ -10,6 +10,7 @@ import {
 } from "@/app/lib/access-control";
 import { resolveRatingBounds } from "@/app/lib/self-appraisal";
 import { competencyScore } from "@/app/lib/manager-review";
+import { forCompany } from '@/app/lib/data/tenant';
 
 export const MIN_COHORT = 5;
 export const TOP_PERCENT_MAX = 50;
@@ -313,10 +314,8 @@ async function releasedBlocks(companyId: string, staffId: string) {
 
 // ---------------------------------------------------------------- appraisal progress
 async function appraisalBlock(companyId: string, staffId: string) {
-  const p: any = await prisma.appraisalCycleParticipant.findFirst({
-    where: {
-      companyId,
-      staffRecordId: staffId,
+  const p: any = await forCompany(companyId).appraisalCycleParticipant.findFirst({
+    where: { staffRecordId: staffId,
       cycle: { status: { in: OPEN_CYCLE } },
     } as any,
     orderBy: { createdAt: "desc" },

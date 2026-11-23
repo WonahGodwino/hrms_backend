@@ -18,10 +18,10 @@ const NUMBER_KEYS = [
 ] as const
 
 // Returns a clean offerDefaults object (only known keys), or null if nothing usable.
-export function sanitizeOfferDefaults(input: unknown): Record<string, any> | null {
+export function sanitizeOfferDefaults(input: unknown): Record<string, unknown> | null {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null
-  const src = input as Record<string, any>
-  const out: Record<string, any> = {}
+  const src = input as Record<string, unknown>
+  const out: Record<string, unknown> = {}
 
   for (const k of STRING_KEYS) {
     if (src[k] !== undefined && src[k] !== null) {

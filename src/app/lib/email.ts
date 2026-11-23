@@ -5,6 +5,8 @@ import { prisma } from '@/app/lib/db'
 import { sign, verify } from 'jsonwebtoken'
 import { normalizeCurrencyCode } from '@/app/lib/currency'
 import { reserveStaffEmailSlot } from '@/app/lib/trial/guard'
+import { requireSecret } from '@/app/lib/config/secrets'
+import { isTransientHttpError, sendWithRetry } from '@/app/lib/mail/retry'
 
 // Initialize Mailgun
 const mailgun = new Mailgun(formData)
@@ -26,42 +28,17 @@ const isEmailDryRun = () =>
   ['true', '1'].includes(String(process.env.EMAIL_DRY_RUN ?? process.env.PAYROLL_EMAIL_DRY_RUN ?? '').toLowerCase())
 
 const SEND_TIMEOUT_MS = 15_000
-const SEND_MAX_ATTEMPTS = 3
 
 const payrollCompanyCache = new Map<string, { companyName: string; baseCurrency: string; expires: number }>()
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-
-// 429, 5xx, timeouts and network errors are transient; other 4xx are permanent
-// (bad address, auth, validation) and must not be retried.
-function isTransientEmailError(error: any): boolean {
-  const status = Number(error?.status ?? error?.statusCode)
-  if (Number.isFinite(status) && status > 0) return status === 429 || status >= 500
-  return true // no HTTP status: timeout / connection reset / DNS
-}
-
+// REL-004: 3 attempts, backoff with jitter, only for 429/5xx/timeouts/network
+// errors (lib/mail/retry.ts); bad addresses and auth errors fail at once.
 async function createMessageWithRetry(mailOptions: any): Promise<any> {
-  let lastError: any
-  for (let attempt = 1; attempt <= SEND_MAX_ATTEMPTS; attempt++) {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    try {
-      return await Promise.race([
-        mg.messages.create(MAILGUN_DOMAIN, mailOptions),
-        new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error('Email request timed out')), SEND_TIMEOUT_MS)
-        }),
-      ])
-    } catch (error: any) {
-      lastError = error
-      if (attempt === SEND_MAX_ATTEMPTS || !isTransientEmailError(error)) break
-      const retryAfter = Number(error?.headers?.['retry-after'])
-      const backoff = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 500 * 2 ** (attempt - 1)
-      await sleep(Math.min(backoff, 10_000) + Math.floor(Math.random() * 250))
-    } finally {
-      if (timer) clearTimeout(timer)
-    }
-  }
-  throw lastError
+  return sendWithRetry(() => mg.messages.create(MAILGUN_DOMAIN, mailOptions), {
+    attempts: 3,
+    timeoutMs: SEND_TIMEOUT_MS,
+    isTransient: isTransientHttpError,
+  })
 }
 
 // ========== NEW: Generic sendEmail function ==========
@@ -808,7 +785,7 @@ export function generateGuarantorToken(
   const expiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
   const token = sign(
       { purpose: 'guarantor_response', loanRequestId, guarantorStaffId },
-      process.env.JWT_SECRET || 'secret',
+      requireSecret('JWT_SECRET'),
       { expiresIn: '7d' }
   )
   return { token, expiry }
@@ -819,7 +796,7 @@ export function verifyGuarantorToken(token: string): {
   guarantorStaffId: string
 } | null {
   try {
-    const decoded = verify(token, process.env.JWT_SECRET || 'secret') as any
+    const decoded = verify(token, requireSecret('JWT_SECRET')) as any
     if (decoded?.purpose !== 'guarantor_response') return null
     return { loanRequestId: decoded.loanRequestId, guarantorStaffId: decoded.guarantorStaffId }
   } catch {

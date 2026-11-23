@@ -5,13 +5,19 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
 import { exportReportResponse, IAD_CHANGES_COLS } from '@/app/lib/phed/report-export'
+import { forCompany } from '@/app/lib/data/tenant'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // GET /api/phed/pay-periods/:id/reports/iad-changes — IAD Page, Changes tab
 // (PRD 13.3). Every payroll-affecting PhedStaff edit recorded between the
 // previous pay period and this one.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req);
+  if (deferred) return deferred;
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'report')
   if (rl) return withCors(rl, origin)
@@ -28,9 +34,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       return withCors(ApiResponse.notFound('Pay period not found'), origin)
     }
 
-    const previousPeriod = await prisma.phedPayPeriod.findFirst({
+    const previousPeriod = await forCompany(period.companyId).phedPayPeriod.findFirst({
       where: {
-        companyId: period.companyId,
         OR: [{ year: { lt: period.year } }, { year: period.year, month: { lt: period.month } }],
       },
       orderBy: [{ year: 'desc' }, { month: 'desc' }],
@@ -47,8 +52,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     // New hires (staff with no computed payroll in any prior period) are
     // reported under the New Hired tab, not Changes — their initial setup
     // edits must not pollute the Changes view.
-    const prevPeriods = await prisma.phedPayPeriod.findMany({
-      where: { companyId: period.companyId, id: { not: params.id } },
+    const prevPeriods = await forCompany(period.companyId).phedPayPeriod.findMany({
+      where: { id: { not: params.id } },
       select: { id: true },
     })
     const prevStaffIds = new Set<string>()
@@ -60,8 +65,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       prevPayrolls.forEach((p: any) => prevStaffIds.add(p.staffId))
     }
 
-    const changes = await prisma.phedChangeLog.findMany({
-      where: { companyId: period.companyId, changedAt: { gte: windowStart, lte: windowEnd } },
+    const changes = await forCompany(period.companyId).phedChangeLog.findMany({
+      where: { changedAt: { gte: windowStart, lte: windowEnd } },
       include: { staff: { select: { firstName: true, lastName: true, staffId: true } } },
       orderBy: { changedAt: 'desc' },
     })

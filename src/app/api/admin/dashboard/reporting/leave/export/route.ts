@@ -10,12 +10,16 @@ import type { ChartSpec } from '@/app/lib/reporting/chart-render'
 import { getMonthName } from '@/app/lib/payroll/utils/monthParser'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { attachmentDisposition, safeFileName } from '@/app/lib/excel/sheet-theme'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
 export async function GET(request: NextRequest) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(request)
+  if (deferred) return deferred
   const origin = request.headers.get('origin')
 
   try {

@@ -171,9 +171,9 @@ export async function addPfaDropdown(
  * pass it in rather than this function hitting the DB per row.
  */
 export function parsePensionRow(
-  row: any,
-  pick: (row: any, keys: string[]) => unknown,
-  cellToString: (value: any) => string,
+  row: unknown,
+  pick: (row: unknown, keys: string[]) => unknown,
+  cellToString: (value: unknown) => string,
   pfaCodes: Set<string>
 ): Record<string, string | number> {
   const out: Record<string, string | number> = {}

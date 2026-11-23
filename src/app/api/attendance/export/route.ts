@@ -20,6 +20,7 @@ import {
   type StaffAttendanceDayRow,
 } from '@/app/lib/attendance/attendance-export'
 import { startOfBusinessDay, startOfBusinessMonth, endOfBusinessMonth, businessDateKey, businessDateParts, addBusinessDays, isBusinessWeekday, BUSINESS_TIMEZONE } from '@/app/lib/attendance/business-day'
+import { deferExport } from '@/app/lib/exports/defer'
 
 const TZ = 'Africa/Lagos'
 const MAX_RANGE_DAYS = 366
@@ -102,7 +103,7 @@ function lagosMinutes(d: Date): number {
 
 // One staff member, one row per calendar day in [start, end].
 async function singleStaffReport(
-  prisma: typeof import('@/app/lib/prisma').prisma,
+  prisma: typeof import('@/app/lib/db').prisma,
   companyId: string,
   staffRecordId: string,
   start: Date,
@@ -179,7 +180,7 @@ async function singleStaffReport(
     staff: { name, staffId: staff.staffId || '', email: staff.email || '', department: staff.department || '', position: staff.position || '' },
     lateCutoff: `${pad(Math.floor(cutoff / 60) % 24)}:${pad(cutoff % 60)}`,
   })
-  const safeName = name.replace(/[\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim() || 'Staff'
+  const safeName = name.replace(/[/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim() || 'Staff'
   const rangeStamp = spanDays > 1 ? `${ymd(start)} to ${ymd(end)}` : ymd(start)
   return xlsxResponse(buffer, `Attendance (${safeName}) ${rangeStamp}.xlsx`)
 }
@@ -189,6 +190,9 @@ export async function OPTIONS(request: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req)
+  if (deferred) return deferred
   const origin = req.headers.get('origin')
 
   try {
@@ -251,7 +255,7 @@ export async function GET(req: NextRequest) {
       return withCors(ApiResponse.error(`Date range cannot exceed ${MAX_RANGE_DAYS} days`, 400), origin)
     }
 
-    const { prisma } = await import('@/app/lib/prisma')
+    const { prisma } = await import('@/app/lib/db')
 
     if (staffRecordId) {
       if (format !== 'excel') {
@@ -325,7 +329,7 @@ export async function GET(req: NextRequest) {
 
     const meta = { companyName: company.companyName, rangeLabel, filters, generatedAt: new Date() }
     const rangeStamp = spanDays > 1 ? `${ymd(start)} to ${ymd(end)}` : ymd(start)
-    const safeCompany = company.companyName.replace(/[\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim() || 'Company'
+    const safeCompany = company.companyName.replace(/[/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim() || 'Company'
     const baseName = `Attendance (${safeCompany}) ${rangeStamp}`
     const disposition = (ext: string) => {
       const name = `${baseName}.${ext}`

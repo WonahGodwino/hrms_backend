@@ -4,8 +4,16 @@ import bcrypt from 'bcryptjs'
 import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { signToken } from '@/app/lib/auth'
+import { signRefreshToken } from '@/app/lib/auth/refresh-token'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { syncUserCompanyForRole } from '@/app/lib/access/user-company-role'
+import { verifyRegistrationToken } from '@/app/lib/auth/registration-token'
+import { phedAccountRateLimit, phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { readJsonBodyOrEmpty } from '@/app/lib/validation/request-body'
+import { completeRegistrationBodySchema } from '@/app/lib/validation/auth-schemas'
+
+const INVALID_INVITE_MESSAGE =
+  'This setup link is invalid or has expired. Request a new link from the registration page or ask HR to resend your invite.'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -13,10 +21,13 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin')
+  // SEC-010: per-IP limit (the proxy-added address, not the client-supplied one).
+  const ipLimited = phedRateLimit(request, 'auth')
+  if (ipLimited) return withCors(ipLimited, origin)
 
   try {
-    const body = await request.json()
-    const { email, staffId, password, companyId } = body || {}
+    // API-002: fields are type-checked; a malformed body falls into the checks below.
+    const { email, staffId, password, companyId, invite } = await readJsonBodyOrEmpty(request, completeRegistrationBodySchema)
 
     if (!email || !staffId || !password) {
       return withCors(
@@ -28,7 +39,23 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // SEC-002: registration needs the signed invite from the setup e-mail.
+    const invitation = verifyRegistrationToken(invite)
+    if (!invitation) {
+      return withCors(
+        ApiResponse.error(INVALID_INVITE_MESSAGE, 403),
+        origin
+      )
+    }
+
     const cleanEmail = email.toLowerCase().trim()
+
+    // SEC-010: per-account limit, so rotating IP addresses does not help.
+
+    const accountLimited = phedAccountRateLimit(request, 'auth', cleanEmail)
+
+    if (accountLimited) return withCors(accountLimited, origin)
+
     const cleanStaffId = staffId.toString().trim()
 
     // Multi-company safe staff lookup:
@@ -77,6 +104,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    if (
+      staffRecord.id !== invitation.staffRecordId ||
+      staffRecord.email.toLowerCase().trim() !== invitation.email ||
+      staffRecord.companyId !== invitation.companyId
+    ) {
+      return withCors(
+        ApiResponse.error(INVALID_INVITE_MESSAGE, 403),
+        origin
+      )
+    }
+
     if (staffRecord.email.toLowerCase().trim() !== cleanEmail) {
       return withCors(
         ApiResponse.error('Email does not match staff record', 403),
@@ -111,7 +149,6 @@ export async function POST(request: NextRequest) {
       data: {
         password: hashed,
         isRegistered: true,
-        isActive: true,
       },
       include: { company: { select: { id: true, companyName: true, email: true, phone: true, address: true } } },
     })
@@ -132,7 +169,7 @@ export async function POST(request: NextRequest) {
     const token = signToken({
       userId: updatedStaff.id,
       email: updatedStaff.email,
-      role: updatedStaff.role || updatedStaff.position,
+      role: updatedStaff.role || 'STAFF',
       companyId: updatedStaff.companyId,
     })
 
@@ -140,13 +177,14 @@ export async function POST(request: NextRequest) {
       ApiResponse.success(
         {
           token,
+          refreshToken: signRefreshToken({ userId: updatedStaff.id }),
           user: {
             id: updatedStaff.id,
             staffId: updatedStaff.staffId,
             email: updatedStaff.email,
             firstName: updatedStaff.firstName,
             lastName: updatedStaff.lastName,
-            role: updatedStaff.role || updatedStaff.position,
+            role: updatedStaff.role || 'STAFF',
             companyId: updatedStaff.companyId,
             department: updatedStaff.department,
             position: updatedStaff.position,

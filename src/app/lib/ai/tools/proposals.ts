@@ -8,7 +8,8 @@ import { buildDepartmentChangePlan, DEPARTMENT_CHANGE_FIELDS, type DepartmentCha
 import { redactSensitive } from '../redact'
 import { buildUndoPlan } from '../undoPlan'
 
-const cleanReason = (v: unknown) =>
+export const cleanReason = (v: unknown) =>
+  // eslint-disable-next-line no-control-regex -- strips control characters on purpose
   redactSensitive(String(v ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim()).slice(0, 500)
 
 export const proposeStaffChange: ToolDefinition = {

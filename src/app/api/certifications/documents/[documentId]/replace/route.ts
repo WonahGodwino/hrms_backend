@@ -1,10 +1,10 @@
 import { NextRequest } from 'next/server';
-import path from 'path';
 
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { requireModuleAccess } from '@/app/lib/module-access';
 import { validateAndStoreFile } from '@/app/lib/uploadUtils';
+import { certificationUploadDir, isExternalDocumentUrl } from '@/app/lib/storage/private-files';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 
 export async function OPTIONS(req: NextRequest) {
@@ -13,9 +13,10 @@ export async function OPTIONS(req: NextRequest) {
 
 // POST /api/certifications/documents/[documentId]/replace
 // Replaces an existing document file with a new file or URL
-export async function POST(req: NextRequest, { params }: { params: { documentId: string } }) {
-	const origin = req.headers.get('origin');
-	try {
+export async function POST(req: NextRequest, props: { params: Promise<{ documentId: string }> }) {
+    const params = await props.params;
+    const origin = req.headers.get('origin');
+    try {
 		const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null;
 		const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN']);
 
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest, { params }: { params: { documentId:
 
 			try {
 				const file = rawFile as unknown as File;
-				const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'certifications');
+				const uploadsDir = certificationUploadDir();
 				const stored = await validateAndStoreFile(file, uploadsDir);
 				newFileName = stored.fileName;
 				newFileType = stored.fileType;
@@ -54,6 +55,10 @@ export async function POST(req: NextRequest, { params }: { params: { documentId:
 			const body = await req.json().catch(() => ({}));
 			if (!body.fileUrl) {
 				return withCors(ApiResponse.error('fileUrl or attached replacement file is required', 400), origin);
+			}
+			// SEC-019: a link supplied by the client must be an external http(s) URL, never a server path.
+			if (body.fileUrl && !isExternalDocumentUrl(body.fileUrl)) {
+				return withCors(ApiResponse.error('Document link must be an http(s) URL', 400), origin);
 			}
 			newFileUrl = body.fileUrl;
 			newFileName = body.fileName || newFileName;

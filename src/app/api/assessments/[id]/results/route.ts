@@ -10,7 +10,8 @@ export async function OPTIONS(req: NextRequest) {
 }
 
 // GET /api/assessments/:id/results
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null

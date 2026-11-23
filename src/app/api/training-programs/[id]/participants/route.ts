@@ -5,11 +5,13 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // GET /api/training-programs/:id/participants?training_status=&cert_status=&department=&search=&page=&limit=
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -26,8 +28,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const page           = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
     const limit          = Math.min(100, parseInt(searchParams.get('limit') ?? '20'))
 
-    const program = await prisma.trainingProgram.findFirst({
-      where: { id: params.id, companyId, deletedAt: null },
+    const program = await forCompany(companyId).trainingProgram.findFirst({
+      where: { id: params.id, deletedAt: null },
       select: { id: true, programName: true },
     })
     if (!program) return withCors(ApiResponse.error('Training program not found', 404), origin)

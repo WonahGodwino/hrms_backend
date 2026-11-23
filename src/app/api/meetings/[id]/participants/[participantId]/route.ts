@@ -21,7 +21,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 		const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null;
 		const user = await requireRoleAsync(token, ROLES);
 		const { id, participantId } = await params;
-		const meeting: any = await (prisma as any).meeting.findUnique({ where: { id }, include: { participants: true } });
+		const meeting: any = await prisma.meeting.findUnique({ where: { id }, include: { participants: true } });
 		if (!meeting) return withCors(ApiResponse.error('Meeting not found', 404), origin);
 		if (!(await hasModuleAccess(meeting.companyId, 'MEETINGS'))) {
 			return withCors(ApiResponse.error('This module is not available for your organisation', 403), origin);
@@ -46,7 +46,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 			const identity = participant.staffId ? `u_${participant.staffId}` : `p_${participant.id}`;
 			await provider.removeParticipant(meeting.roomName, identity).catch(() => {});
 		}
-		await (prisma as any).meetingParticipant.delete({ where: { id: participantId } });
+		await prisma.meetingParticipant.delete({ where: { id: participantId } });
 
 		return withCors(ApiResponse.success({ participantId, revoked: true }, 'Participant access revoked'), origin);
 	} catch (e) {

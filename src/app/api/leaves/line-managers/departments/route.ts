@@ -2,10 +2,10 @@
 // Departments of a company with headcount and how many line managers each has,
 // for the Leave "Manager Assignment" page.
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -31,18 +31,16 @@ export async function GET(request: NextRequest) {
     }
 
     const [departments, staffCounts, ladders] = await Promise.all([
-      prisma.department.findMany({
-        where: { companyId },
+      forCompany(companyId).department.findMany({
         orderBy: { name: 'asc' },
         select: { id: true, name: true, code: true },
       }),
-      prisma.staffRecord.groupBy({
+      forCompany(companyId).staffRecord.groupBy({
         by: ['departmentId'],
-        where: { companyId, isActive: true, departmentId: { not: null } },
+        where: { isActive: true, departmentId: { not: null } },
         _count: { _all: true },
       }),
-      prisma.departmentLineManager.findMany({
-        where: { companyId },
+      forCompany(companyId).departmentLineManager.findMany({
         orderBy: { level: 'asc' },
         select: {
           departmentId: true,

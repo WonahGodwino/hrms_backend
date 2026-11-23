@@ -2,11 +2,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
 import { XL, XLSX_MIME, addTitleBand, argb, attachmentDisposition, buildSubtitle, solid, addInstructionsSheet } from '@/app/lib/excel/sheet-theme'
 import { PAYROLL_TEMPLATES } from '@/app/lib/payroll/templates/types'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -56,7 +57,7 @@ export async function GET(request: NextRequest) {
     
     // Define columns based on template type
     switch (templateType) {
-      case 'ISURF_STANDARD':
+      case 'ISURF_STANDARD': {
         // ISURF_STANDARD template (original format)
         worksheet.columns = [
           { header: 'Name', key: 'name', width: 20 },
@@ -122,7 +123,8 @@ export async function GET(request: NextRequest) {
         worksheet.addRow(sampleRowData)
         break
         
-      case 'BLUERIDGE':
+      }
+      case 'BLUERIDGE': {
         // CORRECTED BLUERIDGE template - Month column is just the month name
         
         // Define the correct headers
@@ -403,6 +405,7 @@ export async function GET(request: NextRequest) {
         
         break
         
+      }
       default:
         return withCors(
           ApiResponse.error('Unsupported template type', 400),
@@ -478,7 +481,7 @@ export async function GET(request: NextRequest) {
       
       if (templateType === 'ISURF_STANDARD') {
         const headers = worksheet.columns.map(col => col.header).join(',')
-        const sampleValues = worksheet.getRow(2).values as any[]
+        const sampleValues = worksheet.getRow(2).values as unknown[]
         const sampleRow = sampleValues.slice(1).join(',')
         csvContent = `${headers}\n${sampleRow}`
       } else {
@@ -659,7 +662,7 @@ export async function GET(request: NextRequest) {
     }
 
   } catch (error) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('Error generating payroll template:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }

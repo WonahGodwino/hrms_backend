@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
         break
 
       case 'ADMIN':
-      case 'HR':
+      case 'HR': {
         // Get assigned companies from user_companies
         const userAssignments = await prisma.userCompany.findMany({
           where: { 
@@ -122,7 +122,8 @@ export async function GET(request: NextRequest) {
         }
         break
 
-      case 'STAFF':
+      }
+      case 'STAFF': {
         // STAFF only has their own company
         const staffRecord = await prisma.staffRecord.findUnique({
           where: { id: user.userId },
@@ -146,6 +147,7 @@ export async function GET(request: NextRequest) {
           }]
         }
         break
+      }
     }
 
     // Mark the current company if user has one in token

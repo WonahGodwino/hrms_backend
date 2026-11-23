@@ -20,8 +20,7 @@ import {
   WebhookReceiver,
   WebhookEvent,
 } from 'livekit-server-sdk'
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { s3Config, isS3Configured } from '@/app/lib/storage/s3'
 
 interface JoinTokenOptions {
   roomName: string
@@ -43,7 +42,7 @@ interface ParticipantSummary {
 interface RecordingHandle {
   egressId: string
   url: string | null
-  /** S3 object key — source of truth for signed playback URLs (see getRecordingDownloadUrl). */
+  /** S3 object key — source of truth for backend-proxied playback URLs. */
   filePath: string
 }
 
@@ -71,8 +70,6 @@ export interface MeetingProvider {
   canRecord(): boolean
   startRecording(roomName: string, meetingId: string): Promise<RecordingHandle>
   stopRecording(egressId: string): Promise<void>
-  /** Short-lived signed GET URL for a private-bucket recording, or null if not configured. */
-  getRecordingDownloadUrl(key: string, ttlSeconds?: number): Promise<string | null>
 }
 
 class LiveKitProvider implements MeetingProvider {
@@ -193,24 +190,22 @@ class LiveKitProvider implements MeetingProvider {
   }
 
   canRecord(): boolean {
-    return (
-        this.isConfigured() &&
-        !!(process.env.LIVEKIT_S3_ACCESS_KEY &&
-            process.env.LIVEKIT_S3_SECRET &&
-            process.env.LIVEKIT_S3_BUCKET &&
-            process.env.LIVEKIT_S3_REGION)
-    )
+    return this.isConfigured() && isS3Configured()
   }
 
   async startRecording(roomName: string, meetingId: string): Promise<RecordingHandle> {
     if (!this.canRecord()) throw new Error('RECORDING_NOT_CONFIGURED')
     const filepath = `recordings/${meetingId}/${Date.now()}.mp4`
-    const endpoint = process.env.LIVEKIT_S3_ENDPOINT || undefined
+    // Record straight into the system-wide object store (S3_*) — the same
+    // bucket payslips/CVs/letters use — so playback goes through the backend
+    // and no separate LIVEKIT_S3_* bucket is needed.
+    const cfg = s3Config()
+    const endpoint = cfg.endpoint || undefined
     const s3 = new S3Upload({
-      accessKey: process.env.LIVEKIT_S3_ACCESS_KEY!,
-      secret: process.env.LIVEKIT_S3_SECRET!,
-      region: process.env.LIVEKIT_S3_REGION!,
-      bucket: process.env.LIVEKIT_S3_BUCKET!,
+      accessKey: cfg.accessKeyId,
+      secret: cfg.secretAccessKey,
+      region: cfg.region,
+      bucket: cfg.bucket,
       ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
     })
     const fileOutput = new EncodedFileOutput({
@@ -223,9 +218,7 @@ class LiveKitProvider implements MeetingProvider {
         { file: fileOutput },
         { layout: 'grid' },
     )
-    const publicBase = (process.env.LIVEKIT_S3_PUBLIC_URL || '').replace(/\/$/, '')
-    const url = publicBase ? `${publicBase}/${filepath}` : null
-    return { egressId: info?.egressId || info?.egress_id || '', url, filePath: filepath }
+    return { egressId: info?.egressId || info?.egress_id || '', url: null, filePath: filepath }
   }
 
   async stopRecording(egressId: string): Promise<void> {
@@ -234,28 +227,6 @@ class LiveKitProvider implements MeetingProvider {
     catch (e: any) {
       if (!/not found|already|complete/i.test(e?.message || '')) throw e
     }
-  }
-
-  private _s3: S3Client | null = null
-  private s3(): S3Client {
-    const endpoint = process.env.LIVEKIT_S3_ENDPOINT || undefined
-    if (!this._s3) {
-      this._s3 = new S3Client({
-        region: process.env.LIVEKIT_S3_REGION!,
-        credentials: {
-          accessKeyId: process.env.LIVEKIT_S3_ACCESS_KEY!,
-          secretAccessKey: process.env.LIVEKIT_S3_SECRET!,
-        },
-        ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
-      })
-    }
-    return this._s3
-  }
-
-  async getRecordingDownloadUrl(key: string, ttlSeconds = 300): Promise<string | null> {
-    if (!this.canRecord() || !key) return null
-    const cmd = new GetObjectCommand({ Bucket: process.env.LIVEKIT_S3_BUCKET!, Key: key })
-    return getSignedUrl(this.s3(), cmd, { expiresIn: ttlSeconds })
   }
 }
 

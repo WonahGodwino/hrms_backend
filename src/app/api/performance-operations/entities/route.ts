@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -19,6 +18,7 @@ import {
   computeCycleEntityStats,
   toProgress,
 } from "@/app/lib/performance-operations/ops-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -136,8 +136,8 @@ export async function GET(request: NextRequest) {
       (k) => k !== UNASSIGNED_KEY,
     );
     const departments = deptIds.length
-      ? await prisma.department.findMany({
-          where: { id: { in: deptIds }, companyId },
+      ? await forCompany(companyId).department.findMany({
+          where: { id: { in: deptIds } },
           select: {
             id: true,
             name: true,

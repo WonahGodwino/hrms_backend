@@ -5,6 +5,8 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
 import { exportReportResponse, IAD_EXITED_COLS } from '@/app/lib/phed/report-export'
+import { forCompany } from '@/app/lib/data/tenant'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -12,7 +14,11 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 // (PRD 13.3). Staff who left during this pay period's month, with their
 // final settlement figures. Self-contained within PHED — no Offboarding
 // module dependency (it has no backend today).
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req);
+  if (deferred) return deferred;
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'report')
   if (rl) return withCors(rl, origin)
@@ -32,8 +38,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const monthStart = new Date(Date.UTC(period.year, period.month - 1, 1))
     const monthEnd = new Date(Date.UTC(period.year, period.month, 1))
 
-    const exits = await prisma.phedStaffExit.findMany({
-      where: { companyId: period.companyId, exitDate: { gte: monthStart, lt: monthEnd } },
+    const exits = await forCompany(period.companyId).phedStaffExit.findMany({
+      where: { exitDate: { gte: monthStart, lt: monthEnd } },
       include: { staff: { select: { firstName: true, lastName: true, staffId: true, department: true } } },
       orderBy: { exitDate: 'desc' },
     })

@@ -4,9 +4,11 @@ import { requireAuth } from '@/app/lib/auth'
 import { getCurrencySymbol, normalizeCurrencyCode } from '@/app/lib/currency'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { prisma } from '@/app/lib/db'
-import type { CustomFieldValue } from '@/app/lib/payroll/templates/types'
 import { getPayslipDisplayFields, calculateTotals } from '@/app/lib/payroll/utils'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import { getMonthNumber } from '@/app/api/admin/dashboard/reporting/salary-summary/period-filter'
+import { toNumber } from '@/app/lib/payroll/reports/bank-schedule'
+import { sumByLabel, toCustomFieldsMap } from '@/app/lib/reporting/aggregatePayrollPeriod'
 
 type SalaryMonthItem = {
   month: string
@@ -21,57 +23,13 @@ type SalaryMonthItem = {
   templateType: string
 }
 
-function toNumber(value: unknown): number {
-  if (value === null || value === undefined) return 0
-  if (typeof value === 'number') return Number.isFinite(value) ? value : 0
-  if (typeof value === 'string') {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : 0
-  }
-  if (typeof value === 'object' && value !== null && 'toString' in value) {
-    const parsed = Number((value as any).toString())
-    return Number.isFinite(parsed) ? parsed : 0
-  }
-  return 0
-}
 
-function sumByLabel(items: Array<{ label: string; value: number }>, regex: RegExp): number {
-  return items
-    .filter((item) => regex.test(item.label))
-    .reduce((sum, item) => sum + toNumber(item.value), 0)
-}
 
-function getMonthNumber(month: string): number {
-  const normalized = (month || '').trim().toLowerCase()
-  const monthMap: Record<string, number> = {
-    january: 1,
-    february: 2,
-    march: 3,
-    april: 4,
-    may: 5,
-    june: 6,
-    july: 7,
-    august: 8,
-    september: 9,
-    october: 10,
-    november: 11,
-    december: 12
-  }
 
-  if (monthMap[normalized]) return monthMap[normalized]
 
-  const asNumber = Number(normalized)
-  if (Number.isFinite(asNumber) && asNumber >= 1 && asNumber <= 12) {
-    return asNumber
-  }
 
-  return 0
-}
 
-function toCustomFieldsMap(value: unknown): Record<string, CustomFieldValue> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  return value as Record<string, CustomFieldValue>
-}
+
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)

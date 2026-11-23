@@ -89,7 +89,7 @@ export async function resolveDefaultAiFromDb() {
   if (_cachedDefaultService && _cachedDefaultModel) return;
   try {
     const { prisma } = await import('@/app/lib/db');
-    const active = await (prisma as any).tokenCostConfig.findFirst({
+    const active = await prisma.tokenCostConfig.findFirst({
       where: { isActive: true },
       select: { defaultAiService: true, defaultAiModel: true },
     });

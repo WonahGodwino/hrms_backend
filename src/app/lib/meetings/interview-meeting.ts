@@ -42,7 +42,7 @@ export async function ensureInterviewMeeting(
   // Don't mint links to a room the SFU can't serve yet.
   if (!getMeetingProvider().isConfigured()) return null
 
-  const a: any = await (prisma as any).recruitmentCandidateAssessment.findUnique({
+  const a: any = await prisma.recruitmentCandidateAssessment.findUnique({
     where: { id: assessmentId },
     select: {
       id: true,
@@ -65,13 +65,13 @@ export async function ensureInterviewMeeting(
   const interviewerIds = [...new Set((opts.interviewerIds || []).map(String).filter(Boolean))]
 
   // Reuse the existing room for this assessment if there is one.
-  let meeting: any = await (prisma as any).meeting.findUnique({
+  let meeting: any = await prisma.meeting.findUnique({
     where: { candidateAssessmentId: assessmentId },
     include: { participants: true },
   })
 
   if (!meeting) {
-    meeting = await (prisma as any).meeting.create({
+    meeting = await prisma.meeting.create({
       data: {
         companyId: a.companyId,
         title,
@@ -106,7 +106,7 @@ export async function ensureInterviewMeeting(
     const toAdd = interviewerIds.filter((id) => !existingStaff.has(id))
     const hasHost = meeting.participants.some((p: any) => p.role === 'HOST')
 
-    await (prisma as any).meeting.update({
+    await prisma.meeting.update({
       where: { id: meeting.id },
       data: {
         title,
@@ -126,7 +126,7 @@ export async function ensureInterviewMeeting(
           : {}),
       },
     })
-    meeting = await (prisma as any).meeting.findUnique({
+    meeting = await prisma.meeting.findUnique({
       where: { id: meeting.id },
       include: { participants: true },
     })

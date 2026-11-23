@@ -1,16 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
 import { buildCostCentreSummary } from '@/app/lib/phed/reports'
 import { exportCostCentreExcel, exportCostCentrePdf } from '@/app/lib/phed/report-export'
+import { forCompany } from '@/app/lib/data/tenant'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // GET /api/phed/pay-periods/:id/reports/cost-centre?format=json|xlsx|pdf
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req);
+  if (deferred) return deferred;
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -30,14 +36,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const format = new URL(req.url).searchParams.get('format') ?? 'json'
 
-    const payrolls = await (prisma as any).phedComputedPayroll.findMany({
+    const payrolls = await prisma.phedComputedPayroll.findMany({
       where: { payPeriodId: params.id },
     })
 
     // Resolve feeder per staff (PhedStaff.feederId → PhedFeeder.name) since the
     // payroll snapshot doesn't store the feeder.
-    const staff = await (prisma as any).phedStaff.findMany({
-      where: { companyId: period.companyId },
+    const staff = await forCompany(period.companyId).phedStaff.findMany({
       select: { id: true, feeder: { select: { name: true } } },
     })
     const feederMap = new Map<string, string>()
@@ -57,7 +62,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         headers: {
           'Content-Type':        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'Content-Disposition': `attachment; filename="cost-centre-${safeName}.xlsx"`,
-          'Access-Control-Allow-Origin': origin ?? '*',
+          ...getCorsHeaders(origin),
         },
       })
     }
@@ -69,7 +74,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         headers: {
           'Content-Type':        'application/pdf',
           'Content-Disposition': `attachment; filename="cost-centre-${safeName}.pdf"`,
-          'Access-Control-Allow-Origin': origin ?? '*',
+          ...getCorsHeaders(origin),
         },
       })
     }

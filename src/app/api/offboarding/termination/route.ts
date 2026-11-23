@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import { requireRoleAsync } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { InitiateTerminationSchema } from '@/app/lib/offboarding/offboarding';
-import { prisma } from '@/app/lib/prisma';
+import { prisma } from '@/app/lib/db';
 import { OffboardingService } from '@/app/lib/services/offboarding.service';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 

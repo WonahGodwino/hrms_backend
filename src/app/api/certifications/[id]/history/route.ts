@@ -3,6 +3,7 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -10,7 +11,8 @@ export async function OPTIONS(req: NextRequest) {
 
 // GET /api/certifications/[id]/history
 // Returns lifecycle, renewal, issuance, and audit history logs for a certification record
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -28,9 +30,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       return withCors(ApiResponse.error('Certification record not found', 404), origin)
     }
 
-    const logs = await prisma.trainingAuditLog.findMany({
+    const logs = await forCompany(user.companyId!).trainingAuditLog.findMany({
       where: {
-        companyId: user.companyId!,
         entityId: params.id,
       },
       include: {

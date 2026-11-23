@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { RouteContext } from "@/app/lib/self-appraisal";
@@ -11,6 +11,7 @@ import {
   norm,
   notifyStaff,
 } from "@/app/lib/development-plans/dev-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -40,8 +41,8 @@ export async function POST(
     if (note.length > MAX_TEXT)
       return bad(`note must be ${MAX_TEXT} characters or fewer`);
 
-    const req = await prisma.developmentCoachingRequest.findFirst({
-      where: { id: requestId, companyId },
+    const req = await forCompany(companyId).developmentCoachingRequest.findFirst({
+      where: { id: requestId },
       include: {
         coach: { select: { firstName: true, lastName: true } },
         plan: {

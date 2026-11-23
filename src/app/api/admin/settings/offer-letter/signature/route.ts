@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     const bytes = Buffer.from(await file.arrayBuffer())
     const dataUri = `data:${file.type};base64,${bytes.toString('base64')}`
 
-    await (prisma as any).company.update({
+    await prisma.company.update({
       where: { id: companyId },
       data: { signatureImage: dataUri },
     })
@@ -88,7 +88,7 @@ export async function DELETE(req: NextRequest) {
     const accessible = await getAccessibleCompanyIds(user)
     const companyId = pickTargetCompanyId(user, accessible, requested)
 
-    await (prisma as any).company.update({
+    await prisma.company.update({
       where: { id: companyId },
       data: { signatureImage: null },
     })

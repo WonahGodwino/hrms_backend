@@ -18,6 +18,8 @@ import { getAccessibleCompanies, resolveTargetCompanies } from '@/app/lib/report
 import { buildReportWorkbook, type ReportColumn } from '@/app/lib/reporting/excel-export'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { attachmentDisposition, safeFileName } from '@/app/lib/excel/sheet-theme'
+import { forCompany } from '@/app/lib/data/tenant'
+import { deferExport } from '@/app/lib/exports/defer'
 
 function dateKey(d: Date): string {
   return d.toISOString().split('T')[0]
@@ -33,6 +35,9 @@ export async function OPTIONS(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(request)
+  if (deferred) return deferred
   const origin = request.headers.get('origin')
 
   try {
@@ -77,8 +82,8 @@ export async function GET(request: NextRequest) {
     const [companyConfig, workingDays, attendanceRecords] = await Promise.all([
       prisma.company.findUnique({ where: { id: staff.companyId }, select: { standardStartTime: true, lateGraceMinutes: true } }),
       getWorkingDaysInRange(staff.companyId, start, end),
-      prisma.attendance.findMany({
-        where: { companyId: staff.companyId, staffId: staff.id, date: { gte: start, lt: end } },
+      forCompany(staff.companyId).attendance.findMany({
+        where: { staffId: staff.id, date: { gte: start, lt: end } },
         select: { date: true, signInTime: true, signOutTime: true, status: true }
       })
     ])

@@ -5,6 +5,7 @@ import { verifyToken, checkCompanyAccess } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { updateCompanyLocation } from '@/app/lib/companies/location-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -20,8 +21,9 @@ function constraintError(error: string, message: string, status = 409) {
 // Updates a location (RESTful variant; same logic as PATCH on the collection).
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string; locationId: string } }
+  props: { params: Promise<{ id: string; locationId: string }> }
 ) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const authHeader = request.headers.get('authorization')
@@ -62,8 +64,9 @@ export async function PATCH(
 // and has no active staff assigned to it.
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; locationId: string } }
+  props: { params: Promise<{ id: string; locationId: string }> }
 ) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -94,8 +97,8 @@ export async function DELETE(
     }
 
     // 3. Resolve the location within the company
-    const location = await prisma.location.findFirst({
-      where: { id: locationId, companyId },
+    const location = await forCompany(companyId).location.findFirst({
+      where: { id: locationId },
     })
     if (!location) {
       return withCors(ApiResponse.error('Location not found', 404), origin)
@@ -115,9 +118,8 @@ export async function DELETE(
     // 5. Constraint: the location must have no active staff assigned.
     // Prefer the FK (locationId); also catch legacy staff that were never
     // backfilled but still carry the matching location name string.
-    const staffCount = await prisma.staffRecord.count({
+    const staffCount = await forCompany(companyId).staffRecord.count({
       where: {
-        companyId,
         isActive: true,
         OR: [
           { locationId: location.id },

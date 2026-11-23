@@ -52,6 +52,7 @@ export interface RuleInput {
 
 export type Validation = { ok: true; value: RuleInput } | { ok: false; errors: string[] }
 
+// eslint-disable-next-line no-control-regex -- strips control characters on purpose
 const clean = (v: unknown, max: number) => String(v ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, max)
 const NO_VALUE: Operator[] = ['is_empty', 'is_not_empty']
 const WHOLE: Operator[] = ['older_than', 'count_above']

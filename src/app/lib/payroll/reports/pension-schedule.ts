@@ -37,8 +37,7 @@ import { monthNameToNumber } from '@/app/lib/payroll/utils/valueParsing';
 import { listBankScheduleSources, toNumber } from '@/app/lib/payroll/reports/bank-schedule';
 import type { BankScheduleSource, BankScheduleSourceType } from '@/app/lib/payroll/reports/bank-schedule';
 import { resolvePayrollSource } from '@/app/lib/payroll/reports/source-scope';
-
-import type { CustomFieldValue } from '@/app/lib/payroll/templates/types';
+import { toCustomFieldsMap } from '@/app/lib/payroll/reports/bank-schedule';
 
 export type { BankScheduleSourceType as PensionScheduleSourceType };
 export const listPensionScheduleSources = listBankScheduleSources;
@@ -108,12 +107,7 @@ export type PensionSchedule = {
 	groups: PensionGroup[];
 };
 
-type CustomFieldsLike = Record<string, CustomFieldValue>;
 
-function toCustomFieldsMap(value: unknown): CustomFieldsLike | null {
-	if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-	return value as CustomFieldsLike;
-}
 
 type PayrollForPension = {
 	id: string;

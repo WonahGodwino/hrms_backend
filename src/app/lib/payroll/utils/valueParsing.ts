@@ -222,6 +222,19 @@ export function monthNameToNumber(raw: any): number {
   return 0
 }
 
+const CANONICAL_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+/**
+ * The stored form of a month (DB-004 step 3): "October". Accepts names,
+ * abbreviations, numbers 1-12 and dates (same rules as monthNameToNumber).
+ * Returns null when the value is not a month. Pay-period columns only hold
+ * these names (database CHECK constraints).
+ */
+export function toMonthName(raw: unknown): string | null {
+  const n = monthNameToNumber(raw)
+  return n >= 1 && n <= 12 ? CANONICAL_MONTHS[n - 1] : null
+}
+
 export function extractYearFromValue(raw: any): number {
   const v = unwrapCellValue(raw)
   if (v instanceof Date) return v.getFullYear()

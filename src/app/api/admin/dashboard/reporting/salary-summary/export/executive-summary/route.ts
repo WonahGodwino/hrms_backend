@@ -11,6 +11,7 @@ import { getMonthName } from '@/app/lib/payroll/utils/monthParser'
 import { getQuarterFromMonth, type SalarySummaryPeriod } from '../../period-filter'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { attachmentDisposition, safeFileName } from '@/app/lib/excel/sheet-theme'
+import { deferExport } from '@/app/lib/exports/defer'
 
 // Executive Summary — a single-sheet, KPI + headline-chart-only workbook for
 // a quick share (board pack, leadership update), vs. the full multi-sheet
@@ -20,6 +21,9 @@ export async function OPTIONS(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(request)
+  if (deferred) return deferred
   const origin = request.headers.get('origin')
 
   try {

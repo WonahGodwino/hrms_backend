@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
 import { handleCorsOptions } from "@/app/lib/cors";
 import type { RouteContext } from "@/app/lib/self-appraisal";
 import { fbRoute, httpErr } from "@/app/lib/fraud-bias";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -14,8 +14,8 @@ export async function GET(
   context: RouteContext<{ id: string }>,
 ) {
   return fbRoute(request, {}, async (ctx) => {
-    const r = await prisma.fairnessReport.findFirst({
-      where: { id: (await context.params).id, companyId: ctx.companyId },
+    const r = await forCompany(ctx.companyId).fairnessReport.findFirst({
+      where: { id: (await context.params).id },
     });
     if (!r) throw httpErr(404, "Report not found");
     return r;

@@ -7,6 +7,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { logRecordChange } from '@/app/lib/core-setup/audit';
 import { prisma } from '@/app/lib/db';
 import { ApiResponse, formatError } from '@/app/lib/utils';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
@@ -43,8 +44,8 @@ const START_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 async function canManage(user: any, companyId: string): Promise<boolean> {
 	if (user.role === 'SUPER_ADMIN') return true;
 	if (user.role === 'ADMIN') {
-		const uc = await prisma.userCompany.findFirst({
-			where: { userId: user.userId, companyId, role: { in: ['ADMIN', 'ALL'] } },
+		const uc = await forCompany(companyId).userCompany.findFirst({
+			where: { userId: user.userId, role: { in: ['ADMIN', 'ALL'] } },
 			select: { id: true },
 		});
 		return !!uc;
@@ -56,9 +57,10 @@ function extractToken(request: NextRequest): string | null {
 	return request.headers.get('authorization')?.replace('Bearer ', '') ?? null;
 }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
-	const origin = request.headers.get('origin');
-	try {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    const params = await props.params;
+    const origin = request.headers.get('origin');
+    try {
 		const token = extractToken(request);
 		if (!token) return withCors(ApiResponse.error('Authorization header missing', 401), origin);
 		const user = await requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR']);
@@ -78,9 +80,10 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 	}
 }
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
-	const origin = request.headers.get('origin');
-	try {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    const params = await props.params;
+    const origin = request.headers.get('origin');
+    try {
 		const token = extractToken(request);
 		if (!token) return withCors(ApiResponse.error('Authorization header missing', 401), origin);
 		const user = await requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR']);
@@ -163,9 +166,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 	}
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
-	const origin = request.headers.get('origin');
-	try {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    const params = await props.params;
+    const origin = request.headers.get('origin');
+    try {
 		const token = extractToken(request);
 		if (!token) return withCors(ApiResponse.error('Authorization header missing', 401), origin);
 		await requireRole(token, ['SUPER_ADMIN']);

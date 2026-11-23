@@ -10,6 +10,7 @@ import { createAnthropicProvider } from '@/app/lib/ai/providers/anthropic'
 import { createOpenAIProvider } from '@/app/lib/ai/providers/openai'
 import { actorFor, recordCoreSetupEvent } from '@/app/lib/core-setup/audit'
 import { TERMS_ACTION, TERMS_VERSION, termsStatus } from '@/app/lib/ai/terms'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -20,9 +21,8 @@ const RATE_LIMIT_MAX = 5
 
 async function checkKeyTestRateLimit(companyId: string): Promise<boolean> {
   const since = new Date(Date.now() - RATE_LIMIT_WINDOW_MS)
-  const count = await prisma.aIUsageLog.count({
+  const count = await forCompany(companyId).aIUsageLog.count({
     where: {
-      companyId,
       endpoint: 'assistant_key_test',
       createdAt: { gte: since },
     },

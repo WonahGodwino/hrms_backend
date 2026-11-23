@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleCorsOptions } from "@/app/lib/cors";
 import { nameOf, ok, pipScope, readCtx } from "@/app/lib/pip";
 import { Params, bail, guarded } from "@/app/lib/pip-employee";

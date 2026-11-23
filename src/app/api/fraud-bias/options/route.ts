@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
 import { handleCorsOptions } from "@/app/lib/cors";
 import {
   fbRoute,
@@ -10,6 +9,7 @@ import {
   fullName,
 } from "@/app/lib/fraud-bias";
 import { rangeOptions } from "@/app/lib/fraud-bias-report";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -20,14 +20,12 @@ export async function GET(request: NextRequest) {
   return fbRoute(request, {}, async (ctx) => {
     const [cycles, departments, people] = await Promise.all([
       listReviewedCycles(ctx.companyId),
-      prisma.department.findMany({
-        where: { companyId: ctx.companyId },
+      forCompany(ctx.companyId).department.findMany({
         select: { id: true, name: true },
         orderBy: { name: "asc" },
       }),
-      prisma.staffRecord.findMany({
+      forCompany(ctx.companyId).staffRecord.findMany({
         where: {
-          companyId: ctx.companyId,
           isActive: true,
           role: { in: ["HR", "ADMIN", "SUPER_ADMIN"] },
         },

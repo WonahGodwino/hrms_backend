@@ -4,7 +4,7 @@ import type {
   PolicyExceptionStatus,
   Prisma,
 } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import {
   HR_REVIEWER_ROLES,
   UNASSIGNED_KEY,

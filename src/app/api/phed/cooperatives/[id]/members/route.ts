@@ -10,7 +10,8 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 // GET /api/phed/cooperatives/:id/members
 // Returns the full member list for a cooperative with their contribution,
 // loan and total deduction amounts as uploaded via the members template.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
   if (rl) return withCors(rl, origin)
@@ -18,13 +19,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const coop = await (prisma as any).phedCooperative.findUnique({
+    const coop = await prisma.phedCooperative.findUnique({
       where:  { id: params.id },
       select: { id: true, name: true, companyId: true, isActive: true },
     })
     if (!coop) return withCors(ApiResponse.notFound('Cooperative not found'), origin)
 
-    const memberships = await (prisma as any).phedStaffCooperative.findMany({
+    const memberships = await prisma.phedStaffCooperative.findMany({
       where: { cooperativeId: params.id },
       include: {
         staff: {

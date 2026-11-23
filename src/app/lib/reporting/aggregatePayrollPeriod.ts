@@ -15,6 +15,7 @@ import {
   getQuarterRange,
   type SalarySummaryPeriod
 } from '@/app/api/admin/dashboard/reporting/salary-summary/period-filter'
+import { toNumber } from '@/app/lib/payroll/reports/bank-schedule'
 
 export type AggregatedSalaryRow = {
   month: string
@@ -46,27 +47,15 @@ type StaffMeta = {
   accountNumber: string | null
 }
 
-function toNumber(value: unknown): number {
-  if (value === null || value === undefined) return 0
-  if (typeof value === 'number') return Number.isFinite(value) ? value : 0
-  if (typeof value === 'string') {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : 0
-  }
-  if (typeof value === 'object' && value !== null && 'toString' in value) {
-    const parsed = Number((value as any).toString())
-    return Number.isFinite(parsed) ? parsed : 0
-  }
-  return 0
-}
 
-function sumByLabel(items: Array<{ label: string; value: number }>, regex: RegExp): number {
+
+export function sumByLabel(items: Array<{ label: string; value: number }>, regex: RegExp): number {
   return items
     .filter((item) => regex.test(item.label))
     .reduce((sum, item) => sum + toNumber(item.value), 0)
 }
 
-function toCustomFieldsMap(value: unknown): Record<string, CustomFieldValue> | null {
+export function toCustomFieldsMap(value: unknown): Record<string, CustomFieldValue> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   return value as Record<string, CustomFieldValue>
 }
@@ -328,7 +317,7 @@ export async function buildPayrollAggregate(payslips: PayrollAggregatePayslip[],
       ? prisma.department.findMany({ where: { id: { in: departmentIds } }, select: { id: true, name: true, businessUnit: true } })
       : Promise.resolve([]),
     designationIds.length
-      ? (prisma as any).designation.findMany({ where: { id: { in: designationIds } }, select: { id: true, title: true } })
+      ? prisma.designation.findMany({ where: { id: { in: designationIds } }, select: { id: true, title: true } })
       : Promise.resolve([])
   ])
 

@@ -5,10 +5,12 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-export async function PATCH(req: NextRequest, { params }: { params: { attemptId: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ attemptId: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -18,8 +20,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { attemptId:
     const resolved = await resolveRequestCompanyId(user, body.companyId ?? new URL(req.url).searchParams.get('companyId'))
     if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
 
-    const attempt = await prisma.assessmentAttempt.findFirst({
-      where: { id: params.attemptId, companyId: resolved.companyId },
+    const attempt = await forCompany(resolved.companyId).assessmentAttempt.findFirst({
+      where: { id: params.attemptId },
     })
     if (!attempt) return withCors(ApiResponse.error('Attempt not found', 404), origin)
 

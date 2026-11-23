@@ -8,6 +8,7 @@ import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { sanitizeOfferDefaults } from "@/app/lib/jobs/offer-defaults";
 import { notifyTalentPoolOfJob } from "@/app/lib/talent-pool/notify";
 import { formatJobSalary, parseSalaryAmount } from "@/app/lib/recruitment/job-salary";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -93,10 +94,9 @@ export async function POST(request: NextRequest) {
       companyId = body.companyId;
 
       if (user.role === "ADMIN") {
-        const hasAccess = await prisma.userCompany.findFirst({
+        const hasAccess = await forCompany(body.companyId!).userCompany.findFirst({
           where: {
             userId: user.userId,
-            companyId: body.companyId!,
             role: { in: ["ADMIN", "ALL"] }
           }
         });
@@ -145,8 +145,8 @@ export async function POST(request: NextRequest) {
     const designationId = body.designationId?.trim() || null;
     let designationTitle: string | null = null;
     if (designationId) {
-      const designation = await (prisma as any).designation.findFirst({
-        where: { id: designationId, companyId },
+      const designation = await forCompany(companyId).designation.findFirst({
+        where: { id: designationId },
         select: { id: true, title: true },
       });
       if (!designation) {
@@ -167,15 +167,15 @@ export async function POST(request: NextRequest) {
     let departmentId: string | null = null;
     const requestedDeptId = body.departmentId?.trim() || null;
     if (requestedDeptId) {
-      const dep = await prisma.department.findFirst({
-        where: { id: requestedDeptId, companyId },
+      const dep = await forCompany(companyId).department.findFirst({
+        where: { id: requestedDeptId },
         select: { id: true },
       });
       departmentId = dep?.id || null;
     }
     if (!departmentId) {
-      const dep = await prisma.department.findFirst({
-        where: { companyId, name: { equals: department, mode: 'insensitive' } },
+      const dep = await forCompany(companyId).department.findFirst({
+        where: { name: { equals: department, mode: 'insensitive' } },
         select: { id: true },
       });
       departmentId = dep?.id || null;
@@ -207,9 +207,8 @@ export async function POST(request: NextRequest) {
 
     // Optional: Prevent duplicate job spam
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const duplicate = await prisma.job.findFirst({
+    const duplicate = await forCompany(companyId!).job.findFirst({
       where: {
-        companyId: companyId!,
         title,
         department,
         position,

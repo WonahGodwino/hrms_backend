@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { fail, ok, readCtx } from "@/app/lib/pip";
@@ -12,6 +11,7 @@ import {
   loadPopulation,
   resolveFocus,
 } from "@/app/lib/comparison";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -29,8 +29,8 @@ export async function GET(request: NextRequest) {
     if ("error" in basis) return fail(origin, basis.error, basis.status);
 
     const [competencies, all, departments] = await Promise.all([
-      prisma.competency.findMany({
-        where: { companyId, status: "ACTIVE" },
+      forCompany(companyId).competency.findMany({
+        where: { status: "ACTIVE" },
         orderBy: { name: "asc" },
         take: 300,
         select: { id: true, name: true, isLeadership: true },
@@ -38,8 +38,8 @@ export async function GET(request: NextRequest) {
       basis.cycle
         ? loadPopulation(companyId, actor, basis.cycle)
         : Promise.resolve([]),
-      prisma.department.findMany({
-        where: { companyId, status: { equals: "Active", mode: "insensitive" } },
+      forCompany(companyId).department.findMany({
+        where: { status: { equals: "Active", mode: "insensitive" } },
         orderBy: { name: "asc" },
         select: { id: true, name: true },
       }),

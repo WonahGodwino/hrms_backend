@@ -4,6 +4,8 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { rejectForeignCompany } from '@/app/lib/phed/company-guard'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -13,11 +15,13 @@ export async function GET(req: NextRequest) {
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
     const companyId = new URL(req.url).searchParams.get('companyId')
+    const foreignCompany = await rejectForeignCompany(user, companyId, origin)
+    if (foreignCompany) return foreignCompany
     if (!companyId) return withCors(ApiResponse.error('companyId is required', 400), origin)
-    const unions = await (prisma as any).phedUnion.findMany({
-      where: { companyId, isActive: true },
+    const unions = await forCompany(companyId).phedUnion.findMany({
+      where: { isActive: true },
       orderBy: { name: 'asc' },
     })
     // Expose percentage as human-readable (e.g. 2.5 instead of 0.025)
@@ -39,14 +43,16 @@ export async function POST(req: NextRequest) {
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
     const { companyId, name, deductionPercentage } = await req.json()
+    const foreignCompany = await rejectForeignCompany(user, companyId, origin)
+    if (foreignCompany) return foreignCompany
     if (!companyId || !name || deductionPercentage === undefined)
       return withCors(ApiResponse.error('companyId, name, and deductionPercentage are required', 400), origin)
     const pct = Number(deductionPercentage)
     if (isNaN(pct) || pct <= 0 || pct > 100)
       return withCors(ApiResponse.error('deductionPercentage must be a number between 0 and 100 (e.g. 2.5 for 2.5%)', 400), origin)
-    const union = await (prisma as any).phedUnion.create({
+    const union = await prisma.phedUnion.create({
       data: { companyId, name, percentage: pct / 100 },
     })
     return withCors(ApiResponse.success({

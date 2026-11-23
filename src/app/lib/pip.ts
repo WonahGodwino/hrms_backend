@@ -6,7 +6,7 @@ import type {
   PipSessionStatus,
   PipStatus,
 } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse } from "@/app/lib/utils";
 import { withCors } from "@/app/lib/cors";

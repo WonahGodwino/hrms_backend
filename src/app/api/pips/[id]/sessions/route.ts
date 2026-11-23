@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { RouteContext } from "@/app/lib/self-appraisal";
@@ -21,6 +21,7 @@ import {
   SESSION_INCLUDE,
   writeCtx,
 } from "@/app/lib/pip";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -42,8 +43,8 @@ export async function POST(
     if (!c.ok) return c.response;
     const { actor, staffId, companyId } = c.ctx;
 
-    const pip = await prisma.pip.findFirst({
-      where: { id, companyId },
+    const pip = await forCompany(companyId).pip.findFirst({
+      where: { id },
       select: {
         id: true,
         status: true,

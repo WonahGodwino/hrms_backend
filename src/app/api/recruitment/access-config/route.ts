@@ -11,6 +11,7 @@ import { requireModuleAccess, hasModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { logStaffActivity } from '@/app/lib/device/device-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
 
     if (!user.companyId) return withCors(ApiResponse.success({ pages: [] }), origin)
 
-    const rows = await prisma.recruitmentPageAccess.findMany({ where: { companyId: user.companyId }, orderBy: { pageKey: 'asc' } })
+    const rows = await forCompany(user.companyId).recruitmentPageAccess.findMany({ orderBy: { pageKey: 'asc' } })
 
     const pages = rows.map((row) => ({
       pageKey: row.pageKey,

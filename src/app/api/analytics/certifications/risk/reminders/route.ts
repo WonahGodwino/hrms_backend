@@ -5,6 +5,7 @@ import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/reso
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { createNotification } from '@/app/lib/notifications/helpers'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -26,8 +27,8 @@ export async function POST(req: NextRequest) {
 
     let risk = null
     if (body.riskId) {
-      risk = await prisma.riskItem.findFirst({
-        where: { companyId, OR: [{ id: body.riskId }, { code: body.riskId }] },
+      risk = await forCompany(companyId).riskItem.findFirst({
+        where: { OR: [{ id: body.riskId }, { code: body.riskId }] },
       })
       if (!risk) return withCors(ApiResponse.error('Risk not found', 404), origin)
     }

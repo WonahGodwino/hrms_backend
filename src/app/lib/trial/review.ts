@@ -8,6 +8,7 @@ import { createNotification } from '@/app/lib/notifications/helpers'
 
 import { MAX_EXTENSION_DAYS, TRIAL_LENGTH_DAYS } from './limits'
 import { verifyRc } from './signup/cac'
+import { forCompany } from '@/app/lib/data/tenant'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -57,7 +58,7 @@ export async function listReviews(opts: { status?: string; page: number; pageSiz
 // Other trials that share a signal with this one. Two or more shared kinds is treated as one
 // cluster (document section 6.2, "link accounts into clusters").
 export async function linkedTrials(companyId: string) {
-  const mine = await prisma.trialSignal.findMany({ where: { companyId }, select: { kind: true, valueHash: true } })
+  const mine = await forCompany(companyId).trialSignal.findMany({ where: { }, select: { kind: true, valueHash: true } })
   if (!mine.length) return []
   const others = await prisma.trialSignal.findMany({
     where: { companyId: { not: companyId }, OR: mine.map((m) => ({ kind: m.kind, valueHash: m.valueHash })) },
@@ -106,7 +107,7 @@ interface Actor {
 
 async function notifyHr(companyId: string, subject: string, text: string) {
   try {
-    const hr = await prisma.staffRecord.findFirst({ where: { companyId, role: 'HR' }, select: { email: true, firstName: true } })
+    const hr = await forCompany(companyId).staffRecord.findFirst({ where: { role: 'HR' }, select: { email: true, firstName: true } })
     if (hr?.email) await sendEmail({ to: hr.email, subject, text: `Hi ${hr.firstName ?? ''},\n\n${text}\n\n247HR`, html: `<p>Hi ${hr.firstName ?? ''},</p><p>${text}</p><p>247HR</p>` })
   } catch (e) {
     console.warn('[trial-review] could not email HR contact:', e)
@@ -137,7 +138,7 @@ export async function requestExtension(companyId: string, reason: string) {
     throw new ReviewError('An extension can only be requested during or just after your trial.')
   }
   if ((company.trialExtraDays || 0) >= MAX_EXTENSION_DAYS) throw new ReviewError('This trial has already been extended as far as it can be.', 409)
-  const open = await prisma.trialReview.findFirst({ where: { companyId, kind: 'EXTENSION', status: 'PENDING' }, select: { id: true } })
+  const open = await forCompany(companyId).trialReview.findFirst({ where: { kind: 'EXTENSION', status: 'PENDING' }, select: { id: true } })
   if (open) throw new ReviewError('Your extension request is already with our team.', 409)
 
   const text = reason.trim().slice(0, 500) || 'No reason given'
@@ -149,7 +150,7 @@ export async function requestExtension(companyId: string, reason: string) {
 // A flagged trial is quietly moved to the tight limits profile and queued for review.
 
 export async function raiseBehaviourFlag(companyId: string, flag: string) {
-  const existing = await prisma.trialReview.findFirst({ where: { companyId, kind: 'BEHAVIOUR', status: 'PENDING' }, select: { id: true, reasons: true } })
+  const existing = await forCompany(companyId).trialReview.findFirst({ where: { kind: 'BEHAVIOUR', status: 'PENDING' }, select: { id: true, reasons: true } })
   if (existing) {
     const reasons = Array.isArray(existing.reasons) ? (existing.reasons as unknown[]) : []
     if (reasons.includes(flag)) return

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { forCompany } from "@/app/lib/data/tenant";
 import { handleCorsOptions } from "@/app/lib/cors";
 import { fbRoute, FbResult, paging } from "@/app/lib/fraud-bias";
 import { createReport } from "@/app/lib/fraud-bias-report";
@@ -13,13 +13,13 @@ export async function GET(request: NextRequest) {
   return fbRoute(request, {}, async (ctx) => {
     const sp = new URL(request.url).searchParams;
     const { page, pageSize, skip } = paging(sp, 20);
+    const db = forCompany(ctx.companyId);
     const where: any = {
-      companyId: ctx.companyId,
       status: sp.get("status") === "ARCHIVED" ? "ARCHIVED" : "GENERATED",
     };
     if (sp.get("type")) where.type = sp.get("type");
     const [items, total] = await Promise.all([
-      prisma.fairnessReport.findMany({
+      db.fairnessReport.findMany({
         where,
         orderBy: { generatedAt: "desc" },
         skip,
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
           config: true,
         },
       }),
-      prisma.fairnessReport.count({ where }),
+      db.fairnessReport.count({ where }),
     ]);
     const filtered = Boolean(where.type) || where.status === "ARCHIVED";
     return {

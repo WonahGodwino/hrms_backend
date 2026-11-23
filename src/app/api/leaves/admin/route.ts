@@ -6,6 +6,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { decimalToNumber } from '@/app/lib/prisma-utils'
 import { LeaveStatusEnum, ApprovalStepEnum } from '@/app/lib/types/leave'
+import { forCompany } from '@/app/lib/data/tenant'
 
 // Define a type for the API response that matches what we return
 interface LeaveRequestAdminResponse {
@@ -269,9 +270,8 @@ export async function GET(request: NextRequest) {
     if (companyId) {
       // Verify this company is accessible
       if (accessibleCompanyIds.includes(companyId)) {
-        const staffInCompany = await prisma.staffRecord.findMany({
+        const staffInCompany = await forCompany(companyId).staffRecord.findMany({
           where: { 
-            companyId, 
             isActive: true 
           },
           select: { id: true }

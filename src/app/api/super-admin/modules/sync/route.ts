@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
 
     // Step 1: Upsert module registry from config
     for (const mod of PLATFORM_MODULES) {
-      await (prisma as any).platformModule.upsert({
+      await prisma.platformModule.upsert({
         where:  { key: mod.key },
         update: { name: mod.name, description: mod.description },
         create: { key: mod.key, name: mod.name, description: mod.description },

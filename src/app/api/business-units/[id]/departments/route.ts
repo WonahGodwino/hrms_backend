@@ -3,11 +3,11 @@
 //   assigned  — departments currently mapped to this BU
 //   available — active departments not mapped to ANY BU (free to assign)
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveBUAccessById, staffName } from '@/app/lib/business-units/bu-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -37,13 +37,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const companyId = access.companyId as string
 
     const [assigned, available] = await Promise.all([
-      (prisma as any).department.findMany({
-        where: { companyId, businessUnitId: id },
+      forCompany(companyId).department.findMany({
+        where: { businessUnitId: id },
         orderBy: { name: 'asc' },
         select: deptSelect,
       }),
-      (prisma as any).department.findMany({
-        where: { companyId, status: 'Active', businessUnitId: null },
+      forCompany(companyId).department.findMany({
+        where: { status: 'Active', businessUnitId: null },
         orderBy: { name: 'asc' },
         select: deptSelect,
       }),

@@ -8,7 +8,8 @@ import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // GET /api/phed/deduction-liabilities/:id/members
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
   if (rl) return withCors(rl, origin)
@@ -16,13 +17,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const item = await (prisma as any).phedDeductionLiability.findUnique({
+    const item = await prisma.phedDeductionLiability.findUnique({
       where:  { id: params.id },
       select: { id: true, name: true, companyId: true, isActive: true },
     })
     if (!item) return withCors(ApiResponse.notFound('Deduction/Liability not found'), origin)
 
-    const memberships = await (prisma as any).phedStaffDeductionLiability.findMany({
+    const memberships = await prisma.phedStaffDeductionLiability.findMany({
       where:   { deductionLiabilityId: params.id },
       include: {
         staff: {

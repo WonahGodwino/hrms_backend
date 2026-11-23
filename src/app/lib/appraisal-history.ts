@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse } from "@/app/lib/utils";
 import { withCors } from "@/app/lib/cors";
@@ -8,6 +8,7 @@ import { verifyCompanyAccess, UserContext } from "@/app/lib/access-control";
 import { resolveRatingBounds } from "@/app/lib/self-appraisal";
 import { toFive } from "@/app/lib/calibration";
 import { resolveSelf, Self } from "@/app/lib/feedback";
+import { forCompany } from '@/app/lib/data/tenant';
 
 // ---------------------------------------------------------------------------
 // Rules
@@ -266,8 +267,8 @@ export async function buildRows(
 }
 
 export function loadParticipations(companyId: string, staffRecordId: string) {
-  return prisma.appraisalCycleParticipant.findMany({
-    where: { companyId, staffRecordId },
+  return forCompany(companyId).appraisalCycleParticipant.findMany({
+    where: { staffRecordId },
     select: HISTORY_SELECT,
   });
 }
@@ -304,8 +305,8 @@ export async function cycleDetail(
   me: Self,
   cycleId: string,
 ) {
-  const p = await prisma.appraisalCycleParticipant.findFirst({
-    where: { companyId, staffRecordId: me.id, cycleId },
+  const p = await forCompany(companyId).appraisalCycleParticipant.findFirst({
+    where: { staffRecordId: me.id, cycleId },
     select: HISTORY_SELECT,
   });
   if (!p) return null;
@@ -318,10 +319,8 @@ export async function cycleDetail(
       peerFeedback: [],
     };
 
-  const feedback = await prisma.feedback.findMany({
-    where: {
-      companyId,
-      recipientId: me.id,
+  const feedback = await forCompany(companyId).feedback.findMany({
+    where: { recipientId: me.id,
       createdAt: { gte: row.window.start, lte: row.window.end },
       ...(p.managerId ? { authorId: { not: p.managerId } } : {}),
     },
@@ -367,8 +366,8 @@ export async function cycleBenchmarks(
       where: { cycleId, enabled: true },
       select: { phaseType: true },
     }),
-    prisma.appraisalCycleParticipant.findMany({
-      where: { companyId, cycleId },
+    forCompany(companyId).appraisalCycleParticipant.findMany({
+      where: { cycleId },
       select: {
         departmentId: true,
         phases: { select: { phaseType: true, status: true } },
@@ -435,8 +434,8 @@ export async function cycleBenchmarks(
 // Career data (grade moves, salary history, recognitions)
 // ---------------------------------------------------------------------------
 async function loadCareerMoves(companyId: string, staffRecordId: string) {
-  return prisma.staffCareerHistory.findMany({
-    where: { companyId, staffId: staffRecordId },
+  return forCompany(companyId).staffCareerHistory.findMany({
+    where: { staffId: staffRecordId },
     orderBy: { effectiveDate: "desc" },
     select: {
       id: true,
@@ -453,8 +452,8 @@ type CareerMove = Awaited<ReturnType<typeof loadCareerMoves>>[number];
 const isPromotion = (h: CareerMove) => !!h.previousDesignation && !!h.promotionRecId;
 
 async function countIncrements(companyId: string, staffRecordId: string) {
-  const rows = await prisma.employeeSalary.findMany({
-    where: { companyId, staffId: staffRecordId },
+  const rows = await forCompany(companyId).employeeSalary.findMany({
+    where: { staffId: staffRecordId },
     orderBy: { createdAt: "asc" },
     select: { basicSalary: true },
   });
@@ -472,7 +471,7 @@ export async function buildSummary(companyId: string, me: Self) {
     loadHistory(companyId, me.id),
     loadCareerMoves(companyId, me.id),
     countIncrements(companyId, me.id),
-    prisma.recognition.count({ where: { companyId, recipientId: me.id } }),
+    forCompany(companyId).recognition.count({ where: { recipientId: me.id } }),
   ]);
   const released = rows.filter((r) => r.released);
   const completed = rows.filter((r) => r.complete).length;
@@ -771,8 +770,8 @@ export async function buildTimeline(
   const [rows, moves, recs, progress, certs] = await Promise.all([
     loadHistory(companyId, me.id),
     loadCareerMoves(companyId, me.id),
-    prisma.recognition.findMany({
-      where: { companyId, recipientId: me.id },
+    forCompany(companyId).recognition.findMany({
+      where: { recipientId: me.id },
       orderBy: { createdAt: "desc" },
       take: 100,
       select: {
@@ -784,10 +783,8 @@ export async function buildTimeline(
         giver: { select: { firstName: true, lastName: true } },
       },
     }),
-    prisma.participantProgress.findMany({
-      where: {
-        companyId,
-        employeeId: me.id,
+    forCompany(companyId).participantProgress.findMany({
+      where: { employeeId: me.id,
         trainingStatus: "COMPLETED",
         completionDate: { not: null },
       },
@@ -808,8 +805,8 @@ export async function buildTimeline(
         },
       },
     }),
-    prisma.certificationRecord.findMany({
-      where: { companyId, employeeId: me.id },
+    forCompany(companyId).certificationRecord.findMany({
+      where: { employeeId: me.id },
       orderBy: { issueDate: "desc" },
       take: 100,
       select: {

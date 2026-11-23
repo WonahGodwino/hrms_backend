@@ -4,6 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest) {
 
     const [, assessments] = await Promise.all([
       prisma.recruitmentCandidateAssessment.count({ where }),
-      (prisma as any).recruitmentCandidateAssessment.findMany({
+      prisma.recruitmentCandidateAssessment.findMany({
         where,
         include: {
           application: {
@@ -67,8 +68,8 @@ export async function GET(request: NextRequest) {
     // designation when the plan was re-used).
     const planIds = Array.from(new Set(assessments.map((a: any) => a.plan?.id).filter(Boolean)))
     const instances: any[] = planIds.length
-      ? await (prisma as any).assessmentPlanInstance.findMany({
-          where: { companyId, status: 'ACTIVE', planId: { in: planIds } },
+      ? await forCompany(companyId).assessmentPlanInstance.findMany({
+          where: { status: 'ACTIVE', planId: { in: planIds } },
           select: { planId: true, jobId: true, designationId: true, panelByRound: true },
         })
       : []
@@ -140,8 +141,8 @@ export async function POST(request: NextRequest) {
     if (!applicationId || !planId)
       return withCors(ApiResponse.error('applicationId and planId are required', 400), origin)
 
-    const application = await prisma.jobApplication.findFirst({
-      where: { id: applicationId, companyId },
+    const application = await forCompany(companyId).jobApplication.findFirst({
+      where: { id: applicationId },
       include: {
         candidateAssessment: { select: { id: true } },
         candidate: { select: { firstName: true, lastName: true, email: true } },
@@ -153,8 +154,8 @@ export async function POST(request: NextRequest) {
     if (application.candidateAssessment)
       return withCors(ApiResponse.error('This candidate is already in an assessment plan', 409), origin)
 
-    const plan = await prisma.recruitmentAssessmentPlan.findFirst({
-      where: { id: planId, companyId, archived: 0 },
+    const plan = await forCompany(companyId).recruitmentAssessmentPlan.findFirst({
+      where: { id: planId, archived: 0 },
       include: { rounds: { orderBy: { order: 'asc' }, take: 1 } },
     })
     if (!plan) return withCors(ApiResponse.error('Assessment plan not found', 404), origin)

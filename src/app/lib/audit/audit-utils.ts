@@ -3,7 +3,7 @@
 
 import { NextRequest } from "next/server";
 import { createHash } from "crypto";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse } from "@/app/lib/utils";
 import { withCors } from "@/app/lib/cors";

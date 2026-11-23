@@ -19,7 +19,7 @@ export interface ApprovalWorkflow {
 
 /** Read + normalize a company's configured approval workflow (or null). */
 async function getCompanyApprovalWorkflow(companyId: string): Promise<ApprovalWorkflow | null> {
-  const company = await (prisma as any).company.findUnique({
+  const company = await prisma.company.findUnique({
     where: { id: companyId },
     select: { offerApprovalWorkflow: true },
   }).catch(() => null)

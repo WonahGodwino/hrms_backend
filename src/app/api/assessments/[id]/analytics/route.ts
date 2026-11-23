@@ -5,11 +5,13 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // GET /api/assessments/:id/analytics
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -18,8 +20,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const resolved = await resolveRequestCompanyId(user, new URL(req.url).searchParams.get('companyId'))
     if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
 
-    const assessment = await prisma.assessment.findFirst({
-      where: { id: params.id, companyId: resolved.companyId, deletedAt: null },
+    const assessment = await forCompany(resolved.companyId).assessment.findFirst({
+      where: { id: params.id, deletedAt: null },
       select: { id: true, passingScore: true, _count: { select: { questions: true } } },
     })
     if (!assessment) return withCors(ApiResponse.error('Assessment not found', 404), origin)

@@ -4,8 +4,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import fs from 'fs'
-import path from 'path'
+import { deleteUploadsUrl } from '@/app/lib/storage/private-files'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -42,16 +41,9 @@ export async function POST(req: NextRequest) {
       select: { id: true, fileUrl: true, certificationRecordId: true },
     })
 
+    // SEC-019: only stored /uploads/ files are ever deleted.
     for (const doc of documents) {
-      if (doc.fileUrl && !doc.fileUrl.startsWith('http://') && !doc.fileUrl.startsWith('https://')) {
-        const resolvedPath = path.isAbsolute(doc.fileUrl)
-          ? doc.fileUrl
-          : path.join(process.cwd(), doc.fileUrl)
-
-        if (fs.existsSync(resolvedPath)) {
-          try { fs.unlinkSync(resolvedPath) } catch {}
-        }
-      }
+      await deleteUploadsUrl(doc.fileUrl)
     }
 
     const deleted = await prisma.certificationDocument.deleteMany({

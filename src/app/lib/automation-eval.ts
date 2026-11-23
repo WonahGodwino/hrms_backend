@@ -3,10 +3,11 @@ import {
   AutomationTrigger,
   Prisma,
 } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { BANDS, kpiScore } from "@/app/lib/manager-review";
 import { nameOf } from "@/app/lib/pip";
 import { StaffInfo } from "@/app/lib/automation-actions";
+import { forCompany } from '@/app/lib/data/tenant';
 
 export type ConditionField =
   | "kpiScore"
@@ -97,10 +98,8 @@ export async function loadRuleContext(
   },
 ): Promise<RuleContext> {
   const [goals, review] = await Promise.all([
-    prisma.goal.findMany({
-      where: {
-        companyId,
-        isArchived: false,
+    forCompany(companyId).goal.findMany({
+      where: { isArchived: false,
         OR: [
           { staffRecordId: staff.id, assignedToId: null },
           { assignedToId: staff.id },
@@ -117,8 +116,8 @@ export async function loadRuleContext(
             recommendation: true,
           },
         })
-      : prisma.managerReview.findFirst({
-          where: { companyId, staffRecordId: staff.id, status: "SUBMITTED" },
+      : forCompany(companyId).managerReview.findFirst({
+          where: { staffRecordId: staff.id, status: "SUBMITTED" },
           orderBy: { submittedAt: "desc" },
           select: {
             overallScore: true,

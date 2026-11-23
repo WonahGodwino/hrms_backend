@@ -5,13 +5,15 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { parseDeductionMembersCsv } from '@/app/lib/phed/csv-parser'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // POST /api/phed/deduction-liabilities/:id/upload
 // Bulk-assigns (or updates) staff members and their fixed deduction amount.
 // Each row: Staff ID, Full Name (ignored), Amount.
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'upload')
   if (rl) return withCors(rl, origin)
@@ -19,7 +21,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user  = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const item = await (prisma as any).phedDeductionLiability.findUnique({
+    const item = await prisma.phedDeductionLiability.findUnique({
       where:  { id: params.id },
       select: { id: true, companyId: true, name: true, isActive: true },
     })
@@ -46,8 +48,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         origin
       )
 
-    const allStaff = await (prisma as any).phedStaff.findMany({
-      where:  { companyId: item.companyId, isActive: true },
+    const allStaff = await forCompany(item.companyId).phedStaff.findMany({
+      where:  { isActive: true },
       select: { id: true, staffId: true },
     })
     const staffMap = new Map<string, string>(
@@ -70,7 +72,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           return
         }
         try {
-          await (prisma as any).phedStaffDeductionLiability.upsert({
+          await prisma.phedStaffDeductionLiability.upsert({
             where:  { staffId_deductionLiabilityId: { staffId: dbId, deductionLiabilityId: params.id } },
             create: { staffId: dbId, deductionLiabilityId: params.id, amount: row.amount },
             update: { amount: row.amount },
@@ -83,7 +85,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       }))
     }
 
-    await (prisma as any).phedBulkUpload.create({
+    await prisma.phedBulkUpload.create({
       data: {
         companyId:    item.companyId,
         type:         'COOPERATIVE_MEMBERS',

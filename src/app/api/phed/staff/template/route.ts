@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { rejectForeignCompany } from '@/app/lib/phed/company-guard'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -19,9 +20,11 @@ export async function GET(req: NextRequest) {
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const companyId = new URL(req.url).searchParams.get('companyId') ?? null
+    const foreignCompany = await rejectForeignCompany(user, companyId, origin)
+    if (foreignCompany) return foreignCompany
 
     let grades:    { code: string; name: string; category: string; defaultBasicSalary?: any }[] = []
     let regions:   { name: string }[] = []
@@ -30,14 +33,14 @@ export async function GET(req: NextRequest) {
 
     if (companyId) {
       ;[grades, regions, feeders, payPoints] = await Promise.all([
-        (prisma as any).phedGrade.findMany({
-          where:   { companyId, isActive: true },
+        forCompany(companyId).phedGrade.findMany({
+          where:   { isActive: true },
           select:  { code: true, name: true, category: true, defaultBasicSalary: true },
           orderBy: [{ category: 'asc' }, { levelOrder: 'asc' }],
         }),
-        (prisma as any).phedRegion.findMany({ where: { companyId, isActive: true }, select: { name: true }, orderBy: { name: 'asc' } }),
-        (prisma as any).phedFeeder.findMany({ where: { companyId, isActive: true }, select: { name: true }, orderBy: { name: 'asc' } }),
-        (prisma as any).phedPayPoint.findMany({ where: { companyId, isActive: true }, select: { name: true }, orderBy: { name: 'asc' } }),
+        forCompany(companyId).phedRegion.findMany({ where: { isActive: true }, select: { name: true }, orderBy: { name: 'asc' } }),
+        forCompany(companyId).phedFeeder.findMany({ where: { isActive: true }, select: { name: true }, orderBy: { name: 'asc' } }),
+        forCompany(companyId).phedPayPoint.findMany({ where: { isActive: true }, select: { name: true }, orderBy: { name: 'asc' } }),
       ])
     }
 
@@ -379,10 +382,10 @@ export async function GET(req: NextRequest) {
       headers: {
         'Content-Type':        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': 'attachment; filename="phed_staff_upload_template.xlsx"',
-        'Access-Control-Allow-Origin': origin ?? '*',
+        ...getCorsHeaders(origin),
       },
     })
-  } catch (e) {
+  } catch (_e) {
     return new NextResponse(JSON.stringify({ error: 'Failed to generate template' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },

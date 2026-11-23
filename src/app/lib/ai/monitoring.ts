@@ -72,11 +72,16 @@ export function estimateCost(logs: { model: string; inputLength: number; outputL
 export async function checkUsageWarning(db: Db, companyId: string, threshold: number | null | undefined, now = new Date()) {
   if (!threshold || threshold <= 0) return { estimate: 0, notified: 0 }
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
-  const logs = await db.aIUsageLog.findMany({
+  // PERF-002: the cost is linear in the lengths, so per-model sums give the
+  // same estimate as adding up every row of the month, without loading them.
+  const perModel = await db.aIUsageLog.groupBy({
+    by: ['model'],
     where: { companyId, service: 'assistant', createdAt: { gte: monthStart } },
-    select: { model: true, inputLength: true, outputLength: true },
+    _sum: { inputLength: true, outputLength: true },
   })
-  const estimate = estimateCost(logs)
+  const estimate = estimateCost(
+    perModel.map((r) => ({ model: r.model, inputLength: r._sum.inputLength ?? 0, outputLength: r._sum.outputLength ?? 0 })),
+  )
   if (estimate < threshold * USAGE_WARNING_RATIO) return { estimate, notified: 0 }
 
   // One warning a month for the company, however many requests cross the line.

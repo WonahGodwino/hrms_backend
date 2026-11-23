@@ -4,11 +4,11 @@
 // candidate profile, job, CV links, CV/interview scores, matched keywords,
 // assessment progress, offer status and recent stage history.
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveRecruitmentCompanyId } from '@/app/lib/recruitment/companyScope'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -24,8 +24,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ appl
     if (scope.error) return withCors(ApiResponse.error(scope.error.message, scope.error.status), origin)
     const companyId = scope.companyId as string
 
-    const app: any = await (prisma as any).jobApplication.findFirst({
-      where: { id: applicationId, companyId },
+    const app: any = await forCompany(companyId).jobApplication.findFirst({
+      where: { id: applicationId },
       include: {
         candidate: {
           select: {

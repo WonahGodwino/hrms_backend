@@ -14,7 +14,8 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 // the five-stage memo reaches "Approved" — the memo and the period are two
 // independent records, and only this action moves the period itself into
 // APPROVED, which is what unlocks payslips.
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)

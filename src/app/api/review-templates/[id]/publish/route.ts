@@ -21,10 +21,8 @@ export async function OPTIONS(request: NextRequest) {
 // supersedes whatever version was previously ACTIVE (if any), and repoints
 // template.currentVersionId at the newly-published version.
 // ---------------------------------------------------------------------------
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");

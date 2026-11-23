@@ -11,12 +11,14 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validateCompanyAccess } from '@/app/lib/departments/department-utils'
 import { EXPORT_DOMAINS, isExportDomain, generateCompanyExport } from '@/app/lib/companies/export-company-data'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -67,7 +69,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     // One export in flight per company at a time — same guard staff
     // bulk-edit uploads use, so a second click can't race a partially
     // generated file.
-    const activeJob = await prisma.companyExportJob.findFirst({ where: { companyId, status: 'PROCESSING' } })
+    const activeJob = await forCompany(companyId).companyExportJob.findFirst({ where: { status: 'PROCESSING' } })
     if (activeJob) {
       return withCors(
         ApiResponse.error('An export is already being generated for this company. Please wait for it to finish before starting another.', 409),

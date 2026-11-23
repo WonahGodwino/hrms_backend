@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { CalibrationStatus } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -16,6 +16,7 @@ import {
   NO_ACTIVE_CYCLE_MESSAGE,
   isNoActiveCycle,
 } from "@/app/lib/calibration";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -130,8 +131,8 @@ export async function GET(request: NextRequest) {
         take: limit,
       }),
       prisma.calibrationRecord.count({ where }),
-      prisma.calibrationRecord.count({
-        where: { companyId, cycleId: cycle.id },
+      forCompany(companyId).calibrationRecord.count({
+        where: { cycleId: cycle.id },
       }),
     ]);
 

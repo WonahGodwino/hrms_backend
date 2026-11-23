@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { RouteContext } from "@/app/lib/self-appraisal";
@@ -14,6 +14,7 @@ import {
 } from "@/app/lib/pip";
 import { validateFiles } from "../../route";
 import { readUploadedBuffer } from "@/app/lib/goals/evidence-files";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -32,8 +33,8 @@ export async function POST(
     if (!c.ok) return c.response;
     const { actor, staffId, companyId } = c.ctx;
 
-    const esc = await prisma.appraisalEscalation.findFirst({
-      where: { id: escalationId, pipId: id, companyId },
+    const esc = await forCompany(companyId).appraisalEscalation.findFirst({
+      where: { id: escalationId, pipId: id },
       select: { id: true, status: true, pip: { select: { managerId: true } } },
     });
     if (!esc?.pip || !canAccessPip(actor, esc.pip))

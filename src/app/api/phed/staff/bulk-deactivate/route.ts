@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
 
     const companyId = user.role === 'SUPER_ADMIN' ? (body.companyId || user.companyId) : user.companyId
 
-    const result = await (prisma as any).phedStaff.updateMany({
+    const result = await prisma.phedStaff.updateMany({
       where: { id: { in: staffIds }, ...(companyId ? { companyId } : {}) },
       data: { isActive: false },
     })

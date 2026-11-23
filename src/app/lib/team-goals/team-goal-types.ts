@@ -121,7 +121,7 @@ export interface ConflictResolutionOption {
   description: string;
   action: GoalConflictResolutionAction;
   isRecommended: boolean;
-  payload?: any;
+  payload?: unknown;
 }
 
 export interface ConflictGoalOverview {

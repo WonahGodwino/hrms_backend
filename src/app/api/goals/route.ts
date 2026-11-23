@@ -31,6 +31,8 @@ import {
   parseText,
   stripPrioritySuffix,
 } from "@/app/lib/goals/goal-utils";
+import { emitAutomationEvent, kickAutomation } from "@/app/lib/automation-events";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -51,8 +53,8 @@ export const GET = withGoalAuth(ALL_ROLES, async ({ request, user, ok }) => {
   const requested = sp.get("staffRecordId");
   if (actor.companyWide) {
     if (requested) {
-      const staff = await prisma.staffRecord.findFirst({
-        where: { id: requested, companyId },
+      const staff = await forCompany(companyId).staffRecord.findFirst({
+        where: { id: requested },
         select: { id: true },
       });
       if (!staff)
@@ -186,8 +188,8 @@ export const POST = withGoalAuth(ALL_ROLES, async ({ request, user, ok }) => {
         403,
         "Only HR or admins can create goals for someone else",
       );
-    const staff = await prisma.staffRecord.findFirst({
-      where: { id: body.staffRecordId, companyId, isActive: true },
+    const staff = await forCompany(companyId).staffRecord.findFirst({
+      where: { id: body.staffRecordId, isActive: true },
       select: { id: true, departmentId: true },
     });
     if (!staff)
@@ -240,7 +242,6 @@ export const POST = withGoalAuth(ALL_ROLES, async ({ request, user, ok }) => {
       newData: { title: created.title, priority: created.priority },
     });
     try {
-      const { emitAutomationEvent } = require("@/app/lib/automation-events");
       await emitAutomationEvent(tx, {
         companyId,
         trigger: "GOAL_CREATED",
@@ -250,14 +251,13 @@ export const POST = withGoalAuth(ALL_ROLES, async ({ request, user, ok }) => {
         subjectStaffRecordId: created.staffRecordId,
         payload: { goalId: created.id },
       });
-    } catch {}
+    } catch { /* ignored: best-effort, failure is non-fatal */ }
     return created;
   });
 
   try {
-    const { kickAutomation } = require("@/app/lib/automation-events");
     kickAutomation(companyId);
-  } catch {}
+  } catch { /* ignored: best-effort, failure is non-fatal */ }
 
   return ok(goal, "Goal created successfully", 201);
 });

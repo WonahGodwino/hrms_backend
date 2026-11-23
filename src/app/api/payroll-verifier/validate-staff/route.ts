@@ -13,12 +13,12 @@
 import { NextRequest } from 'next/server'
 
 import { getCorsHeaders, handleCorsOptions, withCors } from '@/app/lib/cors'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { validatePayrollVerifierCompanyAccess } from '@/app/lib/payroll-verifier/access'
-import { fetchBanks } from '@/app/lib/payroll-verifier/banks'
-import { processStaffRecord, type StaffAccountInput } from '@/app/lib/payroll-verifier/staffValidation'
+import { validatePayrollVerifierCompanyAccess } from '@/app/lib/payroll/verifier/access'
+import { fetchBanks } from '@/app/lib/payroll/verifier/banks'
+import { processStaffRecord, type StaffAccountInput } from '@/app/lib/payroll/verifier/staffValidation'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,8 +51,7 @@ export async function POST(request: NextRequest) {
 
 		await fetchBanks()
 
-		const staffRecords = await prisma.staffRecord.findMany({
-			where: { companyId },
+		const staffRecords = await forCompany(companyId).staffRecord.findMany({
 			select: { id: true, staffId: true, email: true, firstName: true, lastName: true, bankName: true, accountNumber: true },
 		})
 

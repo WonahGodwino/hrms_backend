@@ -11,7 +11,8 @@ export async function OPTIONS(req: NextRequest) {
 
 // POST /api/certifications/[id]/reminder
 // Sends an automated expiry/renewal reminder notification to the employee holding the certification
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null

@@ -6,14 +6,11 @@
 // or vice versa. The token is a bearer capability; every mutation is
 // additionally re-validated against the onboarding's own state server-side.
 import jwt from 'jsonwebtoken'
+import { getSecret } from '@/app/lib/business-units/import-token'
 
 const PURPOSE = 'onboarding-response'
 
-function getSecret(): string {
-	const secret = process.env.JWT_SECRET
-	if (!secret) throw new Error('JWT_SECRET environment variable is not set')
-	return secret
-}
+
 
 export function signOnboardingResponseToken(
 	onboardingId: string,

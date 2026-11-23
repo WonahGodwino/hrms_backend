@@ -8,7 +8,6 @@
 // the run's status is PROCESSING it just returns whatever partial rows
 // exist so far (or none yet), with no errors.
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
@@ -16,6 +15,10 @@ import { consumeTrialQuota } from '@/app/lib/trial/guard'
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
 import { startPayrollGeneration, processPayrollGenerationInBackground } from '@/app/lib/payroll/generation/generate-payroll'
 import { findCompanyDisabledCodesInUse } from '@/app/lib/staff/pension-fields'
+import { toMonthName } from '@/app/lib/payroll/utils/valueParsing'
+import { forCompany } from '@/app/lib/data/tenant'
+import { readJsonBody } from '@/app/lib/validation/request-body'
+import { generatePayrollBodySchema } from '@/app/lib/validation/payroll-staff-schemas'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -32,8 +35,10 @@ export async function POST(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = await requireModuleAccess(token, 'PAYROLL', ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
-    const body = await request.json()
-    const { companyId, templateId, month, year, workingDaysInAMonth, excludedStaffIds } = body as {
+    const parsedBody = await readJsonBody(request, generatePayrollBodySchema)
+    if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.message, 400), origin)
+    const body = parsedBody.data
+    const { companyId, templateId, month: monthInput, year, workingDaysInAMonth, excludedStaffIds } = body as {
       companyId?: string
       templateId?: string
       month?: string
@@ -42,9 +47,12 @@ export async function POST(request: NextRequest) {
       excludedStaffIds?: unknown
     }
 
-    if (!companyId || !templateId || !month || !year) {
+    if (!companyId || !templateId || !monthInput || !year) {
       return withCors(ApiResponse.error('companyId, templateId, month and year are all required', 400), origin)
     }
+    // DB-004: months are stored as names ("October"); "10" or "Oct" are accepted.
+    const month = toMonthName(monthInput)
+    if (!month) return withCors(ApiResponse.error('month must be a month name or number (e.g. October or 10)', 400), origin)
 
     // Free trial: one payroll period; regenerating the same period is free.
     await consumeTrialQuota(companyId, 'payrollRuns', [`${year}-${month}`])
@@ -74,9 +82,8 @@ export async function POST(request: NextRequest) {
     // FAILED run doesn't count as "existing", it never produced usable
     // draft data, so retrying immediately is expected, not a duplicate.
     const payPeriod = `${month} ${year}`
-    const existingRun = await prisma.payrollGenerationRun.findFirst({
+    const existingRun = await forCompany(companyId).payrollGenerationRun.findFirst({
       where: {
-        companyId,
         templateId,
         payPeriod,
         status: { not: 'FAILED' }

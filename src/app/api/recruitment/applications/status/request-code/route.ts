@@ -9,6 +9,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { sendEmail } from '@/app/lib/email'
 import rateLimit from '@/app/lib/rateLimiter'
 import { issueCode } from '@/app/lib/recruitment/statusOtp'
+import { clientIp } from '@/app/lib/recruitment/route-helpers'
 
 // Module-scoped limiters persist across requests.
 const ipLimiter = rateLimit({ interval: 60 * 1000, uniqueTokenPerInterval: 5000 })
@@ -16,10 +17,7 @@ const emailLimiter = rateLimit({ interval: 15 * 60 * 1000, uniqueTokenPerInterva
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-const clientIp = (request: NextRequest) =>
-  request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-  request.headers.get('x-real-ip') ||
-  'unknown'
+
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 

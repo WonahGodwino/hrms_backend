@@ -5,7 +5,7 @@ import type {
   Prisma,
   ReviewPhaseType,
 } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { BANDS } from "@/app/lib/manager-review";
 import { LIVE_STATUSES } from "@/app/lib/appraisal-cycles/appraisal-cycle-utils";
 import {
@@ -20,6 +20,7 @@ import {
 import type { CycleForOps } from "@/app/lib/performance-operations/ops-utils";
 import { canDecideException } from "@/app/lib/performance-operations/ops-actions-utils";
 import { nameOf, pipLabel } from "@/app/lib/pip";
+import { forCompany } from '@/app/lib/data/tenant';
 
 // ---------------------------------------------------------------------------
 // Tunable rules, all in one place (promote to AppraisalWorkflowSettings later)
@@ -250,14 +251,14 @@ const BUCKET_RANK: Record<ProgressBucket, number> = {
   COMPLETED: 2,
 };
 
-function bucketOf(p: OpsParticipant): ProgressBucket {
+export function bucketOf(p: OpsParticipant): ProgressBucket {
   if (p.phases.some((x) => x.isOverdue)) return "OVERDUE";
   if (p.phases.length > 0 && p.phases.every((x) => x.isDone))
     return "COMPLETED";
   return "IN_PROGRESS";
 }
 
-function appraisalProgress(s: OpsSnapshot) {
+export function appraisalProgress(s: OpsSnapshot) {
   let completed = 0;
   let overdue = 0;
   let inProgress = 0;
@@ -282,7 +283,7 @@ function appraisalProgress(s: OpsSnapshot) {
 // ---------------------------------------------------------------------------
 type PerformanceBand = "HIGH" | "AVERAGE" | "LOW" | "PIP";
 
-function bandOf(r: OpsParticipant["review"]): PerformanceBand | null {
+export function bandOf(r: OpsParticipant["review"]): PerformanceBand | null {
   if (!r || r.status !== "SUBMITTED") return null;
   if (r.recommendation === "PIP") return "PIP"; // PIP wins over score
   if (r.finalScore === null) return null;
@@ -291,7 +292,7 @@ function bandOf(r: OpsParticipant["review"]): PerformanceBand | null {
   return "AVERAGE";
 }
 
-function workforcePerformance(s: OpsSnapshot) {
+export function workforcePerformance(s: OpsSnapshot) {
   const counts = { high: 0, average: 0, low: 0, pip: 0 };
   let promotionReady = 0;
   let submittedReviews = 0;
@@ -331,13 +332,13 @@ interface TrendPoint {
   pct: number | null;
 }
 
-const trendTimes = (now: Date) =>
+export const trendTimes = (now: Date) =>
   Array.from({ length: TREND_WEEKS }, (_, i) => ({
     week: `W${i + 1}`,
     at: new Date(now.getTime() - (TREND_WEEKS - 1 - i) * WEEK_MS),
   }));
 
-const lastDelta = (series: TrendPoint[]): number | null => {
+export const lastDelta = (series: TrendPoint[]): number | null => {
   const last = series[series.length - 1]?.pct;
   const prev = series[series.length - 2]?.pct;
   return last === null ||
@@ -348,7 +349,7 @@ const lastDelta = (series: TrendPoint[]): number | null => {
     : last - prev;
 };
 
-function participationFor(s: OpsSnapshot, types: ReviewPhaseType[]) {
+export function participationFor(s: OpsSnapshot, types: ReviewPhaseType[]) {
   const enabledTypes = types.filter((t) => s.enabled.has(t));
   if (enabledTypes.length === 0) {
     return {
@@ -384,7 +385,7 @@ function participationFor(s: OpsSnapshot, types: ReviewPhaseType[]) {
   };
 }
 
-function participation(s: OpsSnapshot) {
+export function participation(s: OpsSnapshot) {
   return {
     employee: participationFor(s, ["SELF_APPRAISAL"]),
     manager: participationFor(s, ["MANAGER_REVIEW"]),
@@ -402,7 +403,7 @@ function participation(s: OpsSnapshot) {
 // "% of phase items past their effective deadline that were completed on or
 // before it." null when nothing is past deadline yet (not a fake 100%).
 // ---------------------------------------------------------------------------
-function compliance(s: OpsSnapshot) {
+export function compliance(s: OpsSnapshot) {
   const items = s.participants.flatMap((p) =>
     p.phases.filter((ph) => ph.deadline !== null),
   );
@@ -843,8 +844,8 @@ function toEscalationItem(
 // No cycle exists at all: still surface general escalations (including PIP
 // ones) so nothing becomes unresolvable. `cycle` is null in this response.
 export async function buildGeneralMonitorFeed(companyId: string) {
-  const rows = await prisma.appraisalEscalation.findMany({
-    where: { companyId, status: { not: "RESOLVED" }, cycleId: null },
+  const rows = await forCompany(companyId).appraisalEscalation.findMany({
+    where: { status: { not: "RESOLVED" }, cycleId: null },
     orderBy: { createdAt: "desc" },
     select: ESCALATION_SELECT,
   });
@@ -1286,16 +1287,16 @@ export async function buildControlsSummary(
   companyId: string,
   cycle: CycleForOps | null,
 ) {
-  const activeCycles = await prisma.appraisalCycle.count({
-    where: { companyId, status: { in: [...LIVE_STATUSES] } },
+  const activeCycles = await forCompany(companyId).appraisalCycle.count({
+    where: { status: { in: [...LIVE_STATUSES] } },
   });
   if (!cycle) {
     return {
       cycle: null,
       activeCycles,
       completionPct: null as number | null,
-     pendingActions: await prisma.appraisalEscalation.count({
-       where: { companyId, status: { not: "RESOLVED" }, cycleId: null },
+     pendingActions: await forCompany(companyId).appraisalEscalation.count({
+       where: { status: { not: "RESOLVED" }, cycleId: null },
      }),
     };
   }
@@ -1314,8 +1315,8 @@ export async function buildControlsSummary(
     prisma.appraisalEscalation.count({
       where: openEscalationWhere(companyId, cycle.id),
     }),
-    prisma.appraisalPolicyException.count({
-      where: { companyId, cycleId: cycle.id, status: "PENDING" },
+    forCompany(companyId).appraisalPolicyException.count({
+      where: { cycleId: cycle.id, status: "PENDING" },
     }),
   ]);
 

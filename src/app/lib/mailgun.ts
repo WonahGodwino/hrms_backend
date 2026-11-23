@@ -1,4 +1,7 @@
 // src/app/lib/mailgun.ts
+import { EmailHttpError, isTransientHttpError, sendWithRetry } from '@/app/lib/mail/retry';
+import { fetchWithTimeout, TIMEOUTS } from '@/app/lib/http/fetch-with-timeout';
+
 interface EmailOptions {
   to: string;
   subject: string;
@@ -58,17 +61,25 @@ export async function sendEmail({ to, subject, text, html }: EmailOptions): Prom
       formData.append('html', html);
     }
 
-    const response = await fetch(
-      `https://api.mailgun.net/v3/${process.env.MAILGUN_DOMAIN}/messages`,
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Basic ${Buffer.from(`api:${process.env.MAILGUN_API_KEY}`).toString("base64")}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: formData,
+    // REL-004: 429/5xx and network failures are retried (lib/mail/retry.ts);
+    // any other response is returned to the caller as before.
+    const response = await sendWithRetry(async () => {
+      const res = await fetchWithTimeout(
+        `https://api.mailgun.net/v3/${process.env.MAILGUN_DOMAIN}/messages`,
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Basic ${Buffer.from(`api:${process.env.MAILGUN_API_KEY}`).toString("base64")}`,
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: formData,
+        }, TIMEOUTS.email
+      );
+      if (res.status === 429 || res.status >= 500) {
+        throw new EmailHttpError(`Mailgun responded ${res.status}`, res.status, undefined, res.headers);
       }
-    );
+      return res;
+    }, { attempts: 3, timeoutMs: 15_000, isTransient: isTransientHttpError });
 
     // Handle the unknown type safely
     const data = await response.json();

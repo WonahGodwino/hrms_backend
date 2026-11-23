@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedApprovalAccess } from '@/app/lib/phed/access-role'
 import { buildApprovalMemoSections } from '@/app/lib/phed/approval-memo-data'
@@ -11,7 +11,8 @@ import { generateApprovalMemoPdf } from '@/app/lib/phed/pdf-approval-memo'
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // GET /api/phed/approvals/memos/:id/pdf — current-state Approval Memo PDF
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'report')
   if (rl) return withCors(rl, origin)
@@ -69,7 +70,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="${fileName}"`,
         'Content-Length': String(pdf.length),
-        'Access-Control-Allow-Origin': origin ?? '*',
+        ...getCorsHeaders(origin),
       },
     })
   } catch (e) { return withCors(handleApiError(e), origin) }

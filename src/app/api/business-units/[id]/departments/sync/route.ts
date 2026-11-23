@@ -8,6 +8,7 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveBUAccessById, logBUAudit } from '@/app/lib/business-units/bu-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -23,7 +24,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (access.error) return withCors(ApiResponse.error(access.error.message, access.error.status), origin)
     const companyId = access.companyId as string
 
-    const bu = await (prisma as any).businessUnit.findFirst({ where: { id, companyId }, select: { id: true, name: true } })
+    const bu = await forCompany(companyId).businessUnit.findFirst({ where: { id }, select: { id: true, name: true } })
     if (!bu) return withCors(ApiResponse.error('Business unit not found', 404), origin)
 
     const requestedIds: string[] = Array.isArray(body.departmentIds)
@@ -31,8 +32,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       : []
 
     // Only accept departments that actually belong to this company.
-    const validDepts = await prisma.department.findMany({
-      where: { companyId, id: { in: requestedIds } },
+    const validDepts = await forCompany(companyId).department.findMany({
+      where: { id: { in: requestedIds } },
       select: { id: true },
     })
     const validIds = validDepts.map((d) => d.id)
@@ -40,7 +41,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     // Map the requested departments to this BU (also refresh the denormalised name),
     // and unmap any department currently on this BU that's no longer selected.
     // Cast: Department.businessUnitId needs `prisma generate` (pending migration).
-    const p = prisma as any
+    const p = prisma
     const [mapped, unmapped] = await prisma.$transaction([
       p.department.updateMany({
         where: { companyId, id: { in: validIds } },

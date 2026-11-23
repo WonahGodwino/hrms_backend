@@ -44,7 +44,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       update.evaluationPlan = body.evaluationPlan ? String(body.evaluationPlan) : null
     }
 
-    const updated: any = await (prisma as any).recruitmentAssessmentRound.update({
+    const updated: any = await prisma.recruitmentAssessmentRound.update({
       where: { id: roundId }, data: update,
     })
 

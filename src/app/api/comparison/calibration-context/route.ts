@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { CalibrationAdjustmentReason } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { CYCLE_SELECT } from "@/app/lib/manager-review";
@@ -24,6 +24,7 @@ import {
   getBasis,
   loadPopulation,
 } from "@/app/lib/comparison";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -66,14 +67,14 @@ export async function GET(request: NextRequest) {
     const me = pop.find((m) => m.staffRecordId === staffRecordId);
     if (!me) return notFound(origin, "Employee");
 
-    let rec = await prisma.calibrationRecord.findFirst({
-      where: { companyId, cycleId: cycle.id, staffRecordId },
+    let rec = await forCompany(companyId).calibrationRecord.findFirst({
+      where: { cycleId: cycle.id, staffRecordId },
       select: { id: true },
     });
     if (!rec) {
       await ensureCalibrationRecords(companyId, cycle.id); // idempotent backfill
-      rec = await prisma.calibrationRecord.findFirst({
-        where: { companyId, cycleId: cycle.id, staffRecordId },
+      rec = await forCompany(companyId).calibrationRecord.findFirst({
+        where: { cycleId: cycle.id, staffRecordId },
         select: { id: true },
       });
     }
@@ -88,7 +89,7 @@ export async function GET(request: NextRequest) {
     const blockedCycle = cycleInfo
       ? assertCalibrationOpen(cycleInfo)
       : "Cycle not found";
-    const [] = await buildRows([record], {
+    await buildRows([record], {
       companyId,
       isAdmin,
       cycleOpen: !blockedCycle,

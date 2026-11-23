@@ -27,7 +27,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 		const { id } = await params;
 		const body = await req.json().catch(() => ({}));
 
-		const meeting: any = await (prisma as any).meeting.findUnique({
+		const meeting: any = await prisma.meeting.findUnique({
 			where: { id },
 			include: { participants: true },
 		});

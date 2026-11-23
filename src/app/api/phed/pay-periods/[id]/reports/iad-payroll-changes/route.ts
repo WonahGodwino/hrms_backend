@@ -4,14 +4,13 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
+import { forCompany } from '@/app/lib/data/tenant'
+import { toNum } from '@/app/lib/phed/currency-words'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-function toNum(v: unknown): number {
-  if (v === null || v === undefined) return 0
-  if (typeof v === 'object' && typeof (v as any).toNumber === 'function') return (v as any).toNumber()
-  return Number(v) || 0
-}
+
 
 function r2(v: number): number {
   return Math.round(v * 100) / 100
@@ -56,7 +55,11 @@ function diffRows(prev: SummaryRow[], curr: SummaryRow[]): SummaryRow[] {
 // tab. Compares the current period's payroll summary against the previous
 // period's, returning three tables (previousMonth, currentMonth, changes)
 // in the same category × metric format as IAD Summary's Section A.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req);
+  if (deferred) return deferred;
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'report')
   if (rl) return withCors(rl, origin)
@@ -73,9 +76,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       return withCors(ApiResponse.notFound('Pay period not found'), origin)
     }
 
-    const previousPeriod = await prisma.phedPayPeriod.findFirst({
+    const previousPeriod = await forCompany(period.companyId).phedPayPeriod.findFirst({
       where: {
-        companyId: period.companyId,
         OR: [
           { year: { lt: period.year } },
           { year: period.year, month: { lt: period.month } },

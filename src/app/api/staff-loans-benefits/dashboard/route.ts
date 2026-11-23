@@ -10,6 +10,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { checkStaffAccess } from '@/app/lib/staff-access'
 import { resolveStaffGrossSalary, resolveStaffNetSalary } from '@/app/lib/staff-loans-benefits/staff-finance'
 import { canAccessPage } from '@/app/lib/staff-loans-benefits/page-access'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -39,9 +40,9 @@ export async function GET(request: NextRequest) {
       if (!user.companyId) return withCors(ApiResponse.success({ orgWide: true, loans: [], benefits: [] }), origin)
 
       const [loans, benefitAllocations, benefitRequests] = await Promise.all([
-        prisma.loanRequest.findMany({ where: { companyId: user.companyId }, select: { status: true, requestedAmount: true, approvedAmount: true, monthlyRepayment: true, remainingBalance: true } }),
-        prisma.benefitAllocation.findMany({ where: { companyId: user.companyId }, select: { status: true, allocationAmount: true } }),
-        prisma.benefitRequest.findMany({ where: { companyId: user.companyId }, select: { status: true } }),
+        forCompany(user.companyId).loanRequest.findMany({ select: { status: true, requestedAmount: true, approvedAmount: true, monthlyRepayment: true, remainingBalance: true } }),
+        forCompany(user.companyId).benefitAllocation.findMany({ select: { status: true, allocationAmount: true } }),
+        forCompany(user.companyId).benefitRequest.findMany({ select: { status: true } }),
       ])
 
       // A loan with a zero balance is fully repaid regardless of whether its

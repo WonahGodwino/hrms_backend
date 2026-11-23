@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
 import { buildFinancePayrollSummary } from '@/app/lib/phed/reports'
 import { exportReportResponse, exportWorkbook, UNION_COOP_COLS } from '@/app/lib/phed/report-export'
 import { buildUnionCoopSheet, buildUnionCoopMaps, periodLabels } from '@/app/lib/phed/payroll-sheets'
+import { forCompany } from '@/app/lib/data/tenant'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -15,7 +17,11 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 // consolidated view of NUEE/SSAEAC/etc. union dues and named cooperative
 // contributions, mirroring Section B of the Approval Memo. Reuses the same
 // Finance Summary aggregation already used elsewhere — no new computation.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req);
+  if (deferred) return deferred;
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'report')
   if (rl) return withCors(rl, origin)
@@ -36,8 +42,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const staffIds = payrolls.map(r => r.staffId)
 
     const [allUnions, allCoops, staffUnions, staffCoops] = await Promise.all([
-      prisma.phedUnion.findMany({ where: { companyId: period.companyId, isActive: true }, orderBy: { name: 'asc' } }),
-      prisma.phedCooperative.findMany({ where: { companyId: period.companyId, isActive: true }, orderBy: { name: 'asc' } }),
+      forCompany(period.companyId).phedUnion.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+      forCompany(period.companyId).phedCooperative.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
       prisma.phedStaffUnion.findMany({ where: { staffId: { in: staffIds } } }),
       prisma.phedStaffCooperative.findMany({ where: { staffId: { in: staffIds } } }),
     ])
@@ -79,9 +85,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'Content-Disposition': `attachment; filename="union-cooperative-${period.periodName.replace(/\s+/g, '-')}.xlsx"`,
-          'Access-Control-Allow-Origin': origin ?? '*',
+          ...getCorsHeaders(origin),
         },
-      })
+      });
     }
 
     const rows = [

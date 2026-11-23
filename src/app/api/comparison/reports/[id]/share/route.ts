@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { RouteContext } from "@/app/lib/self-appraisal";
 import { fail, notFound, ok, readText, writeCtx } from "@/app/lib/pip";
 import { notifyReportShared } from "@/app/lib/comparison-report";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -25,10 +26,9 @@ export async function POST(
     const note = readText(body.sharedNote, "sharedNote", 1000);
     if ("error" in note) return fail(origin, note.error);
 
-    const r = await prisma.comparisonReport.findFirst({
+    const r = await forCompany(companyId).comparisonReport.findFirst({
       where: {
         id,
-        companyId,
         createdById: staffId,
         type: { not: "EMPLOYEE_PROFILE" },
       },

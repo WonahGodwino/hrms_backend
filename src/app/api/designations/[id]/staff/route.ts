@@ -22,7 +22,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const search = (searchParams.get('search') || '').trim()
     const includeInactive = searchParams.get('includeInactive') === 'true'
 
-    const designation = await (prisma as any).designation.findUnique({
+    const designation = await prisma.designation.findUnique({
       where: { id },
       select: { id: true, title: true, code: true, companyId: true },
     })

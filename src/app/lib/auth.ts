@@ -2,6 +2,20 @@ import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/app/lib/db'
 import { getActiveElevatedRole, rankOf } from '@/app/lib/role-elevation'
+import { isSessionRevoked, noteSessionCheck } from '@/app/lib/auth/session-revocations'
+
+/**
+ * SEC-007: only login sessions are accepted as logins. Link tokens (payslip
+ * links, talent-pool, offer, meeting, PHED email actions, etc.) carry a
+ * `purpose` or `kind` claim and are verified by their own routes; tokens with
+ * no user id (e.g. assessment panel links) are not sessions either.
+ */
+export function isSessionPayload(decoded: unknown): boolean {
+  if (!decoded || typeof decoded !== 'object') return false
+  const d = decoded as Record<string, unknown>
+  if (d.purpose !== undefined || d.kind !== undefined) return false
+  return typeof (d.userId ?? d.sub) === 'string'
+}
 
 export type JwtPayload = {
   userId: string
@@ -75,13 +89,23 @@ export async function comparePassword(password: string, hashed: string) {
 }
 
 // type cast to avoid jsonwebtoken overload issues
-export function signToken(payload: JwtPayload, expiresIn: string = '7d') {
+// STATE-001: access tokens are short-lived (ACCESS_TOKEN_TTL, default 2h);
+// the frontend renews them with the refresh token (lib/auth/refresh-token.ts).
+export function accessTokenTtl(): string {
+  return process.env.ACCESS_TOKEN_TTL || '2h'
+}
+
+export function signToken(payload: JwtPayload, expiresIn: string = accessTokenTtl()) {
   return (jwt as any).sign(payload, getJwtSecret(), { expiresIn }) as string
 }
 
 export const verifyToken = (token: string): JwtPayload | null => {
   try {
-    return jwt.verify(token, getJwtSecret()) as JwtPayload
+    const decoded = jwt.verify(token, getJwtSecret()) as JwtPayload & { iat?: number }
+    // SEC-007 / SEC-008: login sessions only, and not revoked.
+    if (!isSessionPayload(decoded)) return null
+    if (isSessionRevoked({ userId: decoded.userId || decoded.sub, deviceId: decoded.deviceId, iat: decoded.iat })) return null
+    return decoded
   } catch {
     return null
   }
@@ -90,8 +114,10 @@ export const verifyToken = (token: string): JwtPayload | null => {
 export async function getUserFromToken(token: string): Promise<AuthUser | null> {
   try {
     const decoded = jwt.verify(token, getJwtSecret()) as any
+    if (!isSessionPayload(decoded)) return null
 
     const sessionCheck = await assertSessionValid(decoded)
+    noteSessionCheck({ userId: decoded.userId || decoded.sub, deviceId: decoded.deviceId }, sessionCheck)
     if (!sessionCheck.valid) return null
 
     let companyIds: string[] = []
@@ -180,7 +206,10 @@ export const requireAuth = (token: string | null): AuthUser => {
 function getUserFromTokenSync(token: string): AuthUser | null {
   try {
     const decoded = jwt.verify(token, getJwtSecret()) as any
-    
+    if (!isSessionPayload(decoded)) return null
+    // SEC-008: refuse deactivated/blocked users and logged-out devices (see session-revocations.ts).
+    if (isSessionRevoked({ userId: decoded.userId || decoded.sub, deviceId: decoded.deviceId, iat: decoded.iat })) return null
+
     return {
       userId: decoded.userId || decoded.sub,
       email: decoded.email,
@@ -209,7 +238,8 @@ export const requireRole = (token: string | null, allowedRoles: string[]): AuthU
   const user = requireAuth(token)
 
   if (!allowedRoles.includes(user.role)) {
-    throw new Error(`Insufficient permissions. Required roles: ${allowedRoles.join(', ')}`)
+    // SEC-015: the list of allowed roles is not shown to the caller.
+    throw new Error('Insufficient permissions')
   }
 
   return user
@@ -220,7 +250,8 @@ export const requireRoleAsync = async (token: string | null, allowedRoles: strin
   const user = await requireAuthAsync(token)
 
   if (!allowedRoles.includes(user.role)) {
-    throw new Error(`Insufficient permissions. Required roles: ${allowedRoles.join(', ')}`)
+    // SEC-015: the list of allowed roles is not shown to the caller.
+    throw new Error('Insufficient permissions')
   }
 
   return user

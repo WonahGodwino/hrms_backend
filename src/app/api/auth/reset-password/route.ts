@@ -3,6 +3,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/db';
 import { hashPassword, comparePassword } from '@/app/lib/auth';
 import { withCors, handleCorsOptions } from '@/app/lib/cors';
+import { MAX_RESET_ATTEMPTS, resetTokenMatches } from '@/app/lib/password-reset/tokens';
+import { phedAccountRateLimit, phedRateLimit } from '@/app/lib/phed/rate-limit';
+import { publicErrorMessage } from '@/app/lib/errors/public-error';
+import { readJsonBodyOrEmpty } from '@/app/lib/validation/request-body'
+import { resetPasswordBodySchema } from '@/app/lib/validation/auth-schemas';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -10,9 +16,13 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const origin = req.headers.get('origin');
+  // SEC-010: per-IP limit (the proxy-added address, not the client-supplied one).
+  const ipLimited = phedRateLimit(req, 'auth');
+  if (ipLimited) return withCors(ipLimited, origin);
 
   try {
-    const body = await req.json();
+    // API-002: fields are type-checked; a malformed body falls into the checks below.
+    const body = await readJsonBodyOrEmpty(req, resetPasswordBodySchema);
     const { 
       email, 
       otp: resetToken, // Using resetToken from verify-otp endpoint
@@ -64,37 +74,43 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedEmail = email.toLowerCase().trim();
+
+    // SEC-010: per-account limit, so rotating IP addresses does not help.
+
+    const accountLimited = phedAccountRateLimit(req, 'auth', normalizedEmail);
+
+    if (accountLimited) return withCors(accountLimited, origin);
+
     const normalizedToken = resetToken.trim();
 
-    // Declare resetRecord variable
-    let resetRecord;
+    // Step 4: Find the active reset record and require the reset token that
+    // verify-otp issued for it (SEC-001). A raw OTP is never accepted here.
+    const candidates = await prisma.passwordReset.findMany({
+      where: {
+        email: normalizedEmail,
+        isUsed: false,
+        otpExpiresAt: { gt: new Date() },
+        ...(companyId ? { companyId } : {}),
+      }
+    });
 
-    // Step 4: Find the reset token record
-    if (companyId) {
-      // If companyId is provided, look for specific record
-      resetRecord = await prisma.passwordReset.findUnique({
-        where: {
-          email_companyId: {
-            email: normalizedEmail,
-            companyId: companyId
-          }
-        }
-      });
-    } else {
-      // If no companyId, find any matching reset token for this email
-      const records = await prisma.passwordReset.findMany({
-        where: {
-          email: normalizedEmail,
-          isUsed: false,
-          otpExpiresAt: { gt: new Date() }
-        }
-      });
-
-      // Find the record with matching token
-      resetRecord = records.find(record => record.otp === normalizedToken);
-    }
+    const resetRecord = candidates.find(record => resetTokenMatches(record.otp, normalizedToken));
 
     if (!resetRecord) {
+      // Count the failed attempt and invalidate records that reach the limit.
+      await Promise.all(
+        candidates.map(record => {
+          const attempts = (record.attempts || 0) + 1;
+          return prisma.passwordReset.update({
+            where: { id: record.id },
+            data: {
+              attempts,
+              ...(attempts >= MAX_RESET_ATTEMPTS ? { isUsed: true } : {})
+            }
+          });
+        })
+      );
+
       return withCors(
         NextResponse.json(
           {
@@ -107,47 +123,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Step 5: Validate reset token
-    if (resetRecord.isUsed) {
-      return withCors(
-        NextResponse.json(
-          {
-            success: false,
-            message: 'This reset token has already been used'
-          },
-          { status: 400 }
-        ),
-        origin
-      );
-    }
-
-    // Check if token is expired
-    const currentTime = new Date();
-    const tokenExpiryTime = new Date(resetRecord.otpExpiresAt);
-
-    if (currentTime > tokenExpiryTime) {
-      await prisma.passwordReset.update({
-        where: { id: resetRecord.id },
-        data: { isUsed: true }
-      });
-
-      return withCors(
-        NextResponse.json(
-          {
-            success: false,
-            message: 'Reset token has expired. Please request a new one.'
-          },
-          { status: 400 }
-        ),
-        origin
-      );
-    }
-
     // Step 6: Find the staff member
-    const staff = await prisma.staffRecord.findFirst({
+    const staff = await forCompany(resetRecord.companyId).staffRecord.findFirst({
       where: {
         email: normalizedEmail,
-        companyId: resetRecord.companyId, // Use companyId from reset record
         isActive: true
       }
     });
@@ -185,47 +164,49 @@ export async function POST(req: NextRequest) {
     // Step 8: Hash the new password
     const hashedPassword = await hashPassword(newPassword);
 
-    // Step 9: Update password in the DB using composite key
-    await prisma.staffRecord.update({
-      where: {
-        email_companyId: {
-          email: normalizedEmail,
-          companyId: resetRecord.companyId
+    // Steps 9-11 run in one transaction (DB-002): the password never changes
+    // without the reset code being spent, so a code cannot be reused.
+    await prisma.$transaction([
+      // Step 9: Update password in the DB using composite key
+      prisma.staffRecord.update({
+        where: {
+          email_companyId: {
+            email: normalizedEmail,
+            companyId: resetRecord.companyId
+          }
+        },
+        data: {
+          password: hashedPassword,
+          isRegistered: true // Mark as registered if this is first-time setup
+        },
+      }),
+
+      // Step 10: Mark reset token as used
+      prisma.passwordReset.update({
+        where: { id: resetRecord.id },
+        data: {
+          isUsed: true,
+          updatedAt: new Date()
         }
-      },
-      data: { 
-        password: hashedPassword,
-        isRegistered: true // Mark as registered if this is first-time setup
-      },
-    });
+      }),
 
-    // Step 10: Mark reset token as used
-    await prisma.passwordReset.update({
-      where: { id: resetRecord.id },
-      data: {
-        isUsed: true,
-        updatedAt: new Date()
-      }
-    });
-
-    // Step 11: Clean up any other unused reset tokens for this email in this company
-    await prisma.passwordReset.updateMany({
-      where: {
-        email: normalizedEmail,
-        companyId: resetRecord.companyId,
-        id: { not: resetRecord.id },
-        isUsed: false
-      },
-      data: {
-        isUsed: true
-      }
-    });
+      // Step 11: Clean up any other unused reset tokens for this email in this company
+      forCompany(resetRecord.companyId).passwordReset.updateMany({
+        where: {
+          email: normalizedEmail,
+          id: { not: resetRecord.id },
+          isUsed: false
+        },
+        data: {
+          isUsed: true
+        }
+      }),
+    ]);
 
     // Step 12: Get user info for response
-    const updatedUser = await prisma.staffRecord.findFirst({
+    const updatedUser = await forCompany(resetRecord.companyId).staffRecord.findFirst({
       where: {
-        email: normalizedEmail,
-        companyId: resetRecord.companyId
+        email: normalizedEmail
       },
       select: {
         firstName: true,
@@ -289,7 +270,7 @@ export async function POST(req: NextRequest) {
         {
           success: false,
           message: 'An unexpected error occurred. Please try again later.',
-          ...(process.env.NODE_ENV === 'development' && { error: error.message })
+          ...(process.env.NODE_ENV === 'development' && { error: publicErrorMessage(error) })
         },
         { status: 500 }
       ),

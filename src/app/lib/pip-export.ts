@@ -41,6 +41,7 @@ export type PipPacket = {
 
 // Built-in Helvetica is Latin-1 only; anything else becomes "?"
 const safe = (s: string | null | undefined) =>
+  // eslint-disable-next-line no-control-regex -- strips control characters on purpose
   (s ?? "").replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, "?");
 
 export function buildPipPdf(d: PipPacket): Promise<Buffer> {

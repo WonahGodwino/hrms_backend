@@ -5,6 +5,7 @@ import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { verifyCompanyAccess, UserContext } from "@/app/lib/access-control";
 import { VALID_QUESTION_TYPES } from "@/app/lib/review-templates/question-bank-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -44,17 +45,17 @@ export async function GET(request: NextRequest) {
     }
 
     const [byType, byCategory, archived, useRows] = await Promise.all([
-      prisma.questionBankItem.groupBy({
+      forCompany(companyId).questionBankItem.groupBy({
         by: ["questionType"],
-        where: { companyId, isActive: true },
+        where: { isActive: true },
         _count: { _all: true },
       }),
-      prisma.questionBankItem.groupBy({
+      forCompany(companyId).questionBankItem.groupBy({
         by: ["category"],
-        where: { companyId, isActive: true, category: { not: null } },
+        where: { isActive: true, category: { not: null } },
         _count: { _all: true },
       }),
-      prisma.questionBankItem.count({ where: { companyId, isActive: false } }),
+      forCompany(companyId).questionBankItem.count({ where: { isActive: false } }),
       prisma.templateQuestion.findMany({
         where: {
           bankItemId: { not: null },

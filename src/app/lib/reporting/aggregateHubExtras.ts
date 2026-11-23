@@ -6,7 +6,7 @@
 // row-level data leaves this file.
 import { prisma } from '@/app/lib/db'
 
-const db = prisma as any
+const db = prisma
 
 const toMap = (rows: Array<{ _count: { _all: number } } & Record<string, any>>, key: string) =>
   rows.map((r) => ({ label: String(r[key]), count: r._count._all }))

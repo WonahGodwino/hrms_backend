@@ -2,28 +2,30 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
+import { canAccessCompany } from '@/app/lib/access/company-access'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // GET /api/phed/staff/upload/history/[id]?format=csv
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const upload = await (prisma as any).phedBulkUpload.findUnique({
+    const upload = await prisma.phedBulkUpload.findUnique({
       where: { id: params.id },
     })
 
-    if (!upload) return withCors(ApiResponse.notFound('Upload not found'), origin)
+    if (!upload || !(await canAccessCompany(user, upload.companyId))) return withCors(ApiResponse.notFound('Upload not found'), origin)
 
     const format = new URL(req.url).searchParams.get('format')
 
     // Return as downloadable CSV
     if (format === 'csv') {
-      const errors: string[] = Array.isArray(upload.errors) ? upload.errors : []
+      const errors: string[] = Array.isArray(upload.errors) ? upload.errors.filter((e): e is string => typeof e === 'string') : []
       const csv = `Row,Error\n${errors.map((e: string) => {
         const match = e.match(/^Row (\d+):?\s*(.*)$/)
         const row = match ? match[1] : ''
@@ -37,7 +39,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         headers: {
           'Content-Type': 'text/csv',
           'Content-Disposition': `attachment; filename="upload-errors-${safeName}"`,
-          'Access-Control-Allow-Origin': origin || '*',
+          ...getCorsHeaders(origin),
         },
       })
     }

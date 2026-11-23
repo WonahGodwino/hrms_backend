@@ -10,7 +10,8 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 
 // PUT /api/phed/tax-profiles/:staffId
 // Sets/updates a single staff member's state of residence (and optional JTB TIN).
-export async function PUT(req: NextRequest, { params }: { params: { staffId: string } }) {
+export async function PUT(req: NextRequest, props: { params: Promise<{ staffId: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'report')
   if (rl) return withCors(rl, origin)

@@ -5,6 +5,9 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { cancelPayrollUpload, validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
+import { forCompany } from '@/app/lib/data/tenant'
+import { readJsonBody } from '@/app/lib/validation/request-body'
+import { uploadIdBodySchema } from '@/app/lib/validation/payroll-staff-schemas'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -29,7 +32,10 @@ export async function POST(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = await requireModuleAccess(token, 'PAYROLL', ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
-    const { uploadId } = await request.json()
+    const parsedBody = await readJsonBody(request, uploadIdBodySchema)
+    if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.message, 400), origin)
+    const body = parsedBody.data
+    const { uploadId } = body
     if (!uploadId) {
       return withCors(ApiResponse.error('uploadId is required', 400), origin)
     }
@@ -58,12 +64,8 @@ export async function POST(request: NextRequest) {
 
     // Clean up any payslips created during this upload.
     // Find payslips whose Payroll records were created after this upload started.
-    const stalePayrolls = await prisma.payroll.findMany({
+    const stalePayrolls = await forCompany(upload.companyId).payroll.findMany({
       where: {
-        companyId: upload.companyId,
-        // Only rows this upload itself created: scoped by upload id AND start
-        // time so a concurrent upload/generation or pre-existing payroll that
-        // merely got updated is never deleted.
         payrollUploadId: upload.id,
         createdAt: { gte: upload.startedAt || upload.createdAt },
       },

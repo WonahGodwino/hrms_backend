@@ -58,7 +58,7 @@ export async function updateCompanyLocation(
     return { ok: false, status: 404, message: 'Location not found' }
   }
 
-  const data: Record<string, any> = {}
+  const data: Record<string, unknown> = {}
   if (fields.name !== undefined) {
     const name = String(fields.name).trim()
     if (!name) return { ok: false, status: 400, message: 'name cannot be empty' }

@@ -23,7 +23,8 @@ type TimelineEntry = {
   details: Record<string, unknown>
 }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {

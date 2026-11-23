@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { deletePhedStaffRecord } from '@/app/lib/phed/staff-delete'
 
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     const companyId = user.role === 'SUPER_ADMIN' ? (body.companyId || user.companyId) : user.companyId
 
     // Fetch compact summaries for the history CSV before deletion.
-    const staff = await (prisma as any).phedStaff.findMany({
+    const staff = await prisma.phedStaff.findMany({
       where: { id: { in: staffIds }, ...(companyId ? { companyId } : {}) },
       select: {
         id: true, staffId: true, firstName: true, lastName: true, email: true,
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
       headers: {
         'Content-Type': 'text/csv',
         'Content-Disposition': `attachment; filename="${fileName}"`,
-        'Access-Control-Allow-Origin': origin || '*',
+        ...getCorsHeaders(origin),
         'Access-Control-Expose-Headers': 'Content-Disposition,X-Delete-Message',
         'X-Delete-Message': encodeURIComponent(`${staff.length} staff permanently deleted. History saved as ${fileName}`),
       },

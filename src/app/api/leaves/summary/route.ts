@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
 
 // OPTIONS - CORS preflight
 export async function OPTIONS(request: NextRequest) {
@@ -347,7 +348,7 @@ export async function POST(request: NextRequest) {
       { 
         success: false,
         message: 'Failed to fetch filtered leave summary',
-        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        details: process.env.NODE_ENV === 'development' ? publicErrorMessage(error) : undefined
       },
       { status: 500 }
     )

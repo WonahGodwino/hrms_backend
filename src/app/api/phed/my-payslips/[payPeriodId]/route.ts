@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { generatePayslipPdf } from '@/app/lib/phed/pdf-payslip'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -12,10 +13,8 @@ function r2(v: number): number { return Math.round(v * 100) / 100 }
 
 // GET /api/phed/my-payslips/:payPeriodId
 // Employee downloads their own payslip PDF for a specific period.
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { payPeriodId: string } }
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ payPeriodId: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'report')
   if (rl) return withCors(rl, origin)
@@ -27,15 +26,15 @@ export async function GET(
     if (!companyId) return withCors(ApiResponse.error('companyId is required', 400), origin)
 
     // Resolve staff record from JWT email
-    const staffRecord = await (prisma as any).phedStaff.findFirst({
-      where: { companyId, email: { equals: user.email ?? '', mode: 'insensitive' }, isActive: true },
+    const staffRecord = await forCompany(companyId).phedStaff.findFirst({
+      where: { email: { equals: user.email ?? '', mode: 'insensitive' }, isActive: true },
       select: { id: true },
     })
 
     if (!staffRecord)
       return withCors(ApiResponse.error('No PHED staff record found for your account', 404), origin)
 
-    const payroll = await (prisma as any).phedComputedPayroll.findUnique({
+    const payroll = await prisma.phedComputedPayroll.findUnique({
       where: {
         payPeriodId_staffId: { payPeriodId: params.payPeriodId, staffId: staffRecord.id },
       },
@@ -57,10 +56,10 @@ export async function GET(
 
     const grossSalary = n(payroll.grossSalary)
     const [allUnions, staffUnions, allCooperatives, staffCooperatives] = await Promise.all([
-      (prisma as any).phedUnion.findMany({ where: { companyId: payroll.companyId, isActive: true }, orderBy: { name: 'asc' } }),
-      (prisma as any).phedStaffUnion.findMany({ where: { staffId: payroll.staffId } }),
-      (prisma as any).phedCooperative.findMany({ where: { companyId: payroll.companyId, isActive: true }, orderBy: { name: 'asc' } }),
-      (prisma as any).phedStaffCooperative.findMany({ where: { staffId: payroll.staffId } }),
+      forCompany(payroll.companyId).phedUnion.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+      prisma.phedStaffUnion.findMany({ where: { staffId: payroll.staffId } }),
+      forCompany(payroll.companyId).phedCooperative.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+      prisma.phedStaffCooperative.findMany({ where: { staffId: payroll.staffId } }),
     ])
     const memberUnionIds = new Set(staffUnions.map((su: any) => su.unionId))
     const unions = allUnions.map((u: any) => ({
@@ -135,7 +134,7 @@ export async function GET(
         'Content-Type':        'application/pdf',
         'Content-Disposition': `attachment; filename="${fileName}"`,
         'Content-Length':      String(pdf.length),
-        'Access-Control-Allow-Origin': origin ?? '*',
+        ...getCorsHeaders(origin),
       },
     })
   } catch (e) { return withCors(handleApiError(e), origin) }

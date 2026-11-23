@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { FeedbackRequestStatus, Prisma } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -12,6 +12,7 @@ import {
   resolveSelf,
   toPerson,
 } from "@/app/lib/feedback";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -165,8 +166,8 @@ export async function POST(request: NextRequest) {
         origin,
       );
 
-    const reviewers = await prisma.staffRecord.findMany({
-      where: { id: { in: parsed.reviewerIds }, companyId, isActive: true },
+    const reviewers = await forCompany(companyId).staffRecord.findMany({
+      where: { id: { in: parsed.reviewerIds }, isActive: true },
       select: { id: true },
     });
     if (reviewers.length !== parsed.reviewerIds.length)
@@ -175,9 +176,8 @@ export async function POST(request: NextRequest) {
         origin,
       );
 
-    const pending = await prisma.feedbackRequest.count({
+    const pending = await forCompany(companyId).feedbackRequest.count({
       where: {
-        companyId,
         requesterId: self.id,
         reviewerId: { in: parsed.reviewerIds },
         status: "PENDING",

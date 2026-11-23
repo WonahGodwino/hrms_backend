@@ -50,8 +50,8 @@ interface LogTemplateActionParams {
   versionId?: string;
   action: string;
   actorId: string;
-  previousData?: any;
-  newData?: any;
+  previousData?: unknown;
+  newData?: unknown;
 }
 
 /**

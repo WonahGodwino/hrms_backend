@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import {
@@ -15,6 +15,7 @@ import {
   resolveSubject,
   serializePlan,
 } from "@/app/lib/development-plans/dev-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -36,9 +37,8 @@ export async function GET(request: NextRequest) {
     if (!subjectId)
       return withCors(ApiResponse.notFound("Staff record not found"), origin);
 
-    const plans = await prisma.developmentPlan.findMany({
+    const plans = await forCompany(a.auth.companyId).developmentPlan.findMany({
       where: {
-        companyId: a.auth.companyId,
         staffRecordId: subjectId,
         status: { not: "ARCHIVED" },
       },
@@ -106,8 +106,8 @@ export async function POST(request: NextRequest) {
 
     const subjectId = await resolveSubject(a.auth, body.staffRecordId);
     const subject = subjectId
-      ? await prisma.staffRecord.findFirst({
-          where: { id: subjectId, companyId, isActive: true },
+      ? await forCompany(companyId).staffRecord.findFirst({
+          where: { id: subjectId, isActive: true },
           select: { id: true, managerId: true },
         })
       : null;
@@ -116,8 +116,8 @@ export async function POST(request: NextRequest) {
 
     // Cross-company validation of every referenced id
     if (body.competencyId) {
-      const c = await prisma.competency.findFirst({
-        where: { id: String(body.competencyId), companyId, status: "ACTIVE" },
+      const c = await forCompany(companyId).competency.findFirst({
+        where: { id: String(body.competencyId), status: "ACTIVE" },
         select: { id: true },
       });
       if (!c) return bad("Competency not found or not active");

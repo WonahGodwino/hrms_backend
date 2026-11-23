@@ -11,6 +11,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { sendEmail } from '@/app/lib/email'
 import { resolveRecruitmentCompanyId } from '@/app/lib/recruitment/companyScope'
+import { forCompany } from '@/app/lib/data/tenant'
 
 const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk'
 
@@ -35,30 +36,30 @@ export async function POST(req: NextRequest) {
       return withCors(ApiResponse.error('candidateId and designationId are required', 400), origin)
 
     // Validate candidate + designation belong to the company.
-    const candidate = await prisma.candidate.findFirst({
-      where: { id: candidateId, companyId },
+    const candidate = await forCompany(companyId).candidate.findFirst({
+      where: { id: candidateId },
       select: { id: true, firstName: true, lastName: true, email: true },
     })
     if (!candidate) return withCors(ApiResponse.error('Candidate not found', 404), origin)
 
-    const designation = await (prisma as any).designation.findFirst({
-      where: { id: designationId, companyId },
+    const designation = await forCompany(companyId).designation.findFirst({
+      where: { id: designationId },
       select: { id: true, title: true },
     })
     if (!designation) return withCors(ApiResponse.error('Designation not found', 404), origin)
 
     // Find the most recent OPEN vacancy recruiting for this designation.
     // Cast: Job.designationId needs `prisma generate` (pending migration).
-    const job = await (prisma as any).job.findFirst({
-      where: { companyId, designationId, status: 'ACTIVE', archived: 0 },
+    const job = await forCompany(companyId).job.findFirst({
+      where: { designationId, status: 'ACTIVE', archived: 0 },
       orderBy: { createdAt: 'desc' },
       select: { id: true, title: true },
     })
     if (!job) {
       // Distinguish "no job at all" from "a job exists but is closed/draft/expired"
       // so the UI can tell the user to open the existing vacancy vs post a new one.
-      const anyJob = await (prisma as any).job.findFirst({
-        where: { companyId, designationId, archived: 0 },
+      const anyJob = await forCompany(companyId).job.findFirst({
+        where: { designationId, archived: 0 },
         orderBy: { createdAt: 'desc' },
         select: { id: true, title: true, status: true },
       })
@@ -77,8 +78,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Reuse the candidate's most recent CV so the new application is complete.
-    const priorApp = await prisma.jobApplication.findFirst({
-      where: { companyId, candidateId, cvFilePath: { not: '' } },
+    const priorApp = await forCompany(companyId).jobApplication.findFirst({
+      where: { candidateId, cvFilePath: { not: '' } },
       orderBy: { createdAt: 'desc' },
       select: { cvFilePath: true, cvFileName: true, parsedCvContent: true },
     })

@@ -1,9 +1,9 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -23,8 +23,7 @@ export async function GET(req: NextRequest) {
       return withCors(ApiResponse.error('You do not have permission to view this company', 403), origin)
     }
 
-    const profiles = await prisma.employeeTaxProfile.findMany({
-      where: { companyId },
+    const profiles = await forCompany(companyId).employeeTaxProfile.findMany({
       include: { staff: { select: { staffId: true, email: true, firstName: true, lastName: true } } },
       orderBy: { staff: { staffId: 'asc' } },
     })

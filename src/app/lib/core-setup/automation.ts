@@ -13,6 +13,7 @@ import type { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { resolveScopedCompanyId } from '@/app/lib/company-scope'
 import { legacyOrgEvents, serializeAuditEvent } from '@/app/lib/core-setup/audit'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export const AUTOMATION_ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN']
 export const AUTOMATION_DECIDER_ROLES = ['SUPER_ADMIN', 'ADMIN', 'HR']
@@ -36,10 +37,10 @@ const str = (v: unknown) => (v === undefined || v === null ? '' : String(v))
 // Everything the Automation Center and the Action Center read, in one response.
 export async function loadAutomationState(companyId: string) {
   const [rules, decisions, runs, events, legacy] = await Promise.all([
-    prisma.automationRuleSetting.findMany({ where: { companyId } }),
-    prisma.actionItemDecision.findMany({ where: { companyId } }),
-    prisma.automationRun.findMany({ where: { companyId }, orderBy: { createdAt: 'desc' }, take: 400 }),
-    prisma.coreSetupAuditEvent.findMany({ where: { companyId }, orderBy: { createdAt: 'desc' }, take: 1000 }),
+    forCompany(companyId).automationRuleSetting.findMany({ where: { } }),
+    forCompany(companyId).actionItemDecision.findMany({ where: { } }),
+    forCompany(companyId).automationRun.findMany({ where: { }, orderBy: { createdAt: 'desc' }, take: 400 }),
+    forCompany(companyId).coreSetupAuditEvent.findMany({ where: { }, orderBy: { createdAt: 'desc' }, take: 1000 }),
     legacyOrgEvents(companyId),
   ])
 
@@ -103,8 +104,8 @@ export interface FailedCheck {
 // bury the notification list.
 export async function raiseFailedCheckAlerts(companyId: string, failures: FailedCheck[]) {
   if (!failures.length) return
-  const admins = await prisma.staffRecord.findMany({
-    where: { companyId, role: 'ADMIN', isActive: true },
+  const admins = await forCompany(companyId).staffRecord.findMany({
+    where: { role: 'ADMIN', isActive: true },
     select: { id: true },
   })
   if (!admins.length) return

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requireLetterOperatorAccess } from '@/app/lib/phed/letter-access'
 import { buildStarterWorkbook } from '@/app/lib/phed/letter-workbook'
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': 'attachment; filename="Promotion Letters Template.xlsx"',
-        'Access-Control-Allow-Origin': origin ?? '*',
+        ...getCorsHeaders(origin),
       },
     })
   } catch (error) {

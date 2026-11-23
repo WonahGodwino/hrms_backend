@@ -23,7 +23,8 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 //
 // Blocked at DRAFT (already first step) and PAID (terminal).
 // Blocked at any step if an active approval memo exists (status not RETURNED_FOR_CORRECTION).
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)

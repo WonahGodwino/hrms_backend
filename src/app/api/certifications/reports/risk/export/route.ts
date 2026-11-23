@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
 
 		const corsHeaders = getCorsHeaders(origin);
 		return new Response(csv, { status: 200, headers: { 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="risk_report.csv"', ...corsHeaders } });
-	} catch (e) {
+	} catch (_e) {
 		return new Response('Internal error', { status: 500 });
 	}
 }

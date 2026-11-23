@@ -5,11 +5,12 @@ import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { extractUsedVariables } from '@/app/lib/offers/template-variables'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 async function loadOwned(id: string, companyId: string | undefined, role: string) {
-  const tpl = await (prisma as any).offerTemplate.findUnique({ where: { id } })
+  const tpl = await prisma.offerTemplate.findUnique({ where: { id } })
   if (!tpl || tpl.archived) return null
   if (role !== 'SUPER_ADMIN' && companyId && tpl.companyId !== companyId) return null
   return tpl
@@ -51,14 +52,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (body.isDefault !== undefined) {
       data.isDefault = !!body.isDefault
       if (data.isDefault) {
-        await (prisma as any).offerTemplate.updateMany({
-          where: { companyId: existing.companyId, isDefault: true, id: { not: id } },
+        await forCompany(existing.companyId).offerTemplate.updateMany({
+          where: { isDefault: true, id: { not: id } },
           data: { isDefault: false },
         })
       }
     }
 
-    const updated = await (prisma as any).offerTemplate.update({ where: { id }, data })
+    const updated = await prisma.offerTemplate.update({ where: { id }, data })
     return withCors(ApiResponse.success(updated, 'Offer template updated'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
@@ -73,7 +74,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     if (!existing) return withCors(ApiResponse.error('Template not found', 404), origin)
 
     // Soft-delete only — never hard-remove records on a production database.
-    await (prisma as any).offerTemplate.update({ where: { id }, data: { archived: 1, isDefault: false, updatedBy: user.userId } })
+    await prisma.offerTemplate.update({ where: { id }, data: { archived: 1, isDefault: false, updatedBy: user.userId } })
     return withCors(ApiResponse.success({ id }, 'Offer template archived'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }

@@ -4,7 +4,7 @@ import {
   AutomationChannel,
   AutomationTiming,
 } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleCorsOptions } from "@/app/lib/cors";
 import { ok } from "@/app/lib/pip";
 import { bail, guarded, oneOf, readBody, text } from "@/app/lib/pip-employee";
@@ -17,6 +17,7 @@ import {
   logAutomation,
   serializeNotification,
 } from "@/app/lib/automation";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -29,8 +30,8 @@ export async function GET(request: NextRequest) {
       request,
       request.nextUrl.searchParams.get("companyId"),
     );
-    const rows = await prisma.automationNotification.findMany({
-      where: { companyId: ctx.companyId, removedAt: null },
+    const rows = await forCompany(ctx.companyId).automationNotification.findMany({
+      where: { removedAt: null },
       orderBy: { createdAt: "asc" },
       take: AUTO_LIMITS.notifications,
     });

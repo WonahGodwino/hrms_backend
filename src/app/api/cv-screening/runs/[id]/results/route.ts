@@ -7,6 +7,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveCvScreeningCompanyId } from '@/app/lib/cv-screening/companyScope'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const scope = await resolveCvScreeningCompanyId(user, searchParams.get('companyId'))
     if (scope.error) return withCors(ApiResponse.error(scope.error.message, scope.error.status), origin)
 
-    const run = await prisma.screeningRun.findFirst({ where: { id, companyId: scope.companyId as string } })
+    const run = await forCompany(scope.companyId as string).screeningRun.findFirst({ where: { id } })
     if (!run) return withCors(ApiResponse.error('Screening not found', 404), origin)
 
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10))

@@ -76,14 +76,14 @@ export async function GET(request: NextRequest) {
     let responseCurrencySymbol: string | null = getCurrencySymbol(responseCurrency)
 
     if (targetCompanyIds.length === 1) {
-      const selectedCompany = await (prisma as any).company.findUnique({
+      const selectedCompany = await prisma.company.findUnique({
         where: { id: targetCompanyIds[0] },
         select: { baseCurrency: true }
       })
       responseCurrency = normalizeCurrencyCode(selectedCompany?.baseCurrency || 'NGN')
       responseCurrencySymbol = getCurrencySymbol(responseCurrency)
     } else {
-      const currencies = await (prisma as any).company.findMany({
+      const currencies = await prisma.company.findMany({
         where: { id: { in: targetCompanyIds } },
         select: { baseCurrency: true },
         distinct: ['baseCurrency']

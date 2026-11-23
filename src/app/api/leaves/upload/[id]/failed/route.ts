@@ -2,9 +2,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { withCors, handleCorsOptions } from '@/app/lib/cors'
-import { prisma } from '@/app/lib/prisma'
+import { withCors, handleCorsOptions, getCorsHeaders } from '@/app/lib/cors'
+import { prisma } from '@/app/lib/db'
 import { attachmentDisposition, safeFileName } from '@/app/lib/excel/sheet-theme'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
+import { forCompany } from '@/app/lib/data/tenant'
 
 
 // OPTIONS - CORS preflight
@@ -351,7 +353,7 @@ export async function GET(
         headers: {
           'Content-Type': 'application/json',
           'Content-Disposition': attachmentDisposition(`Failed Leave Upload (${safeFileName(uploadRecord.companies?.companyName || 'Company')}).json`),
-          'Access-Control-Allow-Origin': origin || '*',
+          ...getCorsHeaders(origin),
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
           'Access-Control-Allow-Headers': 'Authorization, Content-Type'
         }
@@ -381,7 +383,7 @@ export async function GET(
         headers: {
           'Content-Type': 'text/csv',
           'Content-Disposition': attachmentDisposition(`Failed Leave Upload (${safeFileName(uploadRecord.companies?.companyName || 'Company')}).csv`),
-          'Access-Control-Allow-Origin': origin || '*',
+          ...getCorsHeaders(origin),
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
           'Access-Control-Allow-Headers': 'Authorization, Content-Type'
         }
@@ -411,7 +413,7 @@ export async function GET(
         headers: {
           'Content-Type': 'application/vnd.ms-excel',
           'Content-Disposition': attachmentDisposition(`Failed Leave Upload (${safeFileName(uploadRecord.companies?.companyName || 'Company')}).xls`),
-          'Access-Control-Allow-Origin': origin || '*',
+          ...getCorsHeaders(origin),
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
           'Access-Control-Allow-Headers': 'Authorization, Content-Type'
         }
@@ -512,10 +514,9 @@ export async function DELETE(
     }
 
     // Check UserCompany permissions for delete
-    const userCompanyAssignments = await prisma.userCompany.findMany({
+    const userCompanyAssignments = await forCompany(uploadRecord.companyId).userCompany.findMany({
       where: { 
         userId: user.userId,
-        companyId: uploadRecord.companyId,
         role: { in: ['ADMIN', 'SUPER_ADMIN'] }
       }
     })
@@ -564,7 +565,7 @@ export async function DELETE(
       { 
         success: false,
         message: 'Failed to delete upload record',
-        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        details: process.env.NODE_ENV === 'development' ? publicErrorMessage(error) : undefined
       },
       { status: 500 }
     )

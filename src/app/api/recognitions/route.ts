@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { Prisma, RecognitionCategory } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -17,6 +17,7 @@ import {
 } from "@/app/lib/feedback";
 import { readUploadedBuffer } from "@/app/lib/goals/evidence-files";
 import { assertStorageQuota } from "@/app/lib/trial/guard";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -159,8 +160,8 @@ export async function POST(request: NextRequest) {
         origin,
       );
 
-    const recipient = await prisma.staffRecord.findFirst({
-      where: { id: parsed.recipientId, companyId, isActive: true },
+    const recipient = await forCompany(companyId).staffRecord.findFirst({
+      where: { id: parsed.recipientId, isActive: true },
       select: { id: true, departmentId: true },
     });
     if (!recipient)
@@ -168,10 +169,9 @@ export async function POST(request: NextRequest) {
 
     // A linked goal must belong to the recipient
     if (parsed.goalId) {
-      const goal = await prisma.goal.findFirst({
+      const goal = await forCompany(companyId).goal.findFirst({
         where: {
           id: parsed.goalId,
-          companyId,
           staffRecordId: recipient.id,
           isArchived: false,
         },

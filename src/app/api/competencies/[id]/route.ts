@@ -13,15 +13,14 @@ import {
   buildBenchmarkData,
 } from "@/app/lib/competencies/competency-utils";
 import { CompetencyCategory, CompetencyStatus } from "@prisma/client";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
 }
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -94,9 +93,8 @@ export async function PATCH(
         return withCors(ApiResponse.error("name cannot be empty", 400), origin);
       }
 
-      const existingByName = await prisma.competency.findFirst({
+      const existingByName = await forCompany(existing.companyId).competency.findFirst({
         where: {
-          companyId: existing.companyId,
           name: { equals: name, mode: "insensitive" },
           status: { not: "ARCHIVED" },
           id: { not: id },

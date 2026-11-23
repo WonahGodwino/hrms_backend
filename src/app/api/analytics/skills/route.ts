@@ -4,6 +4,7 @@ import { requireRole } from '@/app/lib/auth'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -57,9 +58,8 @@ export async function GET(req: NextRequest) {
       ]
     }
 
-    const participants = await prisma.participantProgress.findMany({
+    const participants = await forCompany(companyId).participantProgress.findMany({
       where: {
-        companyId,
         trainingProgramId: { in: programs.map((p) => p.id) },
         employee: employeeWhere,
       },
@@ -92,7 +92,7 @@ export async function GET(req: NextRequest) {
       if (p.employee.position) c.roles.push(p.employee.position)
     }
 
-    let skillDistribution = Array.from(catMap.entries()).map(([name, d]) => ({
+    const skillDistribution = Array.from(catMap.entries()).map(([name, d]) => ({
       name,
       beginner: d.beginner,
       intermediate: d.intermediate,
@@ -160,8 +160,8 @@ export async function GET(req: NextRequest) {
 
     // ---- filter options ----
     const [allDepartments, allRoles] = await Promise.all([
-      prisma.staffRecord.findMany({ where: { companyId, isActive: true }, select: { department: true }, distinct: ['department'] }),
-      prisma.staffRecord.findMany({ where: { companyId, isActive: true }, select: { position: true }, distinct: ['position'] }),
+      forCompany(companyId).staffRecord.findMany({ where: { isActive: true }, select: { department: true }, distinct: ['department'] }),
+      forCompany(companyId).staffRecord.findMany({ where: { isActive: true }, select: { position: true }, distinct: ['position'] }),
     ])
 
     const topStats = [

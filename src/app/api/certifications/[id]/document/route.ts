@@ -1,12 +1,11 @@
 import { NextRequest } from 'next/server';
-import path from 'path';
 
-import { handleCorsOptions, withCors } from '@/app/lib/cors';
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { requireModuleAccess } from '@/app/lib/module-access';
 import { validateAndStoreFile } from '@/app/lib/uploadUtils';
+import { CERTIFICATE_TYPES, certificationUploadDir, detectFileType, isExternalDocumentUrl, readUploadsUrl } from '@/app/lib/storage/private-files';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
-import { readUploadFile } from '@/app/lib/storage/upload-files';
 
 export async function OPTIONS(req: NextRequest) {
 	return handleCorsOptions(req);
@@ -14,9 +13,10 @@ export async function OPTIONS(req: NextRequest) {
 
 // GET /api/certifications/[id]/document
 // Download primary certificate/evidence file or return document metadata
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-	const origin = req.headers.get('origin');
-	try {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+    const params = await props.params;
+    const origin = req.headers.get('origin');
+    try {
 		const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null;
 		const user = await requireModuleAccess(token, 'TRAINING', ['STAFF', 'HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER']);
 
@@ -48,22 +48,24 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 			return withCors(ApiResponse.error('No document uploaded for this certification record', 404), origin);
 		}
 
-		if (download && document.fileUrl && !document.fileUrl.startsWith('http://') && !document.fileUrl.startsWith('https://')) {
-			const resolvedPath = path.isAbsolute(document.fileUrl) ? document.fileUrl : path.join(process.cwd(), document.fileUrl);
+		// SEC-019: only stored /uploads/ files are read (never arbitrary paths);
+		// the content type comes from the bytes.
+		const fileBuffer = download && !isExternalDocumentUrl(document.fileUrl) ? await readUploadsUrl(document.fileUrl) : null;
+		if (fileBuffer) {
+			const fileName = document.fileName ?? `${record.certificationType.name}_Certificate.pdf`;
+			const contentType = detectFileType(fileBuffer, CERTIFICATE_TYPES)?.mime ?? 'application/octet-stream';
 
-			const bytes = await readUploadFile(document.fileUrl.replace(/^\/+/, ''), resolvedPath);
-			if (bytes) {
-				const fileName = document.fileName ?? `${record.certificationType.name}_Certificate.pdf`;
-				const contentType = document.fileType ?? 'application/pdf';
-
-				return new Response(bytes, {
-					headers: {
-						'Content-Type': contentType,
-						'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
-						'Access-Control-Allow-Origin': origin ?? '*',
-					},
-				});
-			}
+			return new Response(fileBuffer, {
+				headers: {
+					'Content-Type': contentType,
+					'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
+					'X-Content-Type-Options': 'nosniff',
+					...getCorsHeaders(origin),
+				},
+			});
+		}
+		if (download && document.fileUrl && !isExternalDocumentUrl(document.fileUrl)) {
+			return withCors(ApiResponse.error('Document file not found', 404), origin);
 		}
 
 		return withCors(
@@ -85,9 +87,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
 // POST /api/certifications/[id]/document
 // Upload or replace document for record
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-	const origin = req.headers.get('origin');
-	try {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+    const params = await props.params;
+    const origin = req.headers.get('origin');
+    try {
 		const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null;
 		const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN']);
 
@@ -113,7 +116,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
 			try {
 				const file = rawFile as unknown as File;
-				const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'certifications');
+				const uploadsDir = certificationUploadDir();
 				const stored = await validateAndStoreFile(file, uploadsDir);
 				fileName = stored.fileName;
 				fileType = stored.fileType;
@@ -125,6 +128,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 			const body = await req.json().catch(() => ({}));
 			if (!body.fileUrl) {
 				return withCors(ApiResponse.error('fileUrl or attached file is required', 400), origin);
+			}
+			// SEC-019: a link supplied by the client must be an external http(s) URL, never a server path.
+			if (!isExternalDocumentUrl(body.fileUrl)) {
+				return withCors(ApiResponse.error('fileUrl must be an http(s) link', 400), origin);
 			}
 			fileUrl = body.fileUrl;
 			fileName = body.fileName || fileName;

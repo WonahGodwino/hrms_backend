@@ -123,7 +123,7 @@ export async function GET(request: NextRequest) {
 
     const { currency, sections } = await cachedHub(cacheKey, async () => {
       // Which of the selected companies have each module switched on.
-      const access: Array<{ companyId: string; module: { key: string } }> = await (prisma as any).companyModuleAccess.findMany({
+      const access: Array<{ companyId: string; module: { key: string } }> = await prisma.companyModuleAccess.findMany({
         where: { companyId: { in: targetCompanyIds }, enabled: true },
         select: { companyId: true, module: { select: { key: true } } }
       })

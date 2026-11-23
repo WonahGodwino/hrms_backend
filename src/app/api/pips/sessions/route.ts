@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { Prisma, PipSessionStatus } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import {

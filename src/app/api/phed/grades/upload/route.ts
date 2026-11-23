@@ -5,6 +5,8 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { parseConfigCsv } from '@/app/lib/phed/csv-parser'
+import { rejectForeignCompany } from '@/app/lib/phed/company-guard'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -22,6 +24,8 @@ export async function POST(req: NextRequest) {
     const formData  = await req.formData()
     const file      = formData.get('file') as File | null
     const companyId = formData.get('companyId') as string | null
+    const foreignCompany = await rejectForeignCompany(user, companyId, origin)
+    if (foreignCompany) return foreignCompany
     if (!file)      return withCors(ApiResponse.error('file is required', 400), origin)
     if (!companyId) return withCors(ApiResponse.error('companyId is required', 400), origin)
 
@@ -38,8 +42,7 @@ export async function POST(req: NextRequest) {
     // Load existing grades so we can upsert by code and auto-assign levelOrder,
     // exactly like the individual "New Grade" dialog (which only exposes
     // Grade Name + Level and defaults category to REGULAR).
-    const existingGrades = await (prisma as any).phedGrade.findMany({
-      where: { companyId },
+    const existingGrades = await forCompany(companyId).phedGrade.findMany({
       select: { id: true, code: true, name: true, levelOrder: true },
     })
     const existingByCode = new Map<string, any>(
@@ -64,14 +67,14 @@ export async function POST(req: NextRequest) {
       try {
         const existing = existingByCode.get(code.toLowerCase())
         if (existing) {
-          await (prisma as any).phedGrade.update({
+          await prisma.phedGrade.update({
             where: { id: existing.id },
             data: { name },
           })
           updated++
         } else {
           nextLevel += 1
-          const newGrade = await (prisma as any).phedGrade.create({
+          const newGrade = await prisma.phedGrade.create({
             data: {
               companyId,
               name,
@@ -90,7 +93,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    await (prisma as any).phedBulkUpload.create({
+    await prisma.phedBulkUpload.create({
       data: {
         companyId,
         type:         'GRADES',

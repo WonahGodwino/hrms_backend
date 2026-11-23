@@ -5,6 +5,8 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { access } from 'fs/promises'
+import path from 'path'
 
 // CORS preflight
 export async function OPTIONS(request: NextRequest) {
@@ -302,6 +304,33 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    // 6b) Which uploads still have an original file to download: a durable DB
+    // copy, or (older rows) a file still present on this host's disk. Only ids
+    // are selected, so the stored bytes are never loaded.
+    const uploadIdsOnPage = uploads.map((u) => u.id)
+    const withDbCopy = uploadIdsOnPage.length
+      ? await prisma.payrollUpload.findMany({
+          where: { id: { in: uploadIdsOnPage }, fileData: { not: null } },
+          select: { id: true },
+        })
+      : []
+    const dbCopyIds = new Set(withDbCopy.map((u) => u.id))
+    const originalFileAvailable = new Map<string, boolean>()
+    await Promise.all(
+      uploads.map(async (u) => {
+        if (dbCopyIds.has(u.id)) {
+          originalFileAvailable.set(u.id, true)
+          return
+        }
+        if (!u.filePath) {
+          originalFileAvailable.set(u.id, false)
+          return
+        }
+        const absolutePath = path.isAbsolute(u.filePath) ? u.filePath : path.join(process.cwd(), u.filePath)
+        originalFileAvailable.set(u.id, await access(absolutePath).then(() => true, () => false))
+      })
+    )
+
     // 7) Shape response with pagination
     const totalPages = Math.ceil(totalCount / limit)
     const hasNextPage = page < totalPages
@@ -349,6 +378,7 @@ export async function GET(request: NextRequest) {
             phone: upload.company.phone
           } : null,
           fileName: upload.fileName,
+          hasOriginalFile: originalFileAvailable.get(upload.id) ?? false,
           uploadedOn: upload.createdAt,
           totalRecords: upload.totalRecords,
           successful: upload.successful,

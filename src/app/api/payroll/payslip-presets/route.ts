@@ -11,19 +11,16 @@ import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { ensureDefaultPayslipPreset } from '@/app/lib/payroll/seed-default-payslip-preset'
 import { validatePresetHtml } from '@/app/lib/payroll/payslip-preset-renderer'
+import { forCompany } from '@/app/lib/data/tenant'
+import { verifyCompanyAccess } from '@/app/lib/payroll/route-helpers'
+import { readJsonBody } from '@/app/lib/validation/request-body'
+import { payslipPresetBodySchema } from '@/app/lib/validation/payroll-staff-schemas'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-// ---------- helpers ----------
-async function verifyCompanyAccess(user: { userId: string; role: string }, companyId: string): Promise<boolean> {
-  if (user.role === 'SUPER_ADMIN') return true
-  const userCompany = await prisma.userCompany.findFirst({
-    where: { userId: user.userId, companyId, OR: [{ role: user.role }, { role: 'ALL' }] }
-  })
-  return !!userCompany
-}
+
 
 // ---------- GET: list presets for a company ----------
 export async function GET(request: NextRequest) {
@@ -46,8 +43,7 @@ export async function GET(request: NextRequest) {
     // (covers companies created before it was seeded, and fresh deployments).
     await ensureDefaultPayslipPreset(companyId)
 
-    const presets = await prisma.payslipPreset.findMany({
-      where: { companyId },
+    const presets = await forCompany(companyId).payslipPreset.findMany({
       select: {
         id: true, name: true, description: true, isActive: true, isSeed: true,
         htmlContent: true, createdAt: true, updatedAt: true,
@@ -85,7 +81,9 @@ export async function POST(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = await requireModuleAccess(token, 'PAYROLL', ['SUPER_ADMIN', 'HR', 'ADMIN'])
 
-    const body = await request.json()
+    const parsedBody = await readJsonBody(request, payslipPresetBodySchema)
+    if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.message, 400), origin)
+    const body = parsedBody.data
     const { companyId, name, description, htmlContent, isActive } = body || {}
     if (!companyId || !name || !htmlContent) {
       return withCors(ApiResponse.error('companyId, name and htmlContent are required', 400), origin)

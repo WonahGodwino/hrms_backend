@@ -38,7 +38,7 @@ const insensitive = 'insensitive' as const
 const startsWith = (v: string) => ({ startsWith: v, mode: insensitive })
 const contains = (v: string) => ({ contains: v, mode: insensitive })
 
-const fmtDate = (d: Date | null | undefined) =>
+export const fmtDate = (d: Date | null | undefined) =>
   d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
 
 // Every token must match the first or last name (so "john smi" finds John Smith).

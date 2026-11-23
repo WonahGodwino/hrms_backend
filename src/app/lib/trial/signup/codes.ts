@@ -1,6 +1,7 @@
 // Verification codes for sign-up. 6 digits from a CSPRNG (lib/otp.ts uses
 // Math.random, which is not suitable). Only a keyed hash of the code is stored.
 import crypto from 'crypto'
+import { requireSecret } from '@/app/lib/config/secrets'
 
 export const CODE_TTL_MS = 10 * 60_000
 export const MAX_CODE_ATTEMPTS = 5
@@ -10,7 +11,7 @@ export function generateSignupCode(): string {
 }
 
 function secret(): string {
-  return process.env.TRIAL_SIGNAL_SECRET || process.env.JWT_SECRET || 'dev-trial-signal-secret'
+  return requireSecret('TRIAL_SIGNAL_SECRET', 'JWT_SECRET')
 }
 
 export function hashSignupCode(signupId: string, channel: 'email' | 'phone', code: string): string {

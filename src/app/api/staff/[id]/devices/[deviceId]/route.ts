@@ -24,8 +24,9 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; deviceId: string } }
+  props: { params: Promise<{ id: string; deviceId: string }> }
 ) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {

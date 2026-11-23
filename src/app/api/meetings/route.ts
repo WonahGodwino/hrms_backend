@@ -12,8 +12,10 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { signMeetingAccessToken, signMeetingPublicAccessToken } from '@/app/lib/meetings/meeting-token';
 import { notifyMeetingParticipants } from '@/app/lib/meetings/notify';
+import { sweepExpiredRecordings } from '@/app/lib/meetings/recording-retention';
 import { hasModuleAccess } from '@/app/lib/module-access';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(req: NextRequest) {
 	return handleCorsOptions(req);
@@ -78,7 +80,7 @@ async function generateRecurringInstances(companyId: string, parent: any, partic
 	const created: any[] = [];
 	for (const date of instances) {
 		const instanceRoom = `mtg-${randomUUID()}`;
-		const instance = await (prisma as any).meeting.create({
+		const instance = await prisma.meeting.create({
 			data: {
 				companyId,
 				title: parent.title,
@@ -141,12 +143,16 @@ export async function GET(req: NextRequest) {
 			where.participants = { some: { staffId: user.userId } };
 		}
 
-		const meetings = await (prisma as any).meeting.findMany({
+		const meetings = await prisma.meeting.findMany({
 			where,
 			orderBy: [{ scheduledAt: 'desc' }, { createdAt: 'desc' }],
 			take: 200,
 			include: { participants: { select: { id: true, staffId: true, externalName: true, externalEmail: true, role: true } } },
 		});
+
+		// Opportunistic retention sweep — expire stale recordings even when no
+		// external cron scheduler is configured. Fire-and-forget, never blocks.
+		void sweepExpiredRecordings(companyId).catch(() => {});
 
 		const data = meetings.map((m: any) => ({
 			id: m.id,
@@ -226,8 +232,8 @@ export async function POST(req: NextRequest) {
 
 		const staffIds = [...new Set(participants.map((p) => p.staffId).filter((staffId): staffId is string => Boolean(staffId)))];
 		if (staffIds.length > 0) {
-			const companyStaff = await prisma.staffRecord.findMany({
-				where: { id: { in: staffIds }, companyId },
+			const companyStaff = await forCompany(companyId).staffRecord.findMany({
+				where: { id: { in: staffIds } },
 				select: { id: true },
 			});
 			const companyStaffIds = new Set(companyStaff.map((staff) => staff.id));
@@ -250,7 +256,7 @@ export async function POST(req: NextRequest) {
 			participants.unshift({ staffId: user.userId, externalName: null, externalEmail: null, role: 'HOST' });
 		}
 
-		const meeting = await (prisma as any).meeting.create({
+		const meeting = await prisma.meeting.create({
 			data: {
 				companyId,
 				title,

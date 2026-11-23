@@ -9,7 +9,7 @@ import path from 'path';
 import { requireRoleAsync } from '@/app/lib/auth';
 import { withCors, handleCorsOptions } from '@/app/lib/cors';
 import { handleApiError } from '@/app/lib/utils';
-import { prisma } from '@/app/lib/prisma';
+import { prisma } from '@/app/lib/db';
 import { readUploadFile } from '@/app/lib/storage/upload-files';
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -44,7 +44,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 		if (user.role !== 'SUPER_ADMIN') where.companyId = user.companyId;
 		if (user.role === 'STAFF') where.staffId = user.userId;
 
-		const owner = await (prisma as any).offboarding.findFirst({ where, select: { id: true } });
+		const owner = await prisma.offboarding.findFirst({ where, select: { id: true } });
 		if (!owner) {
 			return withCors(NextResponse.json({ success: false, message: 'Document not found' }, { status: 404 }), origin);
 		}

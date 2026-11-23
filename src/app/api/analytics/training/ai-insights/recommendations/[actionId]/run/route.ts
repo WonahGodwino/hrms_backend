@@ -10,7 +10,8 @@ export async function OPTIONS(req: NextRequest) {
 }
 
 // POST /api/analytics/training/ai-insights/recommendations/:actionId/run
-export async function POST(req: NextRequest, { params }: { params: { actionId: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ actionId: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null

@@ -6,17 +6,14 @@
 
 import type { PhedComputedPayroll as PrismaPayroll } from '@prisma/client'
 import type { CostCentreSheet } from './types'
+import { toNum } from '@/app/lib/phed/reports'
 
 type Payroll = PrismaPayroll
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-function toNum(v: any): number {
-  if (v === null || v === undefined) return 0
-  if (typeof v === 'object' && typeof v.toNumber === 'function') return v.toNumber()
-  return Number(v) || 0
-}
+
 function r2(v: number): number { return Math.round(v * 100) / 100 }
 
 export interface PeriodLabels {

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import type { PolicyExceptionStatus } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -22,6 +22,7 @@ import {
   canDecideException,
 } from "@/app/lib/performance-operations/ops-actions-utils";
 import type { ExtendResult } from "@/app/lib/performance-operations/ops-actions-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -110,8 +111,8 @@ export async function POST(
       );
 
     // Cross-company check: the exception must belong to this company.
-    const exception = await prisma.appraisalPolicyException.findFirst({
-      where: { id, companyId },
+    const exception = await forCompany(companyId).appraisalPolicyException.findFirst({
+      where: { id },
       select: {
         id: true,
         cycleId: true,

@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
 		}
 
 		const [modules, companies, totalCompanies, accessRows] = await Promise.all([
-			(prisma as any).platformModule.findMany({ orderBy: { name: 'asc' } }),
+			prisma.platformModule.findMany({ orderBy: { name: 'asc' } }),
 			prisma.company.findMany({
 				where: companyWhere,
 				select: { id: true, companyName: true },
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
 				take: limit,
 			}),
 			prisma.company.count({ where: companyWhere }),
-			(prisma as any).companyModuleAccess.findMany({
+			prisma.companyModuleAccess.findMany({
 				include: { module: { select: { key: true } } },
 			}),
 		]);
@@ -97,13 +97,13 @@ export async function PATCH(req: NextRequest) {
 			return withCors(ApiResponse.error('companyId, moduleKey, and enabled (boolean) are required', 400), origin);
 		}
 
-		const module = await (prisma as any).platformModule.findUnique({ where: { key: moduleKey } });
+		const module = await prisma.platformModule.findUnique({ where: { key: moduleKey } });
 		if (!module) return withCors(ApiResponse.notFound(`Module '${moduleKey}' not found`), origin);
 
 		const company = await prisma.company.findFirst({ where: { id: companyId, archived: 0 }, select: { id: true, companyName: true } });
 		if (!company) return withCors(ApiResponse.notFound('Company not found'), origin);
 
-		const row = await (prisma as any).companyModuleAccess.upsert({
+		const row = await prisma.companyModuleAccess.upsert({
 			where: { companyId_moduleId: { companyId, moduleId: module.id } },
 			update: { enabled },
 			create: { companyId, moduleId: module.id, enabled },

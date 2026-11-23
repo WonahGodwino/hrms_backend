@@ -10,8 +10,8 @@ import { NextRequest } from 'next/server';
 
 import { requireRole } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
-import { prisma } from '@/app/lib/db';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
@@ -40,9 +40,8 @@ export async function GET(request: NextRequest) {
 			return withCors(ApiResponse.success([], 'No search term provided'), origin);
 		}
 
-		const results = await prisma.staffRecord.findMany({
+		const results = await forCompany(companyId).staffRecord.findMany({
 			where: {
-				companyId,
 				role: 'STAFF',
 				isActive: true,
 				OR: [

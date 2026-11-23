@@ -1,9 +1,9 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -45,8 +45,7 @@ export async function GET(req: NextRequest) {
 
     const now = new Date()
 
-    const progress = await prisma.participantProgress.findMany({
-      where: { companyId },
+    const progress = await forCompany(companyId).participantProgress.findMany({
       select: {
         trainingStatus: true,
         dueDate: true,
@@ -101,7 +100,7 @@ export async function GET(req: NextRequest) {
       if (idx >= 0 && idx < weeks) trendBars[idx] += 1
     }
 
-    const heroByTab: Record<string, any> = {}
+    const heroByTab: Record<string, unknown> = {}
     if (worst) {
       const gap = TARGET_COMPLETION - worst.rate
       heroByTab[tab] = {
@@ -122,7 +121,7 @@ export async function GET(req: NextRequest) {
     }
 
     // ---- insight cards ----
-    const insightCards: any[] = []
+    const insightCards: unknown[] = []
     for (const b of withRate.slice(0, 3)) {
       if (b.rate < TARGET_COMPLETION && b.total >= 3) {
         insightCards.push({
@@ -179,7 +178,7 @@ export async function GET(req: NextRequest) {
       }))
 
     // ---- detected patterns ----
-    const detectedPatterns: any[] = []
+    const detectedPatterns: unknown[] = []
     const totalOverdue = withRate.reduce((sum, b) => sum + b.overdue, 0)
     if (totalOverdue > 0) {
       const longOverdue = progress.filter(

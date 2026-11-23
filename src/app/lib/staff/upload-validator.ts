@@ -2,12 +2,13 @@
 //
 // The single rule set for staff uploads. The validate route runs it as a dry run and the
 // import route runs it again before writing, so what the user confirms is what gets imported.
-import { prisma } from '@/app/lib/db'
+import { forCompany } from '@/app/lib/data/tenant'
 import { describeIdentifierCollision } from '@/app/lib/staff/identifierCollision'
 import { loadActivePfaCodes, parsePensionRow } from '@/app/lib/staff/pension-fields'
 import { NSITF_IDENTITY_FIELD_KEYS, parseHireDateCell, parseNsitfIdentityRow, nsitfIdentityWarnings } from '@/app/lib/staff/nsitf-identity-fields'
 import { cellToString, cleanEmail, isValidEmail, normalizeHeader, pick, type ParsedUploadRow } from '@/app/lib/staff/upload-parser'
 import { isPlaceholderValue } from '@/app/lib/staff/placeholder-values'
+import { formatPersonName } from '@/app/lib/staff/nameFormat'
 
 export type RowIssue = { field: string; message: string }
 
@@ -84,8 +85,8 @@ export function extractStaffFields(row: Record<string, string>, pfaCodes: Set<st
   return {
     staffId: get(['staffId', 'StaffID', 'STAFFID', 'Staff Id', 'Staff ID', 'STAFF ID']),
     email: cleanEmail(pick(row, ['email', 'Email', 'EMAIL', 'E-mail', 'E-Mail'])),
-    firstName: get(['firstName', 'First Name', 'Firstname', 'FIRSTNAME']),
-    lastName: get(['lastName', 'Last Name', 'Lastname', 'LASTNAME']),
+    firstName: formatPersonName(get(['firstName', 'First Name', 'Firstname', 'FIRSTNAME'])),
+    lastName: formatPersonName(get(['lastName', 'Last Name', 'Lastname', 'LASTNAME'])),
     department: get(['department', 'Department', 'DEPARTMENT']),
     position: get(['position', 'Position', 'POSITION']),
     phone: get(['phone', 'Phone', 'PHONE']),
@@ -195,8 +196,8 @@ export async function validateStaffRows(rows: ParsedUploadRow[], companyId: stri
   const staffIds = [...new Set(validated.map((r) => r.fields.staffId).filter(Boolean))]
   const emails = [...new Set(validated.map((r) => r.fields.email).filter(Boolean))]
   if (staffIds.length || emails.length) {
-    const holders = await prisma.staffRecord.findMany({
-      where: { companyId, OR: [...(staffIds.length ? [{ staffId: { in: staffIds } }] : []), ...(emails.length ? [{ email: { in: emails } }] : [])] },
+    const holders = await forCompany(companyId).staffRecord.findMany({
+      where: { OR: [...(staffIds.length ? [{ staffId: { in: staffIds } }] : []), ...(emails.length ? [{ email: { in: emails } }] : [])] },
       select: { staffId: true, email: true, firstName: true, lastName: true, isActive: true },
     })
     const byStaffId = new Map(holders.map((h) => [h.staffId, h]))

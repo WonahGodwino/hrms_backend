@@ -9,7 +9,8 @@ import { getStageDef } from '@/app/lib/phed/approval-stages'
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // PATCH /api/phed/approvals/memos/:id/approve — Stage 3 (CPO) or Stage 4 (CFO)
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)

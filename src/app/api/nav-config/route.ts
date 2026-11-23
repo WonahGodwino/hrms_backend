@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
 
     const [sections, modules] = await Promise.all([
       prisma.navSection.findMany({ orderBy: { sortOrder: 'asc' } }),
-      (prisma as any).platformModule.findMany({
+      prisma.platformModule.findMany({
         where: { archived: false },
         select: { key: true, name: true, navSectionId: true, navOrder: true, navLabel: true, navIcon: true },
         orderBy: { navOrder: 'asc' },

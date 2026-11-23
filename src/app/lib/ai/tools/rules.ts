@@ -5,11 +5,10 @@ import { createProposal, ProposalError } from '../proposals'
 import { buildRuleChangePlan } from '../rulePlan'
 import { buildCustomRulePlan } from '../customRulePlan'
 import { AI_RULE_FIELDS, BUILT_IN_RULES, CADENCE_VALUES, STATUS_VALUES, effectiveRuleValue, labelFor, type AiRuleField } from '../ruleCatalog'
-import { redactSensitive } from '../redact'
 import { CADENCES, RECORD_TYPES, RECORD_TYPE_KEYS } from '../../core-setup/custom-rule-types'
+import { cleanReason } from '@/app/lib/ai/tools/proposals'
 
-const cleanReason = (v: unknown) =>
-  redactSensitive(String(v ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim()).slice(0, 500)
+
 
 export const listAutomationRules: ToolDefinition = {
   name: 'list_automation_rules',

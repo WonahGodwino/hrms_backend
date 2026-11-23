@@ -6,6 +6,7 @@
 // immediately, keep processing after the response is sent" pattern, and the
 // same stale-upload safeguard since there's no worker/queue behind this.
 import { prisma } from '@/app/lib/db'
+import { forCompany } from '@/app/lib/data/tenant'
 
 const STALE_UPLOAD_THRESHOLD_MS = 15 * 60 * 1000
 
@@ -21,8 +22,8 @@ export interface StaffBulkEditResults {
  * as if no upload were in flight, so uploads can never be permanently blocked.
  */
 export async function getActiveStaffBulkEditUpload(companyId: string) {
-  const active = await prisma.staffUpload.findFirst({
-    where: { companyId, status: { in: ['PENDING', 'PROCESSING'] } },
+  const active = await forCompany(companyId).staffUpload.findFirst({
+    where: { status: { in: ['PENDING', 'PROCESSING'] } },
     orderBy: { createdAt: 'desc' },
   })
 

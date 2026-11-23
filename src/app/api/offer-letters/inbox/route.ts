@@ -10,8 +10,9 @@ import { NextRequest } from 'next/server';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { requireModuleAccess } from '@/app/lib/module-access';
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access';
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
@@ -122,8 +123,8 @@ export async function GET(request: NextRequest) {
 		// Count unread inbound messages (for badge display) — same
 		// folder-agnostic reasoning as the listing query above.
 		const [unreadEmailCount, unreadStagedCount] = await Promise.all([
-			prisma.offerLetterEmail.count({ where: { companyId, direction: 'INBOUND', isRead: false } }),
-			prisma.offerLetterMailboxMessage.count({ where: { companyId, direction: 'INBOUND', isRead: false } }),
+			forCompany(companyId).offerLetterEmail.count({ where: { direction: 'INBOUND', isRead: false } }),
+			forCompany(companyId).offerLetterMailboxMessage.count({ where: { direction: 'INBOUND', isRead: false } }),
 		]);
 		const unreadCount = unreadEmailCount + unreadStagedCount;
 

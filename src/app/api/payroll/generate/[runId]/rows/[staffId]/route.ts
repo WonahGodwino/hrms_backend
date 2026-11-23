@@ -34,6 +34,8 @@ import {
   type PayrollTemplateFieldLike
 } from '@/app/lib/payroll/generation/field-resolver'
 import { CONTRIBUTION_TYPES } from '@/app/lib/payroll/reports/pension-schedule'
+import { readJsonBody } from '@/app/lib/validation/request-body'
+import { valuesBodySchema } from '@/app/lib/validation/payroll-staff-schemas'
 
 // Staff ID / Name / Email / Department (always re-derived from the staff
 // record) and Month (always the run's own pay period) are never editable
@@ -57,7 +59,11 @@ export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function PATCH(request: NextRequest, { params }: { params: { runId: string; staffId: string } }) {
+export async function PATCH(
+  request: NextRequest,
+  props: { params: Promise<{ runId: string; staffId: string }> }
+) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -68,7 +74,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { runId:
     const token = authHeader.replace('Bearer ', '')
     const user = await requireModuleAccess(token, 'PAYROLL', ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
-    const body = await request.json()
+    const parsedBody = await readJsonBody(request, valuesBodySchema)
+    if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.message, 400), origin)
+    const body = parsedBody.data
     const { values } = body as { values?: Record<string, unknown> }
     if (!values || typeof values !== 'object') {
       return withCors(ApiResponse.error('values object is required', 400), origin)

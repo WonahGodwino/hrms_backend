@@ -4,6 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { getUserFromToken } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { TOKEN_COST_DECIMALS, withNumberFields } from '@/app/lib/prisma-utils'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -16,10 +17,8 @@ export async function OPTIONS(request: NextRequest) {
  * Update a config row (label, tokensPerUnit, costPerUnit, currency).
  * If activate=true, deactivate all others and activate this row.
  */
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const authHeader = request.headers.get('authorization')
@@ -78,7 +77,7 @@ export async function PATCH(
     }
 
     return withCors(
-      ApiResponse.success({ config: updatedConfig }, 'Token cost config updated successfully'),
+      ApiResponse.success({ config: withNumberFields(updatedConfig, TOKEN_COST_DECIMALS) }, 'Token cost config updated successfully'),
       origin
     )
   } catch (error: unknown) {
@@ -90,10 +89,8 @@ export async function PATCH(
  * DELETE /api/admin/token-cost-config/[id]
  * SUPER_ADMIN only. Cannot delete the active config.
  */
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const authHeader = request.headers.get('authorization')

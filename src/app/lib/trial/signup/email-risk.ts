@@ -90,6 +90,7 @@ export function isLookalikeDomain(domain: string): boolean {
   const d = domain.trim().toLowerCase()
   if (!d) return false
   // Punycode / non-ASCII (homograph) domains are never a genuine company sign-up address.
+  // eslint-disable-next-line no-control-regex -- strips control characters on purpose
   if (d.includes('xn--') || /[^\x00-\x7f]/.test(d)) return true
   if (WELL_KNOWN.includes(d)) return false
   // One typo away from a long, well-known provider (gmial.com, outlok.com). Short names like

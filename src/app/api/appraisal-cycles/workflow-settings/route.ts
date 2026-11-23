@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
         origin,
       );
 
-    const settings = await getOrDefaultSettings(prisma as any, companyId);
+    const settings = await getOrDefaultSettings(prisma, companyId);
     return withCors(
       ApiResponse.success(
         { ...settings, capabilities: AUTOMATION_CAPABILITIES },
@@ -178,7 +178,7 @@ export async function PATCH(request: NextRequest) {
 
     // Reminders need someone to remind.
     if (remindersEnabled !== undefined || normalizedRecipients !== undefined) {
-      const current = await getOrDefaultSettings(prisma as any, companyId);
+      const current = await getOrDefaultSettings(prisma, companyId);
       const enabled = remindersEnabled ?? current.remindersEnabled;
       const recipients = normalizedRecipients ?? current.reminderRecipients;
       if (enabled && recipients.length === 0) {

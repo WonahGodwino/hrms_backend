@@ -4,8 +4,9 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -245,7 +246,7 @@ export async function GET(request: NextRequest) {
       origin
     )
   } catch (error) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('[JOB_VIEW] Error:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }

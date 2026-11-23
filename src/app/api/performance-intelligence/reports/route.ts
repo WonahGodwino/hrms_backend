@@ -4,7 +4,7 @@ import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import path from "path";
 import { randomUUID } from "crypto";
 import { mkdir, writeFile } from "fs/promises";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import {
   REPORT_ROOT,
   REPORT_SECTIONS,
@@ -18,6 +18,7 @@ import {
   resolveRange,
 } from "@/app/lib/performance-intelligence/intel-utils";
 import { renderReportPdf } from "@/app/lib/performance-intelligence/intel-report";
+import { forCompany } from "@/app/lib/data/tenant";
 import { uploadFileToS3 } from "@/app/lib/storage/upload-files";
 
 export async function OPTIONS(request: NextRequest) {
@@ -75,8 +76,8 @@ export async function POST(request: NextRequest) {
         )
       : [];
     if (departmentIds.length) {
-      const n = await prisma.department.count({
-        where: { id: { in: departmentIds }, companyId },
+      const n = await forCompany(companyId).department.count({
+        where: { id: { in: departmentIds } },
       });
       if (n !== departmentIds.length)
         return bad("One or more departments were not found", 404);

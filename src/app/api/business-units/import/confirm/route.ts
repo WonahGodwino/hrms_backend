@@ -41,13 +41,13 @@ export async function POST(req: NextRequest) {
     for (const row of session.rows) {
       try {
         // Re-check duplicates at insert time (defensive against races).
-        const dup = await (prisma as any).businessUnit.findFirst({
+        const dup = await prisma.businessUnit.findFirst({
           where: {
             companyId,
             archived: 0,
             OR: [
               { name: { equals: row.name, mode: 'insensitive' } },
-              ...(row.code ? [{ code: { equals: row.code, mode: 'insensitive' } }] : []),
+              ...(row.code ? [{ code: { equals: row.code, mode: 'insensitive' as const } }] : []),
             ],
           },
           select: { id: true },
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
         if (dup) { skipped++; continue }
 
         await assertTrialCapacity(companyId, 'businessUnits')
-        await (prisma as any).businessUnit.create({
+        await prisma.businessUnit.create({
           data: {
             companyId,
             name: row.name,

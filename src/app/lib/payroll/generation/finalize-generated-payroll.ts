@@ -47,7 +47,7 @@ function round2(n: number): number {
 // produced it, read from the template's own field definitions (not guessed
 // from the field's name) — a structural lookup that keeps working no matter
 // what a company happens to call its Employee Pension / PAYE / NSITF field.
-function buildCalculatorMap(fields: PayrollTemplateField[]): Map<string, string> {
+export function buildCalculatorMap(fields: PayrollTemplateField[]): Map<string, string> {
 	const map = new Map<string, string>();
 	for (const field of fields) {
 		if (field.valueSource !== 'SYSTEM_CALC') continue;

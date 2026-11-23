@@ -1,13 +1,14 @@
 import fs from 'fs';
 import { NextRequest } from 'next/server';
-import path from 'path';
 
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { requireModuleAccess } from '@/app/lib/module-access';
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company';
 import { validateAndStoreFile } from '@/app/lib/uploadUtils';
+import { certificationUploadDir } from '@/app/lib/storage/private-files';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(req: NextRequest) {
 	return handleCorsOptions(req);
@@ -231,7 +232,7 @@ export async function POST(req: NextRequest) {
 
 			// Process uploaded files
 			const rawFiles = formData.getAll('files').concat(formData.getAll('documents')).concat(formData.getAll('file'));
-			const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'certifications');
+			const uploadsDir = certificationUploadDir();
 
 			if (!fs.existsSync(uploadsDir)) {
 				fs.mkdirSync(uploadsDir, { recursive: true });
@@ -241,7 +242,7 @@ export async function POST(req: NextRequest) {
 				if (item && typeof item === 'object' && 'arrayBuffer' in item) {
 					try {
 						const file = item as unknown as File;
-						const stored = await validateAndStoreFile(file, path.join(process.cwd(), 'public', 'uploads', 'certifications'));
+						const stored = await validateAndStoreFile(file, certificationUploadDir());
 						uploadedDocs.push({ fileName: stored.fileName, fileUrl: stored.fileUrl, fileType: stored.fileType });
 					} catch (err: any) {
 						return withCors(ApiResponse.error(err?.message || 'Invalid file in upload', 400), origin);
@@ -318,9 +319,8 @@ export async function POST(req: NextRequest) {
 		);
 
 		// Clear saved draft state upon successful issuance
-		await prisma.trainingAuditLog.deleteMany({
+		await forCompany(cid).trainingAuditLog.deleteMany({
 			where: {
-				companyId: cid,
 				actorId: user.userId,
 				entityType: 'certification_issuance_draft',
 			},

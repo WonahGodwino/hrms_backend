@@ -33,12 +33,14 @@ import {
   DAYS_WORKED_SYSTEM_FIELD,
   DAYS_IN_MONTH_SYSTEM_FIELD
 } from '@/app/lib/payroll/generation/field-resolver'
-import { calculateRentRelief, calculateMonthlyPaye2025, NIGERIA_PAYE_2025_BANDS } from '@/app/lib/payroll/generation/paye-calculator'
+import { calculateRentRelief, calculateMonthlyPaye2025 } from '@/app/lib/payroll/generation/paye-calculator'
 import ExcelJS from 'exceljs'
 import { attachmentDisposition, bannerSpan, buildSubtitle } from '@/app/lib/excel/sheet-theme'
-import type { PayrollTemplateField } from '@prisma/client'
 import type { PercentageFormulaConfig } from '@/app/lib/payroll/generation/field-resolver'
 import { BASE_PERCENTAGE_CALCULATORS, SYSTEM_CALC_DEFAULT_RATES, effectiveCalcBase, NHF_CALCULATOR, NHF_DEFAULT_RATE, templateFieldDisplayRank, sortByTemplateOrder } from '@/app/lib/payroll/generation/field-resolver'
+import { buildCalculatorMap } from '@/app/lib/payroll/generation/finalize-generated-payroll'
+import { normalizeSection, isDeductionsSection, isEmployerCostSection, columnLetter, round2, payeBandFormula, THEME, thinBorder } from '@/app/lib/payroll/generate-download-helpers'
+import { deferExport } from '@/app/lib/exports/defer'
 
 type StoredField = {
   value: unknown
@@ -51,41 +53,14 @@ type StoredField = {
 
 const REFERENCE_SYSTEM_FIELDS = new Set<string>([...STAFF_RECORD_DERIVED_SYSTEM_FIELDS, ...PERIOD_DERIVED_SYSTEM_FIELDS])
 
-function normalizeSection(section: string): string {
-  return (section || '').toUpperCase().replace(/[\s-]+/g, '_')
-}
 
-function isDeductionsSection(section: string): boolean {
-  return normalizeSection(section) === 'DEDUCTIONS'
-}
 
-function isEmployerCostSection(section: string): boolean {
-  return normalizeSection(section) === 'EMPLOYER_COST'
-}
+
+
+
 
 // Same structural lookup finalize-generated-payroll.ts uses: which SYSTEM_CALC
-// calculator produced a given field, read from the template's own field
-// definitions rather than guessed from a field's name.
-function buildCalculatorMap(fields: PayrollTemplateField[]): Map<string, string> {
-  const map = new Map<string, string>()
-  for (const field of fields) {
-    if (field.valueSource !== 'SYSTEM_CALC') continue
-    const config = (field.formulaConfig || {}) as { calculator?: string }
-    if (config.calculator) map.set(field.systemField, config.calculator)
-  }
-  return map
-}
 
-function columnLetter(colIndex: number): string {
-  let n = colIndex
-  let s = ''
-  while (n > 0) {
-    const rem = (n - 1) % 26
-    s = String.fromCharCode(65 + rem) + s
-    n = Math.floor((n - 1) / 26)
-  }
-  return s
-}
 
 // --- Formula embedding (approved runs) --------------------------------------
 // When a run's status is APPROVED the exported workbook embeds live Excel
@@ -103,59 +78,27 @@ type CellPlan = { colIdx: number; formula: string; expected: number };
 
 // Rounding helper mirroring the resolver's Math.round(x*100)/100 at each
 // derived step, so a formula's expected value can be compared exactly
-// against the stored number before the formula is embedded.
-const round2 = (n: number) => Math.round(n * 100) / 100;
+
 
 // Builds the progressive-band tax expression for the NIGERIA_PAYE_2025
 // calculator from the same NIGERIA_PAYE_2025_BANDS the calculator itself
 // iterates over, so the embedded formula can never drift from the real
-// computation. `taxable` is an absolute cell reference (e.g. "$AA$12").
-function payeBandFormula(taxable: string): string {
-  let expr = '0';
-  let prev = 0;
-  for (const band of NIGERIA_PAYE_2025_BANDS) {
-    if (band.rate === 0) {
-      if (band.upTo !== null) prev = band.upTo;
-      continue;
-    }
-    const slice =
-      band.upTo === null
-        ? `MAX(0,${taxable}-${prev})`
-        : `MIN(MAX(0,${taxable}-${prev}),${band.upTo - prev})`;
-    expr += `+${slice}*${band.rate}`;
-    if (band.upTo === null) return expr;
-    prev = band.upTo;
-  }
-  return expr;
-}
+
 
 // Shared look-and-feel with every other generated sheet (lib/excel/sheet-theme.ts):
-// brand-purple title band and headers, tinted meta/totals bands, banded rows.
-const THEME = {
-  accent: 'FF6C5DD3',
-  brandBlue: 'FF5843BE',
-  brandDark: 'FF6C5DD3',
-  accentBlue: 'FFEFECFB',
-  greyRow: 'FFFAFBFF',
-  headerFill: 'FF5843BE',
-  headerText: 'FFFFFFFF',
-  textDark: 'FF1B1B2F',
-  textGrey: 'FF1B1B2F',
-  zebra: 'FFFAFBFF',
-  border: 'FFE7E8F1',
-  white: 'FFFFFFFF'
-} as const
 
-function thinBorder(colorArgb: string = THEME.border) {
-  const side = { style: 'thin' as const, color: { argb: colorArgb } }
-  return { top: side, left: side, bottom: side, right: side }
-}
+
+
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function GET(request: NextRequest, { params }: { params: { runId: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ runId: string }> }) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(request);
+  if (deferred) return deferred;
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const authHeader = request.headers.get('authorization')
@@ -629,7 +572,7 @@ export async function GET(request: NextRequest, { params }: { params: { runId: s
         `${row.staff.firstName} ${row.staff.lastName}`,
         row.staff.department || '',
         rawGrossValue ?? '',
-        ...(values as any[]),
+        ...(values as unknown[]),
         finalGross,
         totalDeductions,
         netSalary,

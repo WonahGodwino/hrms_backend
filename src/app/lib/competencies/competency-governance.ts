@@ -1,4 +1,5 @@
 import { prisma } from "@/app/lib/db";
+import { forCompany } from '@/app/lib/data/tenant';
 
 export const OUTDATED_AFTER_MONTHS = 18;
 
@@ -52,8 +53,8 @@ export async function getGovernanceReport(companyId: string) {
     designations,
     inactiveTemplateRefs,
   ] = await Promise.all([
-    prisma.competency.findMany({
-      where: { companyId, status: "ACTIVE" },
+    forCompany(companyId).competency.findMany({
+      where: { status: "ACTIVE" },
       select: {
         id: true,
         name: true,
@@ -70,20 +71,20 @@ export async function getGovernanceReport(companyId: string) {
         },
       },
     }),
-    prisma.proficiencyScale.findMany({
-      where: { companyId, isActive: true },
+    forCompany(companyId).proficiencyScale.findMany({
+      where: { isActive: true },
       select: {
         id: true,
         isDefault: true,
         levels: { select: { level: true } },
       },
     }),
-    prisma.department.findMany({
-      where: { companyId },
+    forCompany(companyId).department.findMany({
+      where: { },
       select: { id: true, name: true, status: true },
     }),
-    prisma.designation.findMany({
-      where: { companyId },
+    forCompany(companyId).designation.findMany({
+      where: { },
       select: { id: true, title: true, status: true, departmentId: true },
     }),
     // Active template versions rating a competency that is no longer ACTIVE

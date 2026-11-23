@@ -4,6 +4,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -15,7 +16,11 @@ type RiskAction = 'assign' | 'remediate' | 'dismiss' | 'restrict-access'
 // Applies a workflow action to a risk signal. The RiskItem row is located by
 // id OR code so the UI can address either. `restrict-access` additionally
 // records the affected departments/users on the risk row.
-export async function POST(req: NextRequest, { params }: { params: { riskId: string; action: string } }) {
+export async function POST(
+  req: NextRequest,
+  props: { params: Promise<{ riskId: string; action: string }> }
+) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -31,8 +36,8 @@ export async function POST(req: NextRequest, { params }: { params: { riskId: str
     if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
     const { companyId } = resolved
 
-    const risk = await prisma.riskItem.findFirst({
-      where: { companyId, OR: [{ id: params.riskId }, { code: params.riskId }] },
+    const risk = await forCompany(companyId).riskItem.findFirst({
+      where: { OR: [{ id: params.riskId }, { code: params.riskId }] },
     })
     if (!risk) {
       return withCors(ApiResponse.error('Risk not found', 404), origin)

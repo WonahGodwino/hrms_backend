@@ -7,6 +7,7 @@ import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { computeOvertimeEarnings, processOneStaff } from '@/app/lib/phed/payroll-processor'
 import { getPayPeriodFreezeState } from '@/app/lib/phed/pay-period-lock'
 import type { PhedPayrollInput, PhedSalaryComponents } from '@/app/lib/phed/types'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -15,7 +16,8 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 // runs the full payroll engine, writes computed results to phed_computed_payrolls,
 // and advances the period to REVIEW.
 // Allowed from VALIDATION_CLOSED (normal flow) or REVIEW (re-compute).
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'compute')
   if (rl) return withCors(rl, origin)
@@ -24,7 +26,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user  = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
+    const period = await prisma.phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && user.companyId && period.companyId !== user.companyId)
       return withCors(ApiResponse.notFound('Pay period not found'), origin)
@@ -39,8 +41,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // ── Exits on/after this month's start — these staff get one final,
     //    prorated payroll row for the month they leave. ─────────
     const monthStartUTC = new Date(Date.UTC(period.year, period.month - 1, 1))
-    const exits = await (prisma as any).phedStaffExit.findMany({
-      where:  { companyId: period.companyId, exitDate: { gte: monthStartUTC } },
+    const exits = await forCompany(period.companyId).phedStaffExit.findMany({
+      where:  { exitDate: { gte: monthStartUTC } },
       select: { staffId: true, exitDate: true },
     })
     const exitDateMap    = new Map<string, Date>(exits.map((e: any) => [e.staffId, new Date(e.exitDate)]))
@@ -48,9 +50,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     // ── Load all active staff + staff who exited this month + per-period data ──
     const [allStaff, validations, overtimeEntries, periodAdvances] = await Promise.all([
-      (prisma as any).phedStaff.findMany({
+      forCompany(period.companyId).phedStaff.findMany({
         where: {
-          companyId: period.companyId,
           OR: [
             { isActive: true },
             ...(exitedStaffIds.length > 0 ? [{ id: { in: exitedStaffIds } }] : []),
@@ -64,9 +65,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           deductionLiabilities: { include: { deductionLiability: true } },
         },
       }),
-      (prisma as any).phedValidation.findMany({ where: { payPeriodId: params.id } }),
-      (prisma as any).phedOvertimeEntry.findMany({ where: { payPeriodId: params.id } }),
-      (prisma as any).phedStaffPeriodAdvance.findMany({ where: { payPeriodId: params.id } }),
+      prisma.phedValidation.findMany({ where: { payPeriodId: params.id } }),
+      prisma.phedOvertimeEntry.findMany({ where: { payPeriodId: params.id } }),
+      prisma.phedStaffPeriodAdvance.findMany({ where: { payPeriodId: params.id } }),
     ])
 
     if (allStaff.length === 0)
@@ -202,7 +203,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // concurrent upserts against the pg pool (max 10), which would queue past
     // `connectionTimeoutMillis` and fail with a 500 "timeout exceeded".
     const upsertComputed = ({ result: r }: { result: any }) =>
-      (prisma as any).phedComputedPayroll.upsert({
+      prisma.phedComputedPayroll.upsert({
         where:  { payPeriodId_staffId: { payPeriodId: params.id, staffId: r.staffId } },
         create: {
           payPeriodId: params.id,
@@ -242,7 +243,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       const batch = overtimeResults.slice(i, i + BATCH_SIZE)
       await Promise.all(
         batch.map(({ result: r }) =>
-          (prisma as any).phedOvertimeEntry.updateMany({
+          prisma.phedOvertimeEntry.updateMany({
             where: { payPeriodId: params.id, staffId: r.staffId },
             data:  { computedAmount: r.overtimeEarnings },
           })
@@ -251,7 +252,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
 
     // ── Advance to REVIEW ─────────────────────────────────────
-    const updatedPeriod = await (prisma as any).phedPayPeriod.update({
+    const updatedPeriod = await prisma.phedPayPeriod.update({
       where: { id: params.id },
       data:  { status: 'REVIEW' },
     })

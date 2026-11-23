@@ -4,6 +4,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -116,12 +117,12 @@ export async function POST(req: NextRequest) {
     if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
     const { companyId } = resolved
 
-    let programId = trainingProgramId
+    const programId = trainingProgramId
     let name = trainingName || 'Expiry Rule'
 
     if (programId) {
-      const prog = await prisma.trainingProgram.findFirst({
-        where: { id: programId, companyId, deletedAt: null },
+      const prog = await forCompany(companyId).trainingProgram.findFirst({
+        where: { id: programId, deletedAt: null },
         select: { id: true, programName: true },
       })
       if (prog) {

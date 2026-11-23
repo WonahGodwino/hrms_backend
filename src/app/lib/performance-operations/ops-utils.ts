@@ -10,6 +10,7 @@ import {
   PHASE_PROGRESS_KEY,
   LIVE_STATUSES,
 } from "@/app/lib/appraisal-cycles/appraisal-cycle-utils";
+import { forCompany } from '@/app/lib/data/tenant';
 
 export const UNASSIGNED_KEY = "unassigned";
 
@@ -81,8 +82,8 @@ export function parseEntityId(
 
 // ---- Cycle helpers -------------------------------------------------------
 export async function listOpsCycles(companyId: string) {
-  return prisma.appraisalCycle.findMany({
-    where: { companyId, status: { in: OPS_CYCLE_STATUSES } },
+  return forCompany(companyId).appraisalCycle.findMany({
+    where: { status: { in: OPS_CYCLE_STATUSES } },
     orderBy: { startDate: "desc" },
     select: {
       id: true,
@@ -334,8 +335,8 @@ interface LogEscalationActionParams {
   companyId: string;
   action: string;
   actorId: string;
-  previousData?: any;
-  newData?: any;
+  previousData?: unknown;
+  newData?: unknown;
 }
 
 export async function logEscalationAction(

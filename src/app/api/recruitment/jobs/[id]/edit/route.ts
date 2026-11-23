@@ -3,11 +3,14 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/app/lib/db";
 
 import { requireModuleAccess } from "@/app/lib/module-access";
-import { ApiResponse, formatError } from "@/app/lib/utils";
+import { ApiResponse } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { sanitizeOfferDefaults } from "@/app/lib/jobs/offer-defaults";
 import { parseSalaryAmount } from "@/app/lib/recruitment/job-salary";
 import { checkJobPermission } from "@/app/lib/recruitment/companyScope";
+import { publicErrorMessage } from "@/app/lib/errors/public-error";
+import { forCompany } from "@/app/lib/data/tenant";
+import { extractBearerToken } from "@/app/lib/recruitment/route-helpers";
 
 type UpdateJobBody = {
   title?: string;
@@ -28,11 +31,7 @@ type UpdateJobBody = {
 
 const ALLOWED_STATUSES = ["ACTIVE", "DRAFT", "CLOSED", "EXPIRED"];
 
-function extractBearerToken(authHeader: string | null): string | null {
-  if (!authHeader) return null;
-  const match = authHeader.match(/^Bearer\s+(.+)$/i);
-  return match?.[1]?.trim() || null;
-}
+
 
 function mapAuthErrorStatus(message: string): number {
   return message.toLowerCase().includes("insufficient permissions") ? 403 : 401;
@@ -51,10 +50,8 @@ export async function OPTIONS(request: NextRequest) {
 }
 
 // Edit one job at a time.
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function PUT(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   const jobId = params.id;
 
@@ -75,7 +72,7 @@ export async function PUT(
         "SUPER_ADMIN",
       ]);
     } catch (authError) {
-      const message = formatError(authError);
+      const message = publicErrorMessage(authError);
       return withCors(
         ApiResponse.error(message, mapAuthErrorStatus(message)),
         origin,
@@ -130,8 +127,8 @@ export async function PUT(
         ? String(body.designationId).trim()
         : "";
       if (desigId) {
-        const designation = await (prisma as any).designation.findFirst({
-          where: { id: desigId, companyId: job.companyId },
+        const designation = await forCompany(job.companyId).designation.findFirst({
+          where: { id: desigId },
           select: { id: true, title: true },
         });
         if (!designation) {
@@ -203,8 +200,8 @@ export async function PUT(
         ? String(body.departmentId).trim()
         : "";
       if (requestedDeptId) {
-        const dep = await prisma.department.findFirst({
-          where: { id: requestedDeptId, companyId: job.companyId },
+        const dep = await forCompany(job.companyId).department.findFirst({
+          where: { id: requestedDeptId },
           select: { id: true },
         });
         deptId = dep?.id || null;
@@ -212,9 +209,8 @@ export async function PUT(
         typeof body.department === "string" &&
         body.department.trim()
       ) {
-        const dep = await prisma.department.findFirst({
+        const dep = await forCompany(job.companyId).department.findFirst({
           where: {
-            companyId: job.companyId,
             name: { equals: body.department.trim(), mode: "insensitive" },
           },
           select: { id: true },
@@ -362,7 +358,7 @@ export async function PUT(
       origin,
     );
   } catch (error) {
-    const message = formatError(error);
+    const message = publicErrorMessage(error);
     console.error("[JOB_EDIT] Error:", error);
     return withCors(ApiResponse.error(message, 500), origin);
   }

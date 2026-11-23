@@ -4,17 +4,19 @@
 //      auto-applied to every new offer). Validates each approver is an eligible
 //      HR/ADMIN/SUPER_ADMIN member of the company.
 import { NextRequest } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { normalizeWorkflow } from '@/app/lib/offers/approval-workflow'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
 async function eligibleApprovers(companyId: string) {
-  const memberships = await prisma.userCompany.findMany({
-    where: { companyId, role: { in: ['HR', 'ADMIN', 'SUPER_ADMIN'] } },
+  const memberships = await forCompany(companyId).userCompany.findMany({
+    where: { role: { in: ['HR', 'ADMIN', 'SUPER_ADMIN'] } },
     include: { user: { select: { id: true, firstName: true, lastName: true, email: true, position: true, isActive: true } } },
   })
   return memberships
@@ -37,7 +39,7 @@ export async function GET(request: NextRequest) {
     const companyId = new URL(request.url).searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
 
-    const company = await (prisma as any).company.findUnique({
+    const company = await prisma.company.findUnique({
       where: { id: companyId },
       select: { offerApprovalWorkflow: true },
     })
@@ -61,7 +63,7 @@ export async function PUT(request: NextRequest) {
 
     // Clearing the workflow (null / empty steps) is allowed.
     if (body.workflow === null || (Array.isArray(body?.workflow?.steps) && body.workflow.steps.length === 0)) {
-      await (prisma as any).company.update({ where: { id: companyId }, data: { offerApprovalWorkflow: null } })
+      await prisma.company.update({ where: { id: companyId }, data: { offerApprovalWorkflow: Prisma.DbNull } })
       return withCors(ApiResponse.success({ workflow: null }, 'Approval workflow cleared. Offers will have approvers assigned ad-hoc.'), origin)
     }
 
@@ -75,7 +77,7 @@ export async function PUT(request: NextRequest) {
       return withCors(ApiResponse.error(`"${bad.approverName || bad.approverId}" is not an eligible approver (needs an HR, ADMIN or SUPER_ADMIN role in this company).`, 400), origin)
     }
 
-    await (prisma as any).company.update({
+    await prisma.company.update({
       where: { id: companyId },
       data: { offerApprovalWorkflow: normalized as any },
     })

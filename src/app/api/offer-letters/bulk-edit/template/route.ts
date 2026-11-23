@@ -9,10 +9,11 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access'
 import ExcelJS from 'exceljs'
 import { writeStyledTable, buildSubtitle, confidentialFooter, attachmentDisposition, safeFileName, XLSX_MIME } from '@/app/lib/excel/sheet-theme'
-import { buildOfferLetterFieldLabels, BASE_FIELD_KEYS } from '@/app/lib/offer-letters/variableLabels'
+import { buildOfferLetterFieldLabels, BASE_FIELD_KEYS } from '@/app/lib/offers/letters/variableLabels'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -45,8 +46,8 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
     }
 
-    const letters = await prisma.generatedOfferLetter.findMany({
-      where: { id: { in: ids }, companyId },
+    const letters = await forCompany(companyId).generatedOfferLetter.findMany({
+      where: { id: { in: ids } },
       include: { template: true },
     })
 

@@ -5,16 +5,15 @@ import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { verifyCompanyAccess, UserContext } from "@/app/lib/access-control";
 import { clampInt } from "@/app/lib/appraisal-cycles/appraisal-cycle-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
 }
 
 // GET /api/appraisal-cycles/:id/history?companyId=&page=&limit=
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -47,8 +46,8 @@ export async function GET(
       );
     }
 
-    const cycle = await prisma.appraisalCycle.findFirst({
-      where: { id: params.id, companyId },
+    const cycle = await forCompany(companyId).appraisalCycle.findFirst({
+      where: { id: params.id },
       select: { id: true },
     });
     if (!cycle)

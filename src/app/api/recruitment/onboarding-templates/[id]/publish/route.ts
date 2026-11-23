@@ -4,6 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -17,8 +18,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const companyId = searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company ID is required', 400), origin)
 
-    const template = await prisma.onboardingTemplate.findFirst({
-      where: { id, companyId },
+    const template = await forCompany(companyId).onboardingTemplate.findFirst({
+      where: { id },
       include: { tasks: { select: { id: true } } },
     })
     if (!template) return withCors(ApiResponse.error('Onboarding template not found', 404), origin)

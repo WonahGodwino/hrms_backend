@@ -12,25 +12,22 @@ import rateLimit from '@/app/lib/rateLimiter'
 import { verifyOfferResponseToken } from '@/app/lib/offers/response-token'
 import { getResponseDeadline, isResponseExpired } from '@/app/lib/offers/response-window'
 import { CANDIDATE_REQUIRED_DOCS, REQUIRED_CATEGORIES, docFor } from '@/app/lib/offers/candidate-documents'
-import { promises as fs } from 'fs'
-import * as path from 'path'
-import { uploadFileToS3 } from '@/app/lib/storage/upload-files'
+import { detectAllowedType, saveCandidateDoc } from '@/app/lib/recruitment/candidate-doc-storage'
+import { clientIp } from '@/app/lib/recruitment/route-helpers'
 
 const ipLimiter = rateLimit({ interval: 60 * 1000, uniqueTokenPerInterval: 5000 })
 
-const clientIp = (request: NextRequest) =>
-  request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-  request.headers.get('x-real-ip') || 'unknown'
+
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
 async function uploadedByCategory(candidateId: string) {
-  const docs = await (prisma as any).candidateDocument.findMany({
+  const docs = await prisma.candidateDocument.findMany({
     where: { candidateId, category: { in: REQUIRED_CATEGORIES }, archived: 0 },
     orderBy: { createdAt: 'desc' },
   })
   const byCat: Record<string, any> = {}
-  for (const d of docs) if (!byCat[d.category]) byCat[d.category] = d
+  for (const d of docs) if (d.category && !byCat[d.category]) byCat[d.category] = d
   return byCat
 }
 
@@ -98,42 +95,35 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('This offer has expired. Please contact the hiring team.', 409), origin)
     }
 
-    // File-type gate.
-    const ext = (file.name.split('.').pop() || '').toLowerCase()
-    const isPdf = ext === 'pdf' || file.type === 'application/pdf'
-    const isImage = ['jpg', 'jpeg', 'png', 'webp', 'heic'].includes(ext) || file.type.startsWith('image/')
-    const ok = spec.accept === 'pdf' ? isPdf : (isPdf || isImage)
-    if (!ok) {
+    if (file.size > 15 * 1024 * 1024) return withCors(ApiResponse.error('File must be 15MB or smaller.', 400), origin)
+
+    // File-type gate (SEC-003): judged from the file's bytes, not its name or
+    // the client-supplied MIME type, and stored with a server-chosen extension.
+    const buffer = Buffer.from(await file.arrayBuffer())
+    const detected = await detectAllowedType(buffer, spec.accept === 'pdf' ? 'pdf' : 'pdf-or-image')
+    if (!detected) {
       return withCors(ApiResponse.error(
         spec.accept === 'pdf' ? `${spec.label} must be a PDF.` : `${spec.label} must be a PDF or image.`, 400,
       ), origin)
     }
-    if (file.size > 15 * 1024 * 1024) return withCors(ApiResponse.error('File must be 15MB or smaller.', 400), origin)
 
-    // Persist under public/ (same convention as executed contracts).
-    const buffer = Buffer.from(await file.arrayBuffer())
-    const dir = path.join(process.cwd(), 'public', 'candidate-docs', offer.candidateId, category)
-    await fs.mkdir(dir, { recursive: true })
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-    const fileName = `${Date.now()}_${safeName}`
-    await fs.writeFile(path.join(dir, fileName), buffer)
-    const relativePath = `/candidate-docs/${offer.candidateId}/${category}/${fileName}`
-    await uploadFileToS3(relativePath, buffer)
+    // Stored privately (not under public/); served only via authenticated routes.
+    const relativePath = await saveCandidateDoc(['candidate-docs', offer.candidateId, category], file.name, detected.ext, buffer)
 
     // Link to an onboarding if one already exists for this offer.
     const onboarding = await prisma.onboarding.findUnique({ where: { offerId: offer.id }, select: { id: true } }).catch(() => null)
 
     // Upsert: replace any prior file for this category.
-    const existing = await (prisma as any).candidateDocument.findFirst({
+    const existing = await prisma.candidateDocument.findFirst({
       where: { candidateId: offer.candidateId, category, archived: 0 },
     })
     if (existing) {
-      await (prisma as any).candidateDocument.update({
+      await prisma.candidateDocument.update({
         where: { id: existing.id },
         data: { filePath: relativePath, fileName: file.name, type: spec.type as any, onboardingId: onboarding?.id || existing.onboardingId || null, uploadedBy: 'candidate' },
       })
     } else {
-      await (prisma as any).candidateDocument.create({
+      await prisma.candidateDocument.create({
         data: {
           companyId: offer.companyId,
           candidateId: offer.candidateId,

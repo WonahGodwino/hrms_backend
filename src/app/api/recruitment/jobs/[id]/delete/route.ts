@@ -4,8 +4,10 @@ import { archiveJobs } from '@/app/lib/jobs'
 import type { UserContext } from '@/app/lib/jobs/types'
 
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
+import { extractBearerToken, mapAuthErrorStatus } from '@/app/lib/recruitment/route-helpers'
 
 type BulkArchiveBody = {
   id?: string
@@ -14,15 +16,9 @@ type BulkArchiveBody = {
   jobIds?: string[]
 }
 
-function extractBearerToken(authHeader: string | null): string | null {
-  if (!authHeader) return null
-  const match = authHeader.match(/^Bearer\s+(.+)$/i)
-  return match?.[1]?.trim() || null
-}
 
-function mapAuthErrorStatus(message: string): number {
-  return message.toLowerCase().includes('insufficient permissions') ? 403 : 401
-}
+
+
 
 function sanitizeIds(ids: string[]): string[] {
   return [...new Set(ids.flatMap((value) => value.split(',')).map((value) => value.trim()).filter(Boolean))]
@@ -56,10 +52,8 @@ export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -83,7 +77,7 @@ export async function DELETE(
         companyId: authUser.companyId
       }
     } catch (authError) {
-      const message = formatError(authError)
+      const message = publicErrorMessage(authError)
       return withCors(ApiResponse.error(message, mapAuthErrorStatus(message)), origin)
     }
 
@@ -122,7 +116,7 @@ export async function DELETE(
     return withCors(ApiResponse.success(result, message), origin)
     
   } catch (error) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('[JOB_DELETE] Error:', error)
     
     // Handle specific error messages

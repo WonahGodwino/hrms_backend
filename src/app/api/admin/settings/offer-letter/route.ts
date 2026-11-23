@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
     const accessible = await getAccessibleCompanyIds(user)
     const companyId = pickTargetCompanyId(user, accessible, requested)
 
-    const company = await (prisma as any).company.findUnique({
+    const company = await prisma.company.findUnique({
       where: { id: companyId },
       select: { id: true, companyName: true, rcNumber: true, offerResponseDays: true, updatedAt: true, ...Object.fromEntries(OFFER_FIELDS.map((f) => [f, true])) },
     })
@@ -100,7 +100,7 @@ export async function PUT(request: NextRequest) {
     }
     if (Object.keys(data).length === 0) return withCors(ApiResponse.error('No offer letter fields provided', 400), origin)
 
-    const updated = await (prisma as any).company.update({
+    const updated = await prisma.company.update({
       where: { id: companyId },
       data,
       select: { id: true, companyName: true, rcNumber: true, offerResponseDays: true, updatedAt: true, ...Object.fromEntries(OFFER_FIELDS.map((f) => [f, true])) },
@@ -124,7 +124,7 @@ export async function DELETE(request: NextRequest) {
     cleared.signatureImage = null
     cleared.offerResponseDays = null
 
-    await (prisma as any).company.update({
+    await prisma.company.update({
       where: { id: companyId },
       data: cleared,
     })

@@ -11,6 +11,7 @@ import { getUserDisplayName } from '@/app/lib/departments/department-utils';
 import { reconcileStaffDesignationLink } from '@/app/lib/designations/designation-sync';
 import { createNotification, NOTIFICATION_TYPES } from '@/app/lib/notifications/helpers';
 import { saveInitialGrossCompensation } from '@/app/lib/staff/gross-compensation';
+import { formatPersonName } from '@/app/lib/staff/nameFormat';
 import { assertStaffCapacity, assertTrialCapacity, recordStaffCreated } from '@/app/lib/trial/guard';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 
@@ -162,7 +163,7 @@ export async function POST(request: NextRequest) {
 		// All optional — only included when provided, so activating an existing
 		// staff record never overwrites a value it already has with a blank.
 		const nsitfIdentityFields: Record<string, unknown> = {};
-		if (middleName) nsitfIdentityFields.middleName = middleName;
+		if (middleName) nsitfIdentityFields.middleName = formatPersonName(middleName);
 		if (gender) nsitfIdentityFields.gender = gender;
 		if (dateOfBirthValue) nsitfIdentityFields.dateOfBirth = dateOfBirthValue;
 		if (maritalStatus) nsitfIdentityFields.maritalStatus = maritalStatus;
@@ -202,8 +203,8 @@ export async function POST(request: NextRequest) {
 					isRegistered: true,
 					isActive: true,
 					role,
-					firstName: firstName.trim(),
-					lastName: lastName.trim(),
+					firstName: formatPersonName(firstName),
+					lastName: formatPersonName(lastName),
 					phone: phone || existing.phone,
 					hireDate: hireDateValue || existing.hireDate,
 					department: deptName || existing.department,
@@ -224,8 +225,8 @@ export async function POST(request: NextRequest) {
 				data: {
 					staffId: generatedStaffId,
 					email: cleanEmail,
-					firstName: firstName.trim(),
-					lastName: lastName.trim(),
+					firstName: formatPersonName(firstName),
+					lastName: formatPersonName(lastName),
 					department: deptName,
 					departmentId: deptId,
 					position: positionName,
@@ -322,12 +323,14 @@ export async function POST(request: NextRequest) {
 			);
 		}
 
+		// Kept at 7 days: this token is handed back to the registering admin's
+		// client, which has no refresh token for the new user (STATE-001).
 		const jwtToken = signToken({
 			userId: staffRecord.id,
 			email: staffRecord.email,
 			role: staffRecord.role,
 			companyId: staffRecord.companyId,
-		});
+		}, '7d');
 
 		return withCors(
 			ApiResponse.success(

@@ -24,19 +24,16 @@ import {
   DAYS_WORKED_SYSTEM_FIELD,
   DAYS_WORKED_DISPLAY_NAME
 } from '@/app/lib/payroll/generation/field-resolver'
-import { cellToString } from '@/app/lib/offer-letters/excelCell'
+import { cellToString } from '@/app/lib/offers/letters/excelCell'
 import ExcelJS from 'exceljs'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
+import { forCompany } from '@/app/lib/data/tenant'
+import { splitCsvLine } from '@/app/lib/payroll/upload/parse'
+import { getRelativePath } from '@/app/lib/storage/relative-path'
+import { normalizeHeader } from '@/app/lib/shared/route-helpers'
 import { uploadFileToS3 } from '@/app/lib/storage/upload-files'
 
-function getRelativePath(absolutePath: string): string {
-  const projectRoot = process.cwd()
-  if (absolutePath.startsWith(projectRoot)) {
-    return path.relative(projectRoot, absolutePath)
-  }
-  return absolutePath
-}
 
 type CompensationFieldLike = { systemField: string; displayName: string; dataType: string; required: boolean; aliases?: unknown }
 
@@ -49,41 +46,9 @@ const GROSS_FIELD: CompensationFieldLike = { systemField: GROSS_SYSTEM_FIELD, di
 // config, so attendance proration always has a place to read from.
 const DAYS_WORKED_FIELD: CompensationFieldLike = { systemField: DAYS_WORKED_SYSTEM_FIELD, displayName: DAYS_WORKED_DISPLAY_NAME, dataType: 'Days', required: false }
 
-function normalizeHeader(h: string): string {
-  return h
-    .toString()
-    .replace(/\[[^\]]*\]/g, ' ')
-    .replace(/<[^>]*>/g, ' ')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '')
-}
 
-function splitCsvLine(line: string): string[] {
-  const result: string[] = []
-  let cur = ''
-  let inQuotes = false
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
-    if (ch === '"' && line[i + 1] === '"') {
-      cur += '"'
-      i++
-      continue
-    }
-    if (ch === '"') {
-      inQuotes = !inQuotes
-      continue
-    }
-    if (ch === ',' && !inQuotes) {
-      result.push(cur.trim())
-      cur = ''
-      continue
-    }
-    cur += ch
-  }
-  result.push(cur.trim())
-  return result
-}
+
+
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -121,8 +86,8 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error(`You do not have ${userRole} access for this company`, 403), origin)
     }
 
-    const template = await prisma.payrollTemplate.findFirst({
-      where: { id: templateId, companyId },
+    const template = await forCompany(companyId).payrollTemplate.findFirst({
+      where: { id: templateId },
       include: { fields: { orderBy: { order: 'asc' } } }
     })
     if (!template) {
@@ -282,8 +247,8 @@ export async function POST(request: NextRequest) {
       const displayRow = i + 2
 
       try {
-        const staffRecord = await prisma.staffRecord.findFirst({
-          where: { companyId, staffId, isActive: true },
+        const staffRecord = await forCompany(companyId).staffRecord.findFirst({
+          where: { staffId, isActive: true },
           select: { id: true }
         })
         if (!staffRecord) {

@@ -3,7 +3,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/db';
 import { sendEmail } from '@/app/lib/mailgun';
 import { generateOtp } from '@/app/lib/otp';
+import { hashResetOtp } from '@/app/lib/password-reset/tokens';
 import { withCors, handleCorsOptions } from '@/app/lib/cors';
+import { phedAccountRateLimit, phedRateLimit } from '@/app/lib/phed/rate-limit';
+import { readJsonBody } from '@/app/lib/validation/request-body';
+import { forgotPasswordBodySchema } from '@/app/lib/validation/auth-schemas';
+import { publicErrorMessage } from '@/app/lib/errors/public-error';
+
+const GENERIC_RESET_MESSAGE = 'If this email exists in our system, you will receive a password reset OTP shortly.';
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -11,10 +18,14 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const origin = req.headers.get('origin');
+  // SEC-010: per-IP limit (the proxy-added address, not the client-supplied one).
+  const ipLimited = phedRateLimit(req, 'auth');
+  if (ipLimited) return withCors(ipLimited, origin);
 
   try {
-    const body = await req.json();
-    const { email } = body;
+    // API-002: schema-checked body; anything invalid falls into the 400 below.
+    const parsedBody = await readJsonBody(req, forgotPasswordBodySchema);
+    const email = parsedBody.ok ? parsedBody.data.email : '';
 
     // Validate input
     if (!email || typeof email !== 'string' || !email.includes('@')) {
@@ -31,6 +42,10 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedEmail = email.toLowerCase().trim();
+
+    // SEC-010: per-account limit, so rotating IP addresses does not help.
+    const accountLimited = phedAccountRateLimit(req, 'auth', normalizedEmail);
+    if (accountLimited) return withCors(accountLimited, origin);
 
     // Find ALL staff records with this email across companies
     const staffRecords = await prisma.staffRecord.findMany({
@@ -59,7 +74,8 @@ export async function POST(req: NextRequest) {
       return withCors(
         NextResponse.json({
           success: true,
-          message: 'If this email exists in our system, you will receive a password reset OTP shortly.'
+          message: GENERIC_RESET_MESSAGE,
+          data: { email: normalizedEmail, expiresIn: '10 minutes' },
         }),
         origin
       );
@@ -67,6 +83,7 @@ export async function POST(req: NextRequest) {
 
     // Generate OTP for each company account
     const otp = generateOtp(); // Same OTP for all accounts (simpler for user)
+    const otpDigest = hashResetOtp(otp); // only the digest is stored
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + 10);
 
@@ -102,7 +119,7 @@ export async function POST(req: NextRequest) {
           }
         },
         update: {
-          otp,
+          otp: otpDigest,
           otpExpiresAt: expiresAt,
           attempts: 0,
           isUsed: false,
@@ -111,7 +128,7 @@ export async function POST(req: NextRequest) {
         create: {
           email: normalizedEmail,
           companyId: staff.companyId,
-          otp,
+          otp: otpDigest,
           otpExpiresAt: expiresAt,
           attempts: 0,
           isUsed: false,
@@ -181,24 +198,14 @@ export async function POST(req: NextRequest) {
     return withCors(
       NextResponse.json({
         success: true,
-        message: staffRecords.length === 1 
-          ? 'Password reset OTP sent successfully. Please check your email.'
-          : `Password reset OTP sent for ${staffRecords.length} account(s). Please check your email.`,
+        // SEC-015: the same answer as for an unknown email, so the response
+        // does not reveal whether (or in which companies) an account exists.
+        message: GENERIC_RESET_MESSAGE,
         data: {
           email: normalizedEmail,
           expiresIn: '10 minutes',
-          // If multiple companies, include them for selection
-          ...(staffRecords.length > 1 && {
-            companies: staffRecords.map(s => ({
-              companyId: s.companyId,
-              companyName: s.company.companyName
-            }))
-          }),
           // For development/testing only
-          ...(process.env.NODE_ENV === 'development' && { 
-            otp,
-            companies: staffRecords.map(s => s.company.companyName)
-          })
+          ...(process.env.NODE_ENV === 'development' && { otp })
         }
       }),
       origin
@@ -226,7 +233,7 @@ export async function POST(req: NextRequest) {
         {
           success: false,
           message: 'An unexpected error occurred. Please try again later.',
-          ...(process.env.NODE_ENV === 'development' && { error: error.message })
+          ...(process.env.NODE_ENV === 'development' && { error: publicErrorMessage(error) })
         },
         { status: 500 }
       ),

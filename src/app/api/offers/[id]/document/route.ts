@@ -3,21 +3,22 @@
 // Streams the stored offer letter (kind=offer, default) or the executed signed
 // contract (kind=signed). Backs the `document.url` returned by /ad-hoc.
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { readOfferMetadata } from '@/app/lib/offers/ad-hoc-helpers'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
 function sanitizeFilename(name: string) {
-  return name.replace(/[^\w.\-() ]+/g, '_')
+  return name.replace(/[^\w.\-() ]+/g, '_');
 }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -32,8 +33,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const disposition =
       request.nextUrl.searchParams.get('disposition') === 'inline' ? 'inline' : 'attachment'
 
-    const offer = await prisma.offer.findFirst({
-      where: { id: params.id, companyId },
+    const offer = await forCompany(companyId).offer.findFirst({
+      where: { id: params.id },
       select: { metadata: true },
     })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)
@@ -44,8 +45,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       return withCors(ApiResponse.error('Requested document is not available', 404), origin)
     }
 
-    const file = await prisma.candidateFile.findFirst({
-      where: { id: fileId, companyId },
+    const file = await forCompany(companyId).candidateFile.findFirst({
+      where: { id: fileId },
       select: { fileName: true, mimeType: true, sizeBytes: true, data: true },
     })
     if (!file) return withCors(ApiResponse.error('Document file not found', 404), origin)

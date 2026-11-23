@@ -38,7 +38,8 @@ function buildMeetingDetails(body: any) {
   }
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -92,7 +93,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       }
     }
 
-    await (prisma as any).recruitmentCandidateAssessment.update({
+    await prisma.recruitmentCandidateAssessment.update({
       where: { id: params.id },
       data: {
         roundStatus: 'SCHEDULED',
@@ -134,7 +135,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   } catch (error) { return withCors(handleApiError(error), origin) }
 }
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -165,7 +167,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (newWhen) updateData.scheduledAt = newWhen
     // Refresh meeting logistics when any of them are supplied.
     const logisticsChanged = body.type !== undefined || body.platform !== undefined || body.meetingUrl !== undefined || body.location !== undefined
-    let meetingDetails: any = logisticsChanged ? buildMeetingDetails(body) : { ...existingMd }
+    const meetingDetails: any = logisticsChanged ? buildMeetingDetails(body) : { ...existingMd }
 
     // Keep the internal 247HR room in sync (time/panel), or provision one now if
     // the interview is virtual with no external link and doesn't have a room yet.
@@ -193,7 +195,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     }
     if (logisticsChanged || meetingDetails.meetingId) updateData.meetingDetails = meetingDetails
 
-    await (prisma as any).recruitmentCandidateAssessment.update({
+    await prisma.recruitmentCandidateAssessment.update({
       where: { id: params.id }, data: updateData,
     })
 

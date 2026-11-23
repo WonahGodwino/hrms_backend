@@ -10,7 +10,8 @@ import { signLetterDownloadToken } from '@/app/lib/phed/letter-download-token'
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // POST — issue a short-lived (15 min) signed download link for a finished run.
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const user = await requireLetterOperatorAccess(token)
 
     const body = await req.json().catch(() => ({}))
-    const run = await (prisma as any).phedLetterRun.findUnique({
+    const run = await prisma.phedLetterRun.findUnique({
       where: { id: params.id },
       select: { id: true, companyId: true, operatorId: true, status: true, filesExpireAt: true },
     })

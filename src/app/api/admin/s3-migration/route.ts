@@ -1,6 +1,6 @@
 // /api/admin/s3-migration — SUPER_ADMIN only.
 //   GET    → latest migration job + per-section progress.
-//   POST   → start a new background migration run (server-side, fire-and-forget).
+//   POST   → start a new migration run on the background job queue (runs inline when the queue is off).
 //   DELETE → cancel the running migration.
 import { NextRequest } from 'next/server'
 import { requireRole } from '@/app/lib/auth'
@@ -11,9 +11,18 @@ import {
   getLatestMigration,
   startS3Migration,
 } from '@/app/lib/migrations/s3-migration'
+import { S3MigrationError } from '@/app/lib/migrations/s3-migration-types'
+import { readJsonBody } from '@/app/lib/validation/request-body'
+import { cancelS3MigrationSchema } from '@/app/lib/validation/s3-migration-schemas'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
+}
+
+/** A refusal from the runner keeps its own status and message; anything else is a generic error. */
+function errorResponse(error: unknown, request: NextRequest) {
+  if (error instanceof S3MigrationError) return ApiResponse.error(error.message, error.status)
+  return handleApiError(error, request)
 }
 
 function requireSuperAdmin(request: NextRequest): { userId: string; role: string; email: string } {
@@ -29,7 +38,7 @@ export async function GET(request: NextRequest) {
     const job = await getLatestMigration()
     return withCors(ApiResponse.success(job), origin)
   } catch (error) {
-    return withCors(handleApiError(error), origin)
+    return withCors(handleApiError(error, request), origin)
   }
 }
 
@@ -39,10 +48,8 @@ export async function POST(request: NextRequest) {
     const user = requireSuperAdmin(request)
     const job = await startS3Migration(user.userId)
     return withCors(ApiResponse.success(job, 'Migration started', 201), origin)
-  } catch (error: any) {
-    const message = error?.message || 'Failed to start migration'
-    const status = /already running/i.test(message) ? 409 : /not configured/i.test(message) ? 400 : (error?.status || 500)
-    return withCors(ApiResponse.error(message, status), origin)
+  } catch (error) {
+    return withCors(errorResponse(error, request), origin)
   }
 }
 
@@ -50,11 +57,11 @@ export async function DELETE(request: NextRequest) {
   const origin = request.headers.get('origin')
   try {
     requireSuperAdmin(request)
-    const { jobId } = await request.json().catch(() => ({ jobId: undefined }))
-    if (!jobId) return withCors(ApiResponse.error('jobId is required', 400), origin)
-    const job = await cancelMigration(jobId)
+    const body = await readJsonBody(request, cancelS3MigrationSchema)
+    if (!body.ok) return withCors(ApiResponse.error(body.message, 400), origin)
+    const job = await cancelMigration(body.data.jobId)
     return withCors(ApiResponse.success(job, 'Migration cancelled'), origin)
   } catch (error) {
-    return withCors(handleApiError(error), origin)
+    return withCors(errorResponse(error, request), origin)
   }
 }

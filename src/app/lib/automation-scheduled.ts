@@ -2,7 +2,7 @@ import {
   AutomationTrigger,
   Prisma,
 } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import {
   deriveStage,
   kpiScore,
@@ -20,6 +20,7 @@ import {
   drainAutomationEvents,
   recoverInterruptedRuns,
 } from "@/app/lib/automation-executor";
+import { forCompany } from '@/app/lib/data/tenant';
 
 export type SweepSource = "ACTIVITY" | "MANUAL" | "EXTERNAL";
 
@@ -49,10 +50,8 @@ export function getIsoWeek(date = new Date()): string {
 }
 
 export async function getLastSweepAt(companyId: string): Promise<Date | null> {
-  const latest = await prisma.automationExecutorTick.findFirst({
-    where: {
-      companyId,
-      status: { in: ["OK", "PARTIAL"] },
+  const latest = await forCompany(companyId).automationExecutorTick.findFirst({
+    where: { status: { in: ["OK", "PARTIAL"] },
       finishedAt: { not: null },
     },
     orderBy: { finishedAt: "desc" },
@@ -84,8 +83,8 @@ export async function maybeSweep(
 
   // For ACTIVITY source, return immediately if no active non-removed rules exist
   if (source === "ACTIVITY") {
-    const activeCount = await prisma.automationRule.count({
-      where: { companyId, status: "ACTIVE", removedAt: null },
+    const activeCount = await forCompany(companyId).automationRule.count({
+      where: { status: "ACTIVE", removedAt: null },
     });
     if (activeCount === 0) {
       return {
@@ -140,10 +139,8 @@ export async function maybeSweep(
 
   try {
     // Determine which triggers are currently active for this company
-    const activeRules = await prisma.automationRule.findMany({
-      where: {
-        companyId,
-        status: "ACTIVE",
+    const activeRules = await forCompany(companyId).automationRule.findMany({
+      where: { status: "ACTIVE",
         removedAt: null,
         OR: [{ startsAt: null }, { startsAt: { lte: now } }],
       },
@@ -159,10 +156,8 @@ export async function maybeSweep(
 
     // Detector 1: REVIEW_OVERDUE
     if (activeTriggers.has("REVIEW_OVERDUE")) {
-      const openCycles = await prisma.appraisalCycle.findMany({
-        where: {
-          companyId,
-          status: { in: [...OPEN_CYCLE_STATUSES] },
+      const openCycles = await forCompany(companyId).appraisalCycle.findMany({
+        where: { status: { in: [...OPEN_CYCLE_STATUSES] },
         },
         select: {
           id: true,
@@ -219,10 +214,8 @@ export async function maybeSweep(
         now.getTime() - DEADLINE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
       );
 
-      const overdueGoals = await prisma.goal.findMany({
-        where: {
-          companyId,
-          isArchived: false,
+      const overdueGoals = await forCompany(companyId).goal.findMany({
+        where: { isArchived: false,
           progress: { lt: 100 },
           dueDate: {
             gte: lookbackDate,
@@ -269,8 +262,8 @@ export async function maybeSweep(
       activeTriggers.has("KPI_MISSED") ||
       activeTriggers.has("KPI_THRESHOLD_HIT")
     ) {
-      const openCycles = await prisma.appraisalCycle.findMany({
-        where: { companyId, status: { in: [...OPEN_CYCLE_STATUSES] } },
+      const openCycles = await forCompany(companyId).appraisalCycle.findMany({
+        where: { status: { in: [...OPEN_CYCLE_STATUSES] } },
         select: {
           id: true,
           startDate: true,
@@ -288,10 +281,8 @@ export async function maybeSweep(
 
       for (const cycle of openCycles) {
         for (const part of cycle.participants) {
-          const goals = await prisma.goal.findMany({
-            where: {
-              companyId,
-              isArchived: false,
+          const goals = await forCompany(companyId).goal.findMany({
+            where: { isArchived: false,
               OR: [
                 { staffRecordId: part.staffRecordId, assignedToId: null },
                 { assignedToId: part.staffRecordId },
@@ -409,7 +400,7 @@ export async function maybeSweep(
       runsCreated: drainRes.runsCreated,
       lastSweepAt: finishedAt,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     errorCount++;
     failureNote = err instanceof Error ? err.message : String(err);
     console.error("maybeSweep error:", err);

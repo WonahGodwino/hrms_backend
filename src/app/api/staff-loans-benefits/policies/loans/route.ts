@@ -6,22 +6,14 @@
 // POST — create a new loan policy, starting as a DRAFT.
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { requireModuleAccess, hasModuleAccess } from '@/app/lib/module-access'
+import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validateApprovalWorkflow } from '@/app/lib/staff-loans-benefits/types'
 import { canAccessPage } from '@/app/lib/staff-loans-benefits/page-access'
+import { assertDesignationStepsAllowed } from '@/app/lib/staff-loans-benefits/route-helpers'
 
-async function assertDesignationStepsAllowed(companyId: string, workflow: { approverKind: string }[]) {
-  const hasDesignationStep = workflow.some((s) => s.approverKind === 'DESIGNATION')
-  if (!hasDesignationStep) return
-  const enabled = await hasModuleAccess(companyId, 'CORE_SETUP')
-  if (!enabled) {
-    throw new Error(
-      'This approval chain uses a Designation-based step, which requires the Core Setup module to be enabled for this company.'
-    )
-  }
-}
+
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)

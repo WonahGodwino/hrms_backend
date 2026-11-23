@@ -11,19 +11,16 @@ import rateLimit from '@/app/lib/rateLimiter'
 import { verifyOfferResponseToken } from '@/app/lib/offers/response-token'
 import { getResponseDeadline, isResponseExpired, OFFER_RESPONSE_DAYS } from '@/app/lib/offers/response-window'
 import { promoteCandidateToStaff, PromoteCandidateError } from '@/app/lib/staff/promote-candidate-to-staff'
+import { clientIp, fmtDeadline } from '@/app/lib/recruitment/route-helpers'
 
 const ipLimiter = rateLimit({ interval: 60 * 1000, uniqueTokenPerInterval: 5000 })
 
 // Offer states a candidate can still respond from (i.e. dispatched, not decided).
 const RESPONDABLE = ['SENT', 'APPROVED', 'AWAITING_SIGNATURE']
 
-const fmtDeadline = (d: Date | null) =>
-  d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : ''
 
-const clientIp = (request: NextRequest) =>
-  request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-  request.headers.get('x-real-ip') ||
-  'unknown'
+
+
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 

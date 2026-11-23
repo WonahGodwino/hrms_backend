@@ -6,6 +6,7 @@ import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { verifyCompanyAccess, UserContext } from "@/app/lib/access-control";
 import { clampInt } from "@/app/lib/appraisal-cycles/appraisal-cycle-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -13,10 +14,8 @@ export async function OPTIONS(request: NextRequest) {
 
 // GET /api/appraisal-cycles/:id/peer-candidates?companyId=&participantId=&search=&limit=
 // Active colleagues who could review this employee, with how many peers each already reviews.
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -53,8 +52,8 @@ export async function GET(
       );
     }
 
-    const cycle = await prisma.appraisalCycle.findFirst({
-      where: { id: params.id, companyId },
+    const cycle = await forCompany(companyId).appraisalCycle.findFirst({
+      where: { id: params.id },
       select: { id: true },
     });
     if (!cycle)
@@ -105,8 +104,8 @@ export async function GET(
       });
     }
 
-    const staff = await prisma.staffRecord.findMany({
-      where: { companyId, isActive: true, id: { notIn: excluded }, AND: and },
+    const staff = await forCompany(companyId).staffRecord.findMany({
+      where: { isActive: true, id: { notIn: excluded }, AND: and },
       select: {
         id: true,
         firstName: true,
@@ -135,8 +134,8 @@ export async function GET(
           })
         : [],
       deptIds.length
-        ? prisma.department.findMany({
-            where: { companyId, id: { in: deptIds } },
+        ? forCompany(companyId).department.findMany({
+            where: { id: { in: deptIds } },
             select: { id: true, name: true },
           })
         : [],

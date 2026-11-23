@@ -4,6 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { toMonthName } from '@/app/lib/payroll/utils/valueParsing'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -71,7 +72,7 @@ export async function GET(request: NextRequest) {
         where: {
           companyId: { in: scopedCompanyIds },
           year,
-          month: month.toString()
+          month: toMonthName(month) ?? month.toString()
         }
       }),
       prisma.userCompany.findMany({

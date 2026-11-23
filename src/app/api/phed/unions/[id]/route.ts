@@ -8,7 +8,8 @@ import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // GET /api/phed/unions/:id — union details + member list
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
   if (rl) return withCors(rl, origin)
@@ -16,13 +17,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const union = await (prisma as any).phedUnion.findUnique({
+    const union = await prisma.phedUnion.findUnique({
       where:  { id: params.id },
       select: { id: true, name: true, percentage: true, isActive: true, companyId: true },
     })
     if (!union) return withCors(ApiResponse.notFound('Union not found'), origin)
 
-    const memberships = await (prisma as any).phedStaffUnion.findMany({
+    const memberships = await prisma.phedStaffUnion.findMany({
       where:   { unionId: params.id },
       include: {
         staff: {
@@ -55,7 +56,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
 // PUT /api/phed/unions/:id
 // Body: { name?, deductionPercentage?, isActive? }
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -68,7 +70,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       if (isNaN(pct) || pct <= 0 || pct > 100)
         return withCors(ApiResponse.error('deductionPercentage must be between 0 and 100', 400), origin)
     }
-    const union = await (prisma as any).phedUnion.update({
+    const union = await prisma.phedUnion.update({
       where: { id: params.id },
       data: {
         ...(name                !== undefined && { name }),
@@ -83,14 +85,15 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
-    await (prisma as any).phedUnion.update({ where: { id: params.id }, data: { isActive: false } })
+    await prisma.phedUnion.update({ where: { id: params.id }, data: { isActive: false } })
     return withCors(ApiResponse.success(null, 'Union deactivated'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }

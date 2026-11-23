@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import path from 'path'
 import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requireLetterOperatorAccess } from '@/app/lib/phed/letter-access'
 import { auditLetterEvent, clientIp, expireRunIfNeeded, resolveLetterCompany } from '@/app/lib/phed/letter-service'
@@ -13,13 +13,14 @@ import { buildRunReportXlsx } from '@/app/lib/phed/letter-report'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'report')
   if (rl) return withCors(rl, origin)
   try {
     const url = new URL(req.url)
-    const run = await (prisma as any).phedLetterRun.findUnique({ where: { id: params.id } })
+    const run = await prisma.phedLetterRun.findUnique({ where: { id: params.id } })
     if (!run) return withCors(ApiResponse.notFound('Run not found'), origin)
 
     const downloadToken = url.searchParams.get('token')
@@ -49,11 +50,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     await auditLetterEvent(run.companyId, actorId, 'DOWNLOAD', run.id, 'ZIP downloaded', clientIp(req.headers))
 
-    const generated = await (prisma as any).phedLetterRunRow.findMany({
+    const generated = await prisma.phedLetterRunRow.findMany({
       where: { runId: params.id, status: 'GENERATED' },
       orderBy: { excelRow: 'asc' },
     })
-    const allRows = await (prisma as any).phedLetterRunRow.findMany({
+    const allRows = await prisma.phedLetterRunRow.findMany({
       where: { runId: params.id },
       orderBy: { excelRow: 'asc' },
     })
@@ -75,7 +76,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       headers: {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="promotion-letters-${run.id}.zip"`,
-        'Access-Control-Allow-Origin': origin ?? '*',
+        ...getCorsHeaders(origin),
       },
     })
   } catch (error) {

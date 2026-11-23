@@ -12,6 +12,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { readFile } from 'fs/promises'
 import path from 'path'
+import { forCompany } from '@/app/lib/data/tenant'
 import { readDocumentObject } from '@/app/lib/storage/documents'
 
 export async function OPTIONS(request: NextRequest) {
@@ -70,10 +71,9 @@ export async function GET(
         return withCors(ApiResponse.error('You are not authorized to view this leave request', 403), origin)
       }
     } else if (user.role !== 'SUPER_ADMIN') {
-      const userAssignment = await prisma.userCompany.findFirst({
+      const userAssignment = await forCompany(leave.companyId).userCompany.findFirst({
         where: {
           userId: user.userId,
-          companyId: leave.companyId,
           role: { in: ['HR', 'ADMIN', 'ALL'] },
         },
       })

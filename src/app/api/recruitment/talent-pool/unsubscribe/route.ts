@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
       return page('Not found', 'We could not find your record. You may already have been removed.', false)
     }
 
-    await (prisma as any).candidate.update({
+    await prisma.candidate.update({
       where: { id: candidate.id },
       data: { talentPoolOptOut: true },
     })

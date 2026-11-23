@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { notFound, ok, readCtx } from "@/app/lib/pip";
 import { loadScopedStaff } from "@/app/lib/promotion";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -24,8 +25,8 @@ export async function GET(request: NextRequest) {
       : null;
     if (staffRecordId && !staff) return notFound(origin, "Employee");
 
-    const designations = await prisma.designation.findMany({
-      where: { companyId, status: "Active" },
+    const designations = await forCompany(companyId).designation.findMany({
+      where: { status: "Active" },
       orderBy: [{ title: "asc" }],
       take: 500,
       select: {

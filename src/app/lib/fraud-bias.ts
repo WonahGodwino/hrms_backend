@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { withCors } from "@/app/lib/cors";
@@ -9,6 +9,8 @@ import {
   resolveActorStaffId,
 } from "@/app/lib/access-control";
 import { logAuditEvent } from "@/app/lib/audit/audit-utils";
+import { isUnique } from "@/app/lib/candidate-portal/core";
+export { isUnique };
 
 export const MIN_GROUP = 5;
 export const SCAN_THROTTLE_MS = 10 * 60 * 1000;
@@ -159,9 +161,7 @@ export const fullName = (s: any) =>
   s ? `${s.firstName ?? ""} ${s.lastName ?? ""}`.trim() : "";
 export const dayStart = (d = new Date()) =>
   new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-export const isUnique = (e: any, field?: string) =>
-  e?.code === "P2002" &&
-  (!field || String(e?.meta?.target ?? "").includes(field));
+
 
 export function paging(sp: URLSearchParams, dflt = 25) {
   const page = Math.max(1, parseInt(sp.get("page") ?? "1", 10) || 1);

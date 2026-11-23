@@ -4,7 +4,7 @@ import {
   AutomationChannel,
   AutomationTiming,
 } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleCorsOptions } from "@/app/lib/cors";
 import { ok } from "@/app/lib/pip";
 import {

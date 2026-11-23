@@ -18,6 +18,7 @@
 import { prisma } from '@/app/lib/db'
 import { isPlaceholderValue } from '@/app/lib/staff/placeholder-values'
 import { logDepartmentAction, logStaffDepartmentChange, updateDepartmentHeadcount } from './department-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 /**
  * Title-cases a free-text department name: trims, collapses internal
@@ -56,8 +57,8 @@ async function generateDepartmentCode(companyId: string, name: string): Promise<
   let suffix = 2
   // Small, bounded loop — number of collisions on a company's department
   // codes is never large enough to matter performance-wise.
-  // eslint-disable-next-line no-await-in-loop
-  while (await prisma.department.findFirst({ where: { companyId, code: candidate }, select: { id: true } })) {
+   
+  while (await forCompany(companyId).department.findFirst({ where: { code: candidate }, select: { id: true } })) {
     candidate = `${base}${suffix}`
     suffix += 1
   }

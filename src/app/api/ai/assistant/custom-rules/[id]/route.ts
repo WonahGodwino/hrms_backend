@@ -7,12 +7,13 @@ import { aiGuard, isGuardError, type AiGuardResult } from '@/app/lib/ai/guard'
 import { actorFor, recordCoreSetupEvent } from '@/app/lib/core-setup/audit'
 import { builderCategories, describeConditions, findMatches, serializeRule, validateRuleInput, type Condition, type RecordTypeKey } from '@/app/lib/core-setup/custom-rules'
 import { isRecordType } from '@/app/lib/core-setup/custom-rule-types'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-type Ctx = { params: { id: string } }
+type Ctx = { params: Promise<{ id: string }> }
 
 type Loaded =
   | { response: Response }
@@ -22,11 +23,12 @@ async function load(request: NextRequest, id: string): Promise<Loaded> {
   const { searchParams } = new URL(request.url)
   const guard = await aiGuard(request, searchParams.get('companyId'), prisma, { requireConnected: false })
   if (isGuardError(guard)) return { response: guard }
-  const rule = await prisma.customAutomationRule.findFirst({ where: { id, companyId: guard.companyId } })
+  const rule = await forCompany(guard.companyId).customAutomationRule.findFirst({ where: { id } })
   return { guard, rule }
 }
 
-export async function GET(request: NextRequest, { params }: Ctx) {
+export async function GET(request: NextRequest, props: Ctx) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const loaded = await load(request, params.id)
@@ -40,7 +42,8 @@ export async function GET(request: NextRequest, { params }: Ctx) {
   }
 }
 
-export async function PATCH(request: NextRequest, { params }: Ctx) {
+export async function PATCH(request: NextRequest, props: Ctx) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const loaded = await load(request, params.id)
@@ -106,7 +109,8 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: Ctx) {
+export async function DELETE(request: NextRequest, props: Ctx) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const loaded = await load(request, params.id)

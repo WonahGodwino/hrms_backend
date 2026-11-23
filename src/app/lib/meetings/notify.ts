@@ -14,7 +14,7 @@ type DeliverySummary = {
 	failures: Array<{ recipient: string; reason: string }>;
 };
 
-function fmtWhen(d: Date | null): string {
+export function fmtWhen(d: Date | null): string {
 	if (!d || isNaN(d.getTime())) return 'To be confirmed';
 	return d.toLocaleString('en-GB', {
 		weekday: 'long',
@@ -65,7 +65,7 @@ export async function notifyMeetingParticipants(
 	type: NotifyType,
 	opts?: { triggeredBy?: string | null; participantId?: string | null }
 ): Promise<DeliverySummary> {
-	const meeting: any = await (prisma as any).meeting.findUnique({
+	const meeting: any = await prisma.meeting.findUnique({
 		where: { id: meetingId },
 		include: {
 			participants: true,

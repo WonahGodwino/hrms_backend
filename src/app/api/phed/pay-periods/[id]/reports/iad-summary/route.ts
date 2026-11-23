@@ -6,6 +6,7 @@ import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
 import { buildPayrollSummary } from '@/app/lib/phed/reports'
 import { exportReportResponse, IAD_SUMMARY_COLS } from '@/app/lib/phed/report-export'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -13,7 +14,11 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 // (PRD 13.3). Returns the same payroll-cost breakdown as the Reports tab's
 // "IAD Summary Report" (head count, gross, employer pension, NSITF, ITF and
 // total payroll cost per category) so the two IAD views never disagree.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req);
+  if (deferred) return deferred;
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'report')
   if (rl) return withCors(rl, origin)

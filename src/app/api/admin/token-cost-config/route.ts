@@ -4,6 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { getUserFromToken } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { TOKEN_COST_DECIMALS, withNumberFields } from '@/app/lib/prisma-utils'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest) {
 
     if (user.role !== 'SUPER_ADMIN') {
       return withCors(
-        ApiResponse.success({ activeConfig }, 'Active token cost config retrieved'),
+        ApiResponse.success({ activeConfig: withNumberFields(activeConfig, TOKEN_COST_DECIMALS) }, 'Active token cost config retrieved'),
         origin
       )
     }
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest) {
     })
 
     return withCors(
-      ApiResponse.success({ activeConfig, all }, 'Token cost configs retrieved'),
+      ApiResponse.success({ activeConfig: withNumberFields(activeConfig, TOKEN_COST_DECIMALS), all: all.map((c) => withNumberFields(c, TOKEN_COST_DECIMALS)) }, 'Token cost configs retrieved'),
       origin
     )
   } catch (error: unknown) {
@@ -119,7 +120,7 @@ export async function POST(request: NextRequest) {
     }
 
     return withCors(
-      ApiResponse.success({ config: newConfig }, 'Token cost config created successfully'),
+      ApiResponse.success({ config: withNumberFields(newConfig, TOKEN_COST_DECIMALS) }, 'Token cost config created successfully'),
       origin
     )
   } catch (error: unknown) {

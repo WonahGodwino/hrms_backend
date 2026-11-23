@@ -20,7 +20,7 @@ export type ApprovalStepConfig = {
 export type EligibilityRule = {
   field: string
   operator: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'notIn'
-  value: any
+  value: unknown
   logic?: 'AND' | 'OR' // how this rule combines with the previous one
 }
 

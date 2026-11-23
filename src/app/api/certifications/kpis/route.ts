@@ -4,6 +4,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -65,10 +66,10 @@ export async function GET(req: NextRequest) {
       prisma.certificationRecord.count({ where: { ...baseWhere, status: 'Pending' } }),
 
       // Prior period counts for delta calculations (records created before 30 days ago)
-      prisma.certificationRecord.count({ where: { companyId, createdAt: { lte: thirtyDaysAgo } } }),
-      prisma.certificationRecord.count({ where: { companyId, status: 'Valid', createdAt: { lte: thirtyDaysAgo } } }),
-      prisma.certificationRecord.count({ where: { companyId, status: 'Expiring Soon', createdAt: { lte: thirtyDaysAgo } } }),
-      prisma.certificationRecord.count({ where: { companyId, status: 'Expired', createdAt: { lte: thirtyDaysAgo } } }),
+      forCompany(companyId).certificationRecord.count({ where: { createdAt: { lte: thirtyDaysAgo } } }),
+      forCompany(companyId).certificationRecord.count({ where: { status: 'Valid', createdAt: { lte: thirtyDaysAgo } } }),
+      forCompany(companyId).certificationRecord.count({ where: { status: 'Expiring Soon', createdAt: { lte: thirtyDaysAgo } } }),
+      forCompany(companyId).certificationRecord.count({ where: { status: 'Expired', createdAt: { lte: thirtyDaysAgo } } }),
     ])
 
     const calcPct = (count: number) => (totalCount > 0 ? Math.round((count / totalCount) * 100) : 0)

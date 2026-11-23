@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
     const action = url.searchParams.get('action') ?? undefined
     const take = Math.min(Number(url.searchParams.get('take') ?? 200) || 200, 500)
 
-    const events = await (prisma as any).phedLetterAuditEvent.findMany({
+    const events = await prisma.phedLetterAuditEvent.findMany({
       where: { companyId, ...(action ? { action } : {}) },
       orderBy: { createdAt: 'desc' },
       take,

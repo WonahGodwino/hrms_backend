@@ -3,6 +3,7 @@
 // is not a hard guarantee across several instances. TrialSignal rows (same IP or
 // device in the last 7 days) are the durable second layer.
 import type { NextRequest } from 'next/server'
+import { getTrustedClientIp } from '@/app/lib/security/client-ip'
 
 interface Entry { count: number; resetAt: number }
 const store = new Map<string, Entry>()
@@ -27,13 +28,9 @@ export function hit(key: string, max: number, windowMs: number): number {
   return 0
 }
 
+// SEC-010: the address added by our own proxy, not the client-supplied one.
 export function clientIp(req: NextRequest): string {
-  const xff = req.headers.get('x-forwarded-for')
-  if (xff) {
-    const first = xff.split(',')[0].trim()
-    if (first) return first
-  }
-  return req.headers.get('x-real-ip')?.trim() || '127.0.0.1'
+  return getTrustedClientIp(req.headers)
 }
 
 const HOUR = 60 * 60_000

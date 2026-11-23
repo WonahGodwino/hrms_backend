@@ -7,7 +7,8 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -29,8 +30,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const hasAccess = await validateOfferLetterCompanyAccess(user, letter.companyId)
     if (!hasAccess) return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
 
-    const emails = await prisma.offerLetterEmail.findMany({
-      where: { letterId: id, companyId: letter.companyId },
+    const emails = await forCompany(letter.companyId).offerLetterEmail.findMany({
+      where: { letterId: id },
       orderBy: { createdAt: 'asc' },
       include: {
         attachments: { select: { id: true, fileName: true, fileSize: true, mimeType: true, source: true } },

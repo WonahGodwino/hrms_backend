@@ -9,15 +9,14 @@ import {
   logCompetencyAction,
   resolveScaleForCompetency,
 } from "@/app/lib/competencies/competency-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -71,10 +70,8 @@ export async function GET(
   }
 }
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -177,10 +174,9 @@ export async function POST(
 
     // Validate every designationId actually belongs to this competency's company
     if (normalized.length > 0) {
-      const validCount = await prisma.designation.count({
+      const validCount = await forCompany(competency.companyId).designation.count({
         where: {
-          id: { in: normalized.map((n) => n.designationId) },
-          companyId: competency.companyId,
+          id: { in: normalized.map((n) => n.designationId) }
         },
       });
       if (validCount !== normalized.length) {

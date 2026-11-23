@@ -10,10 +10,11 @@ export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
 }
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
-	const origin = request.headers.get('origin');
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    const params = await props.params;
+    const origin = request.headers.get('origin');
 
-	try {
+    try {
 		const authHeader = request.headers.get('authorization');
 		if (!authHeader) {
 			return withCors(ApiResponse.unauthorized(), origin);

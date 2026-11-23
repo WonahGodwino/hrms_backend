@@ -1,13 +1,14 @@
 import fs from 'fs';
 import { NextRequest } from 'next/server';
-import path from 'path';
 
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { requireModuleAccess } from '@/app/lib/module-access';
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company';
 import { validateAndStoreFile } from '@/app/lib/uploadUtils';
+import { certificationUploadDir } from '@/app/lib/storage/private-files';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(req: NextRequest) {
 	return handleCorsOptions(req);
@@ -49,7 +50,7 @@ export async function POST(req: NextRequest) {
 			return withCors(ApiResponse.error('No files attached in bulk upload payload', 400), origin);
 		}
 
-		const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'certifications');
+		const uploadsDir = certificationUploadDir();
 		if (!fs.existsSync(uploadsDir)) {
 			fs.mkdirSync(uploadsDir, { recursive: true });
 		}
@@ -69,12 +70,12 @@ export async function POST(req: NextRequest) {
 				// Find certification record by ID or employee ID
 				let record = null;
 				if (targetRecordId) {
-					record = await prisma.certificationRecord.findFirst({
-						where: { id: targetRecordId, companyId },
+					record = await forCompany(companyId).certificationRecord.findFirst({
+						where: { id: targetRecordId },
 					});
 				} else if (mapping.employeeId) {
-					record = await prisma.certificationRecord.findFirst({
-						where: { employeeId: mapping.employeeId, companyId },
+					record = await forCompany(companyId).certificationRecord.findFirst({
+						where: { employeeId: mapping.employeeId },
 						orderBy: { createdAt: 'desc' },
 					});
 				}

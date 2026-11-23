@@ -1,7 +1,7 @@
 // Shared helpers for the Business Units module: company scoping (a concrete
 // company is always required), staff-name formatting, and audit logging.
 // BusinessUnit is a new model that still needs `prisma generate`, so all access
-// goes through (prisma as any) — mirrors the designation/job pattern.
+// goes through prisma — mirrors the designation/job pattern.
 import { prisma } from '@/app/lib/db'
 import { resolveScopedCompanyId } from '@/app/lib/company-scope'
 
@@ -27,7 +27,7 @@ export async function resolveBUAccessById(
   user: BUUser,
   id: string,
 ): Promise<{ companyId?: string; error?: { message: string; status: number } }> {
-  const bu = await (prisma as any).businessUnit.findFirst({ where: { id }, select: { companyId: true } })
+  const bu = await prisma.businessUnit.findFirst({ where: { id }, select: { companyId: true } })
   if (!bu) return { error: { message: 'Business unit not found', status: 404 } }
   const scope = await resolveScopedCompanyId(user, bu.companyId)
   if (scope.forbidden || scope.companyId !== bu.companyId) {
@@ -56,7 +56,7 @@ export async function logBUAudit(
   details?: string,
 ): Promise<void> {
   try {
-    await (prisma as any).businessUnitAuditLog.create({
+    await prisma.businessUnitAuditLog.create({
       data: {
         businessUnitId,
         companyId,

@@ -10,6 +10,7 @@ import {
   VALID_TEMPLATE_TYPES,
   VALID_AUDIENCE_TYPES,
 } from "@/app/lib/review-templates/review-template-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -21,10 +22,8 @@ export async function OPTIONS(request: NextRequest) {
 // audienceScopes nested — the full shape FormBuilderModal and
 // TemplateDetailDrawer need to render without follow-up calls.
 // ---------------------------------------------------------------------------
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -59,8 +58,8 @@ export async function GET(
       );
     }
 
-    const template = await prisma.reviewTemplate.findFirst({
-    where: { id: params.id, companyId },
+    const template = await forCompany(companyId).reviewTemplate.findFirst({
+    where: { id: params.id },
     include: {
         owner: { select: { id: true, firstName: true, lastName: true } },
         currentVersion: {
@@ -107,10 +106,8 @@ export async function GET(
 // not trigger copy-on-write, since name/type/audience aren't versioned content,
 // they're template-level identity. Only section/question edits are versioned.
 // ---------------------------------------------------------------------------
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -153,8 +150,8 @@ export async function PATCH(
       );
     }
 
-    const template = await prisma.reviewTemplate.findFirst({
-      where: { id: params.id, companyId },
+    const template = await forCompany(companyId).reviewTemplate.findFirst({
+      where: { id: params.id },
       include: { currentVersion: { include: { audienceScopes: true } } },
     });
     if (!template) {
@@ -199,9 +196,8 @@ export async function PATCH(
     }
 
     if (name && name.trim() !== template.name) {
-      const existingByName = await prisma.reviewTemplate.findFirst({
+      const existingByName = await forCompany(companyId).reviewTemplate.findFirst({
         where: {
-          companyId,
           id: { not: template.id },
           name: { equals: name.trim(), mode: "insensitive" },
           currentVersion: { status: { not: "ARCHIVED" } },

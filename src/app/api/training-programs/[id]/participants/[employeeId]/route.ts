@@ -1,15 +1,19 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // GET /api/training-programs/:programId/participants/:employeeId
-export async function GET(req: NextRequest, { params }: { params: { id: string; employeeId: string } }) {
+export async function GET(
+  req: NextRequest,
+  props: { params: Promise<{ id: string; employeeId: string }> }
+) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -19,11 +23,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string; 
     if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
     const { companyId } = resolved
 
-    const progress = await prisma.participantProgress.findFirst({
+    const progress = await forCompany(companyId).participantProgress.findFirst({
       where: {
         trainingProgramId: params.id,
-        employeeId: params.employeeId,
-        companyId,
+        employeeId: params.employeeId
       },
       include: {
         trainingProgram: {
@@ -42,9 +45,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string; 
 
     // Fetch their assessment attempts for this program
     const attempts = progress.trainingProgram
-      ? await prisma.assessmentAttempt.findMany({
+      ? await forCompany(companyId).assessmentAttempt.findMany({
           where: {
-            companyId,
             employeeId: params.employeeId,
             assessment: { trainingProgramId: params.id },
           },

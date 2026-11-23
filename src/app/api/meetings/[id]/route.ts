@@ -18,7 +18,7 @@ const ROLES = ['HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER', 'STAFF']
 const PRIVILEGED = ['HR', 'ADMIN', 'SUPER_ADMIN']
 
 async function loadForUser(id: string, user: any) {
-  const meeting = await (prisma as any).meeting.findUnique({
+  const meeting = await prisma.meeting.findUnique({
     where: { id },
     include: { participants: true },
   })
@@ -130,7 +130,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (body.lobbyEnabled !== undefined) data.lobbyEnabled = !!body.lobbyEnabled
 
     const hadRescheduleFields = body.scheduledAt !== undefined || body.durationMins !== undefined || body.title !== undefined
-    const updated = await (prisma as any).meeting.update({ where: { id }, data })
+    const updated = await prisma.meeting.update({ where: { id }, data })
 
     // Update notifications for meeting changes. Existing participant links
     // remain stable because tokens are always derived from participant id.
@@ -167,7 +167,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     if (res.error) return withCors(ApiResponse.error(res.error.message, res.error.status), origin)
     if (!res.canManage) return withCors(ApiResponse.error('Only the host can cancel this meeting', 403), origin)
 
-    await (prisma as any).meeting.update({ where: { id }, data: { status: 'CANCELLED' } })
+    await prisma.meeting.update({ where: { id }, data: { status: 'CANCELLED' } })
     return withCors(ApiResponse.success({ id, status: 'CANCELLED' }, 'Meeting cancelled'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }

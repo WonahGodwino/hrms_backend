@@ -8,7 +8,8 @@ import { resolveLetterCompany } from '@/app/lib/phed/letter-service'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
   if (rl) return withCors(rl, origin)
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireLetterAuditAccess(token)
 
-    const run = await (prisma as any).phedLetterRun.findUnique({ where: { id: params.id }, select: { companyId: true, operatorId: true } })
+    const run = await prisma.phedLetterRun.findUnique({ where: { id: params.id }, select: { companyId: true, operatorId: true } })
     if (!run) return withCors(ApiResponse.notFound('Run not found'), origin)
 
     const companyId = resolveLetterCompany(user, new URL(req.url).searchParams.get('companyId'))
@@ -28,7 +29,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const page = Math.max(1, Number(url.searchParams.get('page') ?? 1) || 1)
     const pageSize = Math.min(1000, Math.max(1, Number(url.searchParams.get('pageSize') ?? 500) || 500))
 
-    const rows = await (prisma as any).phedLetterRunRow.findMany({
+    const rows = await prisma.phedLetterRunRow.findMany({
       where: { runId: params.id },
       orderBy: { excelRow: 'asc' },
       select: { excelRow: true, employeeId: true, status: true, findings: true },

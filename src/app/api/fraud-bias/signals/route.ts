@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
 import { handleCorsOptions } from "@/app/lib/cors";
 import {
   fbRoute,
@@ -16,6 +15,7 @@ import {
   serializeSignal,
   SIGNAL_INCLUDE,
 } from "@/app/lib/fraud-bias-engine";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -39,7 +39,8 @@ export async function GET(request: NextRequest) {
     if (!view.basis) return { ...base, emptyReason: signalEmpty(view, 0, 0) };
 
     const st = csv(sp.get("status"));
-    const where: any = { companyId: ctx.companyId, cycleId: view.basis.id };
+    const db = forCompany(ctx.companyId);
+    const where: any = { cycleId: view.basis.id };
     if (!st.includes("ALL"))
       where.status = { in: st.length ? st : OPEN_SIGNAL };
     if (csv(sp.get("category")).length)
@@ -58,14 +59,14 @@ export async function GET(request: NextRequest) {
       ];
 
     const [rows, total] = await Promise.all([
-      prisma.fairnessSignal.findMany({
+      db.fairnessSignal.findMany({
         where,
         include: SIGNAL_INCLUDE,
         orderBy: [{ severity: "desc" }, { lastDetectedAt: "desc" }],
         skip,
         take: pageSize,
       }),
-      prisma.fairnessSignal.count({ where }),
+      db.fairnessSignal.count({ where }),
     ]);
     const [staff, depts] = await Promise.all([
       staffNames(rows.map((r) => r.managerId)),
@@ -73,9 +74,8 @@ export async function GET(request: NextRequest) {
     ]);
     const anyOpen = total
       ? 1
-      : await prisma.fairnessSignal.count({
+      : await forCompany(ctx.companyId).fairnessSignal.count({
           where: {
-            companyId: ctx.companyId,
             cycleId: view.basis.id,
             status: { in: OPEN_SIGNAL as any },
           },

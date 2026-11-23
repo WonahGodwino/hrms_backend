@@ -1,21 +1,21 @@
 import { NextRequest } from "next/server";
 import { Prisma, SuccessionReadiness } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { RouteContext } from "@/app/lib/self-appraisal";
 import { fail, notFound, ok, readText, writeCtx } from "@/app/lib/pip";
 import { PROMO_LIMITS, logSuccession } from "@/app/lib/promotion";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
 }
 
 async function load(id: string, companyId: string) {
-  return prisma.successionCandidate.findFirst({
+  return forCompany(companyId).successionCandidate.findFirst({
     where: {
       id,
-      companyId,
       removedAt: null,
       criticalRole: { status: "ACTIVE" },
     },

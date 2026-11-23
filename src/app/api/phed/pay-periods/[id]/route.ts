@@ -6,10 +6,12 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { getPayPeriodFreezeState, isFrozenStatus } from '@/app/lib/phed/pay-period-lock'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
   if (rl) return withCors(rl, origin)
@@ -17,7 +19,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user  = await requirePhedReadAccess(token)
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({
+    const period = await prisma.phedPayPeriod.findUnique({
       where: { id: params.id },
       include: {
         approvalMemo: { select: { id: true, status: true } },
@@ -40,26 +42,28 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
+    const period = await prisma.phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     const freeze = await getPayPeriodFreezeState(params.id, period.status)
     if (freeze.frozen)
       return withCors(ApiResponse.error(freeze.reason || 'Pay period is locked', 409), origin)
 
-    await (prisma as any).phedPayPeriod.delete({ where: { id: params.id } })
+    await prisma.phedPayPeriod.delete({ where: { id: params.id } })
     return withCors(ApiResponse.success(null, 'Pay period deleted'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 
 // PATCH /api/phed/pay-periods/:id — edit a period's year/month.
 // Locked only once the period has been PAID.
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -67,7 +71,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
+    const period = await prisma.phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     const freeze = await getPayPeriodFreezeState(params.id, period.status)
     if (freeze.frozen)
@@ -79,8 +83,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (!Number.isInteger(y) || !Number.isInteger(m) || m < 1 || m > 12)
       return withCors(ApiResponse.error('year and month (1–12) are required', 400), origin)
 
-    const existing = await (prisma as any).phedPayPeriod.findFirst({
-      where: { companyId: period.companyId, year: y, month: m, id: { not: params.id } },
+    const existing = await forCompany(period.companyId).phedPayPeriod.findFirst({
+      where: { year: y, month: m, id: { not: params.id } },
       select: { id: true },
     })
     if (existing)
@@ -90,7 +94,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       'July','August','September','October','November','December']
     const periodName = `${monthNames[m - 1]} ${y}`
 
-    const updated = await (prisma as any).phedPayPeriod.update({
+    const updated = await prisma.phedPayPeriod.update({
       where: { id: params.id },
       data: { year: y, month: m, periodName },
     })

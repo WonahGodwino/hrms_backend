@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { FeedbackCategory, FeedbackSentiment, Prisma } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -12,6 +12,7 @@ import {
   resolveSelf,
   serializeFeedback,
 } from "@/app/lib/feedback";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -164,8 +165,8 @@ export async function POST(request: NextRequest) {
         origin,
       );
 
-    const recipient = await prisma.staffRecord.findFirst({
-      where: { id: parsed.recipientId, companyId, isActive: true },
+    const recipient = await forCompany(companyId).staffRecord.findFirst({
+      where: { id: parsed.recipientId, isActive: true },
       select: { id: true, managerId: true },
     });
     if (!recipient)
@@ -173,10 +174,9 @@ export async function POST(request: NextRequest) {
 
     let req: { id: string; requesterId: string } | null = null;
     if (parsed.requestId) {
-      req = await prisma.feedbackRequest.findFirst({
+      req = await forCompany(companyId).feedbackRequest.findFirst({
         where: {
           id: parsed.requestId,
-          companyId,
           reviewerId: self.id,
           status: "PENDING",
         },

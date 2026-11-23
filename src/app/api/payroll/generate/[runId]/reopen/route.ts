@@ -16,12 +16,14 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function POST(request: NextRequest, { params }: { params: { runId: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ runId: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -47,8 +49,8 @@ export async function POST(request: NextRequest, { params }: { params: { runId: 
     }
 
     await prisma.$transaction([
-      prisma.payrollData.updateMany({
-        where: { companyId: run.companyId, templateId: run.templateId, payPeriod: run.payPeriod, status: 'APPROVED' },
+      forCompany(run.companyId).payrollData.updateMany({
+        where: { templateId: run.templateId, payPeriod: run.payPeriod, status: 'APPROVED' },
         data: { status: 'GENERATED' }
       }),
       prisma.payrollGenerationRun.update({ where: { id: run.id }, data: { status: 'GENERATED', triggeredBy: user.userId } })

@@ -21,7 +21,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const companyId = body.companyId || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
 
-    const doc = await (prisma as any).candidateDocument.findFirst({
+    const doc = await prisma.candidateDocument.findFirst({
       where: { id: docId, companyId, archived: 0 },
     })
     if (!doc) return withCors(ApiResponse.error('Document not found', 404), origin)
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const now = new Date()
-    await (prisma as any).candidateDocument.update({
+    await prisma.candidateDocument.update({
       where: { id: docId },
       data: {
         reviewStatus: 'APPROVED',

@@ -3,11 +3,11 @@
 // its head and mapped departments (each with headcount + head). Consumed by the
 // React-Flow org view.
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveBUCompanyId, staffName } from '@/app/lib/business-units/bu-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -21,8 +21,8 @@ export async function GET(req: NextRequest) {
     if (scope.error) return withCors(ApiResponse.error(scope.error.message, scope.error.status), origin)
     const companyId = scope.companyId as string
 
-    const units = await (prisma as any).businessUnit.findMany({
-      where: { companyId, archived: 0 },
+    const units = await forCompany(companyId).businessUnit.findMany({
+      where: { archived: 0 },
       orderBy: { name: 'asc' },
       include: {
         head: { select: { firstName: true, lastName: true } },

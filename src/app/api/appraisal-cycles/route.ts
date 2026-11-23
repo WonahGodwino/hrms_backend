@@ -270,7 +270,7 @@ export async function POST(request: NextRequest) {
 
     // Reminders need someone to remind.
     const currentSettings = await getOrDefaultSettings(
-      prisma as any,
+      prisma,
       companyId,
     );
     const remindersOn = p.remindersEnabled ?? currentSettings.remindersEnabled;

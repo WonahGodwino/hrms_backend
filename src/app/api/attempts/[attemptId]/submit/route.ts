@@ -10,7 +10,8 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 
 // PUT /api/attempts/:attemptId/submit
 // Body: { responses: [{question_id, selected_option_id?, selected_boolean?, time_spent_seconds?}], time_taken_seconds?, companyId? }
-export async function PUT(req: NextRequest, { params }: { params: { attemptId: string } }) {
+export async function PUT(req: NextRequest, props: { params: Promise<{ attemptId: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null

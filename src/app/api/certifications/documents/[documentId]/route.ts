@@ -3,15 +3,15 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import fs from 'fs'
-import path from 'path'
+import { deleteUploadsUrl } from '@/app/lib/storage/private-files'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
 }
 
 // DELETE /api/certifications/documents/[documentId]
-export async function DELETE(req: NextRequest, { params }: { params: { documentId: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ documentId: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -27,15 +27,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { documentI
     }
 
     // Try deleting local file if it exists
-    if (document.fileUrl && !document.fileUrl.startsWith('http://') && !document.fileUrl.startsWith('https://')) {
-      const resolvedPath = path.isAbsolute(document.fileUrl)
-        ? document.fileUrl
-        : path.join(process.cwd(), document.fileUrl)
-
-      if (fs.existsSync(resolvedPath)) {
-        try { fs.unlinkSync(resolvedPath) } catch {}
-      }
-    }
+    // SEC-019: only stored /uploads/ files are ever deleted.
+    await deleteUploadsUrl(document.fileUrl)
 
     await prisma.certificationDocument.delete({
       where: { id: params.documentId },

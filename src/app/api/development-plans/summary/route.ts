@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import {
@@ -12,6 +12,7 @@ import {
 } from "@/app/lib/development-plans/dev-utils";
 import type { PlanRow } from "@/app/lib/development-plans/dev-utils";
 import { loadCompetencyPosition } from "@/app/lib/development-plans/dev-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -38,9 +39,8 @@ export async function GET(request: NextRequest) {
       return withCors(ApiResponse.notFound("Staff record not found"), origin);
 
     const now = new Date();
-    const plans = await prisma.developmentPlan.findMany({
+    const plans = await forCompany(companyId).developmentPlan.findMany({
       where: {
-        companyId,
         staffRecordId: subjectId,
         status: { not: "ARCHIVED" },
       },
@@ -145,24 +145,21 @@ export async function GET(request: NextRequest) {
     const yearAgo = new Date(now.getTime() - 365 * DAY_MS);
     const [completedTrainings, certificationsEarned, coachingSessions] =
       await Promise.all([
-        prisma.participantProgress.count({
+        forCompany(companyId).participantProgress.count({
           where: {
-            companyId,
             employeeId: subjectId,
             trainingStatus: "COMPLETED",
             completionDate: { gte: yearAgo },
           },
         }),
-        prisma.certificationRecord.count({
+        forCompany(companyId).certificationRecord.count({
           where: {
-            companyId,
             employeeId: subjectId,
             status: { in: ["Valid", "Expiring Soon"] },
           },
         }),
-        prisma.developmentCoachingRequest.count({
+        forCompany(companyId).developmentCoachingRequest.count({
           where: {
-            companyId,
             requesterId: subjectId,
             status: { in: ["ACCEPTED", "COMPLETED"] },
           },

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -15,6 +15,7 @@ import {
   NO_ACTIVE_CYCLE_MESSAGE,
   isNoActiveCycle,
 } from "@/app/lib/calibration";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -76,8 +77,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const rows = await prisma.calibrationSession.findMany({
-      where: { companyId, cycleId: resolved.cycle.id },
+    const rows = await forCompany(companyId).calibrationSession.findMany({
+      where: { cycleId: resolved.cycle.id },
       select: SESSION_SELECT,
     });
     return withCors(
@@ -160,8 +161,8 @@ export async function POST(request: NextRequest) {
     if (blocked) return withCors(ApiResponse.error(blocked, 409), origin);
 
     if (parsed.departmentId) {
-      const dept = await prisma.department.findFirst({
-        where: { id: parsed.departmentId, companyId },
+      const dept = await forCompany(companyId).department.findFirst({
+        where: { id: parsed.departmentId },
         select: { id: true },
       });
       if (!dept)

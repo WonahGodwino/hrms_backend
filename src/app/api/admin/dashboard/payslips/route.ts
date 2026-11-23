@@ -4,6 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { normalizePayslipCategory } from '@/app/lib/payroll/templates/shared/category'
 
 interface AdminPayslipItem {
   id: string;
@@ -69,6 +70,8 @@ export async function GET(request: NextRequest) {
     const month = searchParams.get('month')
     const year = searchParams.get('year')
     const templateId = searchParams.get('templateId')
+    const category = searchParams.get('category')
+    const status = searchParams.get('status')
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '50')
     const showOnlyMine = searchParams.get('showOnlyMine') === 'true'
@@ -223,6 +226,34 @@ export async function GET(request: NextRequest) {
       whereClause.payroll = { templateId }
     }
 
+    // Filter by publish status: 'published' (draft = false) or 'draft'
+    if (status === 'published') {
+      whereClause.draft = false
+    } else if (status === 'draft') {
+      whereClause.draft = true
+    }
+
+    // Distinct categories in the current scope (company access, month, year),
+    // computed before the category filter is added so the dropdown always lists
+    // every category that exists, not just the one currently selected.
+    const categoryGroups = await prisma.payslip.groupBy({
+      by: ['payslipCategory'],
+      where: whereClause,
+    })
+    const categories = Array.from(
+      new Set(categoryGroups.map((g) => normalizePayslipCategory(g.payslipCategory)))
+    ).sort()
+
+    // Filter by category. Legacy rows store null, which means SALARY.
+    if (category) {
+      const normalized = normalizePayslipCategory(category)
+      const categoryClause =
+        normalized === 'SALARY'
+          ? { OR: [{ payslipCategory: 'SALARY' }, { payslipCategory: null }] }
+          : { payslipCategory: normalized }
+      whereClause.AND = [...(whereClause.AND || []), categoryClause]
+    }
+
     // Get total count for pagination
     const totalCount = await prisma.payslip.count({
       where: whereClause,
@@ -333,6 +364,7 @@ export async function GET(request: NextRequest) {
             {
               payslips: items,
               companies,
+              categories,
               summary: {
                 totalStaff: totalCount,
                 totalGross: totals._sum.grossPay ? totals._sum.grossPay.toString() : '0',

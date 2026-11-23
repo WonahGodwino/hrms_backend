@@ -4,6 +4,7 @@ import { requireRole } from '@/app/lib/auth'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -24,13 +25,12 @@ export async function GET(req: NextRequest) {
     const thirty = new Date(now.getTime() + 30 * 86_400_000)
 
     const [expiringSoon, overdueTraining, lowPassRate, topProgram] = await Promise.all([
-      prisma.certificationRecord.count({ where: { companyId, expiryDate: { gte: now, lte: thirty } } }),
-      prisma.participantProgress.count({
-        where: { companyId, trainingStatus: { in: ['NOT STARTED', 'IN PROGRESS'] }, dueDate: { lt: now } },
+      forCompany(companyId).certificationRecord.count({ where: { expiryDate: { gte: now, lte: thirty } } }),
+      forCompany(companyId).participantProgress.count({
+        where: { trainingStatus: { in: ['NOT STARTED', 'IN PROGRESS'] }, dueDate: { lt: now } },
       }),
-      prisma.assessmentAttempt.groupBy({
+      forCompany(companyId).assessmentAttempt.groupBy({
         by: ['assessmentId'],
-        where: { companyId },
         _count: { id: true },
         having: { id: { _count: { gt: 5 } } },
       }).then(async groups => {
@@ -41,9 +41,9 @@ export async function GET(req: NextRequest) {
         }))
         return rates.sort((a, b) => a.passRate - b.passRate)[0] ?? null
       }),
-      prisma.participantProgress.groupBy({
+      forCompany(companyId).participantProgress.groupBy({
         by: ['trainingProgramId'],
-        where: { companyId, trainingStatus: 'COMPLETED' },
+        where: { trainingStatus: 'COMPLETED' },
         _count: { id: true },
         orderBy: { _count: { id: 'desc' } },
         take: 1,

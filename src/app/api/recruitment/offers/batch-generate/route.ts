@@ -8,6 +8,7 @@ import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { applyApprovalWorkflow } from '@/app/lib/offers/approval-workflow'
+import { prefetchBatchOfferData } from '@/app/lib/offers/batch-prefetch'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -36,21 +37,21 @@ export async function POST(request: NextRequest) {
     const batchId = randomUUID()
     const results: any[] = []
 
+    // PERF-001: load every application and grade title up front (2 queries)
+    // instead of 2 queries per candidate.
+    const { applicationFor, gradeTitleFor } = await prefetchBatchOfferData(companyId, candidates)
+    // Applications that received an offer earlier in this batch: a repeated
+    // candidate is rejected exactly as when each row re-read the database.
+    const offeredInBatch = new Set<string>()
+
     for (const c of candidates) {
       try {
-        const application = await prisma.jobApplication.findFirst({
-          where: { candidateId: c.candidateId, jobId: c.jobId, companyId },
-          include: { offer: true },
-        })
+        const application = applicationFor(c.candidateId, c.jobId)
         if (!application) { results.push({ candidateId: c.candidateId, error: 'Application not found' }); continue }
-        if (application.offer) { results.push({ candidateId: c.candidateId, error: 'An offer already exists for this application' }); continue }
+        if (application.hasOffer || offeredInBatch.has(application.id)) { results.push({ candidateId: c.candidateId, error: 'An offer already exists for this application' }); continue }
 
-        let gradeName: string | null = null
-        if (c.gradeId) {
-          // gradeId now carries the designation id (standalone grade levels no longer exist).
-          const designation = await prisma.designation.findFirst({ where: { id: c.gradeId, companyId }, select: { title: true } })
-          gradeName = designation ? designation.title : null
-        }
+        // gradeId now carries the designation id (standalone grade levels no longer exist).
+        const gradeName: string | null = c.gradeId ? gradeTitleFor(c.gradeId) : null
 
         const offer = await prisma.offer.create({
           data: {
@@ -79,6 +80,7 @@ export async function POST(request: NextRequest) {
           },
         })
 
+        offeredInBatch.add(application.id)
         await applyApprovalWorkflow(offer.id, companyId)
 
         results.push({ candidateId: c.candidateId, offerId: offer.id, status: 'PENDING_APPROVAL' })

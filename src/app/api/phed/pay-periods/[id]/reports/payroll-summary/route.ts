@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requirePhedReadAccess } from '@/app/lib/phed/access-role'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { buildPayrollSummary } from '@/app/lib/phed/reports'
 import {
@@ -11,6 +11,8 @@ import {
   IADEmployee,
   IADSummaryInput,
 } from '@/app/lib/phed/report-export'
+import { forCompany } from '@/app/lib/data/tenant'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -26,7 +28,11 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 //
 // "Newly hired" = staff who have NO computed payroll in any earlier period for this company.
 // "Exited"      = staff marked isActive=false in phed_staff.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req);
+  if (deferred) return deferred;
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -37,7 +43,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const format = new URL(req.url).searchParams.get('format') ?? 'json'
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({
+    const period = await prisma.phedPayPeriod.findUnique({
       where:  { id: params.id },
       select: { id: true, periodName: true, month: true, year: true, companyId: true, approvedAt: true,
                 company: { select: { companyName: true } } },
@@ -48,7 +54,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const safeName    = (period.periodName as string).replace(/\s+/g, '-')
 
     // ── Fetch current period payrolls ─────────────────────────
-    const currentPayrolls = await (prisma as any).phedComputedPayroll.findMany({
+    const currentPayrolls = await prisma.phedComputedPayroll.findMany({
       where:   { payPeriodId: params.id },
       orderBy: { staffIdCode: 'asc' },
     })
@@ -61,13 +67,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const sheetPrefix = `${MONTH_ABBR[(period.month - 1) % 12]} ${period.year}`
 
     // ── Determine new-hire status (no payroll in any prior period) ──
-    const prevPeriods = await (prisma as any).phedPayPeriod.findMany({
-      where:  { companyId: period.companyId, id: { not: params.id } },
+    const prevPeriods = await forCompany(period.companyId).phedPayPeriod.findMany({
+      where:  { id: { not: params.id } },
       select: { id: true },
     })
     const prevStaffIds = new Set<string>()
     if (prevPeriods.length > 0) {
-      const prevPayrolls = await (prisma as any).phedComputedPayroll.findMany({
+      const prevPayrolls = await prisma.phedComputedPayroll.findMany({
         where:  { payPeriodId: { in: prevPeriods.map((p: any) => p.id) } },
         select: { staffId: true },
       })
@@ -76,7 +82,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     // ── Active/inactive status ────────────────────────────────
     const staffIds = currentPayrolls.map((r: any) => r.staffId)
-    const staffRecords = await (prisma as any).phedStaff.findMany({
+    const staffRecords = await prisma.phedStaff.findMany({
       where:  { id: { in: staffIds } },
       select: { id: true, isActive: true, level: true },
     })
@@ -90,12 +96,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     // ── Dynamic entity data ───────────────────────────────────
     const [allUnions, allCoops, allDeductions, staffUnions, staffCoops, staffDedLiabilities] =
       await Promise.all([
-        (prisma as any).phedUnion.findMany({ where: { companyId: period.companyId, isActive: true }, orderBy: { name: 'asc' } }),
-        (prisma as any).phedCooperative.findMany({ where: { companyId: period.companyId, isActive: true }, orderBy: { name: 'asc' } }),
-        (prisma as any).phedDeductionLiability.findMany({ where: { companyId: period.companyId, isActive: true }, orderBy: { name: 'asc' } }),
-        (prisma as any).phedStaffUnion.findMany({ where: { staffId: { in: staffIds } } }),
-        (prisma as any).phedStaffCooperative.findMany({ where: { staffId: { in: staffIds } } }),
-        (prisma as any).phedStaffDeductionLiability.findMany({ where: { staffId: { in: staffIds } } }),
+        forCompany(period.companyId).phedUnion.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+        forCompany(period.companyId).phedCooperative.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+        forCompany(period.companyId).phedDeductionLiability.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+        prisma.phedStaffUnion.findMany({ where: { staffId: { in: staffIds } } }),
+        prisma.phedStaffCooperative.findMany({ where: { staffId: { in: staffIds } } }),
+        prisma.phedStaffDeductionLiability.findMany({ where: { staffId: { in: staffIds } } }),
       ])
 
     // ── Lookup maps ───────────────────────────────────────────
@@ -206,9 +212,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     })
 
     // ── Previous period summary for Changes sheet (Sheet 5) ──
-    const immediatePrevPeriod = await (prisma as any).phedPayPeriod.findFirst({
+    const immediatePrevPeriod = await forCompany(period.companyId).phedPayPeriod.findFirst({
       where: {
-        companyId: period.companyId,
         computedPayrolls: { some: {} },
         OR: [
           { year: { lt: period.year } },
@@ -219,7 +224,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       orderBy: [{ year: 'desc' }, { month: 'desc' }],
     })
     const prevSummaryPayrolls = immediatePrevPeriod
-      ? await (prisma as any).phedComputedPayroll.findMany({ where: { payPeriodId: immediatePrevPeriod.id } })
+      ? await prisma.phedComputedPayroll.findMany({ where: { payPeriodId: immediatePrevPeriod.id } })
       : []
     const previousSummary = immediatePrevPeriod
       ? buildPayrollSummary(prevSummaryPayrolls, immediatePrevPeriod.periodName, immediatePrevPeriod.month, immediatePrevPeriod.year)
@@ -250,9 +255,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     // staff whose gross/net pay moved versus the previous period.
     const changeWindowStart = immediatePrevPeriod?.approvedAt ?? immediatePrevPeriod?.createdAt ?? new Date(0)
     const changeWindowEnd   = period.approvedAt ?? new Date()
-    const changeLogs = await (prisma as any).phedChangeLog.findMany({
+    const changeLogs = await forCompany(period.companyId).phedChangeLog.findMany({
       where: {
-        companyId: period.companyId,
         changedAt: { gte: changeWindowStart, lte: changeWindowEnd },
       },
       select: { staffId: true },
@@ -336,7 +340,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         headers: {
           'Content-Type':        'application/pdf',
           'Content-Disposition': `attachment; filename="iad-summary-${safeName}.pdf"`,
-          'Access-Control-Allow-Origin': origin ?? '*',
+          ...getCorsHeaders(origin),
         },
       })
     }
@@ -349,7 +353,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         headers: {
           'Content-Type':        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'Content-Disposition': `attachment; filename="iad-summary-${safeName}.xlsx"`,
-          'Access-Control-Allow-Origin': origin ?? '*',
+          ...getCorsHeaders(origin),
         },
       })
     }

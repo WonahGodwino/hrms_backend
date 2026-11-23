@@ -2,8 +2,10 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { getUserFromToken } from '@/app/lib/auth'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { AI_SETTINGS_DECIMALS, asNumber, withNumberFields } from '@/app/lib/prisma-utils'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -107,7 +109,7 @@ export async function GET(request: NextRequest) {
 
     return withCors(
       ApiResponse.success({
-        settings: aiSettings,
+        settings: withNumberFields(aiSettings, AI_SETTINGS_DECIMALS),
         permissions: {
           canEdit: user.role === 'SUPER_ADMIN' || user.role === 'ADMIN',
           canDelete: user.role === 'SUPER_ADMIN'
@@ -118,7 +120,7 @@ export async function GET(request: NextRequest) {
       origin
     )
   } catch (error: unknown) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('Error fetching AI settings:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }
@@ -197,8 +199,8 @@ export async function PUT(request: NextRequest) {
     const aiSettings = await prisma.aISettings.upsert({
       where: { companyId: targetCompanyId },
       update: {
-        monthlyBudget: settingsData.monthlyBudget,
-        costPerReview: settingsData.costPerReview,
+        monthlyBudget: asNumber(settingsData.monthlyBudget),
+        costPerReview: asNumber(settingsData.costPerReview),
         costAlertThreshold: settingsData.costAlertThreshold,
         enabled: settingsData.enabled,
         defaultService: settingsData.defaultService,
@@ -213,8 +215,8 @@ export async function PUT(request: NextRequest) {
       },
       create: {
         companyId: targetCompanyId,
-        monthlyBudget: settingsData.monthlyBudget || 100.00,
-        costPerReview: settingsData.costPerReview || 0.02,
+        monthlyBudget: asNumber(settingsData.monthlyBudget) || 100.00,
+        costPerReview: asNumber(settingsData.costPerReview) || 0.02,
         costAlertThreshold: settingsData.costAlertThreshold || 80,
         enabled: settingsData.enabled !== undefined ? settingsData.enabled : true,
         defaultService: settingsData.defaultService || 'openai',
@@ -238,7 +240,7 @@ export async function PUT(request: NextRequest) {
 
     return withCors(
       ApiResponse.success({
-        settings: aiSettings,
+        settings: withNumberFields(aiSettings, AI_SETTINGS_DECIMALS),
         message: 'AI settings updated successfully',
         updatedBy: user.userId,
         timestamp: new Date().toISOString()
@@ -246,7 +248,7 @@ export async function PUT(request: NextRequest) {
       origin
     )
   } catch (error: unknown) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('Error updating AI settings:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }
@@ -299,7 +301,7 @@ export async function DELETE(request: NextRequest) {
       origin
     )
   } catch (error: unknown) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('Error deleting AI settings:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }

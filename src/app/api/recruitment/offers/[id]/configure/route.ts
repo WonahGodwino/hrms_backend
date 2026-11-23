@@ -8,6 +8,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -20,7 +21,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const companyId = new URL(req.url).searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
 
-    const offer = await prisma.offer.findFirst({ where: { id, companyId } })
+    const offer = await forCompany(companyId).offer.findFirst({ where: { id } })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)
 
     const body = await req.json()

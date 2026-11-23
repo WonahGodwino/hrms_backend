@@ -4,23 +4,25 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { findAccessiblePayPeriod } from '@/app/lib/phed/pay-period-access'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
+    const period = await findAccessiblePayPeriod(user, params.id)
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     if (period.status !== 'VALIDATION_OPEN')
       return withCors(ApiResponse.error('Validation portal is not currently open', 400), origin)
 
-    const updated = await (prisma as any).phedPayPeriod.update({
+    const updated = await prisma.phedPayPeriod.update({
       where: { id: params.id },
       data: { status: 'VALIDATION_CLOSED', validationCloseAt: new Date() },
     })

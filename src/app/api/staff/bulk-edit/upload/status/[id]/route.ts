@@ -8,6 +8,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -33,15 +34,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     if (authUser.role === 'HR') {
-      const hasAccess = await prisma.userCompany.findFirst({
-        where: { userId: authUser.userId, companyId: upload.companyId, role: { in: ['HR', 'ALL'] } },
+      const hasAccess = await forCompany(upload.companyId).userCompany.findFirst({
+        where: { userId: authUser.userId, role: { in: ['HR', 'ALL'] } },
       })
       if (!hasAccess) {
         return withCors(ApiResponse.error('You do not have HR access for this company', 403), origin)
       }
     } else if (authUser.role === 'ADMIN') {
-      const hasAccess = await prisma.userCompany.findFirst({
-        where: { userId: authUser.userId, companyId: upload.companyId, role: { in: ['ADMIN', 'ALL'] } },
+      const hasAccess = await forCompany(upload.companyId).userCompany.findFirst({
+        where: { userId: authUser.userId, role: { in: ['ADMIN', 'ALL'] } },
       })
       if (!hasAccess) {
         return withCors(ApiResponse.error('You do not have access to this company', 403), origin)

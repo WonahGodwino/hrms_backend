@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { buildConfigTemplate } from '@/app/lib/phed/config-template'
 
@@ -29,10 +29,10 @@ export async function GET(req: NextRequest) {
       headers: {
         'Content-Type':        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': 'attachment; filename="phed-grades-template.xlsx"',
-        'Access-Control-Allow-Origin': origin ?? '*',
+        ...getCorsHeaders(origin),
       },
     })
-  } catch (e) {
+  } catch (_e) {
     return withCors(ApiResponse.error('Failed to generate template', 500), origin)
   }
 }

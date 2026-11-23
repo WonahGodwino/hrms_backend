@@ -3,12 +3,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/app/lib/auth'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { z } from 'zod'
-import { prisma } from '@/app/lib/prisma'
+import { prisma } from '@/app/lib/db'
+import { PAGE_SIZE_LIMITS, parsePage, parsePageSize } from '@/app/lib/http/pagination'
 
 // Validation schemas
 const getNotificationsSchema = z.object({
-  page: z.string().optional().default('1').transform(Number),
-  limit: z.string().optional().default('20').transform(Number),
+  page: z.string().optional().transform(parsePage),
+  limit: z.string().optional().transform((v) => parsePageSize(v, PAGE_SIZE_LIMITS.notifications)),
   read: z.enum(['true', 'false', 'all']).optional().default('all'),
   type: z.string().optional(),
   startDate: z.string().optional(),
@@ -28,7 +29,7 @@ const createNotificationSchema = z.object({
   type: z.string(),
   title: z.string().min(1).max(200),
   message: z.string().min(1).max(1000),
-  data: z.record(z.any()).optional(),
+  data: z.record(z.string(), z.any()).optional(),
   companyId: z.string().cuid()
 })
 
@@ -433,12 +434,13 @@ export async function GET(request: NextRequest) {
         result = await getAdminNotificationsData(user.userId, staff.companyId, filters)
         break
         
-      default:
+      default: {
         const response = NextResponse.json(
           { success: false, message: 'Unauthorized role' },
           { status: 403 }
         )
         return withCors(response, origin)
+      }
     }
     
     // Get unread count

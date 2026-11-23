@@ -6,6 +6,8 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { isFrozenStatus } from '@/app/lib/phed/pay-period-lock'
+import { rejectForeignCompany } from '@/app/lib/phed/company-guard'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -15,14 +17,15 @@ export async function GET(req: NextRequest) {
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requirePhedReadAccess(token)
+    const user = await requirePhedReadAccess(token)
 
     const p         = new URL(req.url).searchParams
     const companyId = p.get('companyId')
+    const foreignCompany = await rejectForeignCompany(user, companyId, origin)
+    if (foreignCompany) return foreignCompany
     if (!companyId) return withCors(ApiResponse.error('companyId is required', 400), origin)
 
-    const periods = await (prisma as any).phedPayPeriod.findMany({
-      where: { companyId },
+    const periods = await forCompany(companyId).phedPayPeriod.findMany({
       orderBy: [{ year: 'desc' }, { month: 'desc' }],
       include: {
         approvalMemo: { select: { id: true, status: true } },
@@ -52,6 +55,8 @@ export async function POST(req: NextRequest) {
     const user  = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const { companyId, year, month } = await req.json()
+    const foreignCompany = await rejectForeignCompany(user, companyId, origin)
+    if (foreignCompany) return foreignCompany
     if (!companyId || !year || !month)
       return withCors(ApiResponse.error('companyId, year, and month are required', 400), origin)
 
@@ -63,7 +68,7 @@ export async function POST(req: NextRequest) {
       'July','August','September','October','November','December']
     const periodName = `${monthNames[m - 1]} ${y}`
 
-    const period = await (prisma as any).phedPayPeriod.create({
+    const period = await prisma.phedPayPeriod.create({
       data: { companyId, year: y, month: m, periodName, createdBy: user.userId },
     })
     return withCors(ApiResponse.success(period, 'Pay period created', 201), origin)

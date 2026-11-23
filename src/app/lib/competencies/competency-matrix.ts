@@ -4,6 +4,7 @@ import {
   logCompetencyAction,
   resolveScaleForCompetency,
 } from "./competency-utils";
+import { forCompany } from '@/app/lib/data/tenant';
 
 const ACTIVE = { equals: "Active", mode: "insensitive" as const };
 
@@ -16,8 +17,8 @@ export async function getCompetencyMatrix(
     : ["ACTIVE"];
 
   const [scales, competencies, departments, designations] = await Promise.all([
-    prisma.proficiencyScale.findMany({
-      where: { companyId, isActive: true },
+    forCompany(companyId).proficiencyScale.findMany({
+      where: { isActive: true },
       select: {
         id: true,
         name: true,
@@ -28,8 +29,8 @@ export async function getCompetencyMatrix(
         },
       },
     }),
-    prisma.competency.findMany({
-      where: { companyId, status: { in: statuses } },
+    forCompany(companyId).competency.findMany({
+      where: { status: { in: statuses } },
       select: {
         id: true,
         name: true,
@@ -40,19 +41,15 @@ export async function getCompetencyMatrix(
       },
       orderBy: { name: "asc" },
     }),
-    prisma.department.findMany({
-      where: {
-        companyId,
-        status: ACTIVE,
+    forCompany(companyId).department.findMany({
+      where: { status: ACTIVE,
         ...(opts.departmentId ? { id: opts.departmentId } : {}),
       },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),
-    prisma.designation.findMany({
-      where: {
-        companyId,
-        status: ACTIVE,
+    forCompany(companyId).designation.findMany({
+      where: { status: ACTIVE,
         ...(opts.departmentId ? { departmentId: opts.departmentId } : {}),
       },
       select: { id: true, title: true, departmentId: true },
@@ -175,7 +172,7 @@ export async function applyMatrixChanges(args: {
   const byCell = new Map<string, NormalizedChange>();
   for (const raw of args.changes) {
     const competencyId = raw?.competencyId;
-    let designationId = raw?.designationId || undefined;
+    const designationId = raw?.designationId || undefined;
     let departmentId = raw?.departmentId || undefined;
 
     if (typeof competencyId !== "string" || !competencyId) {

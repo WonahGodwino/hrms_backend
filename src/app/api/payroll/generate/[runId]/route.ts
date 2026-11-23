@@ -22,6 +22,9 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
 import { isEarningsSection, GROSS_SYSTEM_FIELD, templateFieldDisplayRank, sortByTemplateOrder, type PercentageFormulaConfig } from '@/app/lib/payroll/generation/field-resolver'
 import { STALE_RUN_THRESHOLD_MS } from '@/app/lib/payroll/generation/generate-payroll'
+import { forCompany } from '@/app/lib/data/tenant'
+import { readJsonBodyOrEmpty } from '@/app/lib/validation/request-body'
+import { deleteRunBodySchema } from '@/app/lib/validation/payroll-staff-schemas'
 
 type StoredField = {
   value: unknown
@@ -35,18 +38,19 @@ type StoredField = {
 }
 
 function isDeductionsSection(section: string): boolean {
-  return (section || '').toUpperCase().replace(/[\s-]+/g, '_') === 'DEDUCTIONS'
+  return (section || '').toUpperCase().replace(/[\s-]+/g, '_') === 'DEDUCTIONS';
 }
 
 function isEmployerCostSection(section: string): boolean {
-  return (section || '').toUpperCase().replace(/[\s-]+/g, '_') === 'EMPLOYER_COST'
+  return (section || '').toUpperCase().replace(/[\s-]+/g, '_') === 'EMPLOYER_COST';
 }
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function GET(request: NextRequest, { params }: { params: { runId: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ runId: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -81,8 +85,8 @@ export async function GET(request: NextRequest, { params }: { params: { runId: s
       return withCors(ApiResponse.error(`You do not have ${userRole} access for this company`, 403), origin)
     }
 
-    const rows = await prisma.payrollData.findMany({
-      where: { companyId: run.companyId, templateId: run.templateId, payPeriod: run.payPeriod },
+    const rows = await forCompany(run.companyId).payrollData.findMany({
+      where: { templateId: run.templateId, payPeriod: run.payPeriod },
       include: { staff: { select: { id: true, staffId: true, firstName: true, lastName: true, department: true, email: true } } },
       orderBy: { createdAt: 'asc' }
     })
@@ -203,7 +207,8 @@ export async function GET(request: NextRequest, { params }: { params: { runId: s
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { runId: string } }) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ runId: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -237,7 +242,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { runId
       return withCors(ApiResponse.error('This pay period is still being generated. Wait for it to finish before deleting it.', 409), origin)
     }
 
-    const body = await request.json().catch(() => ({}))
+    const body = await readJsonBodyOrEmpty(request, deleteRunBodySchema)
     const confirmPayPeriod = typeof body?.confirmPayPeriod === 'string' ? body.confirmPayPeriod.trim() : ''
     if (confirmPayPeriod !== run.payPeriod) {
       return withCors(
@@ -249,8 +254,8 @@ export async function DELETE(request: NextRequest, { params }: { params: { runId
     // Every run for this exact company+template+period shares the same
     // underlying PayrollData rows — collect the real Payroll rows any of
     // them were approved into before wiping everything.
-    const dataRows = await prisma.payrollData.findMany({
-      where: { companyId: run.companyId, templateId: run.templateId, payPeriod: run.payPeriod },
+    const dataRows = await forCompany(run.companyId).payrollData.findMany({
+      where: { templateId: run.templateId, payPeriod: run.payPeriod },
       select: { payrollId: true }
     })
     const payrollIds = Array.from(new Set(dataRows.map((r) => r.payrollId).filter((id): id is string => Boolean(id))))
@@ -260,10 +265,10 @@ export async function DELETE(request: NextRequest, { params }: { params: { runId
       // Payroll row the manual upload path created, even if a payrollId
       // somehow pointed at one.
       ...(payrollIds.length > 0
-        ? [prisma.payroll.deleteMany({ where: { id: { in: payrollIds }, companyId: run.companyId, source: 'GENERATED' } })] // cascades to Payslip
+        ? [forCompany(run.companyId).payroll.deleteMany({ where: { id: { in: payrollIds }, source: 'GENERATED' } })] // cascades to Payslip
         : []),
-      prisma.payrollData.deleteMany({ where: { companyId: run.companyId, templateId: run.templateId, payPeriod: run.payPeriod } }),
-      prisma.payrollGenerationRun.deleteMany({ where: { companyId: run.companyId, templateId: run.templateId, payPeriod: run.payPeriod } })
+      forCompany(run.companyId).payrollData.deleteMany({ where: { templateId: run.templateId, payPeriod: run.payPeriod } }),
+      forCompany(run.companyId).payrollGenerationRun.deleteMany({ where: { templateId: run.templateId, payPeriod: run.payPeriod } })
     ])
 
     return withCors(ApiResponse.success({ deleted: true, payPeriod: run.payPeriod }, `${run.payPeriod} deleted`), origin)

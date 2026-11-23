@@ -32,6 +32,8 @@ import { GROSS_SYSTEM_FIELD } from '@/app/lib/payroll/generation/field-resolver'
 import { NSITF_IDENTITY_COLUMNS, STAFF_HIRE_DATE_COLUMN } from '@/app/lib/staff/nsitf-identity-fields'
 import { XLSX_MIME, writeStyledTable, buildSubtitle, confidentialFooter, safeFileName, attachmentDisposition } from '@/app/lib/excel/sheet-theme'
 import { cleanStaffText } from '@/app/lib/staff/placeholder-values'
+import { forCompany } from '@/app/lib/data/tenant'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -73,6 +75,9 @@ const fmtDate = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10
 const fmtNum = (v: unknown) => (v === null || v === undefined ? '' : Number(v))
 
 export async function GET(request: NextRequest) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(request)
+  if (deferred) return deferred
   const origin = request.headers.get('origin')
 
   try {
@@ -105,8 +110,8 @@ export async function GET(request: NextRequest) {
       }
     } else {
       if (user.role !== 'SUPER_ADMIN') {
-        const hasAccess = await prisma.userCompany.findFirst({
-          where: { userId: user.userId, companyId },
+        const hasAccess = await forCompany(companyId).userCompany.findFirst({
+          where: { userId: user.userId },
           select: { id: true },
         })
         if (!hasAccess && companyId !== user.companyId) {

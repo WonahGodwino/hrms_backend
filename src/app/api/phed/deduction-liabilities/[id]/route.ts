@@ -8,7 +8,8 @@ import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // GET /api/phed/deduction-liabilities/:id
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
   if (rl) return withCors(rl, origin)
@@ -16,13 +17,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const item = await (prisma as any).phedDeductionLiability.findUnique({
+    const item = await prisma.phedDeductionLiability.findUnique({
       where:  { id: params.id },
       select: { id: true, name: true, isActive: true, companyId: true },
     })
     if (!item) return withCors(ApiResponse.notFound('Deduction/Liability not found'), origin)
 
-    const memberships = await (prisma as any).phedStaffDeductionLiability.findMany({
+    const memberships = await prisma.phedStaffDeductionLiability.findMany({
       where:   { deductionLiabilityId: params.id },
       include: {
         staff: {
@@ -53,7 +54,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 }
 
 // PUT /api/phed/deduction-liabilities/:id
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -61,7 +63,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
     const { name, isActive } = await req.json()
-    const item = await (prisma as any).phedDeductionLiability.update({
+    const item = await prisma.phedDeductionLiability.update({
       where: { id: params.id },
       data: {
         ...(name     !== undefined && { name }),
@@ -73,14 +75,15 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 }
 
 // DELETE /api/phed/deduction-liabilities/:id  — soft delete (isActive = false)
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
-    await (prisma as any).phedDeductionLiability.update({
+    await prisma.phedDeductionLiability.update({
       where: { id: params.id },
       data:  { isActive: false },
     })

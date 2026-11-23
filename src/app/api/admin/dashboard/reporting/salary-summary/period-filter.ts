@@ -1,3 +1,5 @@
+import { getQuarterFromMonth } from '@/app/lib/reporting/periodRange'
+export { getQuarterFromMonth }
 export type SalarySummaryPeriod = 'monthly' | 'quarterly' | 'yearly'
 
 // A pay-period is one calendar month (e.g. "August"). Payroll.month is
@@ -31,12 +33,7 @@ export function getMonthNumber(month: string): number {
   return 0
 }
 
-export function getQuarterFromMonth(monthNumber: number): number {
-  if (monthNumber >= 1 && monthNumber <= 3) return 1
-  if (monthNumber >= 4 && monthNumber <= 6) return 2
-  if (monthNumber >= 7 && monthNumber <= 9) return 3
-  return 4
-}
+
 
 function getMonthName(monthNumber: number): string {
   const names = [

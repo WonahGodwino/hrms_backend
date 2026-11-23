@@ -18,6 +18,7 @@
 // ones are "upcoming" (locked), and a completed stage with quality issues
 // becomes "needs_attention".
 import { prisma } from '@/app/lib/db'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export type StageKey = 'company' | 'organization' | 'roles' | 'people' | 'payroll'
 export type StageStatus = 'completed' | 'current' | 'ready' | 'upcoming' | 'needs_attention'
@@ -51,8 +52,6 @@ export interface ReadinessResult {
   issues: SetupIssue[]
 }
 
-(done: number, total: number) => (total === 0 ? 0 : Math.round((done / total) * 100));
-
 // ---------------------------------------------------------------------------
 // Stage computation
 // ---------------------------------------------------------------------------
@@ -66,7 +65,7 @@ async function computeCompany(companyId: string): Promise<StageReadiness> {
         address: true, phone: true, email: true, baseCurrency: true,
       },
     }),
-    (prisma as any).companyPayDate.count({ where: { companyId, isActive: true } }),
+    forCompany(companyId).companyPayDate.count({ where: { isActive: true } }),
   ])
 
   const profileFields: Array<[string, unknown]> = [
@@ -93,9 +92,9 @@ async function computeCompany(companyId: string): Promise<StageReadiness> {
 
 async function computeOrganization(companyId: string): Promise<StageReadiness> {
   const [buCount, departments] = await Promise.all([
-    (prisma as any).businessUnit.count({ where: { companyId } }),
-    (prisma as any).department.findMany({
-      where: { companyId },
+    forCompany(companyId).businessUnit.count({ where: { } }),
+    forCompany(companyId).department.findMany({
+      where: { },
       select: { headId: true, businessUnitId: true },
     }),
   ])
@@ -130,7 +129,7 @@ async function computeOrganization(companyId: string): Promise<StageReadiness> {
 }
 
 async function computeRoles(companyId: string): Promise<StageReadiness> {
-  const designationCount = await (prisma as any).designation.count({ where: { companyId } })
+  const designationCount = await forCompany(companyId).designation.count({ where: { } })
 
   const requirements: Requirement[] = [
     { label: 'Designations', done: designationCount > 0, detail: `${designationCount} configured` },
@@ -141,8 +140,8 @@ async function computeRoles(companyId: string): Promise<StageReadiness> {
 }
 
 async function computePeople(companyId: string): Promise<StageReadiness> {
-  const staff = await (prisma as any).staffRecord.findMany({
-    where: { companyId, isActive: true },
+  const staff = await forCompany(companyId).staffRecord.findMany({
+    where: { isActive: true },
     select: { departmentId: true, designationId: true },
   })
 
@@ -173,8 +172,8 @@ async function computePeople(companyId: string): Promise<StageReadiness> {
 }
 
 async function computePayroll(companyId: string): Promise<StageReadiness> {
-  const templates = await (prisma as any).payrollTemplate.findMany({
-    where: { companyId },
+  const templates = await forCompany(companyId).payrollTemplate.findMany({
+    where: { },
     select: {
       id: true,
       fields: { select: { section: true } },

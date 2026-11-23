@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
       return withCors(ApiResponse.error('Select at least one module of interest.', 400), origin)
     }
 
-    const created = await (prisma as any).demoRequest.create({
+    const created = await prisma.demoRequest.create({
       data: {
         id: randomUUID(),
         firstName,

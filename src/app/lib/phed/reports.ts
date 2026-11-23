@@ -369,7 +369,7 @@ export function buildCostCentreSummary(
   // ── Sheet 1 & 2: feeder grid + region rollups ───────────────
   const f1Rows: Record<string, any>[] = []
   const f2Rows: Record<string, any>[] = []
-  let grand = { gross: 0, pension: 0, erobrea: 0, nsitf: 0, itf: 0, staffCost: 0, basic: 0 }
+  const grand = { gross: 0, pension: 0, erobrea: 0, nsitf: 0, itf: 0, staffCost: 0, basic: 0 }
 
   const regionStat = (list: Payroll[]) => {
     let gross = 0, pension = 0, basic = 0, erobrea = 0
@@ -702,7 +702,7 @@ export function buildMultiPeriodAggregate(
 
 // ── Helpers ───────────────────────────────────────────────────
 
-function toNum(v: any): number {
+export function toNum(v: any): number {
   if (v === null || v === undefined) return 0
   if (typeof v === 'object' && typeof v.toNumber === 'function') return v.toNumber()
   return Number(v) || 0

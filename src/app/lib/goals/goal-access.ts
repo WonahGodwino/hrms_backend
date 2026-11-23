@@ -38,7 +38,8 @@ export function withGoalAuth<P = Record<string, string>>(
 ) {
   return async (
     request: NextRequest,
-    context?: RouteContext<P>,
+    // Next 15 always passes the route context (params as a Promise).
+    context: RouteContext<P>,
   ): Promise<Response> => {
     const origin = request.headers.get("origin");
     try {

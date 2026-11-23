@@ -5,11 +5,15 @@ import bcrypt from 'bcryptjs'
 import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { signToken } from '@/app/lib/auth'
+import { signRefreshToken } from '@/app/lib/auth/refresh-token'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { phedAccountRateLimit, phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { readJsonBody } from '@/app/lib/validation/request-body'
+import { loginBodySchema } from '@/app/lib/validation/auth-schemas'
 import { getEnabledModules, getArchivedModuleKeys } from '@/app/lib/module-access'
 import { getActiveElevatedRole } from '@/app/lib/role-elevation'
 import { getClientIp, logStaffActivity, parseUserAgent } from '@/app/lib/device/device-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 const MAX_DEVICES = 3
 
@@ -23,21 +27,24 @@ export async function POST(request: NextRequest) {
   if (rl) return withCors(rl, origin)
 
   try {
-    const body = await request.json()
-    const { email, password, companyId, dropDeviceId } = body || {}
-
-    if (!email || !password) {
+    // API-002: a missing, malformed or non-JSON body is a 400, not a 500.
+    const parsedBody = await readJsonBody(request, loginBodySchema)
+    if (!parsedBody.ok) {
       return withCors(ApiResponse.error('Email and password are required', 400), origin)
     }
+    const { email, password, companyId, dropDeviceId } = parsedBody.data
 
     const cleanEmail = email.toLowerCase().trim()
 
+    // SEC-010: per-account limit, so rotating IP addresses does not help.
+    const accountLimited = phedAccountRateLimit(request, 'auth', cleanEmail)
+    if (accountLimited) return withCors(accountLimited, origin)
+
     // Multi-company safe lookup — only ever consider active accounts
     const candidates = companyId
-      ? await prisma.staffRecord.findMany({
+      ? await forCompany(companyId.toString()).staffRecord.findMany({
           where: {
             email: cleanEmail,
-            companyId: companyId.toString(),
             isActive: true,
           },
           include: {
@@ -206,7 +213,11 @@ export async function POST(request: NextRequest) {
         // Archive instead of delete — the device's record survives in the
         // account's device history and can be reactivated by a later login
         // from that same browser if a slot is free.
-        await prisma.device.update({
+        // DB-002: evicting the chosen device and registering this one happen
+        // together, so a failure never frees a slot without using it.
+        const incoming = device
+        device = await prisma.$transaction(async (tx) => {
+        await tx.device.update({
           where: { id: droppedDevice.id },
           data: {
             archivedAt: new Date(),
@@ -217,21 +228,12 @@ export async function POST(request: NextRequest) {
             revokedReason: 'EVICTED',
           },
         })
-        await logStaffActivity({
-          staffRecordId: staff.id,
-          companyId: staff.companyId,
-          action: 'DEVICE_EVICTED',
-          performedById: staff.id,
-          performedByName: `${staff.firstName} ${staff.lastName}`,
-          performedByRole: staff.role,
-          details: { deviceId: droppedDevice.id, deviceName: droppedDevice.deviceName, deviceType: droppedDevice.deviceType, ipAddress: droppedDevice.ipAddress, archived: true },
-        })
 
-        if (device) {
+        if (incoming) {
           // The incoming device is the previously evicted row itself —
           // unarchive it in place (createdAt preserved).
-          device = await prisma.device.update({
-            where: { id: device.id },
+          return tx.device.update({
+            where: { id: incoming.id },
             data: {
               isActive: true,
               lastActiveAt: new Date(),
@@ -246,11 +248,21 @@ export async function POST(request: NextRequest) {
               revokedReason: null,
             },
           })
-        } else {
-          device = await prisma.device.create({
-            data: { staffRecordId: staff.id, deviceKey, deviceName, deviceType, ipAddress, userAgent },
-          })
         }
+        return tx.device.create({
+          data: { staffRecordId: staff.id, deviceKey, deviceName, deviceType, ipAddress, userAgent },
+        })
+        })
+
+        await logStaffActivity({
+          staffRecordId: staff.id,
+          companyId: staff.companyId,
+          action: 'DEVICE_EVICTED',
+          performedById: staff.id,
+          performedByName: `${staff.firstName} ${staff.lastName}`,
+          performedByRole: staff.role,
+          details: { deviceId: droppedDevice.id, deviceName: droppedDevice.deviceName, deviceType: droppedDevice.deviceType, ipAddress: droppedDevice.ipAddress, archived: true },
+        })
         await logStaffActivity({
           staffRecordId: staff.id,
           companyId: staff.companyId,
@@ -305,6 +317,7 @@ export async function POST(request: NextRequest) {
       ApiResponse.success(
         {
           token,
+          refreshToken: signRefreshToken({ userId: staff.id, deviceId: device!.id }),
           user: {
             id: staff.id,
             email: staff.email,

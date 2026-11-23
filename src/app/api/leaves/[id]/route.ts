@@ -12,6 +12,7 @@ import {
   loadSteps,
   serializeSteps
 } from '@/app/lib/leave/approval-chain'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -145,10 +146,9 @@ export async function GET(
         )
       }
     } else if (user.role !== 'SUPER_ADMIN') {
-      const userAssignment = await prisma.userCompany.findFirst({
+      const userAssignment = await forCompany(leave.companyId).userCompany.findFirst({
         where: {
           userId: user.userId,
-          companyId: leave.companyId,
           role: { in: ['HR', 'ADMIN', 'ALL'] }
         }
       })

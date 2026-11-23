@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -20,6 +20,7 @@ import {
   resolveScoreWeights,
   startParticipantPhase,
 } from "@/app/lib/manager-review";
+import { emitAutomationEvent, kickAutomation } from "@/app/lib/automation-events";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -294,7 +295,6 @@ export async function POST(
       });
 
       try {
-        const { emitAutomationEvent } = require("@/app/lib/automation-events");
         const nowMs = Date.now();
         await emitAutomationEvent(tx, {
           companyId,
@@ -310,13 +310,12 @@ export async function POST(
             calibratedOverallScore: newOverall,
           },
         });
-      } catch {}
+      } catch { /* ignored: best-effort, failure is non-fatal */ }
     });
 
     try {
-      const { kickAutomation } = require("@/app/lib/automation-events");
       kickAutomation(companyId);
-    } catch {}
+    } catch { /* ignored: best-effort, failure is non-fatal */ }
 
     const fresh = await loadParticipant(participantId, companyId);
     return withCors(

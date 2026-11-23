@@ -7,12 +7,14 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveBUAccessById, logBUAudit, staffName, initialsOf } from '@/app/lib/business-units/bu-utils'
+import { forCompany } from '@/app/lib/data/tenant'
+import { validStaffId } from '@/app/lib/business-units/route-helpers'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 async function loadBU(id: string, companyId: string) {
-  return (prisma as any).businessUnit.findFirst({
-    where: { id, companyId },
+  return forCompany(companyId).businessUnit.findFirst({
+    where: { id },
     include: {
       head: { select: { id: true, firstName: true, lastName: true } },
       assistantHead: { select: { id: true, firstName: true, lastName: true } },
@@ -41,12 +43,7 @@ function serialize(u: any) {
   }
 }
 
-async function validStaffId(id: string | undefined | null, companyId: string): Promise<string | null> {
-  const trimmed = (id || '').trim()
-  if (!trimmed) return null
-  const staff = await prisma.staffRecord.findFirst({ where: { id: trimmed, companyId }, select: { id: true } })
-  return staff ? staff.id : null
-}
+
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const origin = req.headers.get('origin')
@@ -84,8 +81,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (body.name !== undefined) {
       const name = String(body.name).trim()
       if (!name) return withCors(ApiResponse.error('Business Unit name cannot be empty', 400), origin)
-      const dup = await (prisma as any).businessUnit.findFirst({
-        where: { companyId, archived: 0, id: { not: id }, name: { equals: name, mode: 'insensitive' } },
+      const dup = await forCompany(companyId).businessUnit.findFirst({
+        where: { archived: 0, id: { not: id }, name: { equals: name, mode: 'insensitive' } },
         select: { id: true },
       })
       if (dup) return withCors(ApiResponse.error('A business unit with this name already exists', 409), origin)
@@ -95,8 +92,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (body.code !== undefined) {
       const code = String(body.code).trim() || null
       if (code) {
-        const dup = await (prisma as any).businessUnit.findFirst({
-          where: { companyId, id: { not: id }, code: { equals: code, mode: 'insensitive' } },
+        const dup = await forCompany(companyId).businessUnit.findFirst({
+          where: { id: { not: id }, code: { equals: code, mode: 'insensitive' } },
           select: { id: true },
         })
         if (dup) return withCors(ApiResponse.error('A business unit with this code already exists', 409), origin)
@@ -109,7 +106,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (body.headId !== undefined) data.headId = await validStaffId(body.headId, companyId)
     if (body.assistantHeadId !== undefined) data.assistantHeadId = await validStaffId(body.assistantHeadId, companyId)
 
-    await (prisma as any).businessUnit.update({ where: { id }, data })
+    await prisma.businessUnit.update({ where: { id }, data })
     await logBUAudit(companyId, id, 'Updated business unit', user as any, `Updated "${data.name || existing.name}"`)
 
     const updated = await loadBU(id, companyId)

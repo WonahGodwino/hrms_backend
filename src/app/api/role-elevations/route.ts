@@ -13,6 +13,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveScopedCompanyId } from '@/app/lib/company-scope'
 import { canGrantRole, rankOf } from '@/app/lib/role-elevation'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -25,8 +26,8 @@ const staffName = (s: any) => `${s?.firstName || ''} ${s?.lastName || ''}`.trim(
 // DB status matches reality — cheap, company-scoped, runs on list reads.
 async function sweepExpired(companyId: string) {
   try {
-    await (prisma as any).roleElevation.updateMany({
-      where: { companyId, status: 'ACTIVE', expiresAt: { lte: new Date() } },
+    await forCompany(companyId).roleElevation.updateMany({
+      where: { status: 'ACTIVE', expiresAt: { lte: new Date() } },
       data: { status: 'EXPIRED' },
     })
   } catch (e) {
@@ -81,7 +82,7 @@ export async function GET(req: NextRequest) {
     const where: any = { companyId }
     if (statusFilter && ['ACTIVE', 'REVOKED', 'EXPIRED'].includes(statusFilter)) where.status = statusFilter
 
-    const rows = await (prisma as any).roleElevation.findMany({
+    const rows = await prisma.roleElevation.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       take: 200,
@@ -132,8 +133,8 @@ export async function POST(req: NextRequest) {
     const expiresAt = new Date(Date.now() + hrs * 60 * 60 * 1000)
 
     // Target must be a staff member of this company.
-    const staff = await prisma.staffRecord.findFirst({
-      where: { id: staffId, companyId },
+    const staff = await forCompany(companyId).staffRecord.findFirst({
+      where: { id: staffId },
       select: { id: true, firstName: true, lastName: true, email: true, role: true },
     })
     if (!staff) return withCors(ApiResponse.error('Staff member not found in this company', 404), origin)
@@ -145,9 +146,9 @@ export async function POST(req: NextRequest) {
 
     // One active elevation per staff/company — revoke the existing one first.
     // Only a non-expired ACTIVE row blocks (an ACTIVE-but-lapsed one doesn't).
-    const existingActive = await (prisma as any).roleElevation.findFirst({
+    const existingActive = await forCompany(companyId).roleElevation.findFirst({
       where: {
-        staffId, companyId, status: 'ACTIVE',
+        staffId, status: 'ACTIVE',
         OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
       },
       select: { id: true },
@@ -162,7 +163,7 @@ export async function POST(req: NextRequest) {
       select: { firstName: true, lastName: true },
     })
 
-    const created = await (prisma as any).roleElevation.create({
+    const created = await prisma.roleElevation.create({
       data: {
         companyId,
         staffId,

@@ -10,6 +10,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { parseOfferImportFile, EMAIL_RE, parseApprovalFlag } from '@/app/lib/offers/bulk-import-helpers'
 import { splitName } from '@/app/lib/offers/ad-hoc-helpers'
 import { applyApprovalWorkflow } from '@/app/lib/offers/approval-workflow'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest) {
     // Resolve template body when a template is selected
     let templateBody: string | null = null
     if (templateId) {
-      const tpl = await (prisma as any).offerTemplate.findFirst({ where: { id: templateId, companyId } })
+      const tpl = await forCompany(companyId).offerTemplate.findFirst({ where: { id: templateId } })
       if (!tpl) return withCors(ApiResponse.error('Selected template not found', 400), origin)
       if (tpl.archived) return withCors(ApiResponse.error('Selected template has been archived', 400), origin)
       templateBody = tpl.bodyHtml || null
@@ -63,9 +64,8 @@ export async function POST(request: NextRequest) {
 
       try {
         // Resolve the designation by code, id, or title (position may be a title).
-        const designation = await (prisma as any).designation.findFirst({
+        const designation = await forCompany(companyId).designation.findFirst({
           where: {
-            companyId,
             OR: [
               { id: effectiveDesignation },
               { code: { equals: effectiveDesignation, mode: 'insensitive' } },
@@ -80,9 +80,9 @@ export async function POST(request: NextRequest) {
         const effectiveJob = row.jobId || row.position || ''
         let job = null as any
         if (effectiveJob) {
-          job = await prisma.job.findFirst({
+          job = await forCompany(companyId).job.findFirst({
             where: {
-              companyId, archived: 0,
+              archived: 0,
               OR: [
                 { id: effectiveJob },
                 { title: { equals: effectiveJob, mode: 'insensitive' } },
@@ -97,17 +97,17 @@ export async function POST(request: NextRequest) {
         // Resolve the candidate: match by email first, then by candidateId
         let candidate = null as any
         if (row.candidateId) {
-          candidate = await prisma.candidate.findFirst({ where: { id: row.candidateId, companyId } })
+          candidate = await forCompany(companyId).candidate.findFirst({ where: { id: row.candidateId } })
           if (!candidate) {
-            const appById = await prisma.jobApplication.findFirst({
-              where: { id: row.candidateId, companyId },
+            const appById = await forCompany(companyId).jobApplication.findFirst({
+              where: { id: row.candidateId },
               include: { candidate: true },
             })
             if (appById) candidate = appById.candidate
           }
         }
         if (!candidate) {
-          candidate = await prisma.candidate.findFirst({ where: { email: row.email, companyId } })
+          candidate = await forCompany(companyId).candidate.findFirst({ where: { email: row.email } })
         }
         // Create a new candidate if not found (for external / already-hired candidates)
         if (!candidate) {

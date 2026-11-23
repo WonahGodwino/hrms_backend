@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { fail, nameOf, ok, readCtx, readText, writeCtx } from "@/app/lib/pip";
@@ -11,6 +11,7 @@ import {
   notifyReportShared,
   parseReportConfig,
 } from "@/app/lib/comparison-report";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -29,9 +30,8 @@ export async function GET(request: NextRequest) {
     if (!c.ok) return c.response;
     const { actor, companyId, staffId } = c.ctx;
     if (!staffId) return ok(origin, { reports: [] });
-    const rows = await prisma.comparisonReport.findMany({
+    const rows = await forCompany(companyId).comparisonReport.findMany({
       where: {
-        companyId,
         status: { not: "ARCHIVED" },
         type: { not: "EMPLOYEE_PROFILE" },
         OR: [

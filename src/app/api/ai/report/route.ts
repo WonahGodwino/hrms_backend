@@ -2,9 +2,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { withCors } from '@/app/lib/cors'
 import { openaiUsageTracker } from '@/app/lib/openaiUsage'
+import { asNumber } from '@/app/lib/prisma-utils'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
 
 export async function OPTIONS(request: NextRequest) {
   const origin = request.headers.get('origin')
@@ -254,7 +256,7 @@ export async function GET(request: NextRequest) {
     return withCors(response, origin)
 
   } catch (error: unknown) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('Error generating AI cost report:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }
@@ -464,17 +466,17 @@ async function generateSummaryReport(
       return {
         'Company Name': company.companyName,
         'Company ID': company.id,
-        'Monthly Budget ($)': company.aiSettings?.monthlyBudget || 100,
+        'Monthly Budget ($)': asNumber(company.aiSettings?.monthlyBudget) || 100,
         'Total Applications': totalApplications,
         'Total Cost ($)': parseFloat(totalCost.toFixed(4)),
         'Average Cost/Review ($)': parseFloat(avgCostPerReview.toFixed(4)),
         'Total Tokens Used': totalTokens,
-        'Budget Used (%)': company.aiSettings?.monthlyBudget 
-          ? parseFloat(((totalCost / company.aiSettings.monthlyBudget) * 100).toFixed(1))
+        'Budget Used (%)': asNumber(company.aiSettings?.monthlyBudget) 
+          ? parseFloat(((totalCost / asNumber(company.aiSettings.monthlyBudget)) * 100).toFixed(1))
           : 0,
-        'Status': company.aiSettings?.monthlyBudget && totalCost > company.aiSettings.monthlyBudget 
+        'Status': asNumber(company.aiSettings?.monthlyBudget) && totalCost > asNumber(company.aiSettings.monthlyBudget) 
           ? 'Over Budget' 
-          : company.aiSettings?.monthlyBudget && (totalCost / company.aiSettings.monthlyBudget) > 0.9
+          : asNumber(company.aiSettings?.monthlyBudget) && (totalCost / asNumber(company.aiSettings.monthlyBudget)) > 0.9
             ? 'Near Limit'
             : 'Normal'
       }
@@ -616,7 +618,7 @@ async function generateAuditReport(
     'AI Service': log.service || 'N/A',
     'Model': log.model || 'N/A',
     'Tokens Used': log.tokens || 0,
-    'Cost ($)': parseFloat((log.cost || 0).toFixed(4)),
+    'Cost ($)': parseFloat((asNumber(log.cost) || 0).toFixed(4)),
     'Endpoint': log.endpoint || 'N/A'
   }))
 

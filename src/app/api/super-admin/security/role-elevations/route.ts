@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
 
 		const now = new Date();
 
-		const elevations = await (prisma as any).roleElevation.findMany({
+		const elevations = await prisma.roleElevation.findMany({
 			where: { status: 'ACTIVE' },
 			orderBy: { expiresAt: 'asc' },
 			take: 25,

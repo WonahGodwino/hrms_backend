@@ -6,6 +6,7 @@
 // redirected to an external URL; presigned URLs are only for server-side use.
 import { prisma } from '@/app/lib/db'
 import { isS3Configured, putS3Object, getS3Object, presignS3Get } from './s3'
+import { log, serializeError } from '@/app/lib/observability/logger'
 
 const PREFIX = 'payslips'
 
@@ -53,6 +54,6 @@ export async function uploadPayslipToS3(input: {
   await putPayslipObject(key, bytes)
   await prisma.payslip
     .update({ where: { id: input.payslipId }, data: { s3Key: key } })
-    .catch(() => {})
+    .catch((err) => log.warn('[payslips] object stored but key not recorded', { key, error: serializeError(err) }))
   return key
 }

@@ -13,21 +13,24 @@ import { requireRole } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 import { permanentlyDeleteStaff } from '@/app/lib/staff/deleteStaffPermanently';
+import { readJsonBodyOrEmpty } from '@/app/lib/validation/request-body';
+import { reasonBodySchema } from '@/app/lib/validation/payroll-staff-schemas';
 
 type RouteParams = {
-	params: {
+	params: Promise<{
 		id: string;
-	};
+	}>;
 };
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
 }
 
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
-	const origin = request.headers.get('origin');
+export async function DELETE(request: NextRequest, props: RouteParams) {
+    const params = await props.params;
+    const origin = request.headers.get('origin');
 
-	try {
+    try {
 		const authHeader = request.headers.get('authorization');
 		if (!authHeader) {
 			return withCors(ApiResponse.error('Authorization header missing', 401), origin);
@@ -41,13 +44,8 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 			return withCors(ApiResponse.error('Invalid staff ID', 400), origin);
 		}
 
-		let reason: string | undefined;
-		try {
-			const body = await request.json();
-			reason = body?.reason;
-		} catch {
-			// No body provided — reason is optional.
-		}
+		// A missing or malformed body just means "no reason given".
+		const reason = (await readJsonBodyOrEmpty(request, reasonBodySchema)).reason;
 
 		const result = await permanentlyDeleteStaff({ userId: user.userId, role: user.role }, id, reason);
 

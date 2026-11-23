@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { RouteContext } from "@/app/lib/self-appraisal";
 import { nameOf, notFound, ok, readCtx, writeCtx } from "@/app/lib/pip";
 import { REPORT_LABELS, canSeeReport } from "@/app/lib/comparison-report";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -24,8 +25,8 @@ export async function GET(
     );
     if (!c.ok) return c.response;
     const { actor, companyId, staffId } = c.ctx;
-    const r = await prisma.comparisonReport.findFirst({
-      where: { id, companyId, status: { not: "ARCHIVED" } },
+    const r = await forCompany(companyId).comparisonReport.findFirst({
+      where: { id, status: { not: "ARCHIVED" } },
       include: {
         createdBy: { select: { firstName: true, lastName: true } },
         cycle: { select: { id: true, name: true } },
@@ -67,10 +68,9 @@ export async function DELETE(
     );
     if (!c.ok) return c.response;
     const { staffId, companyId } = c.ctx;
-    const r = await prisma.comparisonReport.findFirst({
+    const r = await forCompany(companyId).comparisonReport.findFirst({
       where: {
         id,
-        companyId,
         createdById: staffId,
         status: { not: "ARCHIVED" },
       },

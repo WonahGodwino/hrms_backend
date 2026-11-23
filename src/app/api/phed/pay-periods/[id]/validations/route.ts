@@ -6,23 +6,33 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { getPayPeriodFreezeState } from '@/app/lib/phed/pay-period-lock'
+import { findAccessiblePayPeriod } from '@/app/lib/phed/pay-period-access'
+import { PhedValidationStatus } from '@prisma/client'
+import { enumValueOrNull } from '@/app/lib/prisma-utils'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // GET all validations for a period
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requirePhedPayrollReadAccess(token)
+    const user = await requirePhedPayrollReadAccess(token)
+    if (!(await findAccessiblePayPeriod(user, params.id)))
+      return withCors(ApiResponse.notFound('Pay period not found'), origin)
 
     const p      = new URL(req.url).searchParams
     const status = p.get('status')
 
-    const validations = await (prisma as any).phedValidation.findMany({
-      where: { payPeriodId: params.id, ...(status ? { status } : {}) },
+    // An unknown status used to fail inside Prisma (500); it is now a 400.
+    const statusValue = enumValueOrNull(PhedValidationStatus, status)
+    if (status && !statusValue) return withCors(ApiResponse.error('Invalid status', 400), origin)
+
+    const validations = await prisma.phedValidation.findMany({
+      where: { payPeriodId: params.id, ...(statusValue ? { status: statusValue } : {}) },
       include: { staff: { select: { id: true, staffId: true, firstName: true, lastName: true, department: true, category: true, region: { select: { name: true } } } } },
       orderBy: { staff: { lastName: 'asc' } },
     })
@@ -31,7 +41,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 }
 
 // PUT — bulk update validations: body { updates: [{ staffId, status, reason }] }
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -39,7 +50,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user  = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
+    const period = await findAccessiblePayPeriod(user, params.id)
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     const freeze = await getPayPeriodFreezeState(params.id, period.status)
     if (freeze.frozen)
@@ -58,7 +69,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       if (!validStatuses.includes(u.status)) { errors.push(`Invalid status "${u.status}" for staff ${u.staffId}`); continue }
 
       try {
-        await (prisma as any).phedValidation.update({
+        await prisma.phedValidation.update({
           where: { payPeriodId_staffId: { payPeriodId: params.id, staffId: u.staffId } },
           data: {
             status:      u.status,
@@ -78,15 +89,16 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 }
 
 // DELETE — remove a single staff validation entry (validation phase only)
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
+    const period = await findAccessiblePayPeriod(user, params.id)
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     const freeze = await getPayPeriodFreezeState(params.id, period.status)
     if (freeze.frozen)
@@ -95,7 +107,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     const staffId = new URL(req.url).searchParams.get('staffId')
     if (!staffId) return withCors(ApiResponse.error('staffId is required', 400), origin)
 
-    await (prisma as any).phedValidation.deleteMany({
+    await prisma.phedValidation.deleteMany({
       where: { payPeriodId: params.id, staffId },
     })
 

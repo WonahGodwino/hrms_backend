@@ -19,8 +19,9 @@ export async function OPTIONS(request: NextRequest) {
 // Soft unassign (status UNASSIGNED). Only while the cycle hasn't started.
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; assignmentId: string } },
+  props: { params: Promise<{ id: string; assignmentId: string }> }
 ) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   const reject = (status: number, body: Record<string, unknown>) =>
     withCors(

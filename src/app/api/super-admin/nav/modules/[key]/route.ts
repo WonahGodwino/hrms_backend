@@ -59,10 +59,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ke
       else return withCors(ApiResponse.error('navIcon must be a non-empty string or null', 400), origin)
     }
 
-    const existing = await (prisma as any).platformModule.findUnique({ where: { key } })
+    const existing = await prisma.platformModule.findUnique({ where: { key } })
     if (!existing) return withCors(ApiResponse.error('Unknown module key', 404), origin)
 
-    const updated = await (prisma as any).platformModule.update({
+    const updated = await prisma.platformModule.update({
       where: { key },
       data,
       select: { key: true, name: true, navSectionId: true, navOrder: true, navLabel: true, navIcon: true },

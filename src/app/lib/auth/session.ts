@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto'
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { signToken } from '@/app/lib/auth'
+import { signRefreshToken } from '@/app/lib/auth/refresh-token'
 import { getEnabledModules, getArchivedModuleKeys } from '@/app/lib/module-access'
 import { getActiveElevatedRole } from '@/app/lib/role-elevation'
 import { getClientIp, logStaffActivity, parseUserAgent, type StaffActivityAction } from '@/app/lib/device/device-utils'
@@ -19,6 +20,7 @@ export type IssueSessionResult =
   | {
       ok: true
       token: string
+      refreshToken: string
       user: Record<string, unknown>
       company: Record<string, unknown> | null
       enabledModules: string[]
@@ -230,6 +232,7 @@ export async function issueSession(
   return {
     ok: true,
     token,
+    refreshToken: signRefreshToken({ userId: staff.id, deviceId: device!.id }),
     user: {
       id: staff.id,
       email: staff.email,

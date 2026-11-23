@@ -1,9 +1,9 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -32,30 +32,29 @@ export async function GET(req: NextRequest) {
 
     const [totalPrograms, activePrograms, enrolledCount, completedCount, inProgressCount, expiredCerts, expiringCerts, currentWindowCompletions, priorCompletions] =
       await Promise.all([
-        prisma.trainingProgram.count({ where: { companyId, deletedAt: null } }),
-        prisma.trainingProgram.count({ where: { companyId, deletedAt: null, status: 'ACTIVE' } }),
-        prisma.participantProgress.count({ where: { companyId } }),
-        prisma.participantProgress.count({ where: { companyId, trainingStatus: 'COMPLETED' } }),
-        prisma.participantProgress.count({ where: { companyId, trainingStatus: 'IN PROGRESS' } }),
-        prisma.certificationRecord.count({ where: { companyId, status: 'Expired' } }),
-        prisma.certificationRecord.count({
-          where: { companyId, status: { not: 'Expired' }, expiryDate: { gte: new Date(), lte: new Date(Date.now() + 30 * 86_400_000) } },
+        forCompany(companyId).trainingProgram.count({ where: { deletedAt: null } }),
+        forCompany(companyId).trainingProgram.count({ where: { deletedAt: null, status: 'ACTIVE' } }),
+        forCompany(companyId).participantProgress.count(),
+        forCompany(companyId).participantProgress.count({ where: { trainingStatus: 'COMPLETED' } }),
+        forCompany(companyId).participantProgress.count({ where: { trainingStatus: 'IN PROGRESS' } }),
+        forCompany(companyId).certificationRecord.count({ where: { status: 'Expired' } }),
+        forCompany(companyId).certificationRecord.count({
+          where: { status: { not: 'Expired' }, expiryDate: { gte: new Date(), lte: new Date(Date.now() + 30 * 86_400_000) } },
         }),
         // Completions in the current window, to compare against the previous one
-        prisma.participantProgress.count({
-          where: { companyId, trainingStatus: 'COMPLETED', completionDate: { gte: since } },
+        forCompany(companyId).participantProgress.count({
+          where: { trainingStatus: 'COMPLETED', completionDate: { gte: since } },
         }),
         // Completions in the previous equal-length window
-        prisma.participantProgress.count({
-          where: { companyId, trainingStatus: 'COMPLETED', completionDate: { gte: priorSince, lt: since } },
+        forCompany(companyId).participantProgress.count({
+          where: { trainingStatus: 'COMPLETED', completionDate: { gte: priorSince, lt: since } },
         }),
       ])
 
     const completionRate = enrolledCount > 0 ? Math.round((completedCount / enrolledCount) * 100) : 0
 
-    const progress = await prisma.participantProgress.findMany({
+    const progress = await forCompany(companyId).participantProgress.findMany({
       where: {
-        companyId,
         OR: [{ updatedAt: { gte: since } }, { completionDate: { gte: since } }],
       },
       select: {

@@ -10,19 +10,14 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import rateLimit from '@/app/lib/rateLimiter'
 import { verifyOfferResponseToken } from '@/app/lib/offers/response-token'
 import { getResponseDeadline, isResponseExpired } from '@/app/lib/offers/response-window'
-import { promises as fs } from 'fs'
-import * as path from 'path'
-import { uploadFileToS3 } from '@/app/lib/storage/upload-files'
+import { detectAllowedType, saveCandidateDoc } from '@/app/lib/recruitment/candidate-doc-storage'
+import { clientIp, fmtDeadline } from '@/app/lib/recruitment/route-helpers'
 
 const ipLimiter = rateLimit({ interval: 60 * 1000, uniqueTokenPerInterval: 5000 })
 
-const clientIp = (request: NextRequest) =>
-  request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-  request.headers.get('x-real-ip') ||
-  'unknown'
 
-const fmtDeadline = (d: Date | null) =>
-  d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : ''
+
+
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -70,15 +65,13 @@ export async function POST(request: NextRequest) {
       ), origin)
     }
 
-    // Persist under public/ (same convention as the HR executed-contract upload).
+    // SEC-003: the bytes must really be a PDF; stored privately, not under public/.
     const buffer = Buffer.from(await file.arrayBuffer())
-    const uploadDir = path.join(process.cwd(), 'public', 'offers', 'executed', offer.id)
-    await fs.mkdir(uploadDir, { recursive: true })
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-    const fileName = `${Date.now()}_${safeName}`
-    await fs.writeFile(path.join(uploadDir, fileName), buffer)
-    const relativePath = `/offers/executed/${offer.id}/${fileName}`
-    await uploadFileToS3(relativePath, buffer, 'application/pdf')
+    const detected = await detectAllowedType(buffer, 'pdf')
+    if (!detected) {
+      return withCors(ApiResponse.error('The signed offer letter must be a PDF', 400), origin)
+    }
+    const relativePath = await saveCandidateDoc(['offers', 'executed', offer.id], file.name, detected.ext, buffer)
 
     const now = new Date()
     const meta = (offer.metadata && typeof offer.metadata === 'object') ? offer.metadata as any : {}

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -10,6 +10,7 @@ import {
   resolveCalibrator,
   serializeSession,
 } from "@/app/lib/calibration";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -74,8 +75,8 @@ export async function POST(
       );
     const actorId = actor.staffRecordId;
 
-    const session = await prisma.calibrationSession.findFirst({
-      where: { id, companyId },
+    const session = await forCompany(companyId).calibrationSession.findFirst({
+      where: { id },
       select: SESSION_SELECT,
     });
     if (!session)
@@ -135,8 +136,8 @@ export async function POST(
       }
     });
 
-    const fresh = await prisma.calibrationSession.findFirstOrThrow({
-      where: { id, companyId },
+    const fresh = await forCompany(companyId).calibrationSession.findFirstOrThrow({
+      where: { id },
       select: SESSION_SELECT,
     });
     return withCors(

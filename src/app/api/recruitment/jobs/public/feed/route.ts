@@ -9,6 +9,7 @@ import { prisma } from "@/app/lib/db";
 import { ApiResponse, formatError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { buildJobFeedXml, buildJobPostingJsonLd, type JobFeedJob } from "@/app/lib/recruitment/job-feed";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -54,9 +55,8 @@ export async function GET(request: NextRequest) {
     }
 
     const now = new Date();
-    const jobs = await prisma.job.findMany({
+    const jobs = await forCompany(companyId).job.findMany({
       where: {
-        companyId,
         status: "ACTIVE",
         archived: 0,
         OR: [{ expirationDate: { gte: now } }, { expirationDate: null }],

@@ -8,16 +8,12 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveBUCompanyId, logBUAudit, staffName } from '@/app/lib/business-units/bu-utils'
+import { forCompany } from '@/app/lib/data/tenant'
+import { validStaffId } from '@/app/lib/business-units/route-helpers'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-// Validate an optional staff id belongs to the company; returns the id or null.
-async function validStaffId(id: string | undefined | null, companyId: string): Promise<string | null> {
-  const trimmed = (id || '').trim()
-  if (!trimmed) return null
-  const staff = await prisma.staffRecord.findFirst({ where: { id: trimmed, companyId }, select: { id: true } })
-  return staff ? staff.id : null
-}
+
 
 export async function POST(req: NextRequest) {
   const origin = req.headers.get('origin')
@@ -36,15 +32,15 @@ export async function POST(req: NextRequest) {
     const code = String(body.code || '').trim() || null
 
     // Case-insensitive duplicate-name guard within the company.
-    const dupName = await (prisma as any).businessUnit.findFirst({
-      where: { companyId, archived: 0, name: { equals: name, mode: 'insensitive' } },
+    const dupName = await forCompany(companyId).businessUnit.findFirst({
+      where: { archived: 0, name: { equals: name, mode: 'insensitive' } },
       select: { id: true },
     })
     if (dupName) return withCors(ApiResponse.error('A business unit with this name already exists', 409), origin)
 
     if (code) {
-      const dupCode = await (prisma as any).businessUnit.findFirst({
-        where: { companyId, code: { equals: code, mode: 'insensitive' } },
+      const dupCode = await forCompany(companyId).businessUnit.findFirst({
+        where: { code: { equals: code, mode: 'insensitive' } },
         select: { id: true },
       })
       if (dupCode) return withCors(ApiResponse.error('A business unit with this code already exists', 409), origin)
@@ -55,7 +51,7 @@ export async function POST(req: NextRequest) {
 
     await assertTrialCapacity(companyId, 'businessUnits')
 
-    const created = await (prisma as any).businessUnit.create({
+    const created = await prisma.businessUnit.create({
       data: {
         companyId,
         name,

@@ -37,7 +37,8 @@ export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function POST(request: NextRequest, { params }: { params: { runId: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ runId: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {

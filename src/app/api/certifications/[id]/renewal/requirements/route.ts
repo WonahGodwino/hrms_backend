@@ -4,6 +4,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -13,7 +14,8 @@ export type RequirementStatus = 'completed' | 'pending' | 'not_started' | 'faile
 
 // GET /api/certifications/[id]/renewal/requirements
 // Returns list of renewal requirements and statuses (completed, pending, not_started, failed, blocked, unavailable)
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -41,9 +43,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     }
 
     // Check saved draft for this renewal
-    const draft = await prisma.trainingAuditLog.findFirst({
+    const draft = await forCompany(companyId).trainingAuditLog.findFirst({
       where: {
-        companyId,
         actorId: user.userId,
         entityType: 'certification_renewal_draft',
         entityId: params.id,
@@ -51,9 +52,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     })
 
     // Check assessment requirements & existing attempts
-    const assessment = await prisma.assessment.findFirst({
+    const assessment = await forCompany(companyId).assessment.findFirst({
       where: {
-        companyId,
         category: { contains: record.certificationType.type, mode: 'insensitive' },
         status: 'ACTIVE',
       },

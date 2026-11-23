@@ -1,5 +1,6 @@
 import { prisma } from "@/app/lib/db";
 import { toDisplayCategory } from "./competency-utils";
+import { forCompany } from '@/app/lib/data/tenant';
 
 export const DEFAULT_THRESHOLD = 70;
 const MIN_THRESHOLD = 50;
@@ -83,8 +84,8 @@ type Prepared = {
 };
 
 async function loadPrepared(companyId: string) {
-  const rows = await prisma.competency.findMany({
-    where: { companyId, status: { in: ["ACTIVE", "DRAFT"] } },
+  const rows = await forCompany(companyId).competency.findMany({
+    where: { status: { in: ["ACTIVE", "DRAFT"] } },
     select: {
       id: true,
       name: true,
@@ -197,8 +198,8 @@ const sharedTerms = (
 async function scorePairs(companyId: string, threshold: number) {
   const { prepared, display } = await loadPrepared(companyId);
 
-  const dismissedRows = await prisma.competencyDuplicateDismissal.findMany({
-    where: { companyId },
+  const dismissedRows = await forCompany(companyId).competencyDuplicateDismissal.findMany({
+    where: { },
     select: { competencyAId: true, competencyBId: true },
   });
   const dismissed = new Set(

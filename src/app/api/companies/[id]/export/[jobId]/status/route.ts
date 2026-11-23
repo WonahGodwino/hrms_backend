@@ -4,17 +4,21 @@
 // few seconds while status is PROCESSING, same pattern as every other
 // background-job status route in this codebase.
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validateCompanyAccess } from '@/app/lib/departments/department-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string; jobId: string } }) {
+export async function GET(
+  request: NextRequest,
+  props: { params: Promise<{ id: string; jobId: string }> }
+) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -30,7 +34,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
     }
 
-    const job = await prisma.companyExportJob.findFirst({ where: { id: params.jobId, companyId: params.id } })
+    const job = await forCompany(params.id).companyExportJob.findFirst({ where: { id: params.jobId } })
     if (!job) {
       return withCors(ApiResponse.error('Export job not found', 404), origin)
     }

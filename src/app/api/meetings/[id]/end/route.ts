@@ -20,7 +20,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const user = await requireRoleAsync(token, ROLES)
     const { id } = await params
 
-    const meeting: any = await (prisma as any).meeting.findUnique({
+    const meeting: any = await prisma.meeting.findUnique({
       where: { id }, include: { participants: true },
     })
     if (!meeting) return withCors(ApiResponse.error('Meeting not found', 404), origin)
@@ -34,13 +34,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return withCors(ApiResponse.error('Only the host can end this meeting', 403), origin)
     }
 
-    await (prisma as any).meeting.update({ where: { id }, data: { status: 'ENDED' } })
+    await prisma.meeting.update({ where: { id }, data: { status: 'ENDED' } })
     // Stop any in-progress recording first — deleting the room doesn't
     // guarantee the egress job gets closed out. Keep recordingEgressId: the
     // egress_ended webhook still needs it to resolve this meeting to READY/FAILED.
     if (meeting.recordingEgressId && meeting.recordingRequested) {
       await getMeetingProvider().stopRecording(meeting.recordingEgressId).catch(() => {})
-      await (prisma as any).meeting.update({
+      await prisma.meeting.update({
         where: { id }, data: { recordingRequested: false, recordingStatus: 'PROCESSING' },
       }).catch(() => {})
     }

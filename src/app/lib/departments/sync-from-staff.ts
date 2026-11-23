@@ -27,7 +27,7 @@ const key = (s: string) => s.trim().toLowerCase()
 
 async function inChunks<T>(items: T[], size: number, fn: (chunk: T[]) => Promise<unknown>) {
   for (let i = 0; i < items.length; i += size) {
-    // eslint-disable-next-line no-await-in-loop
+     
     await fn(items.slice(i, i + size))
   }
 }
@@ -57,7 +57,7 @@ export async function runSyncFromStaff(
   const designationByTitle = new Map<string, string>()
   let designationsCreated = 0
   for (const [k, title] of titles) {
-    // eslint-disable-next-line no-await-in-loop
+     
     const { designation, created } = await findOrCreateDesignation(companyId, title)
     designationByTitle.set(k, designation.id)
     if (created) designationsCreated += 1
@@ -76,7 +76,7 @@ export async function runSyncFromStaff(
     designationLinksRepaired += 1
   }
   for (const [designationId, ids] of designationMoves) {
-    // eslint-disable-next-line no-await-in-loop
+     
     await inChunks(ids, 500, (chunk) => prisma.staffRecord.updateMany({ where: { id: { in: chunk } }, data: { designationId } }))
   }
   report('Matching designations', total, total)
@@ -91,7 +91,7 @@ export async function runSyncFromStaff(
   const departmentByName = new Map<string, string>()
   const departmentsCreatedNames: string[] = []
   for (const [k, raw] of names) {
-    // eslint-disable-next-line no-await-in-loop
+     
     const resolved = await resolveDepartmentForStaffText(companyId, raw, userId, userName)
     if (!resolved.departmentId) continue
     departmentByName.set(k, resolved.departmentId)
@@ -136,7 +136,7 @@ export async function runSyncFromStaff(
     })
   }
   for (const [departmentId, ids] of departmentMoves) {
-    // eslint-disable-next-line no-await-in-loop
+     
     await inChunks(ids, 500, (chunk) => prisma.staffRecord.updateMany({ where: { id: { in: chunk } }, data: { departmentId } }))
   }
   await inChunks(history, 500, (chunk) => prisma.departmentStaffHistory.createMany({ data: chunk }))

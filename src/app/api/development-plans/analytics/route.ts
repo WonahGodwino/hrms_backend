@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { resolveRatingBounds } from "@/app/lib/self-appraisal";
@@ -8,6 +8,7 @@ import {
   loadCompetencyPosition,
   resolveSubject,
 } from "@/app/lib/development-plans/dev-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -57,8 +58,8 @@ export async function GET(request: NextRequest) {
           },
         },
       }),
-      prisma.developmentPlan.findMany({
-        where: { companyId, staffRecordId: subjectId, status: "ACTIVE" },
+      forCompany(companyId).developmentPlan.findMany({
+        where: { staffRecordId: subjectId, status: "ACTIVE" },
         orderBy: { updatedAt: "desc" },
         select: {
           id: true,

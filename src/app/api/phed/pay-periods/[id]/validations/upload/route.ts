@@ -9,7 +9,8 @@ import { getPayPeriodFreezeState } from '@/app/lib/phed/pay-period-lock'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'upload')
   if (rl) return withCors(rl, origin)
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user  = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
+    const period = await prisma.phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     const freeze = await getPayPeriodFreezeState(params.id, period.status)
     if (freeze.frozen)
@@ -52,7 +53,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
 
     // Build staffId code → phedStaff DB id map (scoped to this company)
-    const allStaff  = await (prisma as any).phedStaff.findMany({
+    const allStaff  = await prisma.phedStaff.findMany({
       where:  { companyId: period.companyId },
       select: { id: true, staffId: true },
     })
@@ -81,7 +82,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         }
 
         try {
-          await (prisma as any).phedValidation.upsert({
+          await prisma.phedValidation.upsert({
             where: { payPeriodId_staffId: { payPeriodId: params.id, staffId: dbId } },
             create: {
               payPeriodId: params.id,
@@ -107,7 +108,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       }))
     }
 
-    await (prisma as any).phedBulkUpload.create({
+    await prisma.phedBulkUpload.create({
       data: {
         companyId:    period.companyId,
         payPeriodId:  params.id,

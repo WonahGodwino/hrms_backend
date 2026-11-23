@@ -4,13 +4,15 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { getDepartmentWithAccess, logDepartmentAction, logStaffDepartmentChange } from '@/app/lib/departments/department-utils'
+import { buildStaffTransferHistory, getDepartmentWithAccess, logDepartmentAction } from '@/app/lib/departments/department-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const authHeader = request.headers.get('authorization')
@@ -39,8 +41,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     
     const body = await request.json()
     
-    const staffCount = await prisma.staffRecord.count({ 
-      where: { departmentId: params.id, companyId: department.companyId, isActive: true }
+    const staffCount = await forCompany(department.companyId).staffRecord.count({ 
+      where: { departmentId: params.id, isActive: true }
     })
     
     if (staffCount > 0 && !body.transferToDepartmentId) {
@@ -49,36 +51,40 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     let transferMessage = ''
     if (body.transferToDepartmentId) {
-      const targetDepartment = await prisma.department.findFirst({
-        where: { id: body.transferToDepartmentId, companyId: department.companyId, status: 'Active' }
+      const targetDepartment = await forCompany(department.companyId).department.findFirst({
+        where: { id: body.transferToDepartmentId, status: 'Active' }
       })
       
       if (!targetDepartment) {
         return withCors(ApiResponse.error('Invalid transferToDepartmentId: Department not found or inactive', 400), origin)
       }
       
-      const staffToTransfer = await prisma.staffRecord.findMany({
-        where: { departmentId: params.id, companyId: department.companyId, isActive: true },
+      const staffToTransfer = await forCompany(department.companyId).staffRecord.findMany({
+        where: { departmentId: params.id, isActive: true },
         select: { id: true, position: true }
       })
       
-      for (const staff of staffToTransfer) {
-        await prisma.staffRecord.update({
-          where: { id: staff.id },
-          // Free-text `department` follows the transfer too, same reasoning
-          // as transferAllStaff() in department-utils.ts.
-          data: { departmentId: body.transferToDepartmentId, department: targetDepartment.name }
-        })
-        
-        await logStaffDepartmentChange(
-          staff.id,
-          params.id,
-          body.transferToDepartmentId,
-          staff.position,
-          staff.position,
-          user.userId,
-          'Department deactivation - automatic transfer'
-        )
+      // PERF-001: one update and one history insert for all staff, instead of
+      // two queries per staff member. Run together so the move and its
+      // history are written all-or-nothing.
+      if (staffToTransfer.length > 0) {
+        await prisma.$transaction([
+          prisma.staffRecord.updateMany({
+            where: { id: { in: staffToTransfer.map((s) => s.id) } },
+            // Free-text `department` follows the transfer too.
+            data: { departmentId: body.transferToDepartmentId, department: targetDepartment.name }
+          }),
+          prisma.departmentStaffHistory.createMany({
+            data: buildStaffTransferHistory(
+              staffToTransfer,
+              params.id,
+              body.transferToDepartmentId,
+              department.companyId,
+              user.userId,
+              'Department deactivation - automatic transfer'
+            )
+          })
+        ])
       }
       
       transferMessage = ` and ${staffCount} staff members transferred to ${targetDepartment.name}`

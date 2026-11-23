@@ -9,16 +9,14 @@ import { prisma } from "@/app/lib/db";
 import { ApiResponse, formatError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { requireModuleAccess } from "@/app/lib/module-access";
+import { forCompany } from "@/app/lib/data/tenant";
+import { extractBearerToken } from "@/app/lib/recruitment/route-helpers";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
 }
 
-function extractBearerToken(authHeader: string | null): string | null {
-  if (!authHeader) return null;
-  const match = authHeader.match(/^Bearer\s+(.+)$/i);
-  return match?.[1]?.trim() || null;
-}
+
 
 async function resolveCompanyId(request: NextRequest, user: any): Promise<string | null> {
   const { searchParams } = new URL(request.url);
@@ -60,8 +58,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const logs = await prisma.jobBoardDeliveryLog.findMany({
-      where: { companyId },
+    const logs = await forCompany(companyId).jobBoardDeliveryLog.findMany({
       orderBy: { createdAt: "desc" },
       take: 20,
       include: { job: { select: { title: true } } },

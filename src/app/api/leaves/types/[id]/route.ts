@@ -16,10 +16,8 @@ export async function OPTIONS(request: NextRequest) {
  * GET /api/leaves/types/[id]
  * Get a specific leave type by ID
  */
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {

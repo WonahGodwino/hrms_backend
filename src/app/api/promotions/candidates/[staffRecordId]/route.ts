@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { RouteContext } from "@/app/lib/self-appraisal";
@@ -24,6 +24,7 @@ import {
   loadScopedStaff,
   serializeRec,
 } from "@/app/lib/promotion";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -81,8 +82,8 @@ export async function GET(
           completedAt: true,
         },
       }),
-      prisma.certificationRecord.findMany({
-        where: { companyId, employeeId: staff.id },
+      forCompany(companyId).certificationRecord.findMany({
+        where: { employeeId: staff.id },
         orderBy: { issueDate: "desc" },
         take: 10,
         select: {
@@ -93,8 +94,8 @@ export async function GET(
           certificationType: { select: { name: true } },
         },
       }),
-      prisma.careerDevelopmentAssignment.findMany({
-        where: { companyId, staffRecordId: staff.id },
+      forCompany(companyId).careerDevelopmentAssignment.findMany({
+        where: { staffRecordId: staff.id },
         orderBy: { createdAt: "desc" },
         take: 10,
         select: {
@@ -114,15 +115,14 @@ export async function GET(
           },
         },
       }),
-      prisma.promotionRecommendation.findMany({
-        where: { companyId, staffRecordId: staff.id },
+      forCompany(companyId).promotionRecommendation.findMany({
+        where: { staffRecordId: staff.id },
         orderBy: { createdAt: "desc" },
         take: 5,
         include: REC_INCLUDE,
       }),
-      prisma.successionCandidate.findMany({
+      forCompany(companyId).successionCandidate.findMany({
         where: {
-          companyId,
           staffRecordId: staff.id,
           removedAt: null,
           criticalRole: { status: "ACTIVE" },

@@ -6,6 +6,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import ExcelJS from 'exceljs'
 import { writeStyledTable, buildSubtitle, confidentialFooter, safeFileName, attachmentDisposition, toneCell, XLSX_MIME } from '@/app/lib/excel/sheet-theme'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -63,10 +64,9 @@ export async function GET(request: NextRequest) {
     // downloading records for a company they have real access to but that
     // isn't their token's "current" company.
     if (user.role === 'ADMIN') {
-      const hasAccess = await prisma.userCompany.findFirst({
+      const hasAccess = await forCompany(upload.companyId).userCompany.findFirst({
         where: {
           userId: user.userId,
-          companyId: upload.companyId,
           role: { in: ['ADMIN', 'ALL'] }
         }
       })
@@ -125,7 +125,7 @@ export async function GET(request: NextRequest) {
           let staffId = ''
           const match =
             message.match(/Staff(?:\s+with)?\s+ID\s+([A-Za-z0-9_-]+)/i) ||
-            message.match(/StaffID\s*[:\-]?\s*([A-Za-z0-9_-]+)/i)
+            message.match(/StaffID\s*[:-]?\s*([A-Za-z0-9_-]+)/i)
 
           if (match && match[1]) {
             staffId = match[1]

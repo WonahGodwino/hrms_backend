@@ -4,6 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { aiGuard, isGuardError } from '@/app/lib/ai/guard'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -23,8 +24,8 @@ export async function GET(request: NextRequest) {
     const skip = Math.max(Number(searchParams.get('skip')) || 0, 0)
 
     const [conversations, total] = await Promise.all([
-      prisma.aiConversation.findMany({
-        where: { companyId: guard.companyId, userId: guard.user.userId, deletedAt: null },
+      forCompany(guard.companyId).aiConversation.findMany({
+        where: { userId: guard.user.userId, deletedAt: null },
         orderBy: { lastMessageAt: 'desc' },
         take: limit,
         skip,
@@ -36,8 +37,8 @@ export async function GET(request: NextRequest) {
           _count: { select: { messages: true } },
         },
       }),
-      prisma.aiConversation.count({
-        where: { companyId: guard.companyId, userId: guard.user.userId, deletedAt: null },
+      forCompany(guard.companyId).aiConversation.count({
+        where: { userId: guard.user.userId, deletedAt: null },
       }),
     ])
 

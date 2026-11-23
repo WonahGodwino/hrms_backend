@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     requireRole(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     // Group the catalog by category for the builder UI.
-    const groups: Record<string, any[]> = {}
+    const groups: Record<string, unknown[]> = {}
     for (const v of VARIABLE_CATALOG) {
       ;(groups[v.category] ||= []).push({ key: v.key, label: v.label, source: v.source, sample: v.sample })
     }

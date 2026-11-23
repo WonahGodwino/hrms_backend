@@ -12,6 +12,7 @@ import { getAPIKey, getDefaultModel } from '@/app/lib/aiConfig'
 import { extractCandidateCvText, validateCvFile, MAX_FILES_PER_RUN } from './cvIntake'
 import { buildWeightsFromCriteria, type ScreeningCriterion } from './weights'
 import { getScreeningProfile } from './profiles'
+import { asNumber } from '@/app/lib/prisma-utils'
 import { screeningCvResultKey, uploadDocumentObject } from '@/app/lib/storage/documents'
 
 export const STALE_RUN_THRESHOLD_MS = 15 * 60 * 1000
@@ -145,8 +146,8 @@ export async function processScreeningRunInBackground(runId: string): Promise<vo
       select: { tokensPerUnit: true, costPerUnit: true, providerCostPerUnit: true },
     })
     const rateTokensPerUnit = tokenRateConfig?.tokensPerUnit ?? 1000
-    const rateCostPerUnit = tokenRateConfig?.costPerUnit ?? 0.3
-    const rateProviderPerUnit = tokenRateConfig?.providerCostPerUnit ?? 0.015
+    const rateCostPerUnit = asNumber(tokenRateConfig?.costPerUnit) ?? 0.3
+    const rateProviderPerUnit = asNumber(tokenRateConfig?.providerCostPerUnit) ?? 0.015
 
     const pending = await prisma.screeningCvResult.findMany({
       where: { runId, status: 'PENDING' },

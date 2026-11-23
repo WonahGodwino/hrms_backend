@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { buildConfigTemplate } from '@/app/lib/phed/config-template'
+import { rejectForeignCompany } from '@/app/lib/phed/company-guard'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -17,14 +18,16 @@ export async function GET(req: NextRequest) {
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const companyId = new URL(req.url).searchParams.get('companyId') ?? null
+    const foreignCompany = await rejectForeignCompany(user, companyId, origin)
+    if (foreignCompany) return foreignCompany
 
     let regions: { name: string }[] = []
     if (companyId) {
-      regions = await (prisma as any).phedRegion.findMany({
-        where: { companyId, isActive: true },
+      regions = await forCompany(companyId).phedRegion.findMany({
+        where: { isActive: true },
         select: { name: true },
         orderBy: { name: 'asc' },
       })
@@ -61,10 +64,10 @@ export async function GET(req: NextRequest) {
       headers: {
         'Content-Type':        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': 'attachment; filename="phed-feeders-template.xlsx"',
-        'Access-Control-Allow-Origin': origin ?? '*',
+        ...getCorsHeaders(origin),
       },
     })
-  } catch (e) {
+  } catch (_e) {
     return withCors(ApiResponse.error('Failed to generate template', 500), origin)
   }
 }

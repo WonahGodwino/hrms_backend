@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto'
 
 import { requireModuleAccess, ALL_ROLES } from '@/app/lib/module-access'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
 import { uploadFileToS3 } from '@/app/lib/storage/upload-files'
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024 // 5MB — matches the wizard's stated cap
@@ -63,10 +64,10 @@ export async function POST(request: NextRequest) {
       }),
       origin
     )
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error uploading loan document:', error)
     return withCors(
-      NextResponse.json({ success: false, message: error?.message || 'Failed to upload document' }, { status: 500 }),
+      NextResponse.json({ success: false, message: publicErrorMessage(error, 'Failed to upload document') }, { status: 500 }),
       origin
     )
   }

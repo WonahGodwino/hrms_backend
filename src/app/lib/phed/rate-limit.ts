@@ -10,6 +10,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server'
+import { getTrustedClientIp } from '@/app/lib/security/client-ip'
 
 // ── Profile definitions ───────────────────────────────────────
 export type RateLimitProfile =
@@ -52,15 +53,9 @@ if (typeof setInterval !== 'undefined') {
 }
 
 // ── IP extraction ─────────────────────────────────────────────
+// SEC-010: the address added by our own proxy, not the client-supplied one.
 function getClientIp(req: NextRequest): string {
-  const xff = req.headers.get('x-forwarded-for')
-  if (xff) {
-    const first = xff.split(',')[0].trim()
-    if (first) return first
-  }
-  const realIp = req.headers.get('x-real-ip')
-  if (realIp) return realIp.trim()
-  return '127.0.0.1'
+  return getTrustedClientIp(req.headers)
 }
 
 // ── Main export ───────────────────────────────────────────────
@@ -73,10 +68,30 @@ export function phedRateLimit(
   req:     NextRequest,
   profile: RateLimitProfile
 ): NextResponse | null {
+  return checkBucket(req, profile, `${profile}:${getClientIp(req)}`)
+}
+
+/**
+ * SEC-010: per-account limit (e.g. the email being logged in or reset), so
+ * changing IP address does not reset the attempts allowed for that account.
+ * Call it in addition to phedRateLimit once the account is known.
+ */
+export function phedAccountRateLimit(
+  req:     NextRequest,
+  profile: RateLimitProfile,
+  account: string | null | undefined
+): NextResponse | null {
+  if (!account || typeof account !== 'string') return null
+  return checkBucket(req, profile, `${profile}:acct:${account.trim().toLowerCase()}`)
+}
+
+function checkBucket(
+  req:     NextRequest,
+  profile: RateLimitProfile,
+  key:     string
+): NextResponse | null {
   try {
     const { maxRequests, windowMs } = PROFILES[profile]
-    const ip  = getClientIp(req)
-    const key = `${profile}:${ip}`
     const now = Date.now()
 
     let entry = store.get(key)

@@ -9,6 +9,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { splitName } from '@/app/lib/offers/ad-hoc-helpers'
 import { applyApprovalWorkflow } from '@/app/lib/offers/approval-workflow'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -56,9 +57,8 @@ export async function POST(request: NextRequest) {
     if (!position) return withCors(ApiResponse.error('Position is required', 400), origin)
 
     // Resolve designation by code, id, or title
-    const designation = await (prisma as any).designation.findFirst({
+    const designation = await forCompany(companyId).designation.findFirst({
       where: {
-        companyId,
         OR: [
           { id: position },
           { code: { equals: position, mode: 'insensitive' } },
@@ -73,9 +73,9 @@ export async function POST(request: NextRequest) {
 
     // Resolve job by id or title matching position
     let job = null as any
-    const jobMatch = await prisma.job.findFirst({
+    const jobMatch = await forCompany(companyId).job.findFirst({
       where: {
-        companyId, archived: 0,
+        archived: 0,
         OR: [
           { id: position },
           { title: { equals: position, mode: 'insensitive' } },

@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireRoleAsync(token, ['SUPER_ADMIN'])
 
-    const grouped = await (prisma as any).demoRequest.groupBy({
+    const grouped = await prisma.demoRequest.groupBy({
       by: ['status'],
       _count: { _all: true },
     })

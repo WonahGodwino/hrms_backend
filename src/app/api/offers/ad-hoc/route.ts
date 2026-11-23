@@ -14,6 +14,7 @@ import {
   splitName,
   buildOfferDocumentUrl,
 } from '@/app/lib/offers/ad-hoc-helpers'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -57,7 +58,7 @@ export async function POST(request: NextRequest) {
     if ('error' in pdf) return withCors(ApiResponse.error(pdf.error, 400), origin)
 
     // 3. Verify the job belongs to this company
-    const job = await prisma.job.findFirst({ where: { id: jobId, companyId }, select: { id: true } })
+    const job = await forCompany(companyId).job.findFirst({ where: { id: jobId }, select: { id: true } })
     if (!job) return withCors(ApiResponse.error('Job not found for this company', 404), origin)
 
     const { firstName, lastName } = splitName(candidateName)

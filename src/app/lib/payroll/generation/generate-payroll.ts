@@ -24,6 +24,7 @@
 import { prisma } from '@/app/lib/db'
 import { resolveStaffPayrollFields, type PayrollTemplateFieldLike } from './field-resolver'
 import { resolveDueLoanRepayments } from '@/app/lib/staff-loans-benefits/payroll-integration'
+import { forCompany } from '@/app/lib/data/tenant'
 
 // Exported so other routes touching a PROCESSING run (e.g. the delete route's
 // "can't delete while still generating" guard) use the same definition of
@@ -59,8 +60,8 @@ export type StartGenerationResult = {
  * generation can never be permanently blocked.
  */
 async function getActiveGenerationRun(companyId: string, templateId: string, payPeriod: string) {
-  const active = await prisma.payrollGenerationRun.findFirst({
-    where: { companyId, templateId, payPeriod, status: 'PROCESSING' },
+  const active = await forCompany(companyId).payrollGenerationRun.findFirst({
+    where: { templateId, payPeriod, status: 'PROCESSING' },
     orderBy: { createdAt: 'desc' }
   })
   if (!active) return null

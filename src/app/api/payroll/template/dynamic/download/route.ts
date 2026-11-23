@@ -7,6 +7,7 @@ import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
 import { XL, XLSX_MIME, attachmentDisposition, buildSubtitle, confidentialFooter, safeFileName, solid, writeStyledTable } from '@/app/lib/excel/sheet-theme'
+import { forCompany } from '@/app/lib/data/tenant'
 
 function normalizeSection(section: string): string {
   const normalized = (section || '').toUpperCase().replace(/[\s-]+/g, '_')
@@ -322,10 +323,9 @@ async function verifyCompanyAccess(user: any, companyId: string): Promise<boolea
   if (user.role === 'SUPER_ADMIN') return true
   
   try {
-    const userCompany = await prisma.userCompany.findFirst({
+    const userCompany = await forCompany(companyId).userCompany.findFirst({
       where: {
         userId: user.userId,
-        companyId: companyId,
         OR: [
           { role: user.role },
           { role: 'ALL' }

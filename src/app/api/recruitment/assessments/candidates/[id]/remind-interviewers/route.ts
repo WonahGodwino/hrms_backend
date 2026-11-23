@@ -13,7 +13,8 @@ import { notifyInterviewScheduled, notifyCandidateInterviewScheduled } from '@/a
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -23,7 +24,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const where: any = { id: params.id }
     if (companyId) where.companyId = companyId
 
-    const assessment: any = await (prisma as any).recruitmentCandidateAssessment.findUnique({ where })
+    const assessment: any = await prisma.recruitmentCandidateAssessment.findUnique({ where })
     if (!assessment) return withCors(ApiResponse.error('Candidate assessment not found', 404), origin)
     // SCHEDULED → full reminder to panel + candidate. PENDING_FEEDBACK → nudge the
     // panel to submit their scorecards (no candidate email in that case).
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     // Mint a FRESH panel access token and persist it (replaces any expired one).
     const panelAccessToken = signPanelToken(params.id)
-    await (prisma as any).recruitmentCandidateAssessment.update({
+    await prisma.recruitmentCandidateAssessment.update({
       where: { id: params.id },
       data: { panelAccessToken },
     })

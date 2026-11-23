@@ -3,7 +3,7 @@ import {
   PerformanceActionPriority,
   PerformanceActionType,
 } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { MAX_LONG_TEXT } from "@/app/lib/self-appraisal";
 
 export const MAX_ACTION_ATTACHMENTS = 10;

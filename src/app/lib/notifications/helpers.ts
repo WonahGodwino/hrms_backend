@@ -1,5 +1,6 @@
 // /src/app/lib/notifications/helpers.ts - COMPLETE WORKING VERSION
-import { prisma } from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
+import { forCompany } from '@/app/lib/data/tenant';
 
 // Notification types
 export const NOTIFICATION_TYPES = {
@@ -61,6 +62,7 @@ export const NOTIFICATION_TYPES = {
   SUCCESSION_REPORT_SHARED: "SUCCESSION_REPORT_SHARED",
   FAIRNESS_CASE_ASSIGNED: "FAIRNESS_CASE_ASSIGNED",
   FAIRNESS_CASE_ESCALATED: "FAIRNESS_CASE_ESCALATED",
+  APPLICATION_SUBMITTED: "APPLICATION_SUBMITTED",
   APPLICATION_WITHDRAWN: "APPLICATION_WITHDRAWN",
 } as const;
 
@@ -149,10 +151,8 @@ export async function getNotificationsForLeaveRequest(
 ) {
   try {
     // Get all LEAVE notifications for the company
-    const notifications = await prisma.notification.findMany({
-      where: {
-        companyId,
-        type: { contains: "LEAVE" },
+    const notifications = await forCompany(companyId).notification.findMany({
+      where: { type: { contains: "LEAVE" },
         createdAt: {
           gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // Last 30 days
         },
@@ -187,7 +187,7 @@ export async function getNotificationsForLeaveRequest(
       try {
         const parsedData = JSON.parse(notification.data as string);
         return parsedData?.leaveRequestId === leaveRequestId;
-      } catch (e) {
+      } catch (_e) {
         return false;
       }
     });

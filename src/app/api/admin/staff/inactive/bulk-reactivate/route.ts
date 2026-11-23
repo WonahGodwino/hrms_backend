@@ -5,7 +5,11 @@ import validator from 'validator';
 import { requireRole } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
-import { ApiResponse, formatError } from '@/app/lib/utils';
+import { ApiResponse } from '@/app/lib/utils';
+import { publicErrorMessage } from '@/app/lib/errors/public-error';
+import { forCompany } from '@/app/lib/data/tenant';
+import { readJsonBody } from '@/app/lib/validation/request-body';
+import { bulkReactivateBodySchema } from '@/app/lib/validation/payroll-staff-schemas';
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
@@ -24,12 +28,9 @@ export async function PATCH(request: NextRequest) {
 		const currentUser = requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR']);
 
 		// Parse request body
-		let body;
-		try {
-			body = await request.json();
-		} catch (error) {
-			return withCors(ApiResponse.error('Invalid JSON payload', 400), origin);
-		}
+		const parsedBody = await readJsonBody(request, bulkReactivateBodySchema);
+		if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.issues.length ? parsedBody.message : 'Invalid JSON payload', 400), origin);
+		const body = parsedBody.data;
 
 		const { staffIds, filters } = body;
 		const companyId = body.companyId; // ✅ REQUIRED from body
@@ -210,7 +211,7 @@ export async function PATCH(request: NextRequest) {
 			origin
 		);
 	} catch (error) {
-		const message = formatError(error);
+		const message = publicErrorMessage(error);
 		console.error('Error in bulk reactivation:', error);
 		return withCors(ApiResponse.error(message, 500), origin);
 	}
@@ -219,10 +220,9 @@ export async function PATCH(request: NextRequest) {
 async function checkStaffAccess(currentUser: any, companyId: string): Promise<boolean> {
 	if (currentUser.role === 'SUPER_ADMIN') return true;
 
-	const userAssignments = await prisma.userCompany.findMany({
+	const userAssignments = await forCompany(companyId).userCompany.findMany({
 		where: {
-			userId: currentUser.userId,
-			companyId: companyId,
+			userId: currentUser.userId
 		},
 	});
 

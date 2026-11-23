@@ -1,9 +1,9 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -29,9 +29,9 @@ export async function GET(req: NextRequest) {
       const end   = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59)
 
       const [assigned, completed] = await Promise.all([
-        prisma.participantProgress.count({ where: { companyId, createdAt: { lte: end } } }),
-        prisma.participantProgress.count({
-          where: { companyId, trainingStatus: 'COMPLETED', completionDate: { gte: start, lte: end } },
+        forCompany(companyId).participantProgress.count({ where: { createdAt: { lte: end } } }),
+        forCompany(companyId).participantProgress.count({
+          where: { trainingStatus: 'COMPLETED', completionDate: { gte: start, lte: end } },
         }),
       ])
 

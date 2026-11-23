@@ -6,6 +6,7 @@ import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { readPdfUpload } from '@/app/lib/offers/ad-hoc-helpers'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -49,8 +50,8 @@ export async function POST(request: NextRequest) {
     if ('error' in pdf)
       return withCors(ApiResponse.error('Unsupported file type. Only PDF documents are accepted', 415), origin)
 
-    const application = await prisma.jobApplication.findFirst({
-      where: { candidateId, jobId, companyId },
+    const application = await forCompany(companyId).jobApplication.findFirst({
+      where: { candidateId, jobId },
       include: { offer: true },
     })
     if (!application) return withCors(ApiResponse.error('Application not found', 404), origin)

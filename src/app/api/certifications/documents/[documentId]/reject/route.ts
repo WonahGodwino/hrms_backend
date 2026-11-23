@@ -10,7 +10,8 @@ export async function OPTIONS(req: NextRequest) {
 }
 
 // PATCH /api/certifications/documents/[documentId]/reject
-export async function PATCH(req: NextRequest, { params }: { params: { documentId: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ documentId: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null

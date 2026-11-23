@@ -5,11 +5,11 @@
 // and are excluded. Supports search, designation filter, score-first sorting and
 // pagination (all applied server-side).
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveRecruitmentCompanyId } from '@/app/lib/recruitment/companyScope'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -46,9 +46,9 @@ export async function GET(req: NextRequest) {
     // to build the pool. One candidate can have many applications.
     // Cast to any: Job.designationId / designation relation are part of a
     // migration that still needs `prisma generate`, so the typed client can't
-    // see them yet (mirrors the existing (prisma as any) pattern elsewhere).
-    const applications: any[] = await (prisma as any).jobApplication.findMany({
-      where: { companyId, archived: 0 },
+    // see them yet (mirrors the existing prisma pattern elsewhere).
+    const applications: any[] = await forCompany(companyId).jobApplication.findMany({
+      where: { archived: 0 },
       select: {
         id: true,
         status: true,

@@ -4,19 +4,15 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { checkJobPermission } from '@/app/lib/recruitment/companyScope'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
+import { extractBearerToken, mapAuthErrorStatus } from '@/app/lib/recruitment/route-helpers'
 
-function extractBearerToken(authHeader: string | null): string | null {
-  if (!authHeader) return null
-  const match = authHeader.match(/^Bearer\s+(.+)$/i)
-  return match?.[1]?.trim() || null
-}
 
-function mapAuthErrorStatus(message: string): number {
-  return message.toLowerCase().includes('insufficient permissions') ? 403 : 401
-}
+
+
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -24,9 +20,9 @@ export async function OPTIONS(request: NextRequest) {
 
 // Handle GET request for a single job (any status — needed so HR can view/edit
 // CLOSED or DRAFT jobs, which the paginated list endpoint may not surface).
-export async function GET(request: NextRequest, context: { params: { id: string } }) {
+export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const origin = request.headers.get('origin')
-  const { id } = context.params
+  const { id } = (await context.params)
 
   try {
     const token = extractBearerToken(request.headers.get('authorization'))
@@ -38,7 +34,7 @@ export async function GET(request: NextRequest, context: { params: { id: string 
     try {
       user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'ADMIN', 'SUPER_ADMIN'])
     } catch (authError) {
-      const message = formatError(authError)
+      const message = publicErrorMessage(authError)
       return withCors(ApiResponse.error(message, mapAuthErrorStatus(message)), origin)
     }
 
@@ -73,15 +69,15 @@ export async function GET(request: NextRequest, context: { params: { id: string 
       origin
     )
   } catch (error) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     return withCors(ApiResponse.error(message, 500), origin)
   }
 }
 
 // Handle PUT request for updating a job
-export async function PUT(request: NextRequest, context: { params: { id: string } }) {
+export async function PUT(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const origin = request.headers.get('origin')
-  const { id } = context.params
+  const { id } = (await context.params)
 
   try {
     const token = extractBearerToken(request.headers.get('authorization'))
@@ -93,7 +89,7 @@ export async function PUT(request: NextRequest, context: { params: { id: string 
     try {
       user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'ADMIN', 'SUPER_ADMIN'])
     } catch (authError) {
-      const message = formatError(authError)
+      const message = publicErrorMessage(authError)
       return withCors(ApiResponse.error(message, mapAuthErrorStatus(message)), origin)
     }
 
@@ -126,15 +122,15 @@ export async function PUT(request: NextRequest, context: { params: { id: string 
 
     return withCors(ApiResponse.success(updatedJob, 'Job updated successfully'), origin)
   } catch (error) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     return withCors(ApiResponse.error(message, 500), origin)
   }
 }
 
 // Handle DELETE request for deleting a job
-export async function DELETE(request: NextRequest, context: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const origin = request.headers.get('origin')
-  const { id } = context.params
+  const { id } = (await context.params)
 
   try {
     const token = extractBearerToken(request.headers.get('authorization'))
@@ -146,7 +142,7 @@ export async function DELETE(request: NextRequest, context: { params: { id: stri
     try {
       user = await requireModuleAccess(token, 'RECRUITMENT', ['HR', 'ADMIN', 'SUPER_ADMIN'])
     } catch (authError) {
-      const message = formatError(authError)
+      const message = publicErrorMessage(authError)
       return withCors(ApiResponse.error(message, mapAuthErrorStatus(message)), origin)
     }
 
@@ -166,7 +162,7 @@ export async function DELETE(request: NextRequest, context: { params: { id: stri
 
     return withCors(ApiResponse.success(null, 'Job deleted successfully'), origin)
   } catch (error) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     return withCors(ApiResponse.error(message, 500), origin)
   }
 }

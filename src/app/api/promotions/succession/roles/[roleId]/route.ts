@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { RouteContext } from "@/app/lib/self-appraisal";
 import { fail, notFound, ok, writeCtx } from "@/app/lib/pip";
 import { logSuccession } from "@/app/lib/promotion";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -45,8 +46,8 @@ export async function PATCH(
     )
       return fail(origin, "tier must be EXECUTIVE, DIRECTOR or MANAGER");
 
-    const role = await prisma.criticalRole.findFirst({
-      where: { id: roleId, companyId },
+    const role = await forCompany(companyId).criticalRole.findFirst({
+      where: { id: roleId },
       select: { id: true, status: true, tier: true },
     });
     if (!role) return notFound(origin, "Critical role");

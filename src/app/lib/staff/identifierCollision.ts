@@ -10,16 +10,15 @@
 // ANY holder (active or not) up front and produces a message that tells the
 // caller exactly what's going on instead of surfacing a confusing generic
 // "already exists" error or an unhandled database error.
-import { prisma } from '@/app/lib/db'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export type IdentifierField = 'staffId' | 'email'
 
 const FIELD_LABEL: Record<IdentifierField, string> = { staffId: 'Staff ID', email: 'Email' }
 
 export async function findIdentifierHolder(companyId: string, field: IdentifierField, value: string, excludeStaffRecordId?: string) {
-  return prisma.staffRecord.findFirst({
+  return forCompany(companyId).staffRecord.findFirst({
     where: {
-      companyId,
       [field]: value,
       ...(excludeStaffRecordId ? { id: { not: excludeStaffRecordId } } : {})
     },

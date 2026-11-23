@@ -2,6 +2,7 @@
 // Promotion letters — shared service functions (DB + generation).
 // ============================================================
 
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/app/lib/db'
 import { buildLetterPdf } from './pdf-letter'
 import { deleteRunFiles, letterFileName, writeRunFile } from './letter-storage'
@@ -33,13 +34,13 @@ export function clientIp(headers: { get: (name: string) => string | null }): str
 
 /** Latest template for a company, seeding the canonical one on first use. */
 export async function getOrSeedTemplate(companyId: string, actorId: string): Promise<any> {
-  const existing = await (prisma as any).phedLetterTemplate.findFirst({
+  const existing = await prisma.phedLetterTemplate.findFirst({
     where: { companyId, type: LETTER_TYPE },
     orderBy: { version: 'desc' },
   })
   if (existing) return existing
 
-  return (prisma as any).phedLetterTemplate.create({
+  return prisma.phedLetterTemplate.create({
     data: {
       companyId,
       type: LETTER_TYPE,
@@ -77,14 +78,14 @@ export async function auditLetterEvent(
   detail?: string | null,
   ip?: string | null,
 ): Promise<void> {
-  await (prisma as any).phedLetterAuditEvent.create({
+  await prisma.phedLetterAuditEvent.create({
     data: { companyId, actorId, action, runId: runId ?? null, detail: detail ?? null, ip: ip ?? null },
   })
 }
 
 /** Recompute live progress counts from a run's rows. */
 export async function runProgress(runId: string) {
-  const rows = await (prisma as any).phedLetterRunRow.findMany({
+  const rows = await prisma.phedLetterRunRow.findMany({
     where: { runId },
     select: { status: true },
   })
@@ -113,11 +114,12 @@ export function isRunExpired(run: { filesExpireAt?: Date | string | null } | nul
 
 async function expireRun(run: { id: string; companyId: string }): Promise<void> {
   try { await deleteRunFiles(run.companyId, run.id) } catch (e) { console.warn('[letter] file purge failed:', e) }
-  await (prisma as any).phedLetterRun.update({ where: { id: run.id }, data: { status: 'EXPIRED' } })
+  await prisma.phedLetterRun.update({ where: { id: run.id }, data: { status: 'EXPIRED' } })
   // PII minimisation: purge per-row values once files are gone (findings kept).
-  await (prisma as any).phedLetterRunRow.updateMany({
+  await prisma.phedLetterRunRow.updateMany({
     where: { runId: run.id },
-    data: { values: null, outputKey: null },
+    // A JSON column is cleared with Prisma.DbNull (plain null is rejected).
+    data: { values: Prisma.DbNull, outputKey: null },
   })
   await auditLetterEvent(run.companyId, 'system', 'EXPIRED', run.id, 'Retention window elapsed; generated files purged')
 }
@@ -133,7 +135,7 @@ export async function expireRunIfNeeded(run: { id: string; companyId: string; st
 
 /** Opportunistic sweep — deletes files for any run past its retention window (no scheduler). */
 export async function cleanupExpiredLetterFiles(): Promise<number> {
-  const expired = await (prisma as any).phedLetterRun.findMany({
+  const expired = await prisma.phedLetterRun.findMany({
     where: {
       filesExpireAt: { lt: new Date() },
       status: { in: ['COMPLETED', 'COMPLETED_WITH_FAILURES', 'CANCELLED'] },
@@ -163,14 +165,14 @@ export async function generateRun(runId: string): Promise<void> {
 }
 
 async function generateRunInner(runId: string): Promise<void> {
-  const run = await (prisma as any).phedLetterRun.findUnique({ where: { id: runId } })
+  const run = await prisma.phedLetterRun.findUnique({ where: { id: runId } })
   if (!run) return
 
   const template = run.templateId
-    ? await (prisma as any).phedLetterTemplate.findUnique({ where: { id: run.templateId } })
+    ? await prisma.phedLetterTemplate.findUnique({ where: { id: run.templateId } })
     : null
   if (!template) {
-    await (prisma as any).phedLetterRun.update({
+    await prisma.phedLetterRun.update({
       where: { id: runId },
       data: { status: 'COMPLETED_WITH_FAILURES', completedAt: new Date(), filesExpireAt: retentionExpiry() },
     })
@@ -178,13 +180,13 @@ async function generateRunInner(runId: string): Promise<void> {
   }
   const config = templateToConfig(template)
 
-  const rows = await (prisma as any).phedLetterRunRow.findMany({
+  const rows = await prisma.phedLetterRunRow.findMany({
     where: { runId, status: 'QUEUED' },
     orderBy: { excelRow: 'asc' },
   })
 
   for (const row of rows) {
-    const fresh = await (prisma as any).phedLetterRun.findUnique({
+    const fresh = await prisma.phedLetterRun.findUnique({
       where: { id: runId },
       select: { status: true },
     })
@@ -192,7 +194,7 @@ async function generateRunInner(runId: string): Promise<void> {
 
     const renderModel = (row.values as any)?.renderModel as RenderModel | null
     if (!renderModel) {
-      await (prisma as any).phedLetterRunRow.update({
+      await prisma.phedLetterRunRow.update({
         where: { id: row.id },
         data: { status: 'FAILED', error: 'No render model available for this row.' },
       })
@@ -203,12 +205,12 @@ async function generateRunInner(runId: string): Promise<void> {
       const pdf = await buildLetterPdf(renderModel, config)
       const fileName = letterFileName(renderModel.staff_id, renderModel.staff_name)
       const storageKey = await writeRunFile(run.companyId, runId, fileName, pdf)
-      await (prisma as any).phedLetterRunRow.update({
+      await prisma.phedLetterRunRow.update({
         where: { id: row.id },
         data: { status: 'GENERATED', outputKey: storageKey },
       })
     } catch (e) {
-      await (prisma as any).phedLetterRunRow.update({
+      await prisma.phedLetterRunRow.update({
         where: { id: row.id },
         data: { status: 'FAILED', error: plainError(e) },
       })
@@ -221,22 +223,22 @@ async function generateRunInner(runId: string): Promise<void> {
 /** Set a finished run to COMPLETED / COMPLETED_WITH_FAILURES and snapshot counts. */
 async function finalizeRun(runId: string): Promise<void> {
   const [run, generated, failed] = await Promise.all([
-    (prisma as any).phedLetterRun.findUnique({
+    prisma.phedLetterRun.findUnique({
       where: { id: runId },
       select: { companyId: true, status: true, counts: true },
     }),
-    (prisma as any).phedLetterRunRow.count({ where: { runId, status: 'GENERATED' } }),
-    (prisma as any).phedLetterRunRow.count({ where: { runId, status: 'FAILED' } }),
+    prisma.phedLetterRunRow.count({ where: { runId, status: 'GENERATED' } }),
+    prisma.phedLetterRunRow.count({ where: { runId, status: 'FAILED' } }),
   ])
   if (!run || run.status === 'CANCELLED') return
 
-  await (prisma as any).phedLetterRun.update({
+  await prisma.phedLetterRun.update({
     where: { id: runId },
     data: {
       status: failed > 0 ? 'COMPLETED_WITH_FAILURES' : 'COMPLETED',
       completedAt: new Date(),
       filesExpireAt: retentionExpiry(),
-      counts: { ...(run.counts || {}), generated, failed },
+      counts: { ...(run.counts && typeof run.counts === 'object' && !Array.isArray(run.counts) ? run.counts : {}), generated, failed },
     },
   })
   await auditLetterEvent(run.companyId, 'system', 'GENERATION_FINISHED', runId, `generated=${generated} failed=${failed}`)
@@ -244,7 +246,7 @@ async function finalizeRun(runId: string): Promise<void> {
 
 /** Restart-safe recovery — resume GENERATING runs left behind by a crash/restart. */
 export async function resumeStuckLetterRuns(): Promise<number> {
-  const stale = await (prisma as any).phedLetterRun.findMany({
+  const stale = await prisma.phedLetterRun.findMany({
     where: { status: 'GENERATING' },
     select: { id: true },
     take: 50,
@@ -252,7 +254,7 @@ export async function resumeStuckLetterRuns(): Promise<number> {
   let resumed = 0
   for (const run of stale) {
     if (activeGenerations.has(run.id)) continue
-    const queued = await (prisma as any).phedLetterRunRow.count({ where: { runId: run.id, status: 'QUEUED' } })
+    const queued = await prisma.phedLetterRunRow.count({ where: { runId: run.id, status: 'QUEUED' } })
     if (queued === 0) {
       await finalizeRun(run.id)
       continue

@@ -23,10 +23,10 @@ function esc(s: unknown): string {
 // Picks the template for an offer: explicit override → company default → system default.
 async function pickTemplateBody(companyId: string, templateId?: string | null): Promise<{ id: string | null; body: string }> {
   if (templateId) {
-    const t = await (prisma as any).offerTemplate.findUnique({ where: { id: templateId } })
+    const t = await prisma.offerTemplate.findUnique({ where: { id: templateId } })
     if (t && !t.archived && t.companyId === companyId) return { id: t.id, body: t.bodyHtml }
   }
-  const def = await (prisma as any).offerTemplate.findFirst({
+  const def = await prisma.offerTemplate.findFirst({
     where: { companyId, isDefault: true, archived: 0 },
   })
   if (def) return { id: def.id, body: def.bodyHtml }

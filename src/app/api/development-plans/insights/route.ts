@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import {
@@ -13,6 +13,7 @@ import {
   pickName,
   resolveSubject,
 } from "@/app/lib/development-plans/dev-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -55,25 +56,23 @@ export async function GET(request: NextRequest) {
     const now = new Date();
 
     const [staff, plans, trainings, certs, position] = await Promise.all([
-      prisma.staffRecord.findFirst({
-        where: { id: subjectId, companyId },
+      forCompany(companyId).staffRecord.findFirst({
+        where: { id: subjectId },
         select: {
           manager: { select: PERSON },
           departments: { select: { name: true, head: { select: PERSON } } },
         },
       }),
-      prisma.developmentPlan.findMany({
+      forCompany(companyId).developmentPlan.findMany({
         where: {
-          companyId,
           staffRecordId: subjectId,
           status: { not: "ARCHIVED" },
         },
         include: PLAN_INCLUDE,
         orderBy: { updatedAt: "desc" },
       }),
-      prisma.participantProgress.findMany({
+      forCompany(companyId).participantProgress.findMany({
         where: {
-          companyId,
           employeeId: subjectId,
           trainingStatus: { in: ["IN PROGRESS", "NOT STARTED", "PENDING"] },
         },
@@ -81,9 +80,8 @@ export async function GET(request: NextRequest) {
         orderBy: { dueDate: "asc" },
         take: 3,
       }),
-      prisma.certificationRecord.findMany({
+      forCompany(companyId).certificationRecord.findMany({
         where: {
-          companyId,
           employeeId: subjectId,
           status: { in: ["Expiring Soon", "Expired"] },
         },
@@ -207,8 +205,8 @@ export async function GET(request: NextRequest) {
       new Set(plans.map((p) => p.mentorId).filter((x): x is string => !!x)),
     );
     const planMentors = mentorIds.length
-      ? await prisma.staffRecord.findMany({
-          where: { id: { in: mentorIds }, companyId, isActive: true },
+      ? await forCompany(companyId).staffRecord.findMany({
+          where: { id: { in: mentorIds }, isActive: true },
           select: PERSON,
         })
       : [];

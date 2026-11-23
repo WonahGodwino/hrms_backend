@@ -36,7 +36,8 @@ const EDITABLE_FIELDS = [
   'isActive',
 ]
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const authHeader = request.headers.get('authorization')

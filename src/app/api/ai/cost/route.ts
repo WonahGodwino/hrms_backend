@@ -2,9 +2,11 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { getUserFromToken } from '@/app/lib/auth'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { openaiUsageTracker } from '@/app/lib/openaiUsage'
+import { asNumber } from '@/app/lib/prisma-utils'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -116,7 +118,7 @@ export async function GET(request: NextRequest) {
       origin
     )
   } catch (error: unknown) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('Error fetching AI costs:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }
@@ -293,9 +295,9 @@ async function getSuperAdminAllCompaniesData(
       totalCost: parseFloat(totalCost.toFixed(4)),
       avgCostPerReview: parseFloat(avgCostPerReview.toFixed(4)),
       avgScore: parseFloat(avgScore.toFixed(1)),
-      monthlyBudget: company.aiSettings?.monthlyBudget || 100,
-      budgetUsedPercent: company.aiSettings?.monthlyBudget 
-        ? parseFloat(((totalCost / company.aiSettings.monthlyBudget) * 100).toFixed(1))
+      monthlyBudget: asNumber(company.aiSettings?.monthlyBudget) || 100,
+      budgetUsedPercent: asNumber(company.aiSettings?.monthlyBudget) 
+        ? parseFloat(((totalCost / asNumber(company.aiSettings.monthlyBudget)) * 100).toFixed(1))
         : 0,
       usageStats: companyUsageStats
     }
@@ -458,9 +460,9 @@ async function getCompanySpecificData(
     company: {
       id: company.id,
       name: company.companyName,
-      monthlyBudget: company.aiSettings?.monthlyBudget || 100,
-      budgetUsedPercent: company.aiSettings?.monthlyBudget 
-        ? parseFloat(((totalCost / company.aiSettings.monthlyBudget) * 100).toFixed(1))
+      monthlyBudget: asNumber(company.aiSettings?.monthlyBudget) || 100,
+      budgetUsedPercent: asNumber(company.aiSettings?.monthlyBudget) 
+        ? parseFloat(((totalCost / asNumber(company.aiSettings.monthlyBudget)) * 100).toFixed(1))
         : parseFloat(((totalCost / 100) * 100).toFixed(1)),
       alertThreshold: company.aiSettings?.costAlertThreshold || 80
     },

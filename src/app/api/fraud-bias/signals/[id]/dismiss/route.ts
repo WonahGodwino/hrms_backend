@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { withTransaction } from "@/app/lib/data/transaction";
 import { handleCorsOptions } from "@/app/lib/cors";
 import type { RouteContext } from "@/app/lib/self-appraisal";
 import { fbRoute, httpErr, txt, auditFairness } from "@/app/lib/fraud-bias";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -16,8 +17,8 @@ export async function POST(
   return fbRoute(request, { write: true }, async (ctx, body) => {
     const { id } = await context.params;
     const note = txt(body.note, "note", true)!;
-    const s = await prisma.fairnessSignal.findFirst({
-      where: { id, companyId: ctx.companyId },
+    const s = await forCompany(ctx.companyId).fairnessSignal.findFirst({
+      where: { id },
       select: { status: true, severity: true },
     });
     if (!s) throw httpErr(404, "Signal not found");
@@ -26,7 +27,7 @@ export async function POST(
         409,
         "This signal is under investigation. Resolve its case instead.",
       );
-    await prisma.$transaction(async (tx) => {
+    await withTransaction(async (tx) => {
       const r = await tx.fairnessSignal.updateMany({
         where: { id, companyId: ctx.companyId, status: "OPEN" },
         data: {

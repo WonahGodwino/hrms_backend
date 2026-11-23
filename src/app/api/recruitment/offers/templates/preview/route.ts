@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
     // Resolve the template body: explicit bodyHtml wins, else load the template.
     let bodyHtml: string | undefined = typeof body.bodyHtml === 'string' ? body.bodyHtml : undefined
     if (!bodyHtml && body.templateId) {
-      const tpl = await (prisma as any).offerTemplate.findUnique({ where: { id: body.templateId } })
+      const tpl = await prisma.offerTemplate.findUnique({ where: { id: body.templateId } })
       if (!tpl || tpl.archived) return withCors(ApiResponse.error('Template not found', 404), origin)
       bodyHtml = tpl.bodyHtml
     }

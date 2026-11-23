@@ -9,7 +9,6 @@
 import { NextRequest } from 'next/server';
 
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
-import { prisma } from '@/app/lib/db';
 import { requireModuleAccess } from '@/app/lib/module-access';
 import {
     DAYS_WORKED_DISPLAY_NAME, DAYS_WORKED_SYSTEM_FIELD, GROSS_SYSTEM_FIELD,
@@ -17,6 +16,7 @@ import {
 } from '@/app/lib/payroll/generation/field-resolver';
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { forCompany } from '@/app/lib/data/tenant';
 
 type CompensationFieldLike = { systemField: string; displayName: string; dataType: string; section: string; required: boolean };
 
@@ -74,8 +74,8 @@ export async function GET(request: NextRequest) {
 			return withCors(ApiResponse.error(`You do not have ${userRole} access for this company`, 403), origin);
 		}
 
-		const template = await prisma.payrollTemplate.findFirst({
-			where: { id: templateId, companyId },
+		const template = await forCompany(companyId).payrollTemplate.findFirst({
+			where: { id: templateId },
 			include: { fields: { orderBy: { order: 'asc' } } },
 		});
 		if (!template) {
@@ -90,8 +90,8 @@ export async function GET(request: NextRequest) {
 		);
 		const profileFields: CompensationFieldLike[] = [GROSS_FIELD, DAYS_WORKED_FIELD, ...templateFields];
 
-		const staff = await prisma.staffRecord.findMany({
-			where: { companyId, isActive: true },
+		const staff = await forCompany(companyId).staffRecord.findMany({
+			where: { isActive: true },
 			select: {
 				id: true,
 				staffId: true,

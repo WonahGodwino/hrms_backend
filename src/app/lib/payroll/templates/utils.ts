@@ -34,8 +34,9 @@ import type {
   PayslipDisplayItem,
   ProcessingResult
 } from './types'
+import { forCompany } from '@/app/lib/data/tenant'
 
-function normalizeSection(section?: string): string {
+export function normalizeSection(section?: string): string {
   return (section || '').toUpperCase().replace(/[\s-]+/g, '_')
 }
 
@@ -166,8 +167,8 @@ const ORPHANED_UPLOAD_GRACE_MS = 2 * 60 * 1000
  * no upload were in flight, so uploads can never be permanently blocked.
  */
 export async function getActivePayrollUpload(companyId: string) {
-  const active = await prisma.payrollUpload.findFirst({
-    where: { companyId, status: { in: ['PENDING', 'PROCESSING'] } },
+  const active = await forCompany(companyId).payrollUpload.findFirst({
+    where: { status: { in: ['PENDING', 'PROCESSING'] } },
     orderBy: { createdAt: 'desc' },
   })
 
@@ -372,8 +373,8 @@ async function detectAndNotifyDuplicates(
     console.log('[PAYROLL_DUPLICATE_DETECT] Starting detection', { companyId, month, year })
 
     // Fetch all payslips for this period
-    const payslips = await prisma.payslip.findMany({
-      where: { companyId, month, year },
+    const payslips = await forCompany(companyId).payslip.findMany({
+      where: { month, year },
       select: {
         id: true,
         staffRecordId: true,
@@ -408,10 +409,8 @@ async function detectAndNotifyDuplicates(
     console.log(`[PAYROLL_DUPLICATE_DETECT] Found ${duplicateStaffIds.length} staff with duplicate payslips`)
 
     // Find all HR/Admin users in this company to notify
-    const adminStaff = await prisma.staffRecord.findMany({
-      where: {
-        companyId,
-        isActive: true,
+    const adminStaff = await forCompany(companyId).staffRecord.findMany({
+      where: { isActive: true,
         role: { in: ['ADMIN', 'HR'] },
       },
       select: { id: true },

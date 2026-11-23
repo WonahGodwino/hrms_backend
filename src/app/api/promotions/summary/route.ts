@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { fail, ok, readCtx } from "@/app/lib/pip";
@@ -15,6 +15,7 @@ import {
   resolveBasisCycle,
 } from "@/app/lib/promotion";
 import type { Actor } from "@/app/lib/manager-review";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -22,9 +23,8 @@ export async function OPTIONS(request: NextRequest) {
 
 // Average effective score per cycle, last 4 cycles with data (decision 14)
 async function consistency(companyId: string, actor: Actor) {
-  const rows = await prisma.managerReview.findMany({
+  const rows = await forCompany(companyId).managerReview.findMany({
     where: {
-      companyId,
       status: "SUBMITTED",
       participant: {
         AND: [{ phases: RELEASED_WHERE.phases }, peopleWhere(actor)],

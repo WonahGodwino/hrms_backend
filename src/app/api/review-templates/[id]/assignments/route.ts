@@ -20,6 +20,7 @@ import {
   toScope,
   describeScope,
 } from "@/app/lib/appraisal-cycles/cycle-assignments";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -29,10 +30,8 @@ export async function OPTIONS(request: NextRequest) {
 const ACCEPTED_SCOPE_TYPES = ["ALL_DEPARTMENTS", "SPECIFIC_DEPARTMENTS"];
 
 // GET /api/review-templates/:id/assignments?companyId=...&status=ACTIVE|UNASSIGNED|ALL (default ACTIVE)
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -69,8 +68,8 @@ export async function GET(
       );
     }
 
-    const template = await prisma.reviewTemplate.findFirst({
-      where: { id: params.id, companyId },
+    const template = await forCompany(companyId).reviewTemplate.findFirst({
+      where: { id: params.id },
       select: { id: true },
     });
     if (!template)
@@ -101,10 +100,8 @@ export async function GET(
 
 // POST /api/review-templates/:id/assignments
 // body: { companyId, versionId, cycleId, phaseType?, scopeType?, departmentIds? }
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   const reject = (status: number, body: Record<string, unknown>) =>
     withCors(

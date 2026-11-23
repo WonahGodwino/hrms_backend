@@ -4,6 +4,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -62,10 +63,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Fetch employees from StaffRecord
-    const employees = await prisma.staffRecord.findMany({
+    const employees = await forCompany(cid).staffRecord.findMany({
       where: {
-        id: { in: employeeIds },
-        companyId: cid,
+        id: { in: employeeIds }
       },
       select: {
         id: true,

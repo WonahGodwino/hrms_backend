@@ -10,8 +10,8 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { consumeTrialQuota } from '@/app/lib/trial/guard'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
-import { sendOfferLetterEmail } from '@/app/lib/offer-letters/email/sendEmail'
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access'
+import { sendOfferLetterEmail } from '@/app/lib/offers/letters/email/sendEmail'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)

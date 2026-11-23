@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { withTransaction } from "@/app/lib/data/transaction";
 import { handleCorsOptions } from "@/app/lib/cors";
 import { logPip, ok } from "@/app/lib/pip";
 import {
@@ -42,7 +42,7 @@ export async function POST(
         ? body.improvementObjectiveId
         : null;
 
-    const created = await prisma.$transaction(async (tx) => {
+    const created = await withTransaction(async (tx) => {
       await ownLivePip(tx, ctx, id);
       if (objectiveId) {
         const o = await tx.pipImprovementObjective.findFirst({

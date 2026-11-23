@@ -3,9 +3,10 @@ import { NextRequest } from 'next/server';
 import { requireRoleAsync } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { SubmitResignationSchema } from '@/app/lib/offboarding/offboarding';
-import { prisma } from '@/app/lib/prisma';
+import { prisma } from '@/app/lib/db';
 import { OffboardingService } from '@/app/lib/services/offboarding.service';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
@@ -35,9 +36,8 @@ export async function POST(request: NextRequest) {
 			resignationComment: validated.resignationComment,
 		});
 
-		const hrAdmins = await prisma.staffRecord.findMany({
+		const hrAdmins = await forCompany(user.companyId).staffRecord.findMany({
 			where: {
-				companyId: user.companyId,
 				role: { in: ['HR', 'ADMIN', 'SUPER_ADMIN'] },
 				isActive: true,
 			},

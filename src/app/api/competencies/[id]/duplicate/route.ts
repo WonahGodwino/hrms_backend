@@ -5,15 +5,14 @@ import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { verifyCompanyAccess } from "@/app/lib/access-control";
 import { logCompetencyAction } from "@/app/lib/competencies/competency-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
 }
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -53,9 +52,8 @@ export async function POST(
     let copyName = `${source.name} (Copy)`;
     let suffix = 2;
     while (
-      await prisma.competency.findFirst({
+      await forCompany(source.companyId).competency.findFirst({
         where: {
-          companyId: source.companyId,
           name: { equals: copyName, mode: "insensitive" },
           status: { not: "ARCHIVED" },
         },

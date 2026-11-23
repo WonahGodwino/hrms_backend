@@ -3,8 +3,9 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { getCurrencySymbol, normalizeCurrencyCode } from '@/app/lib/currency'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -94,7 +95,7 @@ export async function GET(request: NextRequest) {
           // can drift (e.g. an HR promoted/demoted to ADMIN later without the
           // assignment row being touched); filtering on it meant a role
           // change could silently zero out a user's entire company list.
-          const userCompanies = await (prisma as any).userCompany.findMany({
+          const userCompanies = await prisma.userCompany.findMany({
             where: { userId: user.userId },
             include: {
               company: { select: { id: true, companyName: true, email: true, phone: true, address: true, logo: true } }
@@ -150,7 +151,7 @@ export async function GET(request: NextRequest) {
     )
 
   } catch (error) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('Error fetching accessible companies:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }

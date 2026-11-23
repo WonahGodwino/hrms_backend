@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -16,6 +16,7 @@ import {
   resolveActor,
   riskLevel,
 } from "@/app/lib/manager-review";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -144,9 +145,8 @@ export async function GET(
     if (finalRecommendation === "PROMOTION") badges.push("PROMOTION_READY");
 
     // ---- Most recent fully completed earlier cycle ("Appraisal Status" card) ----
-    const earlier = await prisma.appraisalCycleParticipant.findMany({
+    const earlier = await forCompany(companyId).appraisalCycleParticipant.findMany({
       where: {
-        companyId,
         staffRecordId: participant.staffRecordId,
         cycleId: { not: participant.cycleId },
       },

@@ -7,7 +7,8 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -48,7 +49,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     })
 
     // Attach any documents the candidate already uploaded post-acceptance.
-    await (prisma as any).candidateDocument.updateMany({
+    await prisma.candidateDocument.updateMany({
       where: { candidateId: offer.candidateId, onboardingId: null, archived: 0 },
       data: { onboardingId: onboarding.id },
     }).catch(() => {})

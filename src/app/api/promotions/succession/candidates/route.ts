@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { SuccessionReadiness } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { fail, isUniqueViolation, ok, readText, writeCtx } from "@/app/lib/pip";
@@ -9,6 +9,7 @@ import {
   loadScopedStaff,
   logSuccession,
 } from "@/app/lib/promotion";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -50,8 +51,8 @@ export async function POST(request: NextRequest) {
     );
     if ("error" in actions) return fail(origin, actions.error);
 
-    const role = await prisma.criticalRole.findFirst({
-      where: { id: body.criticalRoleId, companyId, status: "ACTIVE" },
+    const role = await forCompany(companyId).criticalRole.findFirst({
+      where: { id: body.criticalRoleId, status: "ACTIVE" },
       select: { id: true, designationId: true },
     });
     if (!role) return fail(origin, "Critical role not found", 404);

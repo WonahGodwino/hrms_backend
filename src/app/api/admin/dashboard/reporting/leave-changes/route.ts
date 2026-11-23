@@ -12,14 +12,9 @@ import { aggregateLeavePeriod, type LeavePeriodAggregate } from '@/app/lib/repor
 import { getAccessibleCompanies, resolveTargetCompanies } from '@/app/lib/reporting/access'
 import { getPeriodRange, getPreviousPeriodRange, getQuarterFromMonth, type Period } from '@/app/lib/reporting/periodRange'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import { computeDelta } from '@/app/lib/admin/route-helpers'
 
-function computeDelta(a: number | null, b: number | null): { absolute: number; percent: number } {
-  const aVal = a ?? 0
-  const bVal = b ?? 0
-  const absolute = Number((aVal - bVal).toFixed(1))
-  if (bVal === 0) return { absolute, percent: aVal === 0 ? 0 : 100 }
-  return { absolute, percent: Number(((absolute / bVal) * 100).toFixed(2)) }
-}
+
 
 function compareDepartments(groupsA: LeavePeriodAggregate['byDepartment'], groupsB: LeavePeriodAggregate['byDepartment']) {
   const labels = new Set([...groupsA.map((g) => g.label), ...groupsB.map((g) => g.label)])

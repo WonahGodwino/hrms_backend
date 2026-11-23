@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedReadAccess } from '@/app/lib/phed/access-role'
 import { exportWorkbook, exportSummaryWorkbookExcel } from '@/app/lib/phed/report-export'
@@ -17,12 +17,18 @@ import {
   type RegisterCtx,
   type SummaryWorkbookData,
 } from '@/app/lib/phed/payroll-sheets'
+import { forCompany } from '@/app/lib/data/tenant'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // GET /api/phed/pay-periods/:id/reports/payroll?scope=regular|contract|individual&format=xlsx|json
 // Bundled workbooks that replicate the reference templates sheet-for-sheet.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req);
+  if (deferred) return deferred;
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -51,11 +57,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     if (scope === 'regular')   where.category = 'REGULAR'
     if (scope === 'contract')  where.category = { in: ['CONTRACT', 'NYSC_IT'] }
 
-    const payrolls = await (prisma as any).phedComputedPayroll.findMany({ where })
+    const payrolls = await prisma.phedComputedPayroll.findMany({ where })
 
     // Extra staff attributes for the register (pay point, approved role).
-    const staff = await (prisma as any).phedStaff.findMany({
-      where: { companyId: period.companyId },
+    const staff = await forCompany(period.companyId).phedStaff.findMany({
       select: { id: true, jobTitle: true, payPoint: { select: { name: true } } },
     })
     const ctx: RegisterCtx = {
@@ -69,13 +74,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     }
 
     // Union / cooperative per-column amounts (NUEE, SSAEAC, named coops).
-    const allPayrolls = await (prisma as any).phedComputedPayroll.findMany({ where: { payPeriodId: params.id } })
+    const allPayrolls = await prisma.phedComputedPayroll.findMany({ where: { payPeriodId: params.id } })
     const staffIds = allPayrolls.map((r: any) => r.staffId)
     const [unions, coops, staffUnions, staffCoops] = await Promise.all([
-      (prisma as any).phedUnion.findMany({ where: { companyId: period.companyId, isActive: true } }),
-      (prisma as any).phedCooperative.findMany({ where: { companyId: period.companyId, isActive: true } }),
-      (prisma as any).phedStaffUnion.findMany({ where: { staffId: { in: staffIds } } }),
-      (prisma as any).phedStaffCooperative.findMany({ where: { staffId: { in: staffIds } } }),
+      forCompany(period.companyId).phedUnion.findMany({ where: { isActive: true } }),
+      forCompany(period.companyId).phedCooperative.findMany({ where: { isActive: true } }),
+      prisma.phedStaffUnion.findMany({ where: { staffId: { in: staffIds } } }),
+      prisma.phedStaffCooperative.findMany({ where: { staffId: { in: staffIds } } }),
     ])
     const uc = buildUnionCoopMaps(
       unions.map((u: any) => ({ id: u.id, name: u.name, percentage: Number(u.percentage) })),
@@ -101,29 +106,27 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     } else if (scope === 'individual') {
       sheets = buildIndividualWorkbook(payrolls, ctx)
     } else if (scope === 'summary') {
-      const prevPeriod = await prisma.phedPayPeriod.findFirst({
+      const prevPeriod = await forCompany(period.companyId).phedPayPeriod.findFirst({
         where: {
-          companyId: period.companyId,
           OR: [{ year: { lt: period.year } }, { year: period.year, month: { lt: period.month } }],
         },
         orderBy: [{ year: 'desc' }, { month: 'desc' }],
         select: { id: true },
       })
       const prevPayrolls = prevPeriod
-        ? await (prisma as any).phedComputedPayroll.findMany({ where: { payPeriodId: prevPeriod.id } })
+        ? await prisma.phedComputedPayroll.findMany({ where: { payPeriodId: prevPeriod.id } })
         : []
       summaryData = buildSummaryData(labels, payrolls, prevPayrolls, ctx)
     } else if (scope === 'iad') {
-      const prevPeriod = await prisma.phedPayPeriod.findFirst({
+      const prevPeriod = await forCompany(period.companyId).phedPayPeriod.findFirst({
         where: {
-          companyId: period.companyId,
           OR: [{ year: { lt: period.year } }, { year: period.year, month: { lt: period.month } }],
         },
         orderBy: [{ year: 'desc' }, { month: 'desc' }],
         select: { id: true },
       })
       const prevPayrolls = prevPeriod
-        ? await (prisma as any).phedComputedPayroll.findMany({ where: { payPeriodId: prevPeriod.id } })
+        ? await prisma.phedComputedPayroll.findMany({ where: { payPeriodId: prevPeriod.id } })
         : []
       sheets = buildIadWorkbook(labels, payrolls, prevPayrolls)
     } else {
@@ -145,7 +148,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': `attachment; filename="payroll-${scope}-${safeName}.xlsx"`,
-        'Access-Control-Allow-Origin': origin ?? '*',
+        ...getCorsHeaders(origin),
       },
     })
   } catch (e) { return withCors(handleApiError(e), origin) }

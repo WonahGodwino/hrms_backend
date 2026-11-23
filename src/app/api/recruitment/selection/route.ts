@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveRecruitmentCompanyId } from '@/app/lib/recruitment/companyScope'
 import { calculateIndustryMatchScore, extractKeywords } from '@/app/lib/keywordExtractor'
@@ -11,6 +11,9 @@ import { calculateAICVReviewScore, AICVReviewOptions } from '@/app/lib/aiCVRevie
 import { aiConfig, resolveDefaultAiFromDb, getDefaultAiService, getAPIKey, getDefaultModel } from '@/app/lib/aiConfig'
 import rateLimit from '@/app/lib/rateLimiter'
 import { openaiUsageTracker } from '@/app/lib/openaiUsage'
+import { asNumber } from '@/app/lib/prisma-utils'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
+import { forCompany } from '@/app/lib/data/tenant'
 
  //Initialize rate limiter
 const limiter = rateLimit({
@@ -40,7 +43,7 @@ export async function POST(request: NextRequest) {
     // Apply rate limiting
     try {
       await limiter.check(10, user.userId || 'anonymous') // 10 requests per minute
-    } catch (rateLimitError) {
+    } catch (_rateLimitError) {
       return withCors(
         ApiResponse.error('Rate limit exceeded. Please try again in a minute.', 429),
         origin
@@ -116,10 +119,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Get all specified jobs for this company
-    const jobs = await prisma.job.findMany({
+    const jobs = await forCompany(companyId).job.findMany({
       where: {
-        id: { in: jobIds },
-        companyId: companyId,
+        id: { in: jobIds }
       },
       include: {
         applications: {
@@ -184,8 +186,8 @@ export async function POST(request: NextRequest) {
       select: { tokensPerUnit: true, costPerUnit: true, providerCostPerUnit: true },
     })
     const rateTokensPerUnit   = tokenRateConfig?.tokensPerUnit       ?? 1000
-    const rateCostPerUnit     = tokenRateConfig?.costPerUnit         ?? 0.30  // billed to tenant
-    const rateProviderPerUnit = tokenRateConfig?.providerCostPerUnit ?? 0.015  // our actual cost
+    const rateCostPerUnit     = asNumber(tokenRateConfig?.costPerUnit)         ?? 0.30  // billed to tenant
+    const rateProviderPerUnit = asNumber(tokenRateConfig?.providerCostPerUnit) ?? 0.015  // our actual cost
 
     const reviewResults: ReviewResult[] = []
     const shortlistedCandidates: ShortlistedCandidate[] = []
@@ -436,8 +438,14 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        const meetsThreshold = matchResult.overallScore >= threshold
+
+        // DB-002: the score, the history rows and the status of one application
+        // are saved together, so a failure never leaves a scored application in
+        // the wrong stage. (The AI call above stays outside the transaction.)
+        await prisma.$transaction(async (tx) => {
         // Update application with scores
-        await prisma.jobApplication.update({
+        await tx.jobApplication.update({
           where: { id: application.id },
           data: {
             score: newScore,
@@ -452,7 +460,7 @@ export async function POST(request: NextRequest) {
         const fromStatus = lastStage?.toStatus || 'SUBMITTED'
         
         // Use camelCase for Prisma model
-        await prisma.applicationStageHistory.create({
+        await tx.applicationStageHistory.create({
           data: {
             applicationId: application.id,
             fromStatus: fromStatus as any,
@@ -466,13 +474,11 @@ export async function POST(request: NextRequest) {
           }
         })
 
-        const meetsThreshold = matchResult.overallScore >= threshold
-
         // Only mutate application status when auto-shortlisting is enabled.
         // The candidate is still surfaced in the response below regardless.
         if (autoShortlist && meetsThreshold) {
           // Use camelCase for Prisma model
-          await prisma.applicationStageHistory.create({
+          await tx.applicationStageHistory.create({
             data: {
               applicationId: application.id,
               fromStatus: 'REVIEWING',
@@ -482,23 +488,24 @@ export async function POST(request: NextRequest) {
             }
           })
 
-          await prisma.jobApplication.update({
+          await tx.jobApplication.update({
             where: { id: application.id },
             data: {
               status: 'SHORTLISTED'
             }
           })
-
-          shortlistedCount++
         } else {
           // Just mark as reviewed
-          await prisma.jobApplication.update({
+          await tx.jobApplication.update({
             where: { id: application.id },
             data: {
               status: 'REVIEWING'
             }
           })
         }
+        })
+
+        if (autoShortlist && meetsThreshold) shortlistedCount++
 
         // Always surface candidates that meet the threshold in the response,
         // whether or not they were auto-shortlisted in the database.
@@ -610,7 +617,7 @@ export async function POST(request: NextRequest) {
       origin
     )
   } catch (error: unknown) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('Error in CV review:', {
       error: message,
       stack: error instanceof Error ? error.stack : 'No stack trace'

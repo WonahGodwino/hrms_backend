@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     requireRole(token, ['SUPER_ADMIN'])
 
-    const existingModules = await (prisma as any).platformModule.findMany({
+    const existingModules = await prisma.platformModule.findMany({
       orderBy: { name: 'asc' },
       select: { id: true, key: true, name: true, description: true, archived: true, navIcon: true, createdAt: true },
     })
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     // Check if module with this key already exists. Re-registering an
     // ARCHIVED module un-archives it (that's the documented re-registration
     // path); only a live duplicate is a conflict.
-    const existing = await (prisma as any).platformModule.findUnique({
+    const existing = await prisma.platformModule.findUnique({
       where: { key },
     })
 
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
       if (!existing.archived) {
         return withCors(ApiResponse.error(`Module with key "${key}" already exists`, 409), origin)
       }
-      const revived = await (prisma as any).platformModule.update({
+      const revived = await prisma.platformModule.update({
         where: { key },
         data: { archived: false, ...(name ? { name } : {}), ...(description ? { description } : {}) },
       })
@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Create the module
-    const newModule = await (prisma as any).platformModule.create({
+    const newModule = await prisma.platformModule.create({
       data: { key, name, description: description || '' },
     })
 
@@ -111,7 +111,7 @@ export async function DELETE(req: NextRequest) {
       return withCors(ApiResponse.error('key is required as query parameter', 400), origin)
     }
 
-    const existing = await (prisma as any).platformModule.findUnique({
+    const existing = await prisma.platformModule.findUnique({
       where: { key },
     })
 
@@ -120,7 +120,7 @@ export async function DELETE(req: NextRequest) {
     }
 
     // Check if any company has this module enabled
-    const activeAccessCount = await (prisma as any).companyModuleAccess.count({
+    const activeAccessCount = await prisma.companyModuleAccess.count({
       where: { moduleId: existing.id, enabled: true },
     })
 
@@ -132,12 +132,12 @@ export async function DELETE(req: NextRequest) {
     }
 
     // Delete all company_module_access rows for this module
-    await (prisma as any).companyModuleAccess.deleteMany({
+    await prisma.companyModuleAccess.deleteMany({
       where: { moduleId: existing.id },
     })
 
     // Delete the module
-    await (prisma as any).platformModule.delete({
+    await prisma.platformModule.delete({
       where: { key },
     })
 

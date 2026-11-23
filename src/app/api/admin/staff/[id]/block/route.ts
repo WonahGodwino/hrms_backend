@@ -13,12 +13,15 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { checkStaffAccess } from '@/app/lib/staff-access'
 import { logStaffActivity } from '@/app/lib/device/device-utils'
 import { createNotification } from '@/app/lib/notifications/helpers'
+import { readJsonBodyOrEmpty } from '@/app/lib/validation/request-body'
+import { reasonBodySchema } from '@/app/lib/validation/payroll-staff-schemas'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -29,7 +32,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const token = authHeader.replace('Bearer ', '')
     const currentUser = requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR'])
 
-    const body = await request.json().catch(() => ({}))
+    const body = await readJsonBodyOrEmpty(request, reasonBodySchema)
     const reason = typeof body?.reason === 'string' ? body.reason.trim() : ''
     if (!reason) {
       return withCors(ApiResponse.error('A reason is required to block a user', 400), origin)

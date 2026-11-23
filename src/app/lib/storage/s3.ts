@@ -22,9 +22,15 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
+  HeadObjectCommand,
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { log, serializeError } from '@/app/lib/observability/logger'
+
+// REL-003: a stalled storage call gives up instead of holding a request open.
+const S3_CONNECT_TIMEOUT_MS = 5_000
+const S3_REQUEST_TIMEOUT_MS = 60_000
 
 function env(name: string): string | undefined {
   return process.env[name] || undefined
@@ -63,6 +69,7 @@ export function s3Client(): S3Client {
         accessKeyId: c.accessKeyId,
         secretAccessKey: c.secretAccessKey,
       },
+      requestHandler: { connectionTimeout: S3_CONNECT_TIMEOUT_MS, requestTimeout: S3_REQUEST_TIMEOUT_MS },
       ...(c.endpoint ? { endpoint: c.endpoint, forcePathStyle: true } : {}),
     })
   }
@@ -85,7 +92,16 @@ export async function putS3Object(
   )
 }
 
-/** Returns the object bytes, or null when missing/erroring (callers fall back). */
+/** True when S3 answered that the object does not exist (as opposed to a failed call). */
+export function isS3NotFound(err: unknown): boolean {
+  const e = err as { name?: string; $metadata?: { httpStatusCode?: number } } | null
+  return e?.name === 'NoSuchKey' || e?.name === 'NotFound' || e?.$metadata?.httpStatusCode === 404
+}
+
+/**
+ * Returns the object bytes, or null when missing or erroring (callers fall back to the database or disk copy).
+ * A missing object is normal before the migration; any other failure is logged.
+ */
 export async function getS3Object(key: string): Promise<Uint8Array<ArrayBuffer> | null> {
   if (!key) return null
   // Set S3_DEBUG=1 to watch the backend log every read: "[s3] HIT <key>" means
@@ -97,13 +113,17 @@ export async function getS3Object(key: string): Promise<Uint8Array<ArrayBuffer> 
     const res = await s3Client().send(new GetObjectCommand({ Bucket: c.bucket, Key: key }))
     const bytes = await res.Body?.transformToByteArray()
     if (!bytes) {
-      if (debug) console.log('[s3] MISS (empty)', key)
+      if (debug) log.info('[s3] MISS (empty)', { key })
       return null
     }
-    if (debug) console.log('[s3] HIT', key)
+    if (debug) log.info('[s3] HIT', { key })
     return new Uint8Array(bytes)
-  } catch {
-    if (debug) console.log('[s3] MISS (error)', key)
+  } catch (err) {
+    if (isS3NotFound(err)) {
+      if (debug) log.info('[s3] MISS (not found)', { key })
+    } else {
+      log.warn('[s3] read failed; falling back', { key, error: serializeError(err) })
+    }
     return null
   }
 }
@@ -113,8 +133,56 @@ export async function deleteS3Object(key: string): Promise<void> {
   try {
     const c = s3Config()
     await s3Client().send(new DeleteObjectCommand({ Bucket: c.bucket, Key: key }))
+  } catch (err) {
+    // Best-effort: a leftover object costs storage only, so the caller carries on.
+    log.warn('[s3] delete failed', { key, error: serializeError(err) })
+  }
+}
+
+/** Object metadata only (no body) — for Content-Length/Content-Type. */
+export async function headS3Object(key: string): Promise<{ contentLength: number; contentType?: string } | null> {
+  if (!key) return null
+  try {
+    const c = s3Config()
+    const res = await s3Client().send(new HeadObjectCommand({ Bucket: c.bucket, Key: key }))
+    return {
+      contentLength: res.ContentLength ?? 0,
+      contentType: res.ContentType,
+    }
   } catch {
-    /* best-effort */
+    return null
+  }
+}
+
+/**
+ * Opens an object for streaming (returns a web ReadableStream, no full-buffer
+ * load). `range` is an optional byte range (inclusive) for MP4/video seeking.
+ * Returns null when the object is missing (caller falls back / 404s).
+ */
+export async function openS3Object(
+  key: string,
+  range?: { start: number; end: number },
+): Promise<{ body: ReadableStream<Uint8Array>; contentLength: number; contentType?: string; contentRange?: string } | null> {
+  if (!key) return null
+  try {
+    const c = s3Config()
+    const res = await s3Client().send(
+      new GetObjectCommand({
+        Bucket: c.bucket,
+        Key: key,
+        ...(range ? { Range: `bytes=${range.start}-${range.end}` } : {}),
+      }),
+    )
+    const body = res.Body?.transformToWebStream()
+    if (!body) return null
+    return {
+      body,
+      contentLength: res.ContentLength ?? 0,
+      contentType: res.ContentType,
+      contentRange: res.ContentRange,
+    }
+  } catch {
+    return null
   }
 }
 
@@ -142,8 +210,9 @@ export async function deleteS3ObjectsByPrefix(prefix: string): Promise<void> {
       }
       token = list.IsTruncated ? list.NextContinuationToken : undefined
     } while (token)
-  } catch {
-    /* best-effort */
+  } catch (err) {
+    // Best-effort: a leftover object costs storage only, so the caller carries on.
+    log.warn('[s3] prefix delete failed', { prefix, error: serializeError(err) })
   }
 }
 

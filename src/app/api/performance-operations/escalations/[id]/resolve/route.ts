@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -13,6 +13,7 @@ import { logEscalationAction } from "@/app/lib/performance-operations/ops-utils"
 import { MAX_NOTE_LENGTH } from "@/app/lib/performance-operations/ops-actions-utils";
 import { syncPipOnEscalationChange } from "@/app/lib/pip";
 import { notifyPipEscalationResolved } from "@/app/lib/pip-notify";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -85,8 +86,8 @@ export async function POST(
       );
 
     // Cross-company check: the escalation must belong to this company.
-    const escalation = await prisma.appraisalEscalation.findFirst({
-      where: { id, companyId },
+    const escalation = await forCompany(companyId).appraisalEscalation.findFirst({
+      where: { id },
       select: { id: true, status: true },
     });
     if (!escalation)

@@ -1,11 +1,11 @@
 //src/app/api/recruitment/applications/[applicationId]/cv/route.ts
 // to download applicant CV for a particular job within a company
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/app/lib/db";
 import { requireModuleAccess } from "@/app/lib/module-access";
 import { ApiResponse, formatError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { resolveRecruitmentCompanyId } from "@/app/lib/recruitment/companyScope";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -36,8 +36,9 @@ function buildCvFilename(candidateName: string, jobTitle: string, originalFileNa
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { applicationId: string } }
+  props: { params: Promise<{ applicationId: string }> }
 ) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
 
   try {
@@ -62,8 +63,8 @@ export async function GET(
 
     // Find the CV file for this application within the same company
     // Priority: application.cvFileId if you use it
-    const application = await prisma.jobApplication.findFirst({
-      where: { id: applicationId, companyId },
+    const application = await forCompany(companyId).jobApplication.findFirst({
+      where: { id: applicationId },
       select: {
         id: true,
         cvFileId: true,
@@ -76,9 +77,8 @@ export async function GET(
       return withCors(ApiResponse.error("Application not found", 404), origin);
     }
 
-    const file = await prisma.candidateFile.findFirst({
+    const file = await forCompany(companyId).candidateFile.findFirst({
       where: {
-        companyId,
         OR: [
           application.cvFileId ? { id: application.cvFileId } : undefined,
           { applicationId: applicationId, type: "CV" },

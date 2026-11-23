@@ -13,22 +13,13 @@ import { startOfBusinessDay, businessDateKey } from "@/app/lib/attendance/busine
 import { ensureHolidayAttendance, HOLIDAY_METHOD, getWorkSettings, checkClockOutWindow } from "@/app/lib/attendance/work-calendar";
 import { parseClockLocation, signInLocationData, signOutLocationData, locationView, LOCATION_REQUIRED_MESSAGE } from "@/app/lib/attendance/clock-location";
 import { isLate } from "@/app/lib/attendance/lateness";
+import { deriveAttendanceStatus } from "@/app/lib/attendance/route-helpers";
 
 // Business-day-aware (Africa/Lagos, not server-local) — see business-day.ts.
 const startOfDay = startOfBusinessDay;
 const toDateKey = businessDateKey;
 
-type AttendanceStatus = "PRESENT" | "LATE" | "PARTIAL" | "ABSENT";
 
-function deriveAttendanceStatus(record: {
-  status: string | null;
-  signInTime: Date | null;
-}): AttendanceStatus {
-  if (!record.signInTime) return "ABSENT";
-  if (record.status === "LATE") return "LATE";
-  if (record.status === "HALF_DAY" || record.status === "PARTIAL") return "PARTIAL";
-  return "PRESENT";
-}
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -38,7 +29,7 @@ export async function POST(req: NextRequest) {
   const origin = req.headers.get("origin");
 
   try {
-    const { prisma } = await import("@/app/lib/prisma");
+    const { prisma } = await import("@/app/lib/db");
 
     const authHeader = req.headers.get("authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {

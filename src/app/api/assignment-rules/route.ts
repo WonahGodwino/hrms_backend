@@ -6,6 +6,7 @@ import { logAssignmentRuleActivity } from '@/app/lib/training/assignment-rule-au
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -68,8 +69,8 @@ export async function POST(req: NextRequest) {
 
     // Validate the linked training program belongs to this company
     if (trainingProgramId) {
-      const prog = await prisma.trainingProgram.findFirst({
-        where: { id: trainingProgramId, companyId: cid, deletedAt: null },
+      const prog = await forCompany(cid).trainingProgram.findFirst({
+        where: { id: trainingProgramId, deletedAt: null },
         select: { id: true },
       })
       if (!prog) return withCors(ApiResponse.error('Training program not found', 404), origin)

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { withTransaction } from "@/app/lib/data/transaction";
 import { handleCorsOptions } from "@/app/lib/cors";
 import { logPip, ok } from "@/app/lib/pip";
 import {
@@ -22,7 +22,7 @@ export async function POST(
   return guarded(request, async (origin) => {
     const body = await readBody(request);
     const ctx = await employeeWriteCtx(request, body.companyId);
-    const acknowledgedAt = await prisma.$transaction(async (tx) => {
+    const acknowledgedAt = await withTransaction(async (tx) => {
       const pip = await ownLivePip(tx, ctx, id);
       if (pip.acknowledgedAt) return pip.acknowledgedAt;
       const now = new Date();

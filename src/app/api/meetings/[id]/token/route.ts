@@ -36,7 +36,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return withCors(ApiResponse.error('Video is not configured on the server yet. Please try again later.', 503), origin)
     }
 
-    const meeting: any = await (prisma as any).meeting.findUnique({
+    const meeting: any = await prisma.meeting.findUnique({
       where: { id },
       include: { participants: true },
     })
@@ -92,7 +92,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             return withCors(ApiResponse.error('This invitation link has already been bound to another email', 403), origin)
           }
           if (!participant.accessEmail) {
-            await (prisma as any).meetingParticipant.update({
+            await prisma.meetingParticipant.update({
               where: { id: participant.id },
               data: { accessEmail },
             }).catch(() => {})
@@ -137,13 +137,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     // Stamp joinedAt (first join) for the resolved participant, best-effort.
     if (participant && !participant.joinedAt) {
-      await (prisma as any).meetingParticipant.update({
+      await prisma.meetingParticipant.update({
         where: { id: participant.id }, data: { joinedAt: new Date() },
       }).catch(() => {})
     }
     // First join flips the room LIVE.
     if (meeting.status === 'SCHEDULED') {
-      await (prisma as any).meeting.update({ where: { id }, data: { status: 'LIVE' } }).catch(() => {})
+      await prisma.meeting.update({ where: { id }, data: { status: 'LIVE' } }).catch(() => {})
     }
 
     return withCors(ApiResponse.success({

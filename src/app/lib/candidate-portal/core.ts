@@ -5,6 +5,8 @@ import { prisma } from "@/app/lib/db";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { withCors } from "@/app/lib/cors";
 import rateLimit from "@/app/lib/rateLimiter";
+import { getTrustedClientIp } from "@/app/lib/security/client-ip";
+import { requireSecret } from "@/app/lib/config/secrets";
 
 export const MAX_SUPPORTING_DOCS = 3;
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -40,7 +42,7 @@ export class CpResult {
     public status = 200,
   ) {}
 }
-export type Params<T> = { params: Promise<T> | T };
+export type Params<T> = { params: Promise<T> };
 export const isUnique = (e: any, field?: string) =>
   e?.code === "P2002" &&
   (!field || String(e?.meta?.target ?? "").includes(field));
@@ -66,10 +68,8 @@ export async function allow(
     return false;
   }
 }
-export const clientIp = (r: NextRequest) =>
-  r.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-  r.headers.get("x-real-ip") ||
-  "unknown";
+// SEC-010: the address added by our own proxy, not the client-supplied one.
+export const clientIp = (r: NextRequest) => getTrustedClientIp(r.headers);
 
 // ---------------------------------------------------------------- tokens (separate secret, so staff and candidate tokens never cross)
 function secret() {
@@ -127,7 +127,7 @@ const hashSecret = (v: string) =>
   crypto
     .createHmac(
       "sha256",
-      process.env.OTP_PEPPER || process.env.JWT_SECRET || "",
+      requireSecret("OTP_PEPPER", "JWT_SECRET"),
     )
     .update(v)
     .digest("hex");

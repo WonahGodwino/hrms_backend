@@ -1,7 +1,7 @@
 declare module 'formidable' {
   import { IncomingMessage } from 'http'
 
-  export type Fields = Record<string, any>
+  export type Fields = Record<string, unknown>
   export type Files = Record<string, formidable.File[] | formidable.File>
 
   export interface File {
@@ -13,6 +13,6 @@ declare module 'formidable' {
   }
 
   export default class Formidable {
-    parse(req: IncomingMessage, callback: (err: any, fields: Fields, files: Files) => void): void
+    parse(req: IncomingMessage, callback: (err: unknown, fields: Fields, files: Files) => void): void
   }
 }

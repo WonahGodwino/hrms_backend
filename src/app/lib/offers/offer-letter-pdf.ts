@@ -8,6 +8,7 @@
 // maps common elements (h1-h3, p, ul/li, strong, em, br, hr, img) to PDFKit
 // drawing commands, producing a professional A4 PDF.
 import PDFDocument from 'pdfkit'
+import fs from 'fs'
 import path from 'path'
 
 // ---------------------------------------------------------------------------
@@ -35,9 +36,9 @@ function resolveFonts() {
     ],
   }
 
-  for (const p of candidates.regular) { try { require('fs').accessSync(p); _regularFont = p; break } catch {} }
-  for (const p of candidates.bold) { try { require('fs').accessSync(p); _boldFont = p; break } catch {} }
-  for (const p of candidates.italic) { try { require('fs').accessSync(p); _italicFont = p; break } catch {} }
+  for (const p of candidates.regular) { try { fs.accessSync(p); _regularFont = p; break } catch { /* ignored: best-effort, failure is non-fatal */ } }
+  for (const p of candidates.bold) { try { fs.accessSync(p); _boldFont = p; break } catch { /* ignored: best-effort, failure is non-fatal */ } }
+  for (const p of candidates.italic) { try { fs.accessSync(p); _italicFont = p; break } catch { /* ignored: best-effort, failure is non-fatal */ } }
 
   _regularFont = _regularFont || 'Helvetica'
   _boldFont = _boldFont || 'Helvetica-Bold'
@@ -381,7 +382,6 @@ function renderImage(doc: PDFKit.PDFDocument, html: string, y: number): number {
   if (!src || src.startsWith('data:')) return y
 
   try {
-    const fs = require('fs')
     if (fs.existsSync(src)) {
       doc.image(src, MARGIN_LEFT, y, { width: 120, height: 40 })
       return y + 50

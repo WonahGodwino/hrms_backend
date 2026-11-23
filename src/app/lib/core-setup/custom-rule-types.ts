@@ -4,6 +4,7 @@
 // belongs to, so a rule cannot test a field in a category the company hides from the AI Assistant (for example pay).
 import type { PrismaClient } from '@prisma/client'
 import type { DataCategory } from '@/app/lib/ai/categories'
+import { decimalOrNull } from '@/app/lib/prisma-utils'
 
 export type Operator = 'equals' | 'not_equals' | 'greater_than' | 'less_than' | 'is_empty' | 'is_not_empty' | 'older_than' | 'count_above'
 export type FieldKind = 'text' | 'status' | 'number' | 'date' | 'count' | 'ref'
@@ -92,7 +93,7 @@ const staff: RecordTypeDef = {
         manager: s.managerId ?? null,
         tenure: days(s.hireDate, now),
         hireDate: s.hireDate ?? null,
-        basePay: s.designation?.basePay ?? null,
+        basePay: decimalOrNull(s.designation?.basePay),
       },
     }))
   },
@@ -142,7 +143,7 @@ const designation: RecordTypeDef = {
     })
     return rows.map((d) => ({
       id: d.id, label: d.title, ref: d.code, sub: null, active: isActiveText(d.status) === 'active',
-      v: { title: d.title, status: isActiveText(d.status), basePay: d.basePay ?? null, staffCount: d._count.staffRecords, createdAt: d.createdAt },
+      v: { title: d.title, status: isActiveText(d.status), basePay: decimalOrNull(d.basePay), staffCount: d._count.staffRecords, createdAt: d.createdAt },
     }))
   },
 }

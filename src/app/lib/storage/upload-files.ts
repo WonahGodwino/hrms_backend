@@ -11,6 +11,7 @@
 // ============================================================
 
 import { isS3Configured, putS3Object, getS3Object } from './s3'
+import { log, serializeError } from '@/app/lib/observability/logger'
 
 export function uploadFileS3Key(relativePath: string): string {
   const p = relativePath.replace(/^\/+/, '')
@@ -30,7 +31,7 @@ export async function uploadFileToS3(
   try {
     await putS3Object(uploadFileS3Key(relativePath), new Uint8Array(bytes), contentType)
   } catch (e) {
-    console.warn('[uploads] S3 upload skipped/failed', e)
+    log.warn('[uploads] S3 upload skipped/failed', { error: serializeError(e) })
   }
 }
 

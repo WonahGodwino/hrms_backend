@@ -9,6 +9,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -37,8 +38,7 @@ export async function GET(request: NextRequest) {
       return withCors(ApiResponse.error(`You do not have ${userRole} access for this company`, 403), origin)
     }
 
-    const runs = await prisma.payrollGenerationRun.findMany({
-      where: { companyId },
+    const runs = await forCompany(companyId).payrollGenerationRun.findMany({
       include: { template: { select: { templateName: true } } },
       orderBy: { createdAt: 'desc' },
       take: 100

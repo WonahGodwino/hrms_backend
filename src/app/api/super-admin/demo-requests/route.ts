@@ -36,8 +36,8 @@ export async function GET(req: NextRequest) {
     }
 
     const [total, records] = await Promise.all([
-      (prisma as any).demoRequest.count({ where }),
-      (prisma as any).demoRequest.findMany({
+      prisma.demoRequest.count({ where }),
+      prisma.demoRequest.findMany({
         where,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,

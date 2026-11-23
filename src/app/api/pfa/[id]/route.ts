@@ -10,9 +10,10 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-type RouteParams = { params: { id: string } }
+type RouteParams = { params: Promise<{ id: string }> }
 
-export async function PATCH(req: NextRequest, { params }: RouteParams) {
+export async function PATCH(req: NextRequest, props: RouteParams) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null

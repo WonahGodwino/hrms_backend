@@ -5,14 +5,11 @@
 // participant + meeting); the meeting/token endpoint exchanges it for a
 // short-lived provider (LiveKit) join token.
 import jwt from 'jsonwebtoken'
+import { getSecret } from '@/app/lib/business-units/import-token'
 
 const PURPOSE = 'meeting-access'
 
-function getSecret(): string {
-  const secret = process.env.JWT_SECRET
-  if (!secret) throw new Error('JWT_SECRET environment variable is not set')
-  return secret
-}
+
 
 export function signMeetingAccessToken(
   meetingId: string,
@@ -62,6 +59,34 @@ export function verifyMeetingPublicAccessToken(
   try {
     const decoded = jwt.verify(token, getSecret()) as any
     if (!decoded || decoded.purpose !== PUBLIC_PURPOSE || !decoded.meetingId) return null
+    return { meetingId: String(decoded.meetingId) }
+  } catch {
+    return null
+  }
+}
+
+const RECORDING_PURPOSE = 'meeting-recording-stream'
+
+/**
+ * Short-lived token for streaming/downloading a finished meeting recording.
+ * The browser `<video>` element cannot attach an Authorization header, so the
+ * authenticated `/recording` endpoint exchanges host/privileged access for a
+ * tokenized stream URL (same pattern as the meeting join link).
+ */
+export function signRecordingStreamToken(meetingId: string, expiresIn: string = '1h'): string {
+  return (jwt as any).sign(
+    { meetingId, purpose: RECORDING_PURPOSE },
+    getSecret(),
+    { expiresIn },
+  ) as string
+}
+
+export function verifyRecordingStreamToken(
+  token: string,
+): { meetingId: string } | null {
+  try {
+    const decoded = jwt.verify(token, getSecret()) as any
+    if (!decoded || decoded.purpose !== RECORDING_PURPOSE || !decoded.meetingId) return null
     return { meetingId: String(decoded.meetingId) }
   } catch {
     return null

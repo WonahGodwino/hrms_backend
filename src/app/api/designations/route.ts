@@ -4,6 +4,7 @@ import { getUserFromToken } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveScopedCompanyId } from '@/app/lib/company-scope'
+import { decimalOrNull } from '@/app/lib/prisma-utils'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -40,8 +41,8 @@ export async function GET(req: NextRequest) {
     if (status) where.status = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()
 
     const [total, designations] = await Promise.all([
-      (prisma as any).designation.count({ where }),
-      (prisma as any).designation.findMany({
+      prisma.designation.count({ where }),
+      prisma.designation.findMany({
         where,
         skip,
         take: limit,
@@ -63,7 +64,7 @@ export async function GET(req: NextRequest) {
         usage: d._count?.staffRecords || d.staffCount || 0,
         status: d.status,
         description: d.description,
-        basePay: d.basePay ?? null,
+        basePay: decimalOrNull(d.basePay),
         basePayFrequency: d.basePayFrequency ?? null,
         benefits: d.benefits ?? null,
         createdAt: d.createdAt,

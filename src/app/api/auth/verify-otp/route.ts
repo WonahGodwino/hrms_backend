@@ -2,6 +2,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/db';
 import { withCors, handleCorsOptions } from '@/app/lib/cors';
+import { MAX_RESET_ATTEMPTS, RESET_TOKEN_TTL_MINUTES, createResetToken, otpMatches } from '@/app/lib/password-reset/tokens';
+import { phedAccountRateLimit, phedRateLimit } from '@/app/lib/phed/rate-limit';
+import { publicErrorMessage } from '@/app/lib/errors/public-error';
+import { readJsonBodyOrEmpty } from '@/app/lib/validation/request-body'
+import { verifyOtpBodySchema } from '@/app/lib/validation/auth-schemas';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -9,9 +15,13 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const origin = req.headers.get('origin');
+  // SEC-010: per-IP limit (the proxy-added address, not the client-supplied one).
+  const ipLimited = phedRateLimit(req, 'auth');
+  if (ipLimited) return withCors(ipLimited, origin);
 
   try {
-    const body = await req.json();
+    // API-002: fields are type-checked; a malformed body falls into the checks below.
+    const body = await readJsonBodyOrEmpty(req, verifyOtpBodySchema);
     const { email, otp, companyId } = body; // Add optional companyId
 
     // Validate input
@@ -43,145 +53,33 @@ export async function POST(req: NextRequest) {
 
     // Normalize email
     const normalizedEmail = email.toLowerCase().trim();
+    // SEC-010: per-account limit, so rotating IP addresses does not help.
+    const accountLimited = phedAccountRateLimit(req, 'auth', normalizedEmail);
+    if (accountLimited) return withCors(accountLimited, origin);
+
     const normalizedOtp = otp.trim();
 
-    // Step 1: Find matching OTP records
-    let otpRecord;
-    let matchingCompanies = [];
-
-    if (companyId) {
-      // If companyId is provided, find specific OTP record
-      otpRecord = await prisma.passwordReset.findUnique({
-        where: {
-          email_companyId: {
-            email: normalizedEmail,
-            companyId: companyId
-          }
-        }
-      });
-
-      if (otpRecord) {
-        // Get company info
-        const staff = await prisma.staffRecord.findFirst({
-          where: {
-            email: normalizedEmail,
-            companyId: companyId,
-            isActive: true
-          },
-          select: {
-            company: {
-              select: {
-                id: true,
-                companyName: true
-              }
-            }
-          }
-        });
-
-        if (staff) {
-          matchingCompanies.push({
-            companyId: staff.company.id,
-            companyName: staff.company.companyName
-          });
-        }
+    // Step 1: Find the active reset records this OTP could belong to.
+    // Every lookup path counts failed attempts (SEC-004); OTPs are stored
+    // as digests and compared in constant time.
+    const candidates = await prisma.passwordReset.findMany({
+      where: {
+        email: normalizedEmail,
+        isUsed: false,
+        otpExpiresAt: { gt: new Date() },
+        ...(companyId ? { companyId } : {}),
+      },
+      orderBy: {
+        updatedAt: 'desc'
       }
-    } else {
-      // If no companyId provided, find all active OTPs for this email
-      const otpRecords = await prisma.passwordReset.findMany({
-        where: {
-          email: normalizedEmail,
-          isUsed: false,
-          otpExpiresAt: { gt: new Date() }
-        },
-        orderBy: {
-          updatedAt: 'desc'
-        }
-      });
+    });
 
-      // Find which OTP matches
-      for (const record of otpRecords) {
-        if (record.otp === normalizedOtp) {
-          otpRecord = record;
-          
-          // Get company info for this OTP
-          const staff = await prisma.staffRecord.findFirst({
-            where: {
-              email: normalizedEmail,
-              companyId: record.companyId,
-              isActive: true
-            },
-            select: {
-              company: {
-                select: {
-                  id: true,
-                  companyName: true
-                }
-              }
-            }
-          });
-
-          if (staff) {
-            matchingCompanies.push({
-              companyId: staff.company.id,
-              companyName: staff.company.companyName
-            });
-          }
-          break; // Stop after first match
-        }
-      }
-
-      // If OTP matches multiple records (same OTP sent to multiple companies)
-      if (otpRecord && otpRecords.filter(r => r.otp === normalizedOtp).length > 1) {
-        // Get all companies with this OTP
-        const allMatchingRecords = otpRecords.filter(r => r.otp === normalizedOtp);
-        
-        for (const record of allMatchingRecords) {
-          const staff = await prisma.staffRecord.findFirst({
-            where: {
-              email: normalizedEmail,
-              companyId: record.companyId,
-              isActive: true
-            },
-            select: {
-              company: {
-                select: {
-                  id: true,
-                  companyName: true
-                }
-              }
-            }
-          });
-
-          if (staff) {
-            matchingCompanies.push({
-              companyId: staff.company.id,
-              companyName: staff.company.companyName
-            });
-          }
-        }
-      }
-    }
-
-    if (!otpRecord) {
+    if (candidates.length === 0) {
       return withCors(
         NextResponse.json(
           {
             success: false,
-            message: 'No valid OTP found for this email'
-          },
-          { status: 404 }
-        ),
-        origin
-      );
-    }
-
-    // Step 2: Check if OTP has already been used
-    if (otpRecord.isUsed) {
-      return withCors(
-        NextResponse.json(
-          {
-            success: false,
-            message: 'This OTP has already been used. Please request a new one.'
+            message: 'Invalid or expired OTP. Please request a new one.'
           },
           { status: 400 }
         ),
@@ -189,46 +87,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Step 3: Check if OTP has expired
-    const currentTime = new Date();
-    const otpExpiryTime = new Date(otpRecord.otpExpiresAt);
+    const matches = candidates.filter(record => otpMatches(record.otp, normalizedOtp));
 
-    if (currentTime > otpExpiryTime) {
-      // Mark as used to prevent reuse
-      await prisma.passwordReset.update({
-        where: { id: otpRecord.id },
-        data: { isUsed: true }
-      });
-
-      return withCors(
-        NextResponse.json(
-          {
-            success: false,
-            message: 'OTP has expired. Please request a new one.'
-          },
-          { status: 400 }
-        ),
-        origin
+    if (matches.length === 0) {
+      // Count the failed attempt against every record that could have matched
+      // and invalidate any that reach the limit.
+      const attemptsAfter = candidates.map(record => (record.attempts || 0) + 1);
+      await Promise.all(
+        candidates.map((record, i) =>
+          prisma.passwordReset.update({
+            where: { id: record.id },
+            data: {
+              attempts: attemptsAfter[i],
+              ...(attemptsAfter[i] >= MAX_RESET_ATTEMPTS ? { isUsed: true } : {})
+            }
+          })
+        )
       );
-    }
 
-    // Step 4: Check if OTP matches
-    if (otpRecord.otp !== normalizedOtp) {
-      // Increment failed attempts
-      const newAttempts = (otpRecord.attempts || 0) + 1;
-      
-      await prisma.passwordReset.update({
-        where: { id: otpRecord.id },
-        data: { 
-          attempts: newAttempts,
-          // Lock after 5 failed attempts
-          ...(newAttempts >= 5 ? { isUsed: true } : {})
-        }
-      });
+      const attemptsLeft = Math.max(0, MAX_RESET_ATTEMPTS - Math.max(...attemptsAfter));
 
-      const attemptsLeft = 5 - newAttempts;
-      
-      if (newAttempts >= 5) {
+      if (attemptsLeft === 0) {
         return withCors(
           NextResponse.json(
             {
@@ -253,6 +132,37 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const matchingCompanies: { companyId: string; companyName: string }[] = [];
+
+    for (const record of matches) {
+      const staff = await forCompany(record.companyId).staffRecord.findFirst({
+        where: {
+          email: normalizedEmail,
+          isActive: true
+        },
+        select: {
+          company: {
+            select: {
+              id: true,
+              companyName: true
+            }
+          }
+        }
+      });
+
+      if (staff) {
+        matchingCompanies.push({
+          companyId: staff.company.id,
+          companyName: staff.company.companyName
+        });
+      }
+    }
+
+    // The record whose company has an active staff account, so the token is
+    // issued for the same company the response reports.
+    const otpRecord =
+      matches.find(record => record.companyId === matchingCompanies[0]?.companyId) ?? matches[0];
+
     // Step 5: Handle multiple companies with same OTP
     if (matchingCompanies.length > 1) {
       // Return success but with companies for selection
@@ -271,37 +181,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Step 6: OTP is valid for single company - mark as used
-    await prisma.passwordReset.update({
-      where: { id: otpRecord.id },
-      data: { 
-        isUsed: true,
-        updatedAt: new Date()
-      }
-    });
-
-    // Generate a temporary token for password reset (valid for 15 minutes)
-    const crypto = require('crypto');
-    const resetToken = crypto.randomBytes(32).toString('hex');
+    // Step 6: OTP is valid for a single company - exchange it for a
+    // short-lived reset token. Only the token's digest is stored, which also
+    // invalidates the OTP.
+    const { token: resetToken, stored: storedResetToken } = createResetToken();
     const tokenExpiresAt = new Date();
-    tokenExpiresAt.setMinutes(tokenExpiresAt.getMinutes() + 15);
+    tokenExpiresAt.setMinutes(tokenExpiresAt.getMinutes() + RESET_TOKEN_TTL_MINUTES);
 
-    // Store reset token (reuse otp field)
     await prisma.passwordReset.update({
       where: { id: otpRecord.id },
       data: {
-        otp: resetToken,
+        otp: storedResetToken,
         otpExpiresAt: tokenExpiresAt,
-        isUsed: false, // Reset for the token usage
-        attempts: 0, // Reset attempts
+        isUsed: false,
+        attempts: 0,
       }
     });
 
     // Get user info
-    const user = await prisma.staffRecord.findFirst({
+    const user = await forCompany(matchingCompanies[0]?.companyId || otpRecord.companyId).staffRecord.findFirst({
       where: {
         email: normalizedEmail,
-        companyId: matchingCompanies[0]?.companyId || otpRecord.companyId,
         isActive: true
       },
       select: {
@@ -358,7 +258,7 @@ export async function POST(req: NextRequest) {
         {
           success: false,
           message: 'An error occurred while verifying OTP',
-          ...(process.env.NODE_ENV === 'development' && { error: error.message })
+          ...(process.env.NODE_ENV === 'development' && { error: publicErrorMessage(error) })
         },
         { status: 500 }
       ),

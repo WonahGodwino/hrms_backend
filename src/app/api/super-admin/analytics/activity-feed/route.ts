@@ -29,17 +29,17 @@ export async function GET(req: NextRequest) {
 		requireRole(token, ['SUPER_ADMIN']);
 
 		const [staffActivity, roleElevations, approvalActions, newCompanies] = await Promise.all([
-			(prisma as any).staffActivityLog.findMany({
+			prisma.staffActivityLog.findMany({
 				orderBy: { createdAt: 'desc' },
 				take: 25,
 				include: { company: { select: { companyName: true } } },
 			}),
-			(prisma as any).roleElevation.findMany({
+			prisma.roleElevation.findMany({
 				orderBy: { createdAt: 'desc' },
 				take: 25,
 				include: { company: { select: { companyName: true } } },
 			}),
-			(prisma as any).approvalActionLog.findMany({
+			prisma.approvalActionLog.findMany({
 				orderBy: { createdAt: 'desc' },
 				take: 25,
 			}),

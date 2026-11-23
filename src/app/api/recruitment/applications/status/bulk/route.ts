@@ -9,6 +9,7 @@ import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { sendEmail } from "@/app/lib/email";
 import { resolveRecruitmentCompanyId } from "@/app/lib/recruitment/companyScope";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -88,8 +89,8 @@ export async function PATCH(request: NextRequest) {
     const uniqueIds = [...new Set(applicationIds)];
 
     // 3. Fetch within company scope
-    const applications = await prisma.jobApplication.findMany({
-      where: { id: { in: uniqueIds }, companyId },
+    const applications = await forCompany(companyId).jobApplication.findMany({
+      where: { id: { in: uniqueIds } },
       include: {
         candidate: {
           select: { id: true, firstName: true, lastName: true, email: true },

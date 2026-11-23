@@ -9,6 +9,7 @@
 // Node crypto against the provider JWKS endpoint.
 import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
+import { fetchWithTimeout, TIMEOUTS } from '@/app/lib/http/fetch-with-timeout'
 
 // Convert an RSA JWK (n, e) into an SPKI PEM public key for RS256 verification.
 function pemFromJwk(n: string, e: string): string {
@@ -21,7 +22,7 @@ function pemFromJwk(n: string, e: string): string {
 
 async function fetchJwks(uri: string): Promise<any | null> {
   try {
-    const res = await fetch(uri, { cache: 'no-store' })
+    const res = await fetchWithTimeout(uri, { cache: 'no-store' }, TIMEOUTS.lookup)
     if (!res.ok) return null
     return await res.json()
   } catch {

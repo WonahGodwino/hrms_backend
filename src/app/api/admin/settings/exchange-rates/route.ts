@@ -5,6 +5,8 @@ import { fetchLiveRate, getCurrencySymbol, isValidCurrencyCode, normalizeCurrenc
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import { forCompany } from '@/app/lib/data/tenant'
+import { getAccessibleCompanyIds, pickTargetCompanyId } from '@/app/lib/admin/route-helpers'
 
 type AuthUser = {
   userId: string
@@ -12,59 +14,9 @@ type AuthUser = {
   companyId?: string
 }
 
-async function getAccessibleCompanyIds(user: AuthUser): Promise<string[]> {
-  if (user.role === 'SUPER_ADMIN') {
-    const companies = await prisma.company.findMany({
-      where: { archived: 0 },
-      select: { id: true }
-    })
-    return companies.map((item) => item.id)
-  }
 
-  const assignments = await prisma.userCompany.findMany({
-    where: {
-      userId: user.userId,
-      company: { archived: 0 }
-    },
-    select: { companyId: true },
-    distinct: ['companyId']
-  })
 
-  if (assignments.length > 0) {
-    return assignments.map((item) => item.companyId)
-  }
 
-  if (!user.companyId) return []
-
-  const fallback = await prisma.company.findFirst({
-    where: {
-      id: user.companyId,
-      archived: 0
-    },
-    select: { id: true }
-  })
-
-  return fallback ? [fallback.id] : []
-}
-
-function pickTargetCompanyId(user: AuthUser, accessibleCompanyIds: string[], requestedCompanyId: string | null): string {
-  if (requestedCompanyId) {
-    if (!accessibleCompanyIds.includes(requestedCompanyId)) {
-      throw new Error('Access denied to selected company')
-    }
-    return requestedCompanyId
-  }
-
-  if (user.role === 'SUPER_ADMIN' && accessibleCompanyIds.length > 1) {
-    throw new Error('companyId is required for SUPER_ADMIN when managing multiple companies')
-  }
-
-  if (accessibleCompanyIds.length === 0) {
-    throw new Error('No companies assigned to your account')
-  }
-
-  return accessibleCompanyIds[0]
-}
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -104,9 +56,8 @@ export async function GET(request: NextRequest) {
     const requestedBase = searchParams.get('baseCurrency')
     const baseCurrency = normalizeCurrencyCode(requestedBase || company.baseCurrency || 'NGN')
 
-    const rates = await prisma.companyExchangeRate.findMany({
+    const rates = await forCompany(companyId).companyExchangeRate.findMany({
       where: {
-        companyId,
         baseCurrency
       },
       orderBy: [{ quoteCurrency: 'asc' }]

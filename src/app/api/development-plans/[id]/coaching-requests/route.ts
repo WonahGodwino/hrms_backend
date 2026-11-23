@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { RouteContext } from "@/app/lib/self-appraisal";
@@ -14,6 +14,7 @@ import {
   norm,
   notifyStaff,
 } from "@/app/lib/development-plans/dev-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -64,8 +65,8 @@ export async function POST(
     if (!body.coachId || typeof body.coachId !== "string")
       return bad("Missing required field: coachId");
 
-    const requester = await prisma.staffRecord.findFirst({
-      where: { id: plan.staffRecordId, companyId },
+    const requester = await forCompany(companyId).staffRecord.findFirst({
+      where: { id: plan.staffRecordId },
       select: { id: true, firstName: true, lastName: true, managerId: true },
     });
     if (!requester)
@@ -85,8 +86,8 @@ export async function POST(
       ? String(body.focusCompetencyId)
       : plan.competencyId;
     if (focusCompetencyId) {
-      const c = await prisma.competency.findFirst({
-        where: { id: focusCompetencyId, companyId },
+      const c = await forCompany(companyId).competency.findFirst({
+        where: { id: focusCompetencyId },
         select: { id: true },
       });
       if (!c) return bad("Competency not found");

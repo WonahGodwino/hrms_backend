@@ -15,15 +15,18 @@ import {
 } from '@/app/lib/payroll/generation/finalize-generated-payroll';
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { readJsonBodyOrEmpty } from '@/app/lib/validation/request-body';
+import { approveRunBodySchema } from '@/app/lib/validation/payroll-staff-schemas';
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
 }
 
-export async function POST(request: NextRequest, { params }: { params: { runId: string } }) {
-	const origin = request.headers.get('origin');
+export async function POST(request: NextRequest, props: { params: Promise<{ runId: string }> }) {
+    const params = await props.params;
+    const origin = request.headers.get('origin');
 
-	try {
+    try {
 		const authHeader = request.headers.get('authorization');
 		if (!authHeader) {
 			return withCors(ApiResponse.error('Authorization header missing', 401), origin);
@@ -31,7 +34,7 @@ export async function POST(request: NextRequest, { params }: { params: { runId: 
 		const token = authHeader.replace('Bearer ', '');
 		const user = await requireModuleAccess(token, 'PAYROLL', ['HR', 'SUPER_ADMIN', 'ADMIN']);
 
-		const body = await request.json().catch(() => ({}));
+		const body = await readJsonBodyOrEmpty(request, approveRunBodySchema);
 		const sendEmails = body?.sendEmails === true;
 
 		const run = await prisma.payrollGenerationRun.findUnique({ where: { id: params.runId } });

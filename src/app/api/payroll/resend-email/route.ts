@@ -10,6 +10,9 @@ import { sendPayrollNotificationEmail } from '@/app/lib/email'
 import { consumeTrialQuota } from '@/app/lib/trial/guard'
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
 import { findIdentifierHolder, describeIdentifierCollision } from '@/app/lib/staff/identifierCollision'
+import { forCompany } from '@/app/lib/data/tenant'
+import { readJsonBody } from '@/app/lib/validation/request-body'
+import { resendEmailBodySchema } from '@/app/lib/validation/payroll-staff-schemas'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -52,19 +55,15 @@ export async function POST(request: NextRequest) {
     const user = await requireModuleAccess(token, 'PAYROLL', ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
     // 2) Parse body
-    const body = await request.json()
+    const parsedBody = await readJsonBody(request, resendEmailBodySchema)
+    if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.message, 400), origin)
+    const body = parsedBody.data
     const {
       staffEmail,
       newEmail,
       month,
       year,
       companyId: companyIdParam,
-    }: {
-      staffEmail: string
-      newEmail?: string
-      month?: string
-      year?: number
-      companyId?: string
     } = body
 
     if (!staffEmail) {
@@ -95,10 +94,9 @@ export async function POST(request: NextRequest) {
     }
 
     // 3) Find staff by current email
-    let staff = await prisma.staffRecord.findFirst({
+    let staff = await forCompany(companyId).staffRecord.findFirst({
       where: {
         email: staffEmail,
-        companyId,
         isActive: true,
       },
     })
@@ -170,11 +168,10 @@ export async function POST(request: NextRequest) {
     }
 
     // 6) Find the corresponding payslip to get the payslip ID
-    const payslip = await prisma.payslip.findFirst({
+    const payslip = await forCompany(companyId).payslip.findFirst({
       where: {
         payrollId: payroll.id,
-        staffRecordId: staff.id,
-        companyId,
+        staffRecordId: staff.id
       },
     })
 

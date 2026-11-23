@@ -1,9 +1,9 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -22,16 +22,16 @@ export async function GET(req: NextRequest) {
     const { companyId } = resolved
 
     const [departments, roles, activePrograms] = await Promise.all([
-      prisma.department.findMany({
-        where: { companyId, status: 'Active' },
+      forCompany(companyId).department.findMany({
+        where: { status: 'Active' },
         select: { name: true },
       }),
-      prisma.designation.findMany({
-        where: { companyId, status: 'Active' },
+      forCompany(companyId).designation.findMany({
+        where: { status: 'Active' },
         select: { title: true },
       }),
-      prisma.trainingProgram.findMany({
-        where: { companyId, status: 'ACTIVE', deletedAt: null },
+      forCompany(companyId).trainingProgram.findMany({
+        where: { status: 'ACTIVE', deletedAt: null },
         select: { id: true, programName: true },
       }),
     ])

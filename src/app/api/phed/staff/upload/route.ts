@@ -8,6 +8,8 @@ import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { parseStaffCsv, normalizeState } from '@/app/lib/phed/csv-parser'
 import { sendPhedWelcomeEmail } from '@/app/lib/phed/email'
 import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/helpers'
+import { rejectForeignCompany } from '@/app/lib/phed/company-guard'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -22,6 +24,8 @@ export async function POST(req: NextRequest) {
     const formData  = await req.formData()
     const file      = formData.get('file') as File | null
     const companyId = formData.get('companyId') as string | null
+    const foreignCompany = await rejectForeignCompany(user, companyId, origin)
+    if (foreignCompany) return foreignCompany
 
     if (!file)      return withCors(ApiResponse.error('file is required', 400), origin)
     if (!companyId) return withCors(ApiResponse.error('companyId is required', 400), origin)
@@ -67,10 +71,10 @@ export async function POST(req: NextRequest) {
 
     // Load lookup tables and company name in parallel
     const [grades, regions, feeders, payPoints, company] = await Promise.all([
-      (prisma as any).phedGrade.findMany({ where: { companyId } }),
-      (prisma as any).phedRegion.findMany({ where: { companyId } }),
-      (prisma as any).phedFeeder.findMany({ where: { companyId } }),
-      (prisma as any).phedPayPoint.findMany({ where: { companyId } }),
+      forCompany(companyId).phedGrade.findMany(),
+      forCompany(companyId).phedRegion.findMany(),
+      forCompany(companyId).phedFeeder.findMany(),
+      forCompany(companyId).phedPayPoint.findMany(),
       prisma.company.findUnique({ where: { id: companyId }, select: { companyName: true } }),
     ])
 
@@ -130,7 +134,7 @@ export async function POST(req: NextRequest) {
         }
 
         // ── Upsert PHED staff record ─────────────────────────
-        await (prisma as any).phedStaff.upsert({
+        await prisma.phedStaff.upsert({
           where: { companyId_staffId: { companyId, staffId: r.staffId } },
           create: {
             companyId,
@@ -370,7 +374,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Track upload
-    await (prisma as any).phedBulkUpload.create({
+    await prisma.phedBulkUpload.create({
       data: {
         companyId,
         type:         'STAFF',

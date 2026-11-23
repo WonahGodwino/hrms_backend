@@ -23,12 +23,15 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
+import { readJsonBodyOrEmpty } from '@/app/lib/validation/request-body'
+import { runStaffIdsBodySchema } from '@/app/lib/validation/payroll-staff-schemas'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function POST(request: NextRequest, { params }: { params: { runId: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ runId: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -56,7 +59,7 @@ export async function POST(request: NextRequest, { params }: { params: { runId: 
       return withCors(ApiResponse.error(`You do not have ${userRole} access for this company`, 403), origin)
     }
 
-    const body = await request.json().catch(() => ({}))
+    const body = await readJsonBodyOrEmpty(request, runStaffIdsBodySchema)
     const staffIds = body?.staffIds
     if (!Array.isArray(staffIds) || staffIds.length === 0 || staffIds.some((id) => typeof id !== 'string')) {
       return withCors(ApiResponse.error('staffIds must be a non-empty array of staff IDs', 400), origin)

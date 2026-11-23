@@ -6,6 +6,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -19,8 +20,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const companyId = searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company ID is required', 400), origin)
 
-    const template = await prisma.onboardingTemplate.findFirst({
-      where: { id, companyId },
+    const template = await forCompany(companyId).onboardingTemplate.findFirst({
+      where: { id },
       include: { tasks: { orderBy: { order: 'asc' } } },
     })
     if (!template) return withCors(ApiResponse.error('Onboarding template not found', 404), origin)
@@ -45,7 +46,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const companyId = searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company ID is required', 400), origin)
 
-    const template = await prisma.onboardingTemplate.findFirst({ where: { id, companyId } })
+    const template = await forCompany(companyId).onboardingTemplate.findFirst({ where: { id } })
     if (!template) return withCors(ApiResponse.error('Onboarding template not found', 404), origin)
 
     const body = await request.json()
@@ -72,7 +73,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     const companyId = searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company ID is required', 400), origin)
 
-    const template = await prisma.onboardingTemplate.findFirst({ where: { id, companyId } })
+    const template = await forCompany(companyId).onboardingTemplate.findFirst({ where: { id } })
     if (!template) return withCors(ApiResponse.error('Onboarding template not found', 404), origin)
 
     await prisma.onboardingTemplate.update({ where: { id }, data: { archived: 1, status: 'ARCHIVED', updatedBy: user.userId } })

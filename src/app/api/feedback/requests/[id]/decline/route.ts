@@ -1,11 +1,12 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { verifyCompanyAccess, UserContext } from "@/app/lib/access-control";
 import { RouteContext } from "@/app/lib/self-appraisal";
 import { resolveSelf } from "@/app/lib/feedback";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -54,8 +55,8 @@ export async function POST(
         origin,
       );
 
-    const req = await prisma.feedbackRequest.findFirst({
-      where: { id, companyId, reviewerId: self.id },
+    const req = await forCompany(companyId).feedbackRequest.findFirst({
+      where: { id, reviewerId: self.id },
       select: { status: true },
     });
     if (!req)

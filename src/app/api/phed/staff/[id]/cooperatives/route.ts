@@ -7,14 +7,15 @@ import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
-    const assignments = await (prisma as any).phedStaffCooperative.findMany({
+    const assignments = await prisma.phedStaffCooperative.findMany({
       where: { staffId: params.id },
       include: { cooperative: true },
     })
@@ -23,7 +24,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 }
 
 // POST /api/phed/staff/:id/cooperatives — assign a cooperative and set the monthly deduction amount
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -35,7 +37,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (!cooperativeId) return withCors(ApiResponse.error('cooperativeId is required', 400), origin)
 
     // Verify staff exists and belongs to the same company
-    const staff = await (prisma as any).phedStaff.findUnique({
+    const staff = await prisma.phedStaff.findUnique({
       where: { id: params.id },
       select: { id: true, companyId: true },
     })
@@ -44,7 +46,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return withCors(ApiResponse.notFound('Staff not found'), origin)
 
     // Verify the cooperative belongs to the same company
-    const coop = await (prisma as any).phedCooperative.findUnique({
+    const coop = await prisma.phedCooperative.findUnique({
       where: { id: cooperativeId },
       select: { id: true, companyId: true, name: true, isActive: true },
     })
@@ -54,13 +56,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return withCors(ApiResponse.error('Cannot assign an inactive cooperative', 400), origin)
 
     // Check for existing membership
-    const existing = await (prisma as any).phedStaffCooperative.findUnique({
+    const existing = await prisma.phedStaffCooperative.findUnique({
       where: { staffId_cooperativeId: { staffId: params.id, cooperativeId } },
     })
     if (existing)
       return withCors(ApiResponse.error(`Staff is already a member of "${coop.name}"`, 409), origin)
 
-    const assignment = await (prisma as any).phedStaffCooperative.create({
+    const assignment = await prisma.phedStaffCooperative.create({
       data:    { staffId: params.id, cooperativeId, totalAmount: totalAmount != null ? Number(totalAmount) : 0 },
       include: { cooperative: true },
     })
@@ -69,7 +71,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 }
 
 // PUT /api/phed/staff/:id/cooperatives — update monthly deduction amount for an existing membership
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -82,19 +85,19 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     if (totalAmount == null || isNaN(Number(totalAmount)))
       return withCors(ApiResponse.error('totalAmount is required and must be a number', 400), origin)
 
-    const staff = await (prisma as any).phedStaff.findUnique({
+    const staff = await prisma.phedStaff.findUnique({
       where: { id: params.id }, select: { companyId: true },
     })
     if (!staff) return withCors(ApiResponse.notFound('Staff not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && user.companyId && staff.companyId !== user.companyId)
       return withCors(ApiResponse.notFound('Staff not found'), origin)
 
-    const existing = await (prisma as any).phedStaffCooperative.findUnique({
+    const existing = await prisma.phedStaffCooperative.findUnique({
       where: { staffId_cooperativeId: { staffId: params.id, cooperativeId } },
     })
     if (!existing) return withCors(ApiResponse.notFound('Staff is not a member of this cooperative'), origin)
 
-    const updated = await (prisma as any).phedStaffCooperative.update({
+    const updated = await prisma.phedStaffCooperative.update({
       where:   { staffId_cooperativeId: { staffId: params.id, cooperativeId } },
       data:    { totalAmount: Number(totalAmount) },
       include: { cooperative: true },
@@ -104,7 +107,8 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 }
 
 // DELETE /api/phed/staff/:id/cooperatives — remove a cooperative assignment
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -116,14 +120,14 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     if (!cooperativeId) return withCors(ApiResponse.error('cooperativeId is required', 400), origin)
 
     // Ownership check
-    const staff = await (prisma as any).phedStaff.findUnique({
+    const staff = await prisma.phedStaff.findUnique({
       where: { id: params.id }, select: { companyId: true },
     })
     if (!staff) return withCors(ApiResponse.notFound('Staff not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && user.companyId && staff.companyId !== user.companyId)
       return withCors(ApiResponse.notFound('Staff not found'), origin)
 
-    await (prisma as any).phedStaffCooperative.delete({
+    await prisma.phedStaffCooperative.delete({
       where: { staffId_cooperativeId: { staffId: params.id, cooperativeId } },
     })
     return withCors(ApiResponse.success(null, 'Cooperative removed'), origin)

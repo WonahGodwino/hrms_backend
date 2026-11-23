@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { fail, isUniqueViolation, ok, writeCtx } from "@/app/lib/pip";
 import { logSuccession } from "@/app/lib/promotion";
 import { CriticalRoleTier } from "@prisma/client";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -38,8 +39,8 @@ export async function POST(request: NextRequest) {
         `tier must be one of: ${Object.values(CriticalRoleTier).join(", ")}`,
       );
 
-    const des = await prisma.designation.findFirst({
-      where: { id: body.designationId, companyId, status: "Active" },
+    const des = await forCompany(companyId).designation.findFirst({
+      where: { id: body.designationId, status: "Active" },
       select: { id: true, title: true },
     });
     if (!des) return fail(origin, "Designation not found or not active", 404);

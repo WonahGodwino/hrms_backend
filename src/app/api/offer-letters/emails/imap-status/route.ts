@@ -11,9 +11,10 @@ import { NextRequest } from 'next/server';
 
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { requireModuleAccess } from '@/app/lib/module-access';
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access';
-import { createOfferLetterImapClient, getOfferLetterImapConfig } from '@/app/lib/offer-letters/email/mailbox';
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access';
+import { createOfferLetterImapClient, getOfferLetterImapConfig } from '@/app/lib/offers/letters/email/mailbox';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { publicErrorMessage } from '@/app/lib/errors/public-error';
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
@@ -56,7 +57,7 @@ export async function GET(request: NextRequest) {
 				origin
 			);
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
+			const message = publicErrorMessage(err);
 			// Surface the raw driver error (TLS handshake failure, auth
 			// rejection, ECONNREFUSED, etc) — this IS the diagnostic value of
 			// the endpoint, so it must not be swallowed like the poll path

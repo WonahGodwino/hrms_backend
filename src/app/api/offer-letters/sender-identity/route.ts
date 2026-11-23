@@ -6,8 +6,8 @@
 // sender is always set on the backend to prevent spoofing.
 import { NextRequest } from 'next/server'
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
-import { getOfferLetterSenderIdentity } from '@/app/lib/offer-letters/email/transport'
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access'
+import { getOfferLetterSenderIdentity } from '@/app/lib/offers/letters/email/transport'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 

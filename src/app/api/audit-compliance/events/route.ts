@@ -16,6 +16,7 @@ import {
   EVENT_STATUSES,
   ENTITY_TYPES,
 } from "@/app/lib/audit/audit-utils";
+import { getTrustedClientIp } from "@/app/lib/security/client-ip";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -131,7 +132,7 @@ export async function POST(request: NextRequest) {
       risk: body.risk,
       sourceSystem: body.sourceSystem ?? "API",
       ipAddress:
-        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+        getTrustedClientIp(request.headers) || null,
       beforeValue: body.beforeValue,
       afterValue: body.afterValue,
       reason: body.reason,

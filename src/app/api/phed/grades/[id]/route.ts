@@ -9,7 +9,8 @@ export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
 }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
   if (rl) return withCors(rl, origin)
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user  = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const grade = await (prisma as any).phedGrade.findUnique({
+    const grade = await prisma.phedGrade.findUnique({
       where: { id: params.id },
       include: { allowanceTemplates: true },
     })
@@ -30,7 +31,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 }
 
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -48,12 +50,12 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       return withCors(ApiResponse.error('levelOrder must be a positive integer', 400), origin)
 
     // Ownership check
-    const existing = await (prisma as any).phedGrade.findUnique({ where: { id: params.id }, select: { companyId: true } })
+    const existing = await prisma.phedGrade.findUnique({ where: { id: params.id }, select: { companyId: true } })
     if (!existing) return withCors(ApiResponse.notFound('Grade not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && user.companyId && existing.companyId !== user.companyId)
       return withCors(ApiResponse.notFound('Grade not found'), origin)
 
-    const grade = await (prisma as any).phedGrade.update({
+    const grade = await prisma.phedGrade.update({
       where: { id: params.id },
       data: {
         ...(name !== undefined && { name }),
@@ -69,7 +71,8 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -77,12 +80,12 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user  = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const existing = await (prisma as any).phedGrade.findUnique({ where: { id: params.id }, select: { companyId: true } })
+    const existing = await prisma.phedGrade.findUnique({ where: { id: params.id }, select: { companyId: true } })
     if (!existing) return withCors(ApiResponse.notFound('Grade not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && user.companyId && existing.companyId !== user.companyId)
       return withCors(ApiResponse.notFound('Grade not found'), origin)
 
-    await (prisma as any).phedGrade.update({
+    await prisma.phedGrade.update({
       where: { id: params.id },
       data: { isActive: false },
     })

@@ -1,11 +1,11 @@
 // GET /api/business-units/:id/audit-logs
 // The audit trail for a Business Unit (most recent first).
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveBUAccessById } from '@/app/lib/business-units/bu-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -20,8 +20,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (access.error) return withCors(ApiResponse.error(access.error.message, access.error.status), origin)
     const companyId = access.companyId as string
 
-    const logs = await (prisma as any).businessUnitAuditLog.findMany({
-      where: { businessUnitId: id, companyId },
+    const logs = await forCompany(companyId).businessUnitAuditLog.findMany({
+      where: { businessUnitId: id },
       orderBy: { createdAt: 'desc' },
       take: 200,
     })

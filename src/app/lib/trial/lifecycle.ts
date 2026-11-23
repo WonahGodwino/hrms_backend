@@ -7,6 +7,7 @@ import { prisma } from '@/app/lib/db'
 import { sendEmail } from '@/app/lib/email'
 
 import { READ_ONLY_DAYS } from './limits'
+import { forCompany } from '@/app/lib/data/tenant'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk'
@@ -46,7 +47,7 @@ function copy(stage: LifecycleStage, daysLeft: number): { subject: string; headl
 }
 
 async function alreadySent(companyId: string, stage: LifecycleStage): Promise<boolean> {
-  return (await prisma.trialUsageCounter.count({ where: { companyId, metric: 'trialReminder', subjectKey: stage } })) > 0
+  return (await forCompany(companyId).trialUsageCounter.count({ where: { metric: 'trialReminder', subjectKey: stage } })) > 0
 }
 
 async function markSent(companyId: string, stages: LifecycleStage[]) {

@@ -5,6 +5,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -70,8 +71,8 @@ export async function POST(req: NextRequest) {
     if (!trainingProgramId || !title || !date || !type)
       return withCors(ApiResponse.error('companyId, trainingProgramId, title, date, type are required', 400), origin)
 
-    const program = await prisma.trainingProgram.findFirst({
-      where: { id: trainingProgramId, companyId: cid, deletedAt: null },
+    const program = await forCompany(cid).trainingProgram.findFirst({
+      where: { id: trainingProgramId, deletedAt: null },
       select: { id: true },
     })
     if (!program) return withCors(ApiResponse.error('Training program not found', 404), origin)

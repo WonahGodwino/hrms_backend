@@ -17,6 +17,7 @@ import {
   lockPeerCycle,
   peerExclusionReason,
 } from "@/app/lib/appraisal-cycles/peer-matrix";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -32,10 +33,8 @@ const CYCLE_SELECT = {
 
 // GET /api/appraisal-cycles/:id/peer-assignments?companyId=&departmentId=&search=&page=&limit=
 // departmentId may be "none" for employees without a department.
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -70,8 +69,8 @@ export async function GET(
       );
     }
 
-    const cycle = await prisma.appraisalCycle.findFirst({
-      where: { id: params.id, companyId },
+    const cycle = await forCompany(companyId).appraisalCycle.findFirst({
+      where: { id: params.id },
       select: CYCLE_SELECT,
     });
     if (!cycle)
@@ -184,10 +183,8 @@ export async function GET(
 
 // POST /api/appraisal-cycles/:id/peer-assignments
 // body: { companyId, participantId, reviewerStaffId }  (a manual add)
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   const reject = (status: number, message: string) =>
     withCors(

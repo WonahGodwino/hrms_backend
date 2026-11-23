@@ -2,11 +2,11 @@
 // Parses an uploaded bulk-offer file and returns a validation preview WITHOUT
 // writing anything to the database.
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { parseOfferImportFile, EMAIL_RE, parseApprovalFlag } from '@/app/lib/offers/bulk-import-helpers'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -33,8 +33,7 @@ export async function POST(request: NextRequest) {
 
     // Preload the company's designations so we can resolve each row's position/designation
     // by either its code or its id in one query.
-    const designations = await (prisma as any).designation.findMany({
-      where: { companyId },
+    const designations = await forCompany(companyId).designation.findMany({
       select: { id: true, code: true, title: true },
     })
     const designationKeys = new Set<string>()
@@ -46,8 +45,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Preload the company's jobs so a supplied Job ID or position can be mapped
-    const jobs = await prisma.job.findMany({
-      where: { companyId, archived: 0 },
+    const jobs = await forCompany(companyId).job.findMany({
+      where: { archived: 0 },
       select: { id: true, title: true },
     })
     const jobKeys = new Set<string>()

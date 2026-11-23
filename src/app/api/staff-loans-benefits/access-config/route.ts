@@ -5,11 +5,11 @@
 // Configuration screen. Pages with no row yet are returned with empty lists
 // (meaning: SUPER_ADMIN-only until configured).
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { PAGE_KEYS, PAGE_KEY_LABELS } from '@/app/lib/staff-loans-benefits/page-access'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
     if (!user.companyId) return withCors(ApiResponse.success({ pages: [] }), origin)
 
-    const rows = await prisma.loansBenefitsPageAccess.findMany({ where: { companyId: user.companyId } })
+    const rows = await forCompany(user.companyId).loansBenefitsPageAccess.findMany()
     const byKey = new Map(rows.map((r) => [r.pageKey, r]))
 
     const pages = PAGE_KEYS.map((pageKey) => {

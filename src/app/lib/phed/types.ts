@@ -323,7 +323,7 @@ export interface StaffCsvRow {
 
 export interface ValidationCsvRow {
   staffId: string
-  status: string  // YES | NO
+  status: 'YES_FOR_PAYMENT' | 'NO_FOR_PAYMENT'  // the parser maps YES / NO to these
   reason?: string
 }
 

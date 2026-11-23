@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import path from "path";
 import type { PotentialLevel, Prisma, ReviewPhaseType } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse } from "@/app/lib/utils";
 import { withCors } from "@/app/lib/cors";
@@ -12,6 +12,7 @@ import {
 } from "@/app/lib/access-control";
 import { BANDS } from "@/app/lib/manager-review";
 import { effectiveDeadline } from "@/app/lib/performance-operations/ops-utils";
+import { forCompany } from '@/app/lib/data/tenant';
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const TREND_MAX_POINTS = 12;
@@ -159,10 +160,8 @@ const cycleTime = (c: IntelCycle) =>
   (c.endDate ?? c.startDate ?? new Date(0)).getTime();
 
 export async function listCycles(companyId: string): Promise<IntelCycle[]> {
-  const rows = await prisma.appraisalCycle.findMany({
-    where: {
-      companyId,
-      status: { in: ["ACTIVE", "ESCALATED", "PAUSED", "COMPLETED"] },
+  const rows = await forCompany(companyId).appraisalCycle.findMany({
+    where: { status: { in: ["ACTIVE", "ESCALATED", "PAUSED", "COMPLETED"] },
     },
     select: {
       id: true,
@@ -357,14 +356,12 @@ export async function loadCycleData(
           },
         },
       }),
-      prisma.calibrationRecord.findMany({
-        where: { companyId, cycleId: cycle.id },
+      forCompany(companyId).calibrationRecord.findMany({
+        where: { cycleId: cycle.id },
         select: { participantId: true, potential: true },
       }),
-      prisma.goal.findMany({
-        where: {
-          companyId,
-          isArchived: false,
+      forCompany(companyId).goal.findMany({
+        where: { isArchived: false,
           level: "INDIVIDUAL",
           staffRecord: inCycle,
           OR: goalOr,
@@ -379,10 +376,8 @@ export async function loadCycleData(
           completedAt: true,
         },
       }),
-      prisma.pip.findMany({
-        where: {
-          companyId,
-          activatedAt: { not: null, lte: asOf },
+      forCompany(companyId).pip.findMany({
+        where: { activatedAt: { not: null, lte: asOf },
           OR: [{ closedAt: null }, { closedAt: { gt: asOf } }],
         },
         select: {
@@ -393,22 +388,18 @@ export async function loadCycleData(
           departmentId: true,
         },
       }),
-      prisma.promotionRecommendation.findMany({
-        where: {
-          companyId,
-          status: { in: ["SUBMITTED", "APPROVED"] },
+      forCompany(companyId).promotionRecommendation.findMany({
+        where: { status: { in: ["SUBMITTED", "APPROVED"] },
           OR: promoOr,
         },
         select: { staffRecordId: true },
       }),
-      prisma.developmentPlan.findMany({
-        where: { companyId, status: { not: "ARCHIVED" }, staffRecord: inCycle },
+      forCompany(companyId).developmentPlan.findMany({
+        where: { status: { not: "ARCHIVED" }, staffRecord: inCycle },
         select: { staffRecordId: true, progress: true },
       }),
-      prisma.appraisalEscalation.findMany({
-        where: {
-          companyId,
-          status: { not: "RESOLVED" },
+      forCompany(companyId).appraisalEscalation.findMany({
+        where: { status: { not: "RESOLVED" },
           OR: [{ cycleId: cycle.id }, { cycleId: null }],
         },
         orderBy: { createdAt: "desc" },
@@ -786,10 +777,8 @@ async function buildTrend(
     )
     .slice(0, TREND_MAX_POINTS);
   const rows = pool.length
-    ? await prisma.managerReview.findMany({
-        where: {
-          companyId,
-          status: "SUBMITTED",
+    ? await forCompany(companyId).managerReview.findMany({
+        where: { status: "SUBMITTED",
           cycleId: { in: pool.map((c) => c.id) },
           ...(deptIds?.length
             ? { participant: { departmentId: { in: deptIds } } }
@@ -844,10 +833,8 @@ async function countChronicLow(
     .filter((c) => c.id !== selected.id && cycleTime(c) <= cycleTime(selected))
     .slice(0, k - 1);
   if (older.length < k - 1) return 0;
-  const rows = await prisma.managerReview.findMany({
-    where: {
-      companyId,
-      status: "SUBMITTED",
+  const rows = await forCompany(companyId).managerReview.findMany({
+    where: { status: "SUBMITTED",
       cycleId: { in: older.map((c) => c.id) },
       staffRecordId: { in: candidates },
     },
@@ -881,10 +868,8 @@ async function buildSuccession(companyId: string) {
       _count: { _all: true },
     }),
     // Active critical roles with no active successor
-    prisma.criticalRole.findMany({
-      where: {
-        companyId,
-        status: "ACTIVE",
+    forCompany(companyId).criticalRole.findMany({
+      where: { status: "ACTIVE",
         candidates: {
           none: { removedAt: null, staffRecord: { isActive: true } },
         },

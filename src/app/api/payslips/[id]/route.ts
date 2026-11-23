@@ -6,12 +6,14 @@ import { prisma } from '@/app/lib/db';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils';
 import { regeneratePayslipPdf } from '@/app/lib/payroll/buildPayslipPdfInput';
+import { readJsonBody } from '@/app/lib/validation/request-body';
+import { valuesBodySchema } from '@/app/lib/validation/payroll-staff-schemas';
 import { uploadPayslipToS3 } from '@/app/lib/storage/payslip-storage';
 
 type RouteParams = {
-	params: {
+	params: Promise<{
 		id: string;
-	};
+	}>;
 };
 
 // Editable Payroll columns for ISURF_STANDARD/BLUERIDGE payslips — every
@@ -63,10 +65,11 @@ export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
 }
 
-export async function GET(request: NextRequest, { params }: RouteParams) {
-	const origin = request.headers.get('origin');
+export async function GET(request: NextRequest, props: RouteParams) {
+    const params = await props.params;
+    const origin = request.headers.get('origin');
 
-	try {
+    try {
 		const authHeader = request.headers.get('authorization');
 		if (!authHeader) {
 			return withCors(ApiResponse.error('Authorization header missing', 401), origin);
@@ -152,10 +155,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 	}
 }
 
-export async function PATCH(request: NextRequest, { params }: RouteParams) {
-	const origin = request.headers.get('origin');
+export async function PATCH(request: NextRequest, props: RouteParams) {
+    const params = await props.params;
+    const origin = request.headers.get('origin');
 
-	try {
+    try {
 		const authHeader = request.headers.get('authorization');
 		if (!authHeader) {
 			return withCors(ApiResponse.error('Authorization header missing', 401), origin);
@@ -164,7 +168,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 		const user = requireRole(token, ['ADMIN', 'HR', 'SUPER_ADMIN']);
 
 		const { id } = params;
-		const body = await request.json();
+		const parsedBody = await readJsonBody(request, valuesBodySchema);
+		if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.message, 400), origin);
+		const body = parsedBody.data;
 		const values = body?.values;
 		if (!values || typeof values !== 'object' || Array.isArray(values)) {
 			return withCors(ApiResponse.error('values object is required', 400), origin);
@@ -284,10 +290,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 	}
 }
 
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
-	const origin = request.headers.get('origin');
+export async function DELETE(request: NextRequest, props: RouteParams) {
+    const params = await props.params;
+    const origin = request.headers.get('origin');
 
-	try {
+    try {
 		const authHeader = request.headers.get('authorization');
 		if (!authHeader) {
 			return withCors(ApiResponse.error('Authorization header missing', 401), origin);

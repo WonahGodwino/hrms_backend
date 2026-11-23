@@ -58,8 +58,8 @@ interface LogSettingsActionParams {
   companyId: string;
   action: string;
   actorId: string;
-  previousData?: any;
-  newData?: any;
+  previousData?: unknown;
+  newData?: unknown;
 }
 
 export async function logSettingsAction(

@@ -9,6 +9,8 @@ import { checkErrorRate, checkUsageWarning, handleRejectedKey, estimateCost, isR
 import { recordCoreSetupEvent } from '@/app/lib/core-setup/audit'
 import { redactSensitive, redactForHistory } from '@/app/lib/ai/redact'
 import type { ChatMessage } from '@/app/lib/ai/providers/types'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
+import { forCompany } from '@/app/lib/data/tenant'
 
 // SSE must stream, not buffer: force a dynamic Node runtime so the platform does
 // not statically optimise or batch the response.
@@ -86,8 +88,8 @@ export async function POST(request: NextRequest) {
     }
     let conversation
     if (conversationId) {
-      conversation = await prisma.aiConversation.findFirst({
-        where: { id: conversationId, companyId: guard.companyId, userId: guard.user.userId },
+      conversation = await forCompany(guard.companyId).aiConversation.findFirst({
+        where: { id: conversationId, userId: guard.user.userId },
         include: { messages: { orderBy: { createdAt: 'asc' }, take: 100 } },
       })
       if (!conversation) {
@@ -240,7 +242,7 @@ export async function POST(request: NextRequest) {
           }
         } catch (err: unknown) {
           await logFailure()
-          const msg = err instanceof Error ? err.message : 'Internal error'
+          const msg = publicErrorMessage(err, 'Internal error')
           const errEvent = `data: ${JSON.stringify({ type: 'error', message: msg })}\n\n`
           controller.enqueue(encoder.encode(errEvent))
         } finally {

@@ -87,7 +87,9 @@ export async function exportReportToExcel(
   hdrRow.height = 22
 
   // ── Rows 4+: Data ─────────────────────────────────────────
-  rows.forEach((row, ri) => {
+  const slice = timeSlicer()
+  for (const [ri, row] of rows.entries()) {
+    await slice()
     const dataRow  = ws.getRow(ri + 4)
     const isEven   = ri % 2 === 1
     cols.forEach((c, ci) => {
@@ -101,7 +103,7 @@ export async function exportReportToExcel(
       if (c.type === 'integer') cell.numFmt = '#,##0'
     })
     dataRow.height = 18
-  })
+  }
 
   // ── Totals row ────────────────────────────────────────────
   const totalsRow = ws.getRow(rows.length + 4)
@@ -310,9 +312,13 @@ export function exportReportToPdf(
     }
 
     // ── Render ────────────────────────────────────────────────
+    // PERF-003: drawn in an async block so a long report pauses for other requests (lib/concurrency/time-slice.ts).
+    ;(async () => {
+    const slice = timeSlicer()
     let y = drawPageHeader()
 
     for (const row of rows) {
+      await slice()
       if (y + cardH > footerY - 4) {
         drawFooter()
         doc.addPage()
@@ -332,6 +338,7 @@ export function exportReportToPdf(
 
     drawFooter()
     doc.end()
+    })().catch(reject)
   })
 }
 
@@ -427,7 +434,9 @@ export async function exportWorkbook(
 
     // Data rows (subtotal / total rows highlighted)
     const firstTextKey = cols.find(c => c.type === 'text')?.key
-    sheet.rows.forEach((row, ri) => {
+    const slice = timeSlicer()
+    for (const [ri, row] of sheet.rows.entries()) {
+      await slice()
       const dataRow = ws.getRow(ri + 2)
       const label = String(row[firstTextKey ?? ''] ?? '')
       const isSubtotal = !label || /(total|grand)/i.test(label)
@@ -445,7 +454,7 @@ export async function exportWorkbook(
         if (c.type === 'currency' || c.type === 'number') cell.numFmt = '#,##0.00'
       })
       dataRow.height = 18
-    })
+    }
 
     ws.views = [{ state: 'frozen', ySplit: 1 }]
   }
@@ -653,7 +662,9 @@ export async function exportCostCentreExcel(
 
     // Data rows (subtotal / grand-total rows are highlighted)
     const firstTextKey = cols.find(c => c.type === 'text')?.key
-    sheet.rows.forEach((row, ri) => {
+    const slice = timeSlicer()
+    for (const [ri, row] of sheet.rows.entries()) {
+      await slice()
       const dataRow = ws.getRow(ri + 4)
       const label = String(row[firstTextKey ?? ''] ?? '')
       const isSubtotal = !label || /(total|grand)/i.test(label)
@@ -671,7 +682,7 @@ export async function exportCostCentreExcel(
         if (c.type === 'currency' || c.type === 'number') cell.numFmt = '#,##0.00'
       })
       dataRow.height = 18
-    })
+    }
 
     ws.views = [{ state: 'frozen', ySplit: 3 }]
   }
@@ -733,6 +744,9 @@ export function exportCostCentrePdf(
       y += 24
     }
 
+    // PERF-003: drawn in an async block so a long report pauses for other requests (lib/concurrency/time-slice.ts).
+    ;(async () => {
+    const slice = timeSlicer()
     for (const sheet of sheets) {
       const cols  = sheet.columns
       const widths = colWidths(cols)
@@ -752,6 +766,7 @@ export function exportCostCentrePdf(
 
       // data rows
       for (const row of sheet.rows) {
+        await slice()
         if (y + 14 > footerY - 4) { drawFooter(); doc.addPage(); y = drawPageHeader(); drawSheetTitle(sheet.name) }
         const label = String(row[firstTextKey ?? ''] ?? '')
         const isSubtotal = !label || /(total|grand)/i.test(label)
@@ -769,6 +784,7 @@ export function exportCostCentrePdf(
 
     drawFooter()
     doc.end()
+    })().catch(reject)
   })
 }
 
@@ -1814,6 +1830,7 @@ export function exportPeriodSummaryToPdf(
 // INDIVIDUAL PAYROLL REPORT – Excel export (full payslip detail)
 // =============================================================
 import type { PayslipData } from './pdf-payslip'
+import { timeSlicer } from '@/app/lib/concurrency/time-slice'
 
 export async function exportIndividualPayrollToExcel(
   data:        PayslipData,
@@ -2814,7 +2831,7 @@ export function exportIADSummaryToPdf(
     y += 12
     y = drawIADSection('Exited — Regular Staff', data.exitedRegular, y)
     y += 12
-    y = drawIADSection('Exited — Contract Staff', data.exitedContract, y)
+    drawIADSection('Exited — Contract Staff', data.exitedContract, y)
 
     // Footer
     const footerText = companyName

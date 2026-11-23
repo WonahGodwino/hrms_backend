@@ -5,6 +5,7 @@ import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/reso
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { createNotification } from '@/app/lib/notifications/helpers'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -12,7 +13,8 @@ export async function OPTIONS(req: NextRequest) {
 
 // POST /api/certifications/bulk/:action
 // Actions: renew | assign | remind | verify | archive (and expire-update)
-export async function POST(req: NextRequest, { params }: { params: { action: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ action: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -57,8 +59,8 @@ export async function POST(req: NextRequest, { params }: { params: { action: str
 
     // 1. ACTION: RENEW
     if (action === 'renew') {
-      const records = await prisma.certificationRecord.findMany({
-        where: { id: { in: selectedIds }, companyId: cid },
+      const records = await forCompany(cid).certificationRecord.findMany({
+        where: { id: { in: selectedIds } },
         select: { id: true, expiryDate: true, status: true, employeeId: true },
       })
 
@@ -104,8 +106,8 @@ export async function POST(req: NextRequest, { params }: { params: { action: str
       }
 
       // Check certification type existence
-      const certType = await prisma.certificationType.findFirst({
-        where: { id: certTypeId, companyId: cid },
+      const certType = await forCompany(cid).certificationType.findFirst({
+        where: { id: certTypeId },
       })
 
       if (!certType) {
@@ -138,8 +140,8 @@ export async function POST(req: NextRequest, { params }: { params: { action: str
 
     // 3. ACTION: REMIND
     else if (action === 'remind') {
-      const records = await prisma.certificationRecord.findMany({
-        where: { id: { in: selectedIds }, companyId: cid },
+      const records = await forCompany(cid).certificationRecord.findMany({
+        where: { id: { in: selectedIds } },
         include: { certificationType: { select: { name: true } } },
       })
 
@@ -173,8 +175,8 @@ export async function POST(req: NextRequest, { params }: { params: { action: str
 
     // 4. ACTION: VERIFY
     else if (action === 'verify') {
-      const records = await prisma.certificationRecord.findMany({
-        where: { id: { in: selectedIds }, companyId: cid },
+      const records = await forCompany(cid).certificationRecord.findMany({
+        where: { id: { in: selectedIds } },
         select: { id: true },
       })
 
@@ -200,8 +202,8 @@ export async function POST(req: NextRequest, { params }: { params: { action: str
 
     // 5. ACTION: ARCHIVE (Soft Archive, NOT permanent deletion)
     else if (action === 'archive') {
-      const records = await prisma.certificationRecord.findMany({
-        where: { id: { in: selectedIds }, companyId: cid },
+      const records = await forCompany(cid).certificationRecord.findMany({
+        where: { id: { in: selectedIds } },
         select: { id: true },
       })
 
@@ -227,8 +229,8 @@ export async function POST(req: NextRequest, { params }: { params: { action: str
 
     // 6. ACTION: EXPIRE-UPDATE (Recalculate expired / expiring soon status)
     else if (action === 'expire-update') {
-      const records = await prisma.certificationRecord.findMany({
-        where: { id: { in: selectedIds }, companyId: cid },
+      const records = await forCompany(cid).certificationRecord.findMany({
+        where: { id: { in: selectedIds } },
         select: { id: true, expiryDate: true, status: true },
       })
 

@@ -2,7 +2,7 @@ import {
   AutomationRunStatus,
   Prisma,
 } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { isExecutorEnabled } from "@/app/lib/automation-config";
 import {
   evaluateRule,

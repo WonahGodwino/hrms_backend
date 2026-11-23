@@ -4,6 +4,7 @@
 // "Download Monthly Report" button. Brand colours follow the revamped
 // design system (matches attendance-export.ts).
 import ExcelJS from 'exceljs'
+import { border, genLabel } from '@/app/lib/attendance/attendance-export'
 
 export type OnboardingReportStage = 'Pre-boarding' | 'IT Provisioning' | 'Ready for Activation' | 'Cancelled'
 
@@ -41,25 +42,10 @@ const STAGE_COLORS: Record<OnboardingReportStage, { bg: string; fg: string }> = 
   Cancelled: { bg: 'FCEAEB', fg: 'C92A30' },
 }
 
-function genLabel(d?: Date): string {
-  return (d || new Date()).toLocaleString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'Africa/Lagos',
-  })
-}
+
 
 const fill = (argb: string): ExcelJS.Fill => ({ type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${argb}` } })
-const border = (argb: string): Partial<ExcelJS.Borders> => ({
-  top: { style: 'thin', color: { argb: `FF${argb}` } },
-  bottom: { style: 'thin', color: { argb: `FF${argb}` } },
-  left: { style: 'thin', color: { argb: `FF${argb}` } },
-  right: { style: 'thin', color: { argb: `FF${argb}` } },
-})
+
 
 export interface OnboardingReportSummary {
   total: number

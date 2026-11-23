@@ -5,6 +5,8 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { readJsonBodyOrEmpty } from '@/app/lib/validation/request-body'
+import { changePasswordBodySchema } from '@/app/lib/validation/auth-schemas'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -20,7 +22,8 @@ export async function POST(req: NextRequest) {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user  = requireRole(token, ['STAFF', 'HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const { currentPassword, newPassword } = await req.json()
+    // API-002: fields are type-checked; a malformed body falls into the checks below.
+    const { currentPassword, newPassword } = await readJsonBodyOrEmpty(req, changePasswordBodySchema)
 
     if (!currentPassword || !newPassword)
       return withCors(ApiResponse.error('currentPassword and newPassword are required', 400), origin)

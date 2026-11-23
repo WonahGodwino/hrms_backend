@@ -99,7 +99,7 @@ export async function guarded(
 
 export async function readBody(
   request: NextRequest,
-): Promise<Record<string, any>> {
+): Promise<Record<string, unknown>> {
   const body = await request.json().catch(() => null);
   if (!body || typeof body !== "object" || Array.isArray(body))
     throw new PipHttpError(400, "Invalid JSON body");

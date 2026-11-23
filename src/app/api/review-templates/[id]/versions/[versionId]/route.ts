@@ -13,6 +13,7 @@ import {
   NormalizedQuestion,
 } from "@/app/lib/review-templates/question-rules";
 import { resolveScaleForCompetency } from "@/app/lib/competencies/competency-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -23,7 +24,7 @@ interface IncomingSection {
   description?: string;
   weight?: number | null;
   displayOrder?: number;
-  questions?: any[];
+  questions?: unknown[];
 }
 
 // ---------------------------------------------------------------------------
@@ -34,8 +35,9 @@ interface IncomingSection {
 // ---------------------------------------------------------------------------
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string; versionId: string } },
+  props: { params: Promise<{ id: string; versionId: string }> }
 ) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -75,8 +77,8 @@ export async function PATCH(
       );
     }
 
-    const template = await prisma.reviewTemplate.findFirst({
-      where: { id: params.id, companyId },
+    const template = await forCompany(companyId).reviewTemplate.findFirst({
+      where: { id: params.id },
     });
     if (!template) {
       return withCors(
@@ -221,8 +223,8 @@ export async function PATCH(
       ),
     ];
     if (explicitScaleIds.length > 0) {
-      const found = await prisma.proficiencyScale.count({
-        where: { id: { in: explicitScaleIds }, companyId, isActive: true },
+      const found = await forCompany(companyId).proficiencyScale.count({
+        where: { id: { in: explicitScaleIds }, isActive: true },
       });
       if (found !== explicitScaleIds.length) {
         return fail(
@@ -240,8 +242,8 @@ export async function PATCH(
       ),
     ];
     if (bankItemIds.length > 0) {
-      const found = await prisma.questionBankItem.count({
-        where: { id: { in: bankItemIds }, companyId },
+      const found = await forCompany(companyId).questionBankItem.count({
+        where: { id: { in: bankItemIds } },
       });
       if (found !== bankItemIds.length) {
         return fail(

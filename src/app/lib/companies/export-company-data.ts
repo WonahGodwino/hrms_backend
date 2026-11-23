@@ -20,6 +20,8 @@ import path from 'path'
 import { prisma } from '@/app/lib/db'
 import { uploadFileToS3 } from '@/app/lib/storage/upload-files'
 import { XL, argb, buildSubtitle, confidentialFooter, safeFileName, solid, writeStyledTable } from '@/app/lib/excel/sheet-theme'
+import { decimalOrNull } from '@/app/lib/prisma-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export const EXPORT_DOMAINS = [
   'locations',
@@ -118,7 +120,7 @@ type BuildOpts = {
 }
 
 async function buildLocations(workbook: ExcelJS.Workbook, companyId: string): Promise<number> {
-  const rows = await prisma.location.findMany({ where: { companyId }, orderBy: { name: 'asc' } })
+  const rows = await forCompany(companyId).location.findMany({ where: { }, orderBy: { name: 'asc' } })
   return addSheet(
     workbook,
     DOMAIN_LABELS.locations,
@@ -138,9 +140,9 @@ async function buildLocations(workbook: ExcelJS.Workbook, companyId: string): Pr
 
 async function buildOrgStructure(workbook: ExcelJS.Workbook, companyId: string): Promise<number> {
   const [departments, businessUnits, designations] = await Promise.all([
-    prisma.department.findMany({ where: { companyId }, include: { head: { select: { firstName: true, lastName: true } } }, orderBy: { name: 'asc' } }),
-    prisma.businessUnit.findMany({ where: { companyId }, orderBy: { name: 'asc' } }),
-    prisma.designation.findMany({ where: { companyId }, orderBy: { title: 'asc' } })
+    forCompany(companyId).department.findMany({ where: { }, include: { head: { select: { firstName: true, lastName: true } } }, orderBy: { name: 'asc' } }),
+    forCompany(companyId).businessUnit.findMany({ where: { }, orderBy: { name: 'asc' } }),
+    forCompany(companyId).designation.findMany({ where: { }, orderBy: { title: 'asc' } })
   ])
 
   const deptCount = addSheet(
@@ -190,15 +192,15 @@ async function buildOrgStructure(workbook: ExcelJS.Workbook, companyId: string):
       { header: 'Base Pay', key: 'basePay', width: 16 },
       { header: 'Created At', key: 'createdAt', width: 14 }
     ],
-    designations.map((d) => ({ title: d.title, code: d.code, status: d.status, staffCount: d.staffCount, basePay: d.basePay, createdAt: fmtDate(d.createdAt) }))
+    designations.map((d) => ({ title: d.title, code: d.code, status: d.status, staffCount: d.staffCount, basePay: decimalOrNull(d.basePay), createdAt: fmtDate(d.createdAt) }))
   )
 
   return deptCount + businessUnits.length + designations.length
 }
 
 async function buildStaff(workbook: ExcelJS.Workbook, companyId: string, opts: BuildOpts): Promise<number> {
-  const rows = await prisma.staffRecord.findMany({
-    where: { companyId },
+  const rows = await forCompany(companyId).staffRecord.findMany({
+    where: { },
     include: {
       departments: { select: { name: true } },
       designation: { select: { title: true } },
@@ -248,8 +250,8 @@ async function buildStaff(workbook: ExcelJS.Workbook, companyId: string, opts: B
 }
 
 async function buildPayroll(workbook: ExcelJS.Workbook, companyId: string): Promise<number> {
-  const rows = await prisma.payroll.findMany({
-    where: { companyId },
+  const rows = await forCompany(companyId).payroll.findMany({
+    where: { },
     include: { staffRecord: { select: { staffId: true, firstName: true, lastName: true } } },
     orderBy: [{ year: 'desc' }, { month: 'desc' }]
   })
@@ -296,13 +298,13 @@ async function buildPayroll(workbook: ExcelJS.Workbook, companyId: string): Prom
 
 async function buildLeave(workbook: ExcelJS.Workbook, companyId: string): Promise<number> {
   const [requests, policies, holidays] = await Promise.all([
-    prisma.leaveRequest.findMany({
-      where: { companyId },
+    forCompany(companyId).leaveRequest.findMany({
+      where: { },
       include: { staffRecord: { select: { staffId: true, firstName: true, lastName: true } }, leaveType: { select: { name: true } } },
       orderBy: { startDate: 'desc' }
     }),
-    prisma.leavePolicy.findMany({ where: { companyId }, orderBy: { name: 'asc' } }),
-    prisma.publicHoliday.findMany({ where: { companyId }, orderBy: { date: 'asc' } })
+    forCompany(companyId).leavePolicy.findMany({ where: { }, orderBy: { name: 'asc' } }),
+    forCompany(companyId).publicHoliday.findMany({ where: { }, orderBy: { date: 'asc' } })
   ])
 
   const reqCount = addSheet(
@@ -365,8 +367,8 @@ async function buildAttendance(workbook: ExcelJS.Workbook, companyId: string, op
     return 0
   }
 
-  const rows = await prisma.attendance.findMany({
-    where: { companyId, date: { gte: opts.attendanceFrom, lte: opts.attendanceTo } },
+  const rows = await forCompany(companyId).attendance.findMany({
+    where: { date: { gte: opts.attendanceFrom, lte: opts.attendanceTo } },
     include: { staffRecord: { select: { staffId: true, firstName: true, lastName: true } } },
     orderBy: { date: 'desc' }
   })
@@ -395,15 +397,15 @@ async function buildAttendance(workbook: ExcelJS.Workbook, companyId: string, op
 
 async function buildRecruitment(workbook: ExcelJS.Workbook, companyId: string): Promise<number> {
   const [jobs, candidates, applications, offers] = await Promise.all([
-    prisma.job.findMany({ where: { companyId }, orderBy: { createdAt: 'desc' } }),
-    prisma.candidate.findMany({ where: { companyId }, orderBy: { createdAt: 'desc' } }),
-    prisma.jobApplication.findMany({
-      where: { companyId },
+    forCompany(companyId).job.findMany({ where: { }, orderBy: { createdAt: 'desc' } }),
+    forCompany(companyId).candidate.findMany({ where: { }, orderBy: { createdAt: 'desc' } }),
+    forCompany(companyId).jobApplication.findMany({
+      where: { },
       include: { job: { select: { title: true } }, candidate: { select: { firstName: true, lastName: true, email: true } } },
       orderBy: { createdAt: 'desc' }
     }),
-    prisma.offer.findMany({
-      where: { companyId },
+    forCompany(companyId).offer.findMany({
+      where: { },
       include: { candidate: { select: { firstName: true, lastName: true } } },
       orderBy: { createdAt: 'desc' }
     })
@@ -477,13 +479,13 @@ async function buildRecruitment(workbook: ExcelJS.Workbook, companyId: string): 
 
 async function buildOnboardingOffboarding(workbook: ExcelJS.Workbook, companyId: string): Promise<number> {
   const [onboardings, offboardings] = await Promise.all([
-    prisma.onboarding.findMany({
-      where: { companyId },
+    forCompany(companyId).onboarding.findMany({
+      where: { },
       include: { staffRecord: { select: { staffId: true, firstName: true, lastName: true } } },
       orderBy: { createdAt: 'desc' }
     }),
-    prisma.offboarding.findMany({
-      where: { companyId },
+    forCompany(companyId).offboarding.findMany({
+      where: { },
       include: { staff: { select: { staffId: true, firstName: true, lastName: true } } },
       orderBy: { createdAt: 'desc' }
     })
@@ -534,14 +536,14 @@ async function buildOnboardingOffboarding(workbook: ExcelJS.Workbook, companyId:
 
 async function buildTraining(workbook: ExcelJS.Workbook, companyId: string): Promise<number> {
   const [programs, certifications, attempts] = await Promise.all([
-    prisma.trainingProgram.findMany({ where: { companyId }, orderBy: { createdAt: 'desc' } }),
-    prisma.certificationRecord.findMany({
-      where: { companyId },
+    forCompany(companyId).trainingProgram.findMany({ where: { }, orderBy: { createdAt: 'desc' } }),
+    forCompany(companyId).certificationRecord.findMany({
+      where: { },
       include: { employee: { select: { staffId: true, firstName: true, lastName: true } }, certificationType: { select: { name: true } } },
       orderBy: { issueDate: 'desc' }
     }),
-    prisma.assessmentAttempt.findMany({
-      where: { companyId },
+    forCompany(companyId).assessmentAttempt.findMany({
+      where: { },
       include: { employee: { select: { staffId: true, firstName: true, lastName: true } } },
       orderBy: { createdAt: 'desc' }
     })
@@ -608,18 +610,18 @@ async function buildTraining(workbook: ExcelJS.Workbook, companyId: string): Pro
 
 async function buildLoansBenefits(workbook: ExcelJS.Workbook, companyId: string): Promise<number> {
   const [loans, benefitRequests, allocations] = await Promise.all([
-    prisma.loanRequest.findMany({
-      where: { companyId },
+    forCompany(companyId).loanRequest.findMany({
+      where: { },
       include: { staff: { select: { staffId: true, firstName: true, lastName: true } } },
       orderBy: { createdAt: 'desc' }
     }),
-    prisma.benefitRequest.findMany({
-      where: { companyId },
+    forCompany(companyId).benefitRequest.findMany({
+      where: { },
       include: { staff: { select: { staffId: true, firstName: true, lastName: true } } },
       orderBy: { createdAt: 'desc' }
     }),
-    prisma.benefitAllocation.findMany({
-      where: { companyId },
+    forCompany(companyId).benefitAllocation.findMany({
+      where: { },
       include: { staff: { select: { staffId: true, firstName: true, lastName: true } } },
       orderBy: { createdAt: 'desc' }
     })
@@ -714,7 +716,7 @@ export async function generateCompanyExport(jobId: string): Promise<void> {
 
     const rowCounts: Record<string, number> = {}
     for (const domain of domains) {
-      // eslint-disable-next-line no-await-in-loop
+       
       rowCounts[domain] = await BUILDERS[domain](workbook, job.companyId, opts)
     }
 

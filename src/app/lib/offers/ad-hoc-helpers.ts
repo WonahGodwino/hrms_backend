@@ -27,7 +27,7 @@ export type OfferMetadata = {
     size: number
     uploadedAt: string
   }
-  [key: string]: any
+  [key: string]: unknown
 }
 
 // Reads Offer.metadata defensively (it is stored as JSON).

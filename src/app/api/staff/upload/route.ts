@@ -20,15 +20,10 @@ import { parseStaffUpload } from '@/app/lib/staff/upload-parser';
 import { missingRequiredColumns, validateStaffRows } from '@/app/lib/staff/upload-validator';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 import { assertStaffCapacity, recordStaffCreatedMany } from '@/app/lib/trial/guard';
+import { getRelativePath } from '@/app/lib/storage/relative-path';
+import { ensureUploadDirectories } from '@/app/lib/staff/route-helpers';
 import { uploadFileToS3 } from '@/app/lib/storage/upload-files';
 
-function getRelativePath(absolutePath: string): string {
-	const projectRoot = process.cwd();
-	if (absolutePath.startsWith(projectRoot)) {
-		return path.relative(projectRoot, absolutePath);
-	}
-	return absolutePath;
-}
 
 // -----------------------------
 // CORS preflight
@@ -392,12 +387,4 @@ export async function GET(request: NextRequest) {
 
 // -----------------------------
 // Helper function for upload directories
-// -----------------------------
-async function ensureUploadDirectories() {
-	const baseDir = process.cwd();
-	const uploadsDir = path.join(baseDir, 'uploads');
 
-	await mkdir(uploadsDir, { recursive: true });
-
-	return { baseDir, uploadsDir };
-}

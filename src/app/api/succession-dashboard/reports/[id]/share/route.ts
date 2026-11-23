@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { RouteContext } from "@/app/lib/self-appraisal";
@@ -10,6 +10,7 @@ import {
   dashWriteCtx,
   notifySuccessionReportShared,
 } from "@/app/lib/succession-dashboard";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -43,20 +44,18 @@ export async function POST(
     const note = readText(body.sharedNote, "sharedNote", 1000);
     if ("error" in note) return fail(origin, note.error);
 
-    const r = await prisma.successionReport.findFirst({
+    const r = await forCompany(companyId).successionReport.findFirst({
       where: {
         id,
-        companyId,
         createdById: staffId,
         status: { not: "ARCHIVED" },
       },
       select: { id: true, title: true, sharedWithIds: true },
     });
     if (!r) return notFound(origin, "Report");
-    const valid = await prisma.staffRecord.findMany({
+    const valid = await forCompany(companyId).staffRecord.findMany({
       where: {
         id: { in: ids },
-        companyId,
         isActive: true,
         role: { in: EXEC_ROLES },
       },

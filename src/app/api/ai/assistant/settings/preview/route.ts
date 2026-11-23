@@ -9,6 +9,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { aiGuard, isGuardError } from '@/app/lib/ai/guard'
 import { gateStaffData } from '@/app/lib/ai/gate'
 import { ALL_CATEGORIES, ALWAYS_HIDDEN, categoryOf } from '@/app/lib/ai/categories'
+import { forCompany } from '@/app/lib/data/tenant'
 
 const HIDDEN = '[hidden by company policy]'
 
@@ -31,8 +32,8 @@ export async function POST(request: NextRequest) {
     const requested = Array.isArray(body.categories) ? (body.categories as unknown[]).map(String) : saved
     const visible = requested.filter((c) => (ALL_CATEGORIES as readonly string[]).includes(c) && !(ALWAYS_HIDDEN as readonly string[]).includes(c))
 
-    const record = await prisma.staffRecord.findFirst({
-      where: { companyId: guard.companyId, OR: [{ staffId: ref }, { email: { equals: ref, mode: 'insensitive' } }] },
+    const record = await forCompany(guard.companyId).staffRecord.findFirst({
+      where: { OR: [{ staffId: ref }, { email: { equals: ref, mode: 'insensitive' } }] },
     })
     if (!record) return withCors(ApiResponse.notFound('No staff member found for that staff number or email'), origin)
 

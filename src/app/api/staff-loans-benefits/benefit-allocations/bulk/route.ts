@@ -9,6 +9,7 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { logStaffActivity } from '@/app/lib/device/device-utils'
 import { canAccessPage } from '@/app/lib/staff-loans-benefits/page-access'
 import { createNotification, NOTIFICATION_TYPES } from '@/app/lib/notifications/helpers'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
     if (!policy || policy.companyId !== user.companyId) return withCors(ApiResponse.error('Benefit policy not found', 404), origin)
 
     const [staff, company] = await Promise.all([
-      prisma.staffRecord.findMany({ where: { id: { in: staffIds }, companyId: user.companyId }, select: { id: true } }),
+      forCompany(user.companyId).staffRecord.findMany({ where: { id: { in: staffIds } }, select: { id: true } }),
       prisma.company.findUnique({ where: { id: user.companyId }, select: { baseCurrency: true } }),
     ])
     const currencyCode = company?.baseCurrency || 'NGN'

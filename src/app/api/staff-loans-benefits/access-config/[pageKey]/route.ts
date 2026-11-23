@@ -15,7 +15,8 @@ export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function PUT(request: NextRequest, { params }: { params: { pageKey: string } }) {
+export async function PUT(request: NextRequest, props: { params: Promise<{ pageKey: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const authHeader = request.headers.get('authorization')

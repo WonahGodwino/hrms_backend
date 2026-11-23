@@ -10,12 +10,14 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { OFFER_DISPLAY_STATUS, readOfferMetadata, readPdfUpload } from '@/app/lib/offers/ad-hoc-helpers'
 import { promoteCandidateToStaff, PromoteCandidateError } from '@/app/lib/staff/promote-candidate-to-staff'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -34,8 +36,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const companyId = formCompanyId || String(user.companyId)
     const actor = user.userId || user.email || 'system'
 
-    const offer = await prisma.offer.findFirst({
-      where: { id: params.id, companyId },
+    const offer = await forCompany(companyId).offer.findFirst({
+      where: { id: params.id },
       select: { id: true, candidateId: true, applicationId: true, metadata: true, status: true },
     })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)

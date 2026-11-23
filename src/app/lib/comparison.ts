@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import type { PotentialLevel } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { BANDS } from "@/app/lib/manager-review";
 import type { Actor } from "@/app/lib/manager-review";
 import { resolveRatingBounds } from "@/app/lib/self-appraisal";
@@ -17,6 +17,7 @@ import {
   resolveBasisCycle,
 } from "@/app/lib/promotion";
 import type { BasisCycle } from "@/app/lib/promotion";
+import { forCompany } from '@/app/lib/data/tenant';
 
 // ---------------------------------------------------------------------------
 // Tunable rules, all in one place
@@ -247,10 +248,8 @@ export async function loadPopulation(
   cycle: BasisCycle,
   only?: string[],
 ): Promise<Member[]> {
-  const parts = await prisma.appraisalCycleParticipant.findMany({
-    where: {
-      companyId,
-      cycleId: cycle.id,
+  const parts = await forCompany(companyId).appraisalCycleParticipant.findMany({
+    where: { cycleId: cycle.id,
       AND: [
         REVIEWED_WHERE,
         peopleWhere(actor),
@@ -423,10 +422,8 @@ export async function loadCycleRows(
   departmentId: string | null,
 ): Promise<CycleRow[]> {
   if (!cycleIds.length) return [];
-  const rows = await prisma.managerReview.findMany({
-    where: {
-      companyId,
-      status: "SUBMITTED",
+  const rows = await forCompany(companyId).managerReview.findMany({
+    where: { status: "SUBMITTED",
       cycleId: { in: cycleIds },
       participant: {
         AND: [REVIEWED_WHERE, peopleWhere(actor, null, departmentId)],
@@ -466,10 +463,8 @@ export type PersonCycle = {
 export async function personCycles(companyId: string, staffIds: string[]) {
   const out = new Map<string, PersonCycle[]>();
   if (!staffIds.length) return out;
-  const rows = await prisma.managerReview.findMany({
-    where: {
-      companyId,
-      status: "SUBMITTED",
+  const rows = await forCompany(companyId).managerReview.findMany({
+    where: { status: "SUBMITTED",
       staffRecordId: { in: staffIds },
       participant: REVIEWED_WHERE,
     },
@@ -515,10 +510,8 @@ export async function goalCounts(
     { completed: number; missed: number; total: number }
   >();
   if (!staffIds.length) return out;
-  const goals = await prisma.goal.findMany({
-    where: {
-      companyId,
-      isArchived: false,
+  const goals = await forCompany(companyId).goal.findMany({
+    where: { isArchived: false,
       AND: [
         {
           OR: [
@@ -572,10 +565,8 @@ export async function feedbackPositivity(
 ) {
   const out = new Map<string, number | null>();
   if (!members.length) return out;
-  const rows = await prisma.feedback.findMany({
-    where: {
-      companyId,
-      recipientId: { in: members.map((m) => m.staffRecordId) },
+  const rows = await forCompany(companyId).feedback.findMany({
+    where: { recipientId: { in: members.map((m) => m.staffRecordId) },
       sentiment: { not: null },
       createdAt: {
         gte: cycle.startDate ?? cycle.createdAt,
@@ -660,10 +651,8 @@ export async function buildOverview(
   // Accuracy (company-wide only, because calibration is HR-owned)
   let accuracy: { pct: number; reviewed: number } | null = null;
   if (actor.companyWide && n) {
-    const recs = await prisma.calibrationRecord.findMany({
-      where: {
-        companyId,
-        cycleId: cycle.id,
+    const recs = await forCompany(companyId).calibrationRecord.findMany({
+      where: { cycleId: cycle.id,
         staffRecordId: { in: pop.map((m) => m.staffRecordId) },
         status: { in: ["ADJUSTED", "APPROVED", "FINALIZED"] },
       },
@@ -1009,8 +998,8 @@ export async function emptyReason(
 ) {
   if (popCount > 0) return null;
   if (!basis.cycle) {
-    const scoped = await prisma.appraisalCycleParticipant.count({
-      where: { companyId, AND: [peopleWhere(actor)] },
+    const scoped = await forCompany(companyId).appraisalCycleParticipant.count({
+      where: { AND: [peopleWhere(actor)] },
     });
     if (!scoped)
       return {

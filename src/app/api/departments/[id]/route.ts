@@ -7,12 +7,14 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { getDepartmentWithAccess, logDepartmentAction } from '@/app/lib/departments/department-utils'
 import { sanitizeDepartmentName } from '@/app/lib/departments/department-sync'
 import { resolveBusinessUnitLink } from '@/app/lib/departments/business-unit-link'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const authHeader = request.headers.get('authorization')
@@ -47,7 +49,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const authHeader = request.headers.get('authorization')
@@ -105,9 +108,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     // message (a rename to an existing name — regardless of case — would
     // otherwise hit the lower(name) unique index).
     if (updateData.name !== undefined) {
-      const clash = await prisma.department.findFirst({
+      const clash = await forCompany(department.companyId).department.findFirst({
         where: {
-          companyId: department.companyId,
           name: { equals: updateData.name, mode: 'insensitive' },
           NOT: { id: params.id },
         },
@@ -119,8 +121,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     }
 
     if (updateData.headId) {
-      const headStaff = await prisma.staffRecord.findFirst({
-        where: { id: updateData.headId, companyId: department.companyId, isActive: true }
+      const headStaff = await forCompany(department.companyId).staffRecord.findFirst({
+        where: { id: updateData.headId, isActive: true }
       })
       if (!headStaff) {
         return withCors(ApiResponse.error('Invalid headId: Staff not found or not active', 400), origin)
@@ -128,8 +130,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     }
 
     if (updateData.assistantHeadId) {
-      const assistantHeadStaff = await prisma.staffRecord.findFirst({
-        where: { id: updateData.assistantHeadId, companyId: department.companyId, isActive: true }
+      const assistantHeadStaff = await forCompany(department.companyId).staffRecord.findFirst({
+        where: { id: updateData.assistantHeadId, isActive: true }
       })
       if (!assistantHeadStaff) {
         return withCors(ApiResponse.error('Invalid assistantHeadId: Staff not found or not active', 400), origin)
@@ -186,10 +188,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 async function validateCompanyAccess(user: any, companyId: string): Promise<boolean> {
   if (user.role === 'SUPER_ADMIN') return true
   
-  const userCompany = await prisma.userCompany.findFirst({
+  const userCompany = await forCompany(companyId).userCompany.findFirst({
     where: {
       userId: user.userId,
-      companyId: companyId,
       role: { in: [user.role, 'ALL'] }
     }
   })

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { PipStatus, Prisma } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import {
@@ -27,6 +27,8 @@ import {
   validateRange,
   writeCtx,
 } from "@/app/lib/pip";
+import { emitAutomationEvent, kickAutomation } from "@/app/lib/automation-events";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -145,10 +147,9 @@ export async function POST(request: NextRequest) {
     let performanceActionId: string | null = null;
     let actionStatus: string | null = null;
     if (body.managerReviewId) {
-      const review = await prisma.managerReview.findFirst({
+      const review = await forCompany(companyId).managerReview.findFirst({
         where: {
           id: String(body.managerReviewId),
-          companyId,
           staffRecordId: subject.id,
         },
         select: { id: true, cycleId: true, recommendation: true, status: true },
@@ -165,10 +166,9 @@ export async function POST(request: NextRequest) {
       cycleId = review.cycleId;
     }
     if (body.performanceActionId) {
-      const action = await prisma.performanceAction.findFirst({
+      const action = await forCompany(companyId).performanceAction.findFirst({
         where: {
           id: String(body.performanceActionId),
-          companyId,
           staffRecordId: subject.id,
           type: "PIP",
         },
@@ -237,7 +237,6 @@ export async function POST(request: NextRequest) {
               newData: { activatedAt: now.toISOString() },
             });
             try {
-              const { emitAutomationEvent } = require("@/app/lib/automation-events");
               await emitAutomationEvent(tx, {
                 companyId,
                 trigger: "PIP_ACTIVATED",
@@ -247,7 +246,7 @@ export async function POST(request: NextRequest) {
                 subjectStaffRecordId: subject.id,
                 payload: { pipId: pip.id },
               });
-            } catch {}
+            } catch { /* ignored: best-effort, failure is non-fatal */ }
           }
           if (performanceActionId) {
             await tx.performanceAction.update({
@@ -270,9 +269,8 @@ export async function POST(request: NextRequest) {
         if (activate) {
           await captureKpiSnapshot(created.id, "BASELINE", staffId);
           try {
-            const { kickAutomation } = require("@/app/lib/automation-events");
             kickAutomation(companyId);
-          } catch {}
+          } catch { /* ignored: best-effort, failure is non-fatal */ }
         }
         return ok(
           origin,

@@ -4,6 +4,8 @@ import { withCors, handleCorsOptions } from "@/app/lib/cors";
 import { canManageAttendance } from "@/app/lib/attendance/access";
 import { fillMissingAddresses, locationView } from "@/app/lib/attendance/clock-location";
 import { startOfBusinessWeek, endOfBusinessWeek, startOfBusinessDay, endOfBusinessDay, businessDateKey, isBusinessWeekday, addBusinessDays, BUSINESS_TIMEZONE } from "@/app/lib/attendance/business-day";
+import { publicErrorMessage } from "@/app/lib/errors/public-error";
+import { getBusinessDaysCount } from "@/app/lib/attendance/route-helpers";
 
 // Business-day-aware (Africa/Lagos, not server-local) — see business-day.ts.
 const startOfWeek = startOfBusinessWeek;
@@ -27,7 +29,7 @@ export async function GET(req: NextRequest) {
 
   try {
     // Dynamically import Prisma to avoid issues during build
-    const { prisma } = await import("@/app/lib/prisma");
+    const { prisma } = await import("@/app/lib/db");
 
     // Authorization check
     const authHeader = req.headers.get("authorization");
@@ -251,7 +253,7 @@ export async function GET(req: NextRequest) {
     const response = NextResponse.json({ 
       success: false, 
       message: "Failed to fetch weekly attendance data",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: process.env.NODE_ENV === 'development' ? publicErrorMessage(error) : undefined
     }, { status: 500 });
     return withCors(response, origin);
   }
@@ -278,7 +280,7 @@ async function calculateStaffAttendanceStats(
   endDate: Date,
   _totalStaff: number
 ): Promise<any[]> {
-  const { prisma } = await import("@/app/lib/prisma");
+  const { prisma } = await import("@/app/lib/db");
 
   // Get all active staff
   const allStaff = await prisma.staffRecord.findMany({
@@ -377,19 +379,7 @@ async function calculateStaffAttendanceStats(
   }).sort((a, b) => b.attendancePercentage - a.attendancePercentage); // Sort by attendance percentage
 }
 
-// Helper function to count business days (Monday-Friday)
-function getBusinessDaysCount(startDate: Date, endDate: Date): number {
-  let count = 0;
-  let current = new Date(startDate);
-  const end = new Date(endDate);
 
-  while (current <= end) {
-    if (isBusinessWeekday(current)) count++;
-    current = addBusinessDays(current, 1);
-  }
-
-  return count;
-}
 
 async function validateCompanyAccess(user: any, companyId: string): Promise<boolean> {
   // One rule for the whole attendance module (lib/attendance/access.ts):

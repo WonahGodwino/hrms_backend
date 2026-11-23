@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
     }
 
     const [units, total] = await Promise.all([
-      (prisma as any).businessUnit.findMany({
+      prisma.businessUnit.findMany({
         where,
         orderBy: { name: 'asc' },
         skip,
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
           _count: { select: { departments: true } },
         },
       }),
-      (prisma as any).businessUnit.count({ where }),
+      prisma.businessUnit.count({ where }),
     ])
 
     const data = units.map((u: any) => {

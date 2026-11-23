@@ -19,10 +19,8 @@ export async function OPTIONS(request: NextRequest) {
 // CREATED (via DUPLICATED) entry is logged on the new template instead,
 // matching the "don't copy history" rule from the competency duplicate flow.
 // ---------------------------------------------------------------------------
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");

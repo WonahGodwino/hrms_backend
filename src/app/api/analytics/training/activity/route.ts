@@ -1,9 +1,9 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -20,8 +20,7 @@ export async function GET(req: NextRequest) {
     const { companyId } = resolved
     const limit     = Math.min(50, parseInt(searchParams.get('limit') ?? '20'))
 
-    const activity = await prisma.trainingAuditLog.findMany({
-      where: { companyId },
+    const activity = await forCompany(companyId).trainingAuditLog.findMany({
       include: { actor: { select: { id: true, firstName: true, lastName: true, email: true } } },
       orderBy: { createdAt: 'desc' },
       take: limit,

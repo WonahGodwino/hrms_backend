@@ -4,6 +4,7 @@ import { requireRole } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { asNumber } from '@/app/lib/prisma-utils';
 
 export async function OPTIONS(req: NextRequest) {
 	return handleCorsOptions(req);
@@ -23,19 +24,19 @@ export async function GET(req: NextRequest) {
 		const last7Days = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
 		const [recentUsage, topSpendRows, activeRate, failedEmails7d, totalEmails7d] = await Promise.all([
-			(prisma as any).aIUsageLog.findMany({
+			prisma.aIUsageLog.findMany({
 				where: { createdAt: { gte: last30Days } },
 				select: { createdAt: true, cost: true, tokensUsed: true },
 			}),
-			(prisma as any).aIUsageLog.groupBy({
+			prisma.aIUsageLog.groupBy({
 				by: ['companyId'],
 				_sum: { cost: true, tokensUsed: true },
 				orderBy: { _sum: { cost: 'desc' } },
 				take: 5,
 			}),
-			(prisma as any).tokenCostConfig.findFirst({ where: { isActive: true } }),
-			(prisma as any).emailLog.count({ where: { status: 'FAILED', createdAt: { gte: last7Days } } }),
-			(prisma as any).emailLog.count({ where: { createdAt: { gte: last7Days } } }),
+			prisma.tokenCostConfig.findFirst({ where: { isActive: true } }),
+			prisma.emailLog.count({ where: { status: 'FAILED', createdAt: { gte: last7Days } } }),
+			prisma.emailLog.count({ where: { createdAt: { gte: last7Days } } }),
 		]);
 
 		// Bucket by day (YYYY-MM-DD)
@@ -43,12 +44,12 @@ export async function GET(req: NextRequest) {
 		for (const row of recentUsage) {
 			const day = row.createdAt.toISOString().slice(0, 10);
 			const bucket = dailyMap.get(day) ?? { cost: 0, tokensUsed: 0 };
-			bucket.cost += row.cost ?? 0;
+			bucket.cost += asNumber(row.cost) ?? 0;
 			bucket.tokensUsed += row.tokensUsed ?? 0;
 			dailyMap.set(day, bucket);
 		}
 		const dailyTrend = Array.from(dailyMap.entries())
-			.map(([day, v]) => ({ day, cost: Math.round(v.cost * 100) / 100, tokensUsed: v.tokensUsed }))
+			.map(([day, v]) => ({ day, cost: Math.round(asNumber(v.cost) * 100) / 100, tokensUsed: v.tokensUsed }))
 			.sort((a, b) => a.day.localeCompare(b.day));
 
 		const companyIds = topSpendRows.map((r: any) => r.companyId);
@@ -58,7 +59,7 @@ export async function GET(req: NextRequest) {
 		const topSpenders = topSpendRows.map((r: any) => ({
 			companyId: r.companyId,
 			companyName: companyNameById.get(r.companyId) ?? 'Unknown',
-			cost: Math.round((r._sum.cost ?? 0) * 100) / 100,
+			cost: Math.round((asNumber(r._sum.cost) ?? 0) * 100) / 100,
 			tokensUsed: r._sum.tokensUsed ?? 0,
 		}));
 
@@ -67,7 +68,7 @@ export async function GET(req: NextRequest) {
 				dailyTrend,
 				topSpenders,
 				activeRate: activeRate
-					? { costPerUnit: activeRate.costPerUnit, tokensPerUnit: activeRate.tokensPerUnit, currency: activeRate.currency }
+					? { costPerUnit: asNumber(activeRate.costPerUnit), tokensPerUnit: activeRate.tokensPerUnit, currency: activeRate.currency }
 					: null,
 				emailHealth: {
 					failedLast7d: failedEmails7d,

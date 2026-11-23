@@ -9,8 +9,8 @@ import { NextRequest } from 'next/server'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
-import { getActiveOfferLetterBulkJob } from '@/app/lib/offer-letters/bulkJobStatus'
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access'
+import { getActiveOfferLetterBulkJob } from '@/app/lib/offers/letters/bulkJobStatus'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)

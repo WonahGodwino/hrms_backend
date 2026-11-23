@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleCorsOptions } from "@/app/lib/cors";
 import { nameOf, ok } from "@/app/lib/pip";
 import { Params, bail, guarded, oneOf, readBody } from "@/app/lib/pip-employee";
@@ -20,6 +20,7 @@ import {
   serializeRule,
   toConditionJson,
 } from "@/app/lib/automation";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -36,8 +37,8 @@ export async function GET(
       request,
       request.nextUrl.searchParams.get("companyId"),
     );
-    const rule = await prisma.automationRule.findFirst({
-      where: { id, companyId: ctx.companyId, removedAt: null },
+    const rule = await forCompany(ctx.companyId).automationRule.findFirst({
+      where: { id, removedAt: null },
       include: {
         createdBy: { select: { firstName: true, lastName: true } },
         updatedBy: { select: { firstName: true, lastName: true } },
@@ -46,8 +47,8 @@ export async function GET(
     if (!rule) return bail(404, "Rule not found");
     const [stats, history] = await Promise.all([
       loadRuleStats(ctx.companyId, [id]),
-      prisma.automationHistory.findMany({
-        where: { companyId: ctx.companyId, entityType: "RULE", entityId: id },
+      forCompany(ctx.companyId).automationHistory.findMany({
+        where: { entityType: "RULE", entityId: id },
         orderBy: { createdAt: "desc" },
         take: 10,
         include: HISTORY_INCLUDE,

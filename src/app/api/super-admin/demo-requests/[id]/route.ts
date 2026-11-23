@@ -18,7 +18,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     await requireRoleAsync(token, ['SUPER_ADMIN'])
 
     const { id } = await params
-    const record = await (prisma as any).demoRequest.findUnique({ where: { id } })
+    const record = await prisma.demoRequest.findUnique({ where: { id } })
 
     if (!record) {
       return withCors(ApiResponse.notFound('Demo request not found.'), origin)
@@ -51,12 +51,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return withCors(ApiResponse.error('Invalid status value.', 400), origin)
     }
 
-    const existing = await (prisma as any).demoRequest.findUnique({ where: { id } })
+    const existing = await prisma.demoRequest.findUnique({ where: { id } })
     if (!existing) {
       return withCors(ApiResponse.notFound('Demo request not found.'), origin)
     }
 
-    const updated = await (prisma as any).demoRequest.update({
+    const updated = await prisma.demoRequest.update({
       where: { id },
       data: {
         ...(nextStatus ? { status: nextStatus } : {}),

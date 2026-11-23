@@ -19,7 +19,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { transferTo } = await req.json()
     const companyId = user.role === 'SUPER_ADMIN' ? undefined : user.companyId
 
-    const existing = await (prisma as any).designation.findUnique({ where: { id } })
+    const existing = await prisma.designation.findUnique({ where: { id } })
     if (!existing || (companyId && existing.companyId !== companyId)) return withCors(ApiResponse.error('Designation not found', 404), origin)
     if (existing.status === 'Inactive') return withCors(ApiResponse.error('Already inactive', 400), origin)
 
@@ -30,16 +30,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     if (transferTo) {
-      const target = await (prisma as any).designation.findUnique({ where: { id: transferTo } })
-      if (!target) return withCors(ApiResponse.error('Transfer target not found', 404), origin)
+      const target = await prisma.designation.findUnique({ where: { id: transferTo } })
+      // The target must be this company's designation or a global one.
+      if (!target || (target.companyId !== null && target.companyId !== existing.companyId)) return withCors(ApiResponse.error('Transfer target not found', 404), origin)
 
       await prisma.staffRecord.updateMany({ where: { designationId: id }, data: { designationId: transferTo } })
-      await (prisma as any).designation.update({ where: { id: transferTo }, data: { staffCount: { increment: staffCount } } })
+      await prisma.designation.update({ where: { id: transferTo }, data: { staffCount: { increment: staffCount } } })
     }
 
-    await (prisma as any).designation.update({ where: { id }, data: { status: 'Inactive', staffCount: 0 } })
+    await prisma.designation.update({ where: { id }, data: { status: 'Inactive', staffCount: 0 } })
 
-    await logRecordChange(req, user, { companyId: existing.companyId, noun: 'Designation', type: 'designation', before: { id, title: existing.title, status: existing.status }, after: { id, title: existing.title, status: 'Inactive' } })
+    // Global designations (no company) have no company audit trail.
+    if (existing.companyId) await logRecordChange(req, user, { companyId: existing.companyId, noun: 'Designation', type: 'designation', before: { id, title: existing.title, status: existing.status }, after: { id, title: existing.title, status: 'Inactive' } })
 
     return withCors(ApiResponse.success({ id, status: 'Inactive', staffTransferred: transferTo ? staffCount : 0 }, 'Designation deactivated'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }

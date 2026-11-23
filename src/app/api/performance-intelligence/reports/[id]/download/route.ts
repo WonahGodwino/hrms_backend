@@ -2,7 +2,6 @@ import { NextRequest } from "next/server";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { NextResponse } from "next/server";
-import prisma from "@/app/lib/prisma";
 import { RouteContext } from "@/app/lib/self-appraisal";
 import { readUploadFile } from "@/app/lib/storage/upload-files";
 import {
@@ -10,6 +9,7 @@ import {
   logReportEvent,
   reportFilePath,
 } from "@/app/lib/performance-intelligence/intel-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -28,8 +28,8 @@ export async function GET(
     if (!a.ok) return a.response;
     const { companyId, actorId } = a.auth;
 
-    const report = await prisma.intelligenceReport.findFirst({
-      where: { id, companyId },
+    const report = await forCompany(companyId).intelligenceReport.findFirst({
+      where: { id },
     });
     if (
       !report ||

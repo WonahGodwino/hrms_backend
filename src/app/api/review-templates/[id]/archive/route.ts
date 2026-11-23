@@ -19,10 +19,8 @@ export async function OPTIONS(request: NextRequest) {
 
 // POST /api/review-templates/:id/archive
 // body: { companyId, confirmImpact? }
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   const reject = (status: number, body: Record<string, unknown>) =>
     withCors(

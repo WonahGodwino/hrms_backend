@@ -1,5 +1,6 @@
 // src/app/lib/aiCVReview.ts
 import { calculateIndustryMatchScore } from './keywordExtractor'
+import { fetchWithTimeout, TIMEOUTS } from '@/app/lib/http/fetch-with-timeout'
 
 export interface AIMatchResult {
   overallScore: number;
@@ -257,7 +258,7 @@ async function analyzeWithOpenAI(prompt: string, options: AICVReviewOptions): Pr
   const apiKey = options.apiKey || process.env.OPENAI_API_KEY || '';
   const model = options.model || 'gpt-4-turbo-preview';
   
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  const response = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -279,7 +280,7 @@ async function analyzeWithOpenAI(prompt: string, options: AICVReviewOptions): Pr
       max_tokens: options.maxTokens || 1500,
       response_format: { type: 'json_object' }
     })
-  });
+  }, TIMEOUTS.ai);
 
   if (!response.ok) {
     throw new Error(`OpenAI API error: ${response.statusText}`);
@@ -317,7 +318,7 @@ async function analyzeWithAnthropic(prompt: string, options: AICVReviewOptions):
     headers['x-api-key'] = apiKey;
   }
   
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: headers,
     body: JSON.stringify({
@@ -332,7 +333,7 @@ async function analyzeWithAnthropic(prompt: string, options: AICVReviewOptions):
       ],
       system: 'You are an expert HR recruitment analyst. Provide detailed CV analysis in JSON format.'
     })
-  });
+  }, TIMEOUTS.ai);
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -360,7 +361,7 @@ async function analyzeWithGemini(prompt: string, options: AICVReviewOptions): Pr
   const apiKey = options.apiKey || process.env.GEMINI_API_KEY || '';
   const model = options.model || 'gemini-pro';
   
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+  const response = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -380,7 +381,7 @@ async function analyzeWithGemini(prompt: string, options: AICVReviewOptions): Pr
         maxOutputTokens: options.maxTokens || 1500
       }
     })
-  });
+  }, TIMEOUTS.ai);
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -404,7 +405,7 @@ async function analyzeWithLocalLLM(prompt: string, options: AICVReviewOptions): 
   const localEndpoint = process.env.LOCAL_LLM_ENDPOINT || 'http://localhost:11434/api/generate';
   const model = options.model || 'llama2';
   
-  const response = await fetch(localEndpoint, {
+  const response = await fetchWithTimeout(localEndpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -418,7 +419,7 @@ async function analyzeWithLocalLLM(prompt: string, options: AICVReviewOptions): 
         num_predict: options.maxTokens || 1500
       }
     })
-  });
+  }, TIMEOUTS.ai);
 
   if (!response.ok) {
     const errorText = await response.text();

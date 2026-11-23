@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import {
@@ -24,6 +24,7 @@ import {
   validateFiles,
   validateTarget,
 } from "@/app/lib/promotion";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -100,9 +101,8 @@ export async function POST(request: NextRequest) {
         409,
       );
 
-    const approved = await prisma.promotionRecommendation.findFirst({
+    const approved = await forCompany(companyId).promotionRecommendation.findFirst({
       where: {
-        companyId,
         staffRecordId: staff.id,
         status: "APPROVED",
         decidedAt: { gte: new Date(Date.now() - COOLDOWN_DAYS * DAY) },

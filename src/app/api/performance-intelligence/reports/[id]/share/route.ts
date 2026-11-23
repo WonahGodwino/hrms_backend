@@ -2,12 +2,13 @@ import { NextRequest } from "next/server";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { createHash, randomBytes } from "crypto";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { RouteContext } from "@/app/lib/self-appraisal";
 import {
   authorizeSuper,
   logReportEvent,
 } from "@/app/lib/performance-intelligence/intel-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -40,8 +41,8 @@ export async function POST(
         ? body.label.trim().slice(0, 100) || null
         : null;
 
-    const report = await prisma.intelligenceReport.findFirst({
-      where: { id, companyId },
+    const report = await forCompany(companyId).intelligenceReport.findFirst({
+      where: { id },
     });
     if (!report || report.status !== "READY" || report.purgedAt)
       return withCors(ApiResponse.notFound("Report not available"), origin);

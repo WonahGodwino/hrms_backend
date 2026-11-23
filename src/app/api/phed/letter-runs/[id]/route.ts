@@ -8,7 +8,8 @@ import { cleanupExpiredLetterFiles, resolveLetterCompany, resumeStuckLetterRuns,
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
   if (rl) return withCors(rl, origin)
@@ -18,7 +19,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     cleanupExpiredLetterFiles().catch((e) => console.warn('[letter] cleanup sweep failed:', e))
     resumeStuckLetterRuns().catch((e) => console.warn('[letter] resume sweep failed:', e))
 
-    const run = await (prisma as any).phedLetterRun.findUnique({
+    const run = await prisma.phedLetterRun.findUnique({
       where: { id: params.id },
       select: {
         id: true, companyId: true, operatorId: true, status: true, counts: true, runInputs: true,

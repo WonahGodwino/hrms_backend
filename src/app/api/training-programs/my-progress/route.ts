@@ -1,10 +1,10 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -28,8 +28,8 @@ export async function GET(req: NextRequest) {
     if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
     const { companyId } = resolved
 
-    const assignments = await prisma.participantProgress.findMany({
-      where: { companyId, employeeId: user.userId },
+    const assignments = await forCompany(companyId).participantProgress.findMany({
+      where: { employeeId: user.userId },
       include: {
         trainingProgram: {
           select: {
@@ -58,8 +58,8 @@ export async function GET(req: NextRequest) {
 
     const assessmentIds = assignments.map((a) => a.trainingProgram.assessments[0]?.id).filter((id): id is string => Boolean(id))
     const myAttempts = assessmentIds.length
-      ? await prisma.assessmentAttempt.findMany({
-          where: { companyId, employeeId: user.userId, assessmentId: { in: assessmentIds } },
+      ? await forCompany(companyId).assessmentAttempt.findMany({
+          where: { employeeId: user.userId, assessmentId: { in: assessmentIds } },
           orderBy: { attemptNumber: 'desc' },
         })
       : []

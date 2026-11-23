@@ -4,18 +4,20 @@ import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
 import { hasModuleAccess } from '@/app/lib/module-access'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import fs from 'fs/promises'
 import path from 'path'
 import ExcelJS from 'exceljs'
 import { readUploadFile, uploadFileToS3 } from '@/app/lib/storage/upload-files'
 import { attachmentDisposition, buildSubtitle, confidentialFooter, safeFileName, toneCell, writeStyledTable } from '@/app/lib/excel/sheet-theme'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
+import { forCompany } from '@/app/lib/data/tenant'
 
 type RouteParams = {
-  params: {
+  params: Promise<{
     id: string
-  }
+  }>
 }
 
 // Helper function to resolve path (handles both absolute and relative)
@@ -86,7 +88,8 @@ export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function GET(request: NextRequest, { params }: RouteParams) {
+export async function GET(request: NextRequest, props: RouteParams) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -130,10 +133,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     if (user.role === 'ADMIN') {
-      const hasAccess = await prisma.userCompany.findFirst({
+      const hasAccess = await forCompany(payrollUpload.companyId).userCompany.findFirst({
         where: {
           userId: user.userId,
-          companyId: payrollUpload.companyId,
           role: { in: ['ADMIN', 'ALL'] }
         }
       })
@@ -185,7 +187,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         fileBuffer = await fs.readFile(fullFilePath)
         foundPath = fullFilePath
         console.log(`[DOWNLOAD_FAILED] File found at: ${foundPath}`)
-      } catch (error) {
+      } catch (_error) {
         console.log(
           `[DOWNLOAD_FAILED] File not found at primary location: ${fullFilePath}`
         )
@@ -217,7 +219,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             foundPath = altPath
             console.log(`[DOWNLOAD_FAILED] Found at alternative: ${foundPath}`)
             break
-          } catch (err) {
+          } catch (_err) {
             continue
           }
         }
@@ -314,7 +316,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     return withCors(response, origin)
   } catch (error) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('[DOWNLOAD_FAILED] Top-level error:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }

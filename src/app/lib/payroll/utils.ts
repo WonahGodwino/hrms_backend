@@ -3,10 +3,10 @@ import type {
   CustomFieldValue, 
   PayslipDisplayItem,
   } from './templates/types'
+import { calculateTotals, normalizeSection } from '@/app/lib/payroll/templates/utils'
+export { calculateTotals }
 
-function normalizeSection(section?: string): string {
-  return (section || '').toUpperCase().replace(/[\s-]+/g, '_')
-}
+
 
 /**
  * Get fields marked for payslip display from custom fields
@@ -96,26 +96,5 @@ export function getCustomFieldValue(
   return Number.isNaN(coerced) ? null : coerced
 }
 
-/**
- * Calculate totals from payslip items
- */
-export function calculateTotals(
-  earnings: PayslipDisplayItem[],
-  deductions: PayslipDisplayItem[]
-): {
-  grossPay: number
-  totalDeductions: number
-  netPay: number
-} {
-  // Fixed Value items are informational and must not affect gross/net pay
-  // calculations. Both spellings exist: legacy rows stored 'FIXED_VALUE',
-  // current templates store 'FIXED_VALUES'.
-  const grossPay = earnings
-    .filter((item) => item.section !== 'FIXED_VALUE' && item.section !== 'FIXED_VALUES')
-    .reduce((sum, item) => sum + item.value, 0)
-  const totalDeductions = deductions.reduce((sum, item) => sum + item.value, 0)
-  const netPay = grossPay - totalDeductions
 
-  return { grossPay, totalDeductions, netPay }
-}
 

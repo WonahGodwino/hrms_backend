@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { PerformanceActionType } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -12,6 +12,7 @@ import {
   parseActionPayload,
   serializeAction,
 } from "@/app/lib/performance-action";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -76,8 +77,8 @@ export async function GET(request: NextRequest) {
     let target = {};
     const participantId = searchParams.get("participantId");
     if (participantId) {
-      const participant = await prisma.appraisalCycleParticipant.findFirst({
-        where: { id: participantId, companyId },
+      const participant = await forCompany(companyId).appraisalCycleParticipant.findFirst({
+        where: { id: participantId },
         select: { cycleId: true, staffRecordId: true, managerId: true },
       });
       if (!participant || !canAccess(actor, participant))
@@ -168,8 +169,8 @@ export async function POST(request: NextRequest) {
     const actorId = actor.staffRecordId;
 
     // Managers: own reports only. HR/admin: anyone in the company.
-    const participant = await prisma.appraisalCycleParticipant.findFirst({
-      where: { id: participantId, companyId },
+    const participant = await forCompany(companyId).appraisalCycleParticipant.findFirst({
+      where: { id: participantId },
       select: { cycleId: true, staffRecordId: true, managerId: true },
     });
     if (!participant || !canAccess(actor, participant))

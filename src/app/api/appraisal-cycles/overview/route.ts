@@ -12,6 +12,7 @@ import {
 } from "@/app/lib/appraisal-cycles/appraisal-cycle-utils";
 import { todayStart } from "@/app/lib/appraisal-cycles/cycle-dates";
 import { maybeRunCycleSweep } from "@/app/lib/appraisal-cycles/cycle-automation";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -74,13 +75,12 @@ export async function GET(request: NextRequest) {
     const cutoff = todayStart();
 
     const [statusGroups, liveCycles] = await Promise.all([
-      prisma.appraisalCycle.groupBy({
+      forCompany(companyId).appraisalCycle.groupBy({
         by: ["status"],
-        where: { companyId },
         _count: { _all: true },
       }),
-      prisma.appraisalCycle.findMany({
-        where: { companyId, status: { in: LIVE_STATUSES } },
+      forCompany(companyId).appraisalCycle.findMany({
+        where: { status: { in: LIVE_STATUSES } },
         select: {
           id: true,
           name: true,
@@ -217,8 +217,8 @@ export async function GET(request: NextRequest) {
       .map((g) => g.departmentId)
       .filter((id): id is string => !!id);
     const delayedDepts = delayedDeptIds.length
-      ? await prisma.department.findMany({
-          where: { id: { in: delayedDeptIds }, companyId },
+      ? await forCompany(companyId).department.findMany({
+          where: { id: { in: delayedDeptIds } },
           select: { name: true },
         })
       : [];
@@ -239,8 +239,8 @@ export async function GET(request: NextRequest) {
       ),
     );
     const locations = locationIds.length
-      ? await prisma.location.findMany({
-          where: { id: { in: locationIds }, companyId },
+      ? await forCompany(companyId).location.findMany({
+          where: { id: { in: locationIds } },
           select: { id: true, name: true, state: true, country: true },
         })
       : [];

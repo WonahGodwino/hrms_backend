@@ -14,6 +14,7 @@ import {
   todayStart,
   daysUntilDate,
 } from "@/app/lib/appraisal-cycles/cycle-dates";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -80,18 +81,18 @@ export async function GET(request: NextRequest) {
     const cutoff = todayStart();
 
     const [liveCycles, heldRaw, completedCycles] = await Promise.all([
-      prisma.appraisalCycle.findMany({
-        where: { companyId, status: { in: LIVE_STATUSES } },
+      forCompany(companyId).appraisalCycle.findMany({
+        where: { status: { in: LIVE_STATUSES } },
         orderBy: { startDate: "desc" },
         select: cycleSelect,
       }),
-      prisma.appraisalCycle.findMany({
-        where: { companyId, status: { in: HELD_STATUSES } },
+      forCompany(companyId).appraisalCycle.findMany({
+        where: { status: { in: HELD_STATUSES } },
         orderBy: { startDate: "desc" },
         select: cycleSelect,
       }),
-      prisma.appraisalCycle.findMany({
-        where: { companyId, status: "COMPLETED" },
+      forCompany(companyId).appraisalCycle.findMany({
+        where: { status: "COMPLETED" },
         orderBy: { endDate: "desc" },
         take: 10,
         select: cycleSelect,
@@ -109,8 +110,8 @@ export async function GET(request: NextRequest) {
     if (cycleIdParam && !cycle) {
       // Allow viewing any other cycle (e.g. an older one) by explicit id.
       cycle =
-        (await prisma.appraisalCycle.findFirst({
-          where: { id: cycleIdParam, companyId },
+        (await forCompany(companyId).appraisalCycle.findFirst({
+          where: { id: cycleIdParam },
           select: cycleSelect,
         })) ?? undefined;
       if (!cycle)
@@ -303,8 +304,8 @@ export async function GET(request: NextRequest) {
       (id): id is string => !!id,
     );
     const deptRows = deptIds.length
-      ? await prisma.department.findMany({
-          where: { id: { in: deptIds }, companyId },
+      ? await forCompany(companyId).department.findMany({
+          where: { id: { in: deptIds } },
           select: { id: true, name: true },
         })
       : [];

@@ -1,11 +1,12 @@
 import { NextRequest } from 'next/server';
-import path from 'path';
 
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { requireModuleAccess } from '@/app/lib/module-access';
 import { validateAndStoreFile } from '@/app/lib/uploadUtils';
+import { certificationUploadDir, isExternalDocumentUrl } from '@/app/lib/storage/private-files';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(req: NextRequest) {
 	return handleCorsOptions(req);
@@ -13,9 +14,10 @@ export async function OPTIONS(req: NextRequest) {
 
 // POST /api/certifications/[id]/renew
 // Renews certification record. Supports application/json or multipart/form-data with attached renewal document file.
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-	const origin = req.headers.get('origin');
-	try {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+    const params = await props.params;
+    const origin = req.headers.get('origin');
+    try {
 		const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null;
 		const user = await requireModuleAccess(token, 'TRAINING', ['HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER']);
 
@@ -63,7 +65,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 			if (rawFile && typeof rawFile === 'object' && 'arrayBuffer' in rawFile) {
 				try {
 					const file = rawFile as unknown as File;
-					const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'certifications');
+					const uploadsDir = certificationUploadDir();
 					const stored = await validateAndStoreFile(file, uploadsDir);
 					uploadedFile = { fileName: stored.fileName, fileUrl: stored.fileUrl, fileType: stored.fileType };
 				} catch (err: any) {
@@ -78,6 +80,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 			assessmentAttemptId = body.assessmentAttemptId;
 			assessmentStatus = body.assessmentStatus;
 
+			// SEC-019: a link supplied by the client must be an external http(s) URL, never a server path.
+			if (body.documentUrl && !isExternalDocumentUrl(body.documentUrl)) {
+				return withCors(ApiResponse.error('Document link must be an http(s) URL', 400), origin);
+			}
 			if (body.documentUrl) {
 				uploadedFile = {
 					fileName: body.documentName ?? 'renewal-document.pdf',
@@ -133,9 +139,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 		}
 
 		// Clear saved renewal draft
-		await prisma.trainingAuditLog.deleteMany({
+		await forCompany(record.companyId).trainingAuditLog.deleteMany({
 			where: {
-				companyId: record.companyId,
 				actorId: user.userId,
 				entityType: 'certification_renewal_draft',
 				entityId: params.id,

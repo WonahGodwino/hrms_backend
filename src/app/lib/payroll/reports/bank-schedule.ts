@@ -19,7 +19,7 @@
 // StaffRecord, mirroring how the existing period-based bank-schedule export
 // reads them.
 import { prisma } from '@/app/lib/db';
-import { resolveBankCode } from '@/app/lib/payroll-verifier/banks';
+import { resolveBankCode } from '@/app/lib/payroll/verifier/banks';
 import { calculateTotals, getPayslipDisplayFields } from '@/app/lib/payroll/utils';
 
 import type { CustomFieldValue } from '@/app/lib/payroll/templates/types';
@@ -165,7 +165,7 @@ export type BankScheduleSource = {
 
 type CustomFieldsLike = Record<string, CustomFieldValue>;
 
-function toCustomFieldsMap(value: unknown): CustomFieldsLike | null {
+export function toCustomFieldsMap(value: unknown): CustomFieldsLike | null {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
 	return value as CustomFieldsLike;
 }

@@ -4,12 +4,14 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // POST /api/phed/pay-periods/:id/open-validation
 // Seeds validation records for all active staff and opens the validation window.
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -17,14 +19,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
+    const period = await prisma.phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     if (period.status !== 'DRAFT')
       return withCors(ApiResponse.error('Can only open validation for DRAFT periods', 400), origin)
 
     // Load all active staff for this company
-    const allStaff = await (prisma as any).phedStaff.findMany({
-      where: { companyId: period.companyId, isActive: true },
+    const allStaff = await forCompany(period.companyId).phedStaff.findMany({
+      where: { isActive: true },
       select: { id: true },
     })
 
@@ -37,7 +39,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       const batch = allStaff.slice(i, i + BATCH_SIZE)
       await Promise.all(
         batch.map((s: any) =>
-          (prisma as any).phedValidation.upsert({
+          prisma.phedValidation.upsert({
             where: { payPeriodId_staffId: { payPeriodId: params.id, staffId: s.id } },
             create: { payPeriodId: params.id, staffId: s.id, companyId: period.companyId },
             update: {},
@@ -46,7 +48,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       )
     }
 
-    const updated = await (prisma as any).phedPayPeriod.update({
+    const updated = await prisma.phedPayPeriod.update({
       where: { id: params.id },
       data: { status: 'VALIDATION_OPEN', validationOpenAt: new Date() },
     })

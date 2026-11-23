@@ -1,12 +1,12 @@
 import { NextRequest } from "next/server";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
-import prisma from "@/app/lib/prisma";
 import { RouteContext } from "@/app/lib/self-appraisal";
 import {
   authorizeSuper,
   logReportEvent,
 } from "@/app/lib/performance-intelligence/intel-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -25,8 +25,8 @@ export async function DELETE(
     if (!a.ok) return a.response;
     const { companyId, actorId } = a.auth;
 
-    const flipped = await prisma.intelligenceReportShare.updateMany({
-      where: { id: shareId, reportId: id, companyId, revokedAt: null },
+    const flipped = await forCompany(companyId).intelligenceReportShare.updateMany({
+      where: { id: shareId, reportId: id, revokedAt: null },
       data: { revokedAt: new Date(), revokedById: actorId },
     });
     if (flipped.count !== 1)

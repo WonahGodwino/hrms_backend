@@ -11,7 +11,8 @@ import { buildPayslipHtml } from '@/app/lib/phed/payslip-email'
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // POST /api/phed/pay-periods/:id/payslips — trigger payslip emails
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -26,7 +27,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const allowed = await verifyCompanyAccess(user, companyId)
     if (!allowed) return withCors(ApiResponse.forbidden('You do not have access to this company'), origin)
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({
+    const period = await prisma.phedPayPeriod.findUnique({
       where: { id: params.id },
       include: { company: { select: { companyName: true, address: true } } },
     })
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // Large workforces are sent in batched requests (`skip`/`take`) so a single
     // request never outlives the serverless request window. Ordering by staffId
     // makes the batches deterministic across requests.
-    const allPayrolls = await (prisma as any).phedComputedPayroll.findMany({
+    const allPayrolls = await prisma.phedComputedPayroll.findMany({
       where: { payPeriodId: params.id },
       orderBy: { staffId: 'asc' },
     })
@@ -66,10 +67,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // deduction by name rather than a single unnamed total.
     const staffIds = payrolls.map((p: any) => p.staffId)
     const [allUnions, allCoops, staffUnions, staffCoops] = await Promise.all([
-      (prisma as any).phedUnion.findMany({ where: { companyId, isActive: true }, orderBy: { name: 'asc' } }),
-      (prisma as any).phedCooperative.findMany({ where: { companyId, isActive: true }, orderBy: { name: 'asc' } }),
-      (prisma as any).phedStaffUnion.findMany({ where: { staffId: { in: staffIds } } }),
-      (prisma as any).phedStaffCooperative.findMany({ where: { staffId: { in: staffIds } } }),
+      prisma.phedUnion.findMany({ where: { companyId, isActive: true }, orderBy: { name: 'asc' } }),
+      prisma.phedCooperative.findMany({ where: { companyId, isActive: true }, orderBy: { name: 'asc' } }),
+      prisma.phedStaffUnion.findMany({ where: { staffId: { in: staffIds } } }),
+      prisma.phedStaffCooperative.findMany({ where: { staffId: { in: staffIds } } }),
     ])
     const unionMembers = new Map<string, Set<string>>()
     staffUnions.forEach((su: any) => {
@@ -85,7 +86,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // Fall back to the current staff email when the computed snapshot is blank,
     // and gather the onboarding-only fields (role / feeder / NHF number /
     // franchise state) the payslip email needs to mirror the PDF layout.
-    const staffRecords = await (prisma as any).phedStaff.findMany({
+    const staffRecords = await prisma.phedStaff.findMany({
       where: { id: { in: staffIds } },
       select: {
         id: true, email: true, jobTitle: true, nhfNumber: true,
@@ -97,7 +98,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     )
     const emails = staffRecords.map((s: any) => s.email).filter(Boolean)
     const taxProfiles = emails.length
-      ? await (prisma as any).staffRecord.findMany({
+      ? await prisma.staffRecord.findMany({
           where: { email: { in: emails } },
           select: { email: true, taxProfile: { select: { stateOfResidence: true } } },
         })
@@ -164,7 +165,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // Mark period as PAID if approved and this is the final batch — never mark
     // PAID while further batches remain to be sent.
     if (period.status === 'APPROVED' && remaining === 0) {
-      await (prisma as any).phedPayPeriod.update({
+      await prisma.phedPayPeriod.update({
         where: { id: params.id },
         data:  { status: 'PAID' },
       })

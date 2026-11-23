@@ -4,6 +4,8 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { asNumber } from '@/app/lib/prisma-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -48,24 +50,21 @@ export async function GET(request: NextRequest) {
     // ── Aggregate totals from DB ──────────────────────────────────────────────
     const [aggregate, dailyAggregate, recentLogs] = await Promise.all([
       // All-time totals for this company
-      prisma.aIUsageLog.aggregate({
-        where: { companyId },
+      forCompany(companyId).aIUsageLog.aggregate({
         _sum:   { cost: true, tokensUsed: true },
         _count: { id: true },
       }),
 
       // Last-24-hour totals
-      prisma.aIUsageLog.aggregate({
+      forCompany(companyId).aIUsageLog.aggregate({
         where: {
-          companyId,
           createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
         },
         _sum: { cost: true, tokensUsed: true },
       }),
 
       // Recent activity rows
-      prisma.aIUsageLog.findMany({
-        where:   { companyId },
+      forCompany(companyId).aIUsageLog.findMany({
         orderBy: { createdAt: 'desc' },
         take:    recentLimit,
         select: {
@@ -81,10 +80,10 @@ export async function GET(request: NextRequest) {
       }),
     ])
 
-    const totalCost       = aggregate._sum.cost       ?? 0
+    const totalCost       = asNumber(aggregate._sum.cost)       ?? 0
     const totalTokens     = aggregate._sum.tokensUsed ?? 0
     const totalReviews    = aggregate._count.id
-    const dailyCost       = dailyAggregate._sum.cost  ?? 0
+    const dailyCost       = asNumber(dailyAggregate._sum.cost)  ?? 0
     const monthlyEstimate = dailyCost * 30
 
     const payload: Record<string, unknown> = {
@@ -103,7 +102,7 @@ export async function GET(request: NextRequest) {
         model:         r.model,
         endpoint:      r.endpoint,
         tokens:        r.tokensUsed,
-        cost:          parseFloat(r.cost.toFixed(6)),
+        cost:          parseFloat(asNumber(r.cost).toFixed(6)),
         applicationId: r.applicationId ?? null,
       })),
     }
@@ -120,7 +119,7 @@ export async function GET(request: NextRequest) {
       payload.companyBreakdown = breakdown.map((b) => ({
         companyId:   b.companyId,
         totalReviews: b._count.id,
-        totalCost:   parseFloat((b._sum.cost    ?? 0).toFixed(6)),
+        totalCost:   parseFloat((asNumber(b._sum.cost)    ?? 0).toFixed(6)),
         totalTokens: b._sum.tokensUsed ?? 0,
       }))
     }

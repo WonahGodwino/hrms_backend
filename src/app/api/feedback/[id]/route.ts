@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -13,6 +13,7 @@ import {
   serializeFeedback,
   toPerson,
 } from "@/app/lib/feedback";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -58,8 +59,8 @@ export async function GET(
         origin,
       );
 
-    const f = await prisma.feedback.findFirst({
-      where: { id, companyId },
+    const f = await forCompany(companyId).feedback.findFirst({
+      where: { id },
       select: {
         ...feedbackSelect(self.id),
         comments: {
@@ -149,8 +150,8 @@ export async function PUT(
         origin,
       );
 
-    const f = await prisma.feedback.findFirst({
-      where: { id, companyId },
+    const f = await forCompany(companyId).feedback.findFirst({
+      where: { id },
       select: { authorId: true, recipientId: true },
     });
     if (!f || !canViewFeedback(self, f))

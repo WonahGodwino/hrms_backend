@@ -9,6 +9,7 @@ import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { dispatchOfferLetter } from '@/app/lib/offers/dispatch'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -48,8 +49,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Load the targeted offers (company-scoped) so we can skip ineligible ones.
-    const offers = await prisma.offer.findMany({
-      where: { id: { in: offerIds }, companyId, archived: 0 },
+    const offers = await forCompany(companyId).offer.findMany({
+      where: { id: { in: offerIds }, archived: 0 },
       select: { id: true, status: true },
     })
     const byId = new Map(offers.map((o) => [o.id, o]))

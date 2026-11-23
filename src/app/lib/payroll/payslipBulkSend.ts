@@ -7,6 +7,7 @@
 // pattern, and the same stale-job safeguard since there's no worker/queue
 // behind this.
 import { prisma } from '@/app/lib/db'
+import { forCompany } from '@/app/lib/data/tenant'
 
 // Staleness is judged on activity, not total runtime, so a healthy 3,000-email
 // run is never killed. A live job (heartbeat in this process) is stale only
@@ -32,8 +33,8 @@ export interface PayslipBulkSendResults {
  * none were in flight, so a crashed run can never permanently block sending.
  */
 export async function getActivePayslipBulkSend(companyId: string) {
-  const active = await prisma.payslipBulkSend.findFirst({
-    where: { companyId, status: { in: ['PENDING', 'PROCESSING'] } },
+  const active = await forCompany(companyId).payslipBulkSend.findFirst({
+    where: { status: { in: ['PENDING', 'PROCESSING'] } },
     orderBy: { createdAt: 'desc' },
   })
 

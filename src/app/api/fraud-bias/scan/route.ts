@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     await auditFairness(ctx, {
       action: "Fairness scan run manually",
       entityId: cycle.id,
-      after: `${(run as any).reviewsScanned ?? 0} reviews scanned · ${(run as any).signalsOpen ?? 0} open signals`,
+      after: `${('reviewsScanned' in run ? run.reviewsScanned : 0) ?? 0} reviews scanned · ${('signalsOpen' in run ? run.signalsOpen : 0) ?? 0} open signals`,
     });
     return { cycleId: cycle.id, ...run };
   });

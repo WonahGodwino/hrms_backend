@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { forCompany } from "@/app/lib/data/tenant";
 import { handleCorsOptions } from "@/app/lib/cors";
 import { LIVE_PIP, canAccessPip, ok } from "@/app/lib/pip";
 import {
@@ -21,13 +21,14 @@ export async function GET(request: NextRequest) {
     const targetId = sp.get("staffRecordId") ?? ctx.staffId;
     if (!targetId) return ok(origin, { plan: null });
 
-    const base = { companyId: ctx.companyId, staffRecordId: targetId };
+    const db = forCompany(ctx.companyId);
+    const base = { staffRecordId: targetId };
     const pip =
-      (await prisma.pip.findFirst({
+      (await db.pip.findFirst({
         where: { ...base, status: { in: LIVE_PIP } },
         include: EMPLOYEE_INCLUDE,
       })) ??
-      (await prisma.pip.findFirst({
+      (await db.pip.findFirst({
         where: { ...base, status: "COMPLETED" },
         orderBy: { closedAt: "desc" },
         include: EMPLOYEE_INCLUDE,
@@ -38,7 +39,7 @@ export async function GET(request: NextRequest) {
     if (!isOwner && !canAccessPip(ctx.actor, pip))
       return ok(origin, { plan: null });
     const drafts = isOwner
-      ? await prisma.pipProgressDraft.findMany({
+      ? await db.pipProgressDraft.findMany({
           where: { pipId: pip.id, staffRecordId: ctx.staffId as string },
         })
       : [];

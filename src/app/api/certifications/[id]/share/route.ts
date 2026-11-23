@@ -12,7 +12,8 @@ export async function OPTIONS(req: NextRequest) {
 
 // POST /api/certifications/[id]/share
 // Generates a secure share link/token for verifying or viewing a certification record
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null

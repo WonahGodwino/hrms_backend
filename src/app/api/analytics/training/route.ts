@@ -1,9 +1,9 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -41,34 +41,33 @@ export async function GET(req: NextRequest) {
       programsByCategory,
       complianceByDept,
     ] = await Promise.all([
-      prisma.trainingProgram.count({ where: { companyId, deletedAt: null } }),
-      prisma.trainingProgram.count({ where: { companyId, status: 'ACTIVE', deletedAt: null } }),
-      prisma.participantProgress.count({ where: { companyId } }),
-      prisma.participantProgress.count({ where: { companyId, trainingStatus: 'COMPLETED' } }),
-      prisma.participantProgress.count({ where: { companyId, trainingStatus: 'IN PROGRESS' } }),
-      prisma.certificationRecord.count({ where: { companyId } }),
-      prisma.certificationRecord.count({ where: { companyId, status: 'Valid' } }),
-      prisma.certificationRecord.count({ where: { companyId, status: 'Expiring Soon' } }),
-      prisma.certificationRecord.count({ where: { companyId, status: 'Expired' } }),
-      prisma.assessment.count({ where: { companyId, deletedAt: null, name: { not: '__QUESTION_BANK__' } } }),
-      prisma.assessmentAttempt.count({ where: { companyId, outcome: 'Passed' } }),
-      prisma.assessmentAttempt.count({ where: { companyId, outcome: 'Failed' } }),
-      prisma.trainingAuditLog.findMany({
-        where: { companyId, createdAt: { gte: thirtyDaysAgo } },
+      forCompany(companyId).trainingProgram.count({ where: { deletedAt: null } }),
+      forCompany(companyId).trainingProgram.count({ where: { status: 'ACTIVE', deletedAt: null } }),
+      forCompany(companyId).participantProgress.count(),
+      forCompany(companyId).participantProgress.count({ where: { trainingStatus: 'COMPLETED' } }),
+      forCompany(companyId).participantProgress.count({ where: { trainingStatus: 'IN PROGRESS' } }),
+      forCompany(companyId).certificationRecord.count(),
+      forCompany(companyId).certificationRecord.count({ where: { status: 'Valid' } }),
+      forCompany(companyId).certificationRecord.count({ where: { status: 'Expiring Soon' } }),
+      forCompany(companyId).certificationRecord.count({ where: { status: 'Expired' } }),
+      forCompany(companyId).assessment.count({ where: { deletedAt: null, name: { not: '__QUESTION_BANK__' } } }),
+      forCompany(companyId).assessmentAttempt.count({ where: { outcome: 'Passed' } }),
+      forCompany(companyId).assessmentAttempt.count({ where: { outcome: 'Failed' } }),
+      forCompany(companyId).trainingAuditLog.findMany({
+        where: { createdAt: { gte: thirtyDaysAgo } },
         include: {
           actor: { select: { firstName: true, lastName: true } },
         },
         orderBy: { createdAt: 'desc' },
         take: 10,
       }),
-      prisma.trainingProgram.groupBy({
+      forCompany(companyId).trainingProgram.groupBy({
         by: ['category'],
-        where: { companyId, deletedAt: null },
+        where: { deletedAt: null },
         _count: { id: true },
       }),
-      prisma.participantProgress.groupBy({
+      forCompany(companyId).participantProgress.groupBy({
         by: ['trainingStatus'],
-        where: { companyId },
         _count: { id: true },
       }),
     ])

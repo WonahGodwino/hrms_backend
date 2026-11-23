@@ -1,9 +1,9 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -18,18 +18,17 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url)
     const resolved = await resolveRequestCompanyId(user, searchParams.get('companyId'))
-    if (isCompanyError(resolved)) return new Response(resolved.error.message, { status: resolved.error.status, headers: { "Access-Control-Allow-Origin": origin ?? "*" } })
+    if (isCompanyError(resolved)) return new Response(resolved.error.message, { status: resolved.error.status, headers: { ...getCorsHeaders(origin)} })
     const { companyId } = resolved
 
     const [totalPrograms, activePrograms, totalParticipants, completedParticipants] = await Promise.all([
-      prisma.trainingProgram.count({ where: { companyId, deletedAt: null } }),
-      prisma.trainingProgram.count({ where: { companyId, deletedAt: null, status: 'ACTIVE' } }),
-      prisma.participantProgress.count({ where: { companyId } }),
-      prisma.participantProgress.count({ where: { companyId, trainingStatus: 'COMPLETED' } }),
+      forCompany(companyId).trainingProgram.count({ where: { deletedAt: null } }),
+      forCompany(companyId).trainingProgram.count({ where: { deletedAt: null, status: 'ACTIVE' } }),
+      forCompany(companyId).participantProgress.count(),
+      forCompany(companyId).participantProgress.count({ where: { trainingStatus: 'COMPLETED' } }),
     ])
 
-    const progress = await prisma.participantProgress.findMany({
-      where: { companyId },
+    const progress = await forCompany(companyId).participantProgress.findMany({
       select: { trainingStatus: true, employee: { select: { department: true } } },
       take: 20000,
     })
@@ -60,7 +59,7 @@ export async function GET(req: NextRequest) {
       headers: {
         'Content-Type': 'text/csv',
         'Content-Disposition': 'attachment; filename="training-analytics-dashboard.csv"',
-        'Access-Control-Allow-Origin': origin ?? '*',
+        ...getCorsHeaders(origin),
       },
     })
   } catch (e) { return withCors(handleApiError(e), origin) }

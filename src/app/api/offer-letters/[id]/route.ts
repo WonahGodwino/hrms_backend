@@ -4,8 +4,9 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
-import { renderDocx, MissingOfferLetterVariableError } from '@/app/lib/offer-letters/docxTemplate'
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access'
+import { renderDocx, MissingOfferLetterVariableError } from '@/app/lib/offers/letters/docxTemplate'
+import { toMonthName } from '@/app/lib/payroll/utils/valueParsing'
 import { generatedOfferLetterKey, uploadDocumentObject } from '@/app/lib/storage/documents'
 
 export async function OPTIONS(request: NextRequest) {
@@ -114,7 +115,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return withCors(ApiResponse.error(`Missing values for: ${missing.join(', ')}`, 400), origin)
     }
 
-    const finalMonth = month || existing.month
+    // DB-004: stored as a month name; "10" or "Oct" are accepted.
+    const finalMonth = month ? toMonthName(month) : existing.month
+    if (!finalMonth) return withCors(ApiResponse.error('Month must be a month name or number (e.g. October or 10)', 400), origin)
     const finalYear = year !== undefined ? (typeof year === 'string' ? parseInt(year, 10) : year) : existing.year
     if (!finalYear || Number.isNaN(finalYear)) {
       return withCors(ApiResponse.error('A valid year is required', 400), origin)

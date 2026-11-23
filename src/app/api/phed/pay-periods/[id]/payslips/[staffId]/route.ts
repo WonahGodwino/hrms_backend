@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requirePhedReadAccess } from '@/app/lib/phed/access-role'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { generatePayslipPdf } from '@/app/lib/phed/pdf-payslip'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -12,8 +13,9 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 // HR or admin downloads a specific staff member's payslip PDF for this period.
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string; staffId: string } }
+  props: { params: Promise<{ id: string; staffId: string }> }
 ) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'report')
   if (rl) return withCors(rl, origin)
@@ -21,7 +23,7 @@ export async function GET(
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     await requirePhedReadAccess(token)
 
-    const payroll = await (prisma as any).phedComputedPayroll.findUnique({
+    const payroll = await prisma.phedComputedPayroll.findUnique({
       where: { payPeriodId_staffId: { payPeriodId: params.id, staffId: params.staffId } },
       include: { payPeriod: { select: { periodName: true, month: true, year: true, company: { select: { companyName: true, address: true } } } } },
     })
@@ -31,10 +33,10 @@ export async function GET(
 
     const grossSalary = payroll.grossSalary ? Number(payroll.grossSalary) : 0
     const [allUnions, staffUnions, allCooperatives, staffCooperatives] = await Promise.all([
-      (prisma as any).phedUnion.findMany({ where: { companyId: payroll.companyId, isActive: true }, orderBy: { name: 'asc' } }),
-      (prisma as any).phedStaffUnion.findMany({ where: { staffId: payroll.staffId } }),
-      (prisma as any).phedCooperative.findMany({ where: { companyId: payroll.companyId, isActive: true }, orderBy: { name: 'asc' } }),
-      (prisma as any).phedStaffCooperative.findMany({ where: { staffId: payroll.staffId } }),
+      forCompany(payroll.companyId).phedUnion.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+      prisma.phedStaffUnion.findMany({ where: { staffId: payroll.staffId } }),
+      forCompany(payroll.companyId).phedCooperative.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+      prisma.phedStaffCooperative.findMany({ where: { staffId: payroll.staffId } }),
     ])
     const memberUnionIds = new Set(staffUnions.map((su: any) => su.unionId))
     const unions = allUnions.map((u: any) => ({
@@ -49,7 +51,7 @@ export async function GET(
 
     // Role, feeder and NHF number come from the staff onboarding record (not
     // denormalised onto the payroll snapshot), matching the payslip template.
-    const staffRecord = await (prisma as any).phedStaff.findUnique({
+    const staffRecord = await prisma.phedStaff.findUnique({
       where:  { id: payroll.staffId },
       select: { jobTitle: true, nhfNumber: true, email: true, feeder: { select: { name: true } } },
     })
@@ -58,7 +60,7 @@ export async function GET(
     // best-effort via the shared email (no FK between PhedStaff and StaffRecord).
     let franchiseState = ''
     if (staffRecord?.email) {
-      const sr = await (prisma as any).staffRecord.findUnique({
+      const sr = await prisma.staffRecord.findUnique({
         where:  { email_companyId: { email: staffRecord.email, companyId: payroll.companyId } },
         select: { taxProfile: { select: { stateOfResidence: true } } },
       })
@@ -80,7 +82,7 @@ export async function GET(
         'Content-Type':        'application/pdf',
         'Content-Disposition': `attachment; filename="${fileName}"`,
         'Content-Length':      String(pdf.length),
-        'Access-Control-Allow-Origin': origin ?? '*',
+        ...getCorsHeaders(origin),
       },
     })
   } catch (e) { return withCors(handleApiError(e), origin) }

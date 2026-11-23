@@ -27,7 +27,7 @@ type JobForAdvert = {
 async function getPoolRecipients(companyId: string): Promise<
   { id: string; firstName: string; lastName: string; email: string }[]
 > {
-  const candidates = await (prisma as any).candidate.findMany({
+  const candidates = await prisma.candidate.findMany({
     where: {
       companyId,
       archived: 0,

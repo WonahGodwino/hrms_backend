@@ -4,6 +4,7 @@ import { requireRole } from '@/app/lib/auth'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -28,9 +29,9 @@ export async function GET(req: NextRequest) {
     if (type)     where.type     = type
 
     const [critical, warning, resolved, activeRisks] = await Promise.all([
-      prisma.riskItem.count({ where: { companyId, severity: 'CRITICAL', status: 'Active' } }),
-      prisma.riskItem.count({ where: { companyId, severity: 'WARNING',  status: 'Active' } }),
-      prisma.riskItem.count({ where: { companyId, status: 'Resolved' } }),
+      forCompany(companyId).riskItem.count({ where: { severity: 'CRITICAL', status: 'Active' } }),
+      forCompany(companyId).riskItem.count({ where: { severity: 'WARNING',  status: 'Active' } }),
+      forCompany(companyId).riskItem.count({ where: { status: 'Resolved' } }),
       prisma.riskItem.findMany({
         where,
         orderBy: [{ severity: 'asc' }, { createdAt: 'desc' }],

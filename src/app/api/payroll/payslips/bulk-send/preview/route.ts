@@ -5,11 +5,11 @@
 // Lets the Company Payslips slider show "X draft payslips will be published
 // and emailed" before the user commits to the bulk-send action.
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validatePayrollCompanyAccess } from '@/app/lib/payroll/templates/utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -47,8 +47,8 @@ export async function GET(request: NextRequest) {
     }
 
     const [draftCount, publishedCount] = await Promise.all([
-      prisma.payslip.count({ where: { companyId, month, year, draft: true } }),
-      prisma.payslip.count({ where: { companyId, month, year, draft: false } }),
+      forCompany(companyId).payslip.count({ where: { month, year, draft: true } }),
+      forCompany(companyId).payslip.count({ where: { month, year, draft: false } }),
     ])
 
     return withCors(

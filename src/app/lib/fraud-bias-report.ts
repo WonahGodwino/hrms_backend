@@ -1,5 +1,5 @@
 import PDFDocument from "pdfkit"; // match the import style used in pip-export.ts
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import {
   FbCtx,
   MIN_GROUP,

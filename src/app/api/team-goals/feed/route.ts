@@ -18,6 +18,7 @@ import {
   parseText,
 } from "@/app/lib/goals/goal-utils";
 import { formatTimeAgo } from "@/app/lib/team-goals/team-goal-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -72,8 +73,8 @@ export const GET = withGoalAuth(ALL_ROLES, async ({ request, user, ok }) => {
   if (departmentFilter && departmentFilter !== "All")
     and.push({ departmentId: departmentFilter });
 
-  const rows = await prisma.goalActivity.findMany({
-    where: { companyId, AND: and },
+  const rows = await forCompany(companyId).goalActivity.findMany({
+    where: { AND: and },
     include: { author: { select: AUTHOR_SELECT } },
     orderBy: { createdAt: "desc" },
     take: limit,
@@ -106,8 +107,8 @@ export const POST = withGoalAuth(ALL_ROLES, async ({ request, user, ok }) => {
     departmentId = goal.departmentId;
   }
   if (body.departmentId) {
-    const dept = await prisma.department.findFirst({
-      where: { id: String(body.departmentId), companyId },
+    const dept = await forCompany(companyId).department.findFirst({
+      where: { id: String(body.departmentId) },
       select: { id: true },
     });
     if (!dept)

@@ -16,6 +16,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 const MAX_HR_CONTACTS = 5
 
@@ -51,8 +52,8 @@ export async function GET(request: NextRequest) {
         where: { id: companyId, archived: 0 },
         select: { id: true, companyName: true, email: true, phone: true, hrRepName: true, hrRepTitle: true },
       }),
-      prisma.staffRecord.findMany({
-        where: { companyId, isActive: true, role: { in: ['HR', 'ADMIN'] } },
+      forCompany(companyId).staffRecord.findMany({
+        where: { isActive: true, role: { in: ['HR', 'ADMIN'] } },
         select: { firstName: true, lastName: true, email: true, position: true, role: true },
         orderBy: [{ role: 'desc' }, { firstName: 'asc' }], // HR before ADMIN
         take: MAX_HR_CONTACTS,

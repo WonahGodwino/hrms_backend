@@ -2,9 +2,9 @@ import {
   AutomationAudience,
   AutomationChannel,
 } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
 import { createNotification } from "@/app/lib/notifications/helpers";
 import { sendEmail } from "@/app/lib/email";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export type AutomationRecipient = {
   id: string; // StaffRecord.id
@@ -38,8 +38,8 @@ export async function resolveAudienceDelivery(
   companyId: string,
   audience: AutomationAudience,
 ): Promise<AudienceDeliveryResolution> {
-  const templates = await prisma.automationNotification.findMany({
-    where: { companyId, removedAt: null, audience },
+  const templates = await forCompany(companyId).automationNotification.findMany({
+    where: { removedAt: null, audience },
     orderBy: { createdAt: "asc" },
     select: { id: true, enabled: true, channel: true },
   });

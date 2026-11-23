@@ -7,8 +7,8 @@ import { NextRequest } from 'next/server'
 
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { validatePayrollVerifierCompanyAccess } from '@/app/lib/payroll-verifier/access'
-import { fetchBanks, getBankList } from '@/app/lib/payroll-verifier/banks'
+import { validatePayrollVerifierCompanyAccess } from '@/app/lib/payroll/verifier/access'
+import { fetchBanks, getBankList } from '@/app/lib/payroll/verifier/banks'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 
 export async function OPTIONS(request: NextRequest) {

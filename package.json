@@ -4,14 +4,16 @@
 	"description": "Human Resource Management System Backend",
 	"scripts": {
 		"dev": "next dev -H localhost -p 3000",
-		"build": "rimraf .next src/app/api/engine src/app/lib/payroll-engine && npx prisma generate && next build",
+		"build": "rimraf .next src/app/api/engine src/app/lib/payroll-engine && npx prisma generate && node --max-old-space-size=8192 node_modules/next/dist/bin/next build",
 		"start": "next start",
-		"lint": "next lint",
-		"typecheck": "tsc --noEmit -p .",
+		"lint": "eslint . --max-warnings 0",
+		"typecheck": "node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit -p .",
 		"test": "jest --config jest.config.ts",
 		"test:unit": "jest --config jest.config.ts tests/phed/unit",
 		"test:api": "jest --config jest.config.ts tests/phed/api",
 		"test:security": "jest --config jest.config.ts tests/phed/security",
+		"test:db:prepare": "node scripts/test-db.js prepare",
+		"test:db": "node scripts/test-db.js run",
 		"db:push": "prisma db push",
 		"db:studio": "prisma studio",
 		"db:generate": "prisma generate",
@@ -19,6 +21,7 @@
 		"db:seed:payroll-templates": "tsx scripts/seed-system-payroll-templates.ts",
 		"setup": "powershell -File scripts/setup-windows.ps1",
 		"verify": "tsx scripts/verify-env.ts",
+		"docs:api": "tsx scripts/generate-api-reference.ts",
 		"postinstall": "prisma generate"
 	},
 	"dependencies": {
@@ -29,10 +32,8 @@
 		"@prisma/client": "^7.3.0",
 		"@prisma/engines": "^7.3.0",
 		"@react-pdf/renderer": "^4.5.1",
-		"@sendgrid/mail": "^8.1.6",
 		"@types/exceljs": "^0.5.3",
-		"@types/recharts": "^1.8.29",
-		"archiver": "^7.0.1",
+		"archiver": "^8.0.0",
 		"bcryptjs": "^2.4.3",
 		"compromise": "^14.14.5",
 		"cors": "^2.8.5",
@@ -50,31 +51,32 @@
 		"jose": "^6.2.3",
 		"jsonwebtoken": "^9.0.2",
 		"livekit-server-sdk": "^2.17.0",
-		"lucide-react": "^0.562.0",
 		"mailgun.js": "^12.7.1",
 		"mailparser": "^3.9.15",
 		"mammoth": "^1.11.0",
 		"multer": "^1.4.5-lts.1",
 		"natural": "^8.1.0",
-		"next": "^14.0.0",
-		"nodemailer": "^7.0.10",
+		"next": "^15.5.29",
+		"nodemailer": "10.3.1",
 		"pdf-lib": "^1.17.1",
 		"pdf-parse": "^2.4.5",
 		"pdfkit": "^0.14.0",
 		"pg": "^8.18.0",
+		"pg-boss": "^10.4.2",
 		"pizzip": "^3.2.0",
-		"puppeteer": "^24.33.0",
-		"react": "^18.3.1",
-		"react-dom": "^18.3.1",
-		"recharts": "^3.6.0",
+		"puppeteer": "25.16.0",
+		"react": "^19.3.1",
+		"react-dom": "^19.3.1",
 		"sharp": "^0.35.5",
 		"stopword": "^3.1.5",
 		"supports-color": "^10.2.2",
 		"validator": "^13.15.26",
-		"xlsx": "^0.18.5"
+		"xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+		"zod": "4.6.7"
 	},
 	"devDependencies": {
-		"@types/archiver": "^6.0.4",
+		"@eslint/js": "^9.39.5",
+		"@types/archiver": "^8.0.0",
 		"@types/bcryptjs": "^2.4.6",
 		"@types/formidable": "^3.4.6",
 		"@types/he": "^1.2.3",
@@ -86,16 +88,30 @@
 		"@types/nodemailer": "^6.4.21",
 		"@types/pdfkit": "^0.12.12",
 		"@types/pg": "^8.16.0",
-		"@types/react": "^18.3.27",
-		"@types/react-dom": "^18.3.7",
+		"@types/react": "^19.3.0",
+		"@types/react-dom": "^19.3.0",
 		"@types/uuid": "^10.0.0",
 		"@types/validator": "^13.15.10",
 		"docx": "^9.7.1",
+		"eslint": "^9.39.5",
+		"globals": "^17.14.0",
 		"jest": "^30.3.0",
 		"jest-environment-node": "^30.3.0",
 		"prisma": "^7.3.0",
 		"ts-jest": "^29.4.9",
 		"tsx": "^4.20.6",
-		"typescript": "^5.9.3"
+		"typescript": "^5.9.3",
+		"typescript-eslint": "^8.72.2"
+	},
+	"overrides": {
+		"readdir-glob": {
+			"minimatch": "11.0.4"
+		},
+		"exceljs": {
+			"uuid": "11.1.1"
+		},
+		"next": {
+			"postcss": "8.5.32"
+		}
 	}
 }

@@ -1,5 +1,6 @@
 import { prisma } from '@/app/lib/db';
 import { isPlaceholderValue } from '@/app/lib/staff/placeholder-values';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export function normalizeDesignationTitle(raw: string | null | undefined): string | null {
 	if (!raw || isPlaceholderValue(raw)) return null;
@@ -13,7 +14,7 @@ async function generateDesignationCode(companyId: string, title: string): Promis
 
 	let candidate = base;
 	let suffix = 2;
-	while (await prisma.designation.findFirst({ where: { companyId, code: candidate }, select: { id: true } })) {
+	while (await forCompany(companyId).designation.findFirst({ where: { code: candidate }, select: { id: true } })) {
 		candidate = `${base}${suffix}`;
 		suffix += 1;
 	}
@@ -21,8 +22,8 @@ async function generateDesignationCode(companyId: string, title: string): Promis
 }
 
 export async function findOrCreateDesignation(companyId: string, title: string) {
-	const existing = await prisma.designation.findFirst({
-		where: { companyId, title: { equals: title, mode: 'insensitive' }, status: 'Active' },
+	const existing = await forCompany(companyId).designation.findFirst({
+		where: { title: { equals: title, mode: 'insensitive' }, status: 'Active' },
 		orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
 	});
 	if (existing) return { designation: existing, created: false };
@@ -41,8 +42,8 @@ export async function findOrCreateDesignation(companyId: string, title: string) 
 		return { designation, created: true };
 	} catch (error: any) {
 		if (error?.code !== 'P2002') throw error;
-		const designation = await prisma.designation.findFirst({
-			where: { companyId, title: { equals: title, mode: 'insensitive' }, status: 'Active' },
+		const designation = await forCompany(companyId).designation.findFirst({
+			where: { title: { equals: title, mode: 'insensitive' }, status: 'Active' },
 			orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
 		});
 		if (!designation) throw error;

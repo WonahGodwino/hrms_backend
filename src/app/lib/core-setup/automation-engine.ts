@@ -14,6 +14,7 @@
 import { prisma } from '@/app/lib/db'
 import { raiseFailedCheckAlerts, type FailedCheck } from '@/app/lib/core-setup/automation'
 import { isPlaceholderValue } from '@/app/lib/staff/placeholder-values'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export const CADENCE_MINUTES: Record<string, number> = { event: 0, hourly: 60, daily: 1440, weekly: 10080 }
 
@@ -84,14 +85,14 @@ async function scanChecks(companyId: string, ids: string[]): Promise<Record<stri
   const needDepts = ['ar-003', 'ar-009', 'ar-014'].some((id) => want.has(id))
 
   const staff = needStaff
-    ? await prisma.staffRecord.findMany({
-        where: { companyId, isActive: true },
+    ? await forCompany(companyId).staffRecord.findMany({
+        where: { isActive: true },
         select: { firstName: true, lastName: true, department: true, departmentId: true, designationId: true, position: true },
       })
     : []
   const departments = needDepts
-    ? await prisma.department.findMany({
-        where: { companyId },
+    ? await forCompany(companyId).department.findMany({
+        where: { },
         select: { name: true, status: true, headId: true, businessUnit: true, businessUnitId: true },
       })
     : []
@@ -119,7 +120,7 @@ async function scanChecks(companyId: string, ids: string[]): Promise<Record<stri
     out['ar-009'] = { evaluated: departments.length, exceptions: departments.filter((d) => isActive(d.status) && !d.headId).length }
   }
   if (want.has('ar-014')) {
-    const activeBUs = await prisma.businessUnit.count({ where: { companyId, archived: 0, status: { equals: 'Active', mode: 'insensitive' } } })
+    const activeBUs = await forCompany(companyId).businessUnit.count({ where: { archived: 0, status: { equals: 'Active', mode: 'insensitive' } } })
     const noBu = activeBUs
       ? departments.filter((d) => isActive(d.status) && !d.businessUnitId && (!d.businessUnit || norm(d.businessUnit) === 'unassigned')).length
       : 0
@@ -132,8 +133,8 @@ async function scanChecks(companyId: string, ids: string[]): Promise<Record<stri
 async function eventChecks(companyId: string, since: Record<string, number>, ids: string[]): Promise<Record<string, RuleResult>> {
   const out: Record<string, RuleResult> = {}
   const earliest = new Date(Math.min(...ids.map((id) => since[id] ?? 0)))
-  const events = await prisma.coreSetupAuditEvent.findMany({
-    where: { companyId, kind: { in: ['record', 'bulk'] }, createdAt: { gt: earliest } },
+  const events = await forCompany(companyId).coreSetupAuditEvent.findMany({
+    where: { kind: { in: ['record', 'bulk'] }, createdAt: { gt: earliest } },
     orderBy: { createdAt: 'desc' },
     take: 500,
   })
@@ -148,7 +149,7 @@ async function eventChecks(companyId: string, since: Record<string, number>, ids
     const deptEvs = fresh('ar-007').filter((e) => e.area === 'org' && related(e).some((r) => r.type === 'department'))
     if (deptEvs.length) {
       const deptIds = [...new Set(deptEvs.flatMap((e) => related(e).filter((r) => r.type === 'department').map((r) => r.identifier || '')).filter(Boolean))]
-      const depts = await prisma.department.findMany({ where: { companyId, id: { in: deptIds } }, select: { headId: true, businessUnitId: true } })
+      const depts = await forCompany(companyId).department.findMany({ where: { id: { in: deptIds } }, select: { headId: true, businessUnitId: true } })
       const bad = depts.filter((d) => !d.headId || !d.businessUnitId).length
       out['ar-007'] = { evaluated: Math.max(deptIds.length, 1), exceptions: bad }
     }
@@ -157,7 +158,7 @@ async function eventChecks(companyId: string, since: Record<string, number>, ids
     const re = fresh('ar-011').filter((e) => e.area === 'staff' && /reactivated/i.test(e.action))
     if (re.length) {
       const staffIds = re.flatMap((e) => related(e).filter((r) => r.type === 'staff').map((r) => r.identifier || '')).filter(Boolean)
-      const people = await prisma.staffRecord.findMany({ where: { companyId, id: { in: staffIds } }, select: { department: true, departmentId: true, designationId: true, position: true } })
+      const people = await forCompany(companyId).staffRecord.findMany({ where: { id: { in: staffIds } }, select: { department: true, departmentId: true, designationId: true, position: true } })
       const bad = people.filter((s) => !hasDepartment(s) || !hasDesignation(s)).length
       out['ar-011'] = { evaluated: re.length, exceptions: bad }
     }
@@ -182,8 +183,8 @@ export interface CompanyRunSummary {
 export async function runAutomationForCompany(companyId: string, opts: RunOptions = {}): Promise<CompanyRunSummary> {
   const now = opts.now ?? Date.now()
   const [settings, recent] = await Promise.all([
-    prisma.automationRuleSetting.findMany({ where: { companyId } }),
-    prisma.automationRun.findMany({ where: { companyId }, orderBy: { createdAt: 'desc' }, take: 400 }),
+    forCompany(companyId).automationRuleSetting.findMany({ where: { } }),
+    forCompany(companyId).automationRun.findMany({ where: { }, orderBy: { createdAt: 'desc' }, take: 400 }),
   ])
   const override = new Map(settings.map((s) => [s.ruleId, (s.overrides as Record<string, unknown>) ?? {}]))
   const lastRun = new Map<string, (typeof recent)[number]>()
@@ -249,7 +250,7 @@ export async function runAutomationForCompany(companyId: string, opts: RunOption
       const watching = eventDue.filter((id) => !['ar-007', 'ar-011', 'ar-013'].includes(id))
       if (watching.length) {
         const earliest = new Date(Math.min(...watching.map((id) => since[id] ?? 0)))
-        const evs = await prisma.coreSetupAuditEvent.findMany({ where: { companyId, kind: { in: ['record', 'bulk'] }, createdAt: { gt: earliest } }, select: { createdAt: true, relatedRecords: true }, take: 500 })
+        const evs = await forCompany(companyId).coreSetupAuditEvent.findMany({ where: { kind: { in: ['record', 'bulk'] }, createdAt: { gt: earliest } }, select: { createdAt: true, relatedRecords: true }, take: 500 })
         const changed = watching.filter((id) => {
           const types = RESOURCE_TYPES[id]
           return evs.some((e) => e.createdAt.getTime() > (since[id] ?? 0) && Array.isArray(e.relatedRecords) && (e.relatedRecords as { type?: string }[]).some((r) => types === '*' || (types ?? []).includes(String(r.type))))

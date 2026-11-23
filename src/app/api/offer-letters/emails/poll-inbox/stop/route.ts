@@ -3,8 +3,8 @@ import { NextRequest } from 'next/server';
 import { requireRole } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { requireModuleAccess } from '@/app/lib/module-access';
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access';
-import { stopOfferLetterPoll } from '@/app/lib/offer-letters/email/pollControl';
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access';
+import { stopOfferLetterPoll } from '@/app/lib/offers/letters/email/pollControl';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 
 const ALL_COMPANIES_LOCK_KEY = '__ALL__';

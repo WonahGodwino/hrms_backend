@@ -3,8 +3,9 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -146,7 +147,7 @@ async function handleExport(req: NextRequest, bodyOrParams: any) {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': 'attachment; filename="certifications-export.xlsx"',
-        'Access-Control-Allow-Origin': origin ?? '*',
+        ...getCorsHeaders(origin),
       },
     })
   }
@@ -159,7 +160,7 @@ async function handleExport(req: NextRequest, bodyOrParams: any) {
         headers: {
           'Content-Type': 'text/csv',
           'Content-Disposition': 'attachment; filename="certifications-export.csv"',
-          'Access-Control-Allow-Origin': origin ?? '*',
+          ...getCorsHeaders(origin),
         },
       })
     }
@@ -173,7 +174,7 @@ async function handleExport(req: NextRequest, bodyOrParams: any) {
       headers: {
         'Content-Type': 'text/csv',
         'Content-Disposition': 'attachment; filename="certifications-export.csv"',
-        'Access-Control-Allow-Origin': origin ?? '*',
+        ...getCorsHeaders(origin),
       },
     })
   }
@@ -184,6 +185,9 @@ async function handleExport(req: NextRequest, bodyOrParams: any) {
 
 // GET /api/certifications/export
 export async function GET(req: NextRequest) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req)
+  if (deferred) return deferred
   const origin = req.headers.get('origin')
   try {
     const { searchParams } = new URL(req.url)

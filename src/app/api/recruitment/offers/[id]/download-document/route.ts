@@ -1,15 +1,16 @@
 // GET /api/recruitment/offers/:id/download-document — download offer PDF
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import * as path from 'path'
+import { forCompany } from '@/app/lib/data/tenant'
 import { readUploadFile } from '@/app/lib/storage/upload-files'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -18,8 +19,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const companyId = searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company ID is required', 400), origin)
 
-    const offer = await prisma.offer.findFirst({
-      where: { id: params.id, companyId },
+    const offer = await forCompany(companyId).offer.findFirst({
+      where: { id: params.id },
     })
     if (!offer) return withCors(ApiResponse.error('Offer not found', 404), origin)
     if (!['APPROVED', 'ACCEPTED', 'AWAITING_SIGNATURE'].includes(offer.status))

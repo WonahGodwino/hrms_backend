@@ -9,16 +9,15 @@ import {
   TEMPLATE_PHASES,
   TEMPLATE_TYPE_PHASES,
 } from "@/app/lib/appraisal-cycles/cycle-assignments";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
 }
 
 // GET /api/appraisal-cycles/:id/assignable-templates?companyId=&phaseType=
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -60,8 +59,8 @@ export async function GET(
       );
     }
 
-    const cycle = await prisma.appraisalCycle.findFirst({
-      where: { id: params.id, companyId },
+    const cycle = await forCompany(companyId).appraisalCycle.findFirst({
+      where: { id: params.id },
       select: { id: true },
     });
     if (!cycle)
@@ -70,8 +69,8 @@ export async function GET(
         origin,
       );
 
-    const templates = await prisma.reviewTemplate.findMany({
-      where: { companyId, currentVersion: { status: { not: "ARCHIVED" } } },
+    const templates = await forCompany(companyId).reviewTemplate.findMany({
+      where: { currentVersion: { status: { not: "ARCHIVED" } } },
       select: { id: true, name: true, type: true },
       orderBy: { name: "asc" },
     });

@@ -11,7 +11,8 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 // PATCH /api/phed/approvals/memos/:id/tax-audit — Stage 2: Tax Manager
 // "I concur to this" returns the memo to the HR uploader (Stage 1) for
 // sign-off; HR then releases it to Head, Internal Audit (Stage 3).
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)

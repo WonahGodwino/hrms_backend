@@ -1,16 +1,15 @@
 // GET/POST/DELETE /api/admin/settings/handbook
 // Manage the company's handbook PDF, shown to candidates during pre-offer
-// onboarding. Stored on disk (public/company/<id>/handbook/...) — PDFs are
-// too large for the base64-in-DB pattern used for the signature image.
+// onboarding. Stored privately on disk (uploads/company/<id>/handbook/..., SEC-019)
+// and served only through authenticated or token-gated routes. PDFs are too
+// large for the base64-in-DB pattern used for the signature image.
 import { NextRequest } from 'next/server'
-import { promises as fs } from 'fs'
-import * as path from 'path'
 import { requireRole } from '@/app/lib/auth'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import { PDF_ONLY, deletePrivateFile, detectFileType, savePrivateFile } from '@/app/lib/storage/private-files'
 import { getAccessibleCompanyIds, pickTargetCompanyId, mapCompanyAccessError, CompanyAccessUser } from '@/app/lib/company/company-access'
-import { uploadFileToS3 } from '@/app/lib/storage/upload-files'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -53,24 +52,17 @@ export async function POST(req: NextRequest) {
 		const file = form.get('file') as File | null
 		if (!file) return withCors(ApiResponse.error('No file provided', 400), origin)
 
-		const ext = (file.name.split('.').pop() || '').toLowerCase()
-		const isPdf = ext === 'pdf' || file.type === 'application/pdf'
-		if (!isPdf) return withCors(ApiResponse.error('The company handbook must be a PDF', 400), origin)
 		if (file.size > MAX_SIZE) return withCors(ApiResponse.error('Handbook file must be under 10 MB', 400), origin)
 
+		// SEC-019: the bytes must really be a PDF; stored privately, not under public/.
 		const buffer = Buffer.from(await file.arrayBuffer())
-		const uploadDir = path.join(process.cwd(), 'public', 'company', companyId, 'handbook')
-		await fs.mkdir(uploadDir, { recursive: true })
-		const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-		const fileName = `${Date.now()}_${safeName}`
-		await fs.writeFile(path.join(uploadDir, fileName), buffer)
-		const relativePath = `/company/${companyId}/handbook/${fileName}`
-		await uploadFileToS3(relativePath, buffer, 'application/pdf')
+		if (!detectFileType(buffer, PDF_ONLY)) return withCors(ApiResponse.error('The company handbook must be a PDF', 400), origin)
+		const relativePath = await savePrivateFile(['company', companyId, 'handbook'], file.name, 'pdf', buffer)
 
 		// Best-effort cleanup of the previous file — never block the upload on this.
 		const previous = await prisma.company.findUnique({ where: { id: companyId }, select: { handbookPath: true } })
 		if (previous?.handbookPath) {
-			fs.unlink(path.join(process.cwd(), 'public', previous.handbookPath)).catch(() => {})
+			await deletePrivateFile(previous.handbookPath)
 		}
 
 		const now = new Date()
@@ -94,7 +86,7 @@ export async function DELETE(req: NextRequest) {
 
 		const company = await prisma.company.findUnique({ where: { id: companyId }, select: { handbookPath: true } })
 		if (company?.handbookPath) {
-			fs.unlink(path.join(process.cwd(), 'public', company.handbookPath)).catch(() => {})
+			await deletePrivateFile(company.handbookPath)
 		}
 
 		await prisma.company.update({

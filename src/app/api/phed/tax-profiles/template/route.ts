@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { PHED_STATES } from '@/app/lib/phed/csv-parser'
@@ -106,7 +106,7 @@ export async function GET(req: NextRequest) {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': 'attachment; filename="phed-tax-profiles-template.xlsx"',
-        'Access-Control-Allow-Origin': origin ?? '*',
+        ...getCorsHeaders(origin),
       },
     })
   } catch (e) {

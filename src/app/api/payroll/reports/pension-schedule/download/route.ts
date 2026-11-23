@@ -19,6 +19,7 @@ import { buildReportWorkbook } from '@/app/lib/reporting/excel-export';
 import { resolveReportCurrency } from '@/app/lib/reporting/resolveCurrency';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 import { attachmentDisposition, safeFileName } from '@/app/lib/excel/sheet-theme';
+import { deferExport } from '@/app/lib/exports/defer';
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
@@ -42,6 +43,9 @@ const SCHEDULE_COLUMNS = [
 ];
 
 export async function GET(request: NextRequest) {
+	// PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+	const deferred = await deferExport(request);
+	if (deferred) return deferred;
 	const origin = request.headers.get('origin');
 
 	try {

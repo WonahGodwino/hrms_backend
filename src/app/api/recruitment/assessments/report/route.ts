@@ -5,12 +5,17 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import ExcelJS from 'exceljs'
+import { forCompany } from '@/app/lib/data/tenant'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
 export async function GET(request: NextRequest) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(request)
+  if (deferred) return deferred
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -20,8 +25,8 @@ export async function GET(request: NextRequest) {
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
     const format = (searchParams.get('format') || 'excel').toLowerCase()
 
-    const assessments = await (prisma as any).recruitmentCandidateAssessment.findMany({
-      where: { companyId, roundStatus: 'COMPLETED' },
+    const assessments = await forCompany(companyId).recruitmentCandidateAssessment.findMany({
+      where: { roundStatus: 'COMPLETED' },
       include: {
         application: {
           select: {
@@ -177,7 +182,7 @@ export async function GET(request: NextRequest) {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': 'attachment; filename="interview_performance_report.xlsx"',
-        'Access-Control-Allow-Origin': origin || '*',
+        ...getCorsHeaders(origin),
       },
     })
   } catch (error) { return withCors(handleApiError(error), origin) }

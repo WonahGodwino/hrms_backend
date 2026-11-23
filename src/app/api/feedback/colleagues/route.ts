@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { verifyCompanyAccess, UserContext } from "@/app/lib/access-control";
 import { PERSON_SELECT, resolveSelf, toPerson } from "@/app/lib/feedback";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -59,9 +59,8 @@ export async function GET(request: NextRequest) {
       .filter(Boolean)
       .slice(0, 5);
 
-    const rows = await prisma.staffRecord.findMany({
+    const rows = await forCompany(companyId).staffRecord.findMany({
       where: {
-        companyId,
         isActive: true,
         id: { not: self.id },
         AND: tokens.map((tk) => {

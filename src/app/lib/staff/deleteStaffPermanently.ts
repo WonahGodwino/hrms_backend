@@ -42,12 +42,12 @@ export async function permanentlyDeleteStaff(actingUser: ActingUser, staffRecord
   }
 
   const [phedAccessRoleCount, employeeSalaryCount, payValidationCount, overtimeEntryCount, deductionEntryCount, computedPayslipCount] = await Promise.all([
-    (prisma as any).phedStaffAccessRole.count({ where: { staffRecordId: staff.id } }),
-    (prisma as any).employeeSalary.count({ where: { staffId: staff.id } }),
-    (prisma as any).payValidation.count({ where: { staffId: staff.id } }),
-    (prisma as any).overtimeEntry.count({ where: { staffId: staff.id } }),
-    (prisma as any).deductionEntry.count({ where: { staffId: staff.id } }),
-    (prisma as any).computedPayslip.count({ where: { staffId: staff.id } })
+    prisma.phedStaffAccessRole.count({ where: { staffRecordId: staff.id } }),
+    prisma.employeeSalary.count({ where: { staffId: staff.id } }),
+    prisma.payValidation.count({ where: { staffId: staff.id } }),
+    prisma.overtimeEntry.count({ where: { staffId: staff.id } }),
+    prisma.deductionEntry.count({ where: { staffId: staff.id } }),
+    prisma.computedPayslip.count({ where: { staffId: staff.id } })
   ])
   const phedRecordCount = phedAccessRoleCount + employeeSalaryCount + payValidationCount + overtimeEntryCount + deductionEntryCount + computedPayslipCount
   if (phedRecordCount > 0) {

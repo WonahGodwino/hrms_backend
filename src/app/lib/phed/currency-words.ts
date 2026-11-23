@@ -14,7 +14,7 @@ export interface NairaAmountInWords {
   full: string // e.g. "Twelve Million, ... Naira, Fifty Kobo Only"
 }
 
-function toNum(v: unknown): number {
+export function toNum(v: unknown): number {
   if (v === null || v === undefined) return 0
   if (typeof v === 'object' && typeof (v as any).toNumber === 'function') return (v as any).toNumber()
   return Number(v) || 0

@@ -7,6 +7,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const companyId = new URL(request.url).searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
 
-    const onboarding = await prisma.onboarding.findFirst({ where: { id, companyId } })
+    const onboarding = await forCompany(companyId).onboarding.findFirst({ where: { id } })
     if (!onboarding) return withCors(ApiResponse.error('Onboarding not found', 404), origin)
 
     const [totalTasks, openTasks] = await Promise.all([

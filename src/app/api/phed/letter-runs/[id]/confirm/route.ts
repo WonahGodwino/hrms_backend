@@ -8,7 +8,8 @@ import { auditLetterEvent, clientIp, generateRun, resolveLetterCompany } from '@
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const user = await requireLetterOperatorAccess(token)
 
     const body = await req.json().catch(() => ({}))
-    const run = await (prisma as any).phedLetterRun.findUnique({ where: { id: params.id } })
+    const run = await prisma.phedLetterRun.findUnique({ where: { id: params.id } })
     if (!run) return withCors(ApiResponse.notFound('Run not found'), origin)
 
     const companyId = resolveLetterCompany(user, body?.companyId)
@@ -31,8 +32,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return withCors(ApiResponse.error('mode must be "valid_only".', 400), origin)
     }
 
-    await (prisma as any).phedLetterRun.update({ where: { id: params.id }, data: { status: 'GENERATING' } })
-    await (prisma as any).phedLetterRunRow.updateMany({
+    await prisma.phedLetterRun.update({ where: { id: params.id }, data: { status: 'GENERATING' } })
+    await prisma.phedLetterRunRow.updateMany({
       where: { runId: params.id, status: 'PENDING' },
       data: { status: 'QUEUED' },
     })

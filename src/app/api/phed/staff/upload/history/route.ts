@@ -3,6 +3,7 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { rejectForeignCompany } from '@/app/lib/phed/company-guard'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -11,10 +12,12 @@ export async function GET(req: NextRequest) {
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const p         = new URL(req.url).searchParams
     const companyId = p.get('companyId')
+    const foreignCompany = await rejectForeignCompany(user, companyId, origin)
+    if (foreignCompany) return foreignCompany
     const page      = Math.max(1, Number(p.get('page') || 1))
     const limit     = Math.min(50, Math.max(1, Number(p.get('limit') || 20)))
 
@@ -23,8 +26,8 @@ export async function GET(req: NextRequest) {
     const where = { companyId, type: 'STAFF' as const }
 
     const [total, uploads] = await Promise.all([
-      (prisma as any).phedBulkUpload.count({ where }),
-      (prisma as any).phedBulkUpload.findMany({
+      prisma.phedBulkUpload.count({ where }),
+      prisma.phedBulkUpload.findMany({
         where,
         orderBy: { createdAt: 'desc' },
         skip:  (page - 1) * limit,

@@ -20,10 +20,8 @@ export async function OPTIONS(request: NextRequest) {
 // POST /api/appraisal-cycles/:id/peer-assignments/generate
 // body: { companyId, departmentId? ("none" = no department), keepManualOverrides? (default true),
 //         peersPerEmployee? (1-5; also saved on the cycle) }
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   const reject = (status: number, message: string) =>
     withCors(

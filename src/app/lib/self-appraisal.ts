@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
-import prisma from "@/app/lib/prisma"; // match your shared Prisma client import
+import { prisma } from "@/app/lib/db"; // match your shared Prisma client import
 
-export type RouteContext<T> = { params: Promise<T> | T };
+export type RouteContext<T> = { params: Promise<T> };
 type Db = Prisma.TransactionClient;
 
 export const MAX_LONG_TEXT = 5000;
@@ -9,6 +9,7 @@ export const MAX_SHORT_TEXT = 255;
 export const MAX_EVIDENCE_PER_REFLECTION = 10;
 export const NO_ACTIVE_SELF_APPRAISAL_MESSAGE =
   "You have no self appraisal open right now. It will appear here once an appraisal cycle that includes you is active.";
+import { forCompany } from '@/app/lib/data/tenant';
 export const SELF_APPRAISAL_OPEN_STATUSES = ["ACTIVE", "ESCALATED"] as const;
 
 export const APPRAISAL_INCLUDE = {
@@ -404,8 +405,8 @@ export async function resolveRatingBounds(
         scale: { select: { levels: { select: { level: true } } } },
       },
     }),
-    prisma.proficiencyScale.findFirst({
-      where: { companyId, isDefault: true, isActive: true },
+    forCompany(companyId).proficiencyScale.findFirst({
+      where: { isDefault: true, isActive: true },
       select: { levels: { select: { level: true } } },
     }),
   ]);

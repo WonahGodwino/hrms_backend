@@ -5,6 +5,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { parseMembershipCsv } from '@/app/lib/phed/csv-parser'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -12,7 +13,8 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 // Bulk-assigns staff members to a union from a CSV or Excel file.
 // This is an additive operation — staff already in the union are silently skipped.
 // The file must have a "Staff ID" column (other columns are ignored).
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'upload')
   if (rl) return withCors(rl, origin)
@@ -21,7 +23,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const user  = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     // ── Verify the union exists and is active ─────────────────
-    const union = await (prisma as any).phedUnion.findUnique({
+    const union = await prisma.phedUnion.findUnique({
       where: { id: params.id },
       select: { id: true, companyId: true, name: true, isActive: true },
     })
@@ -52,8 +54,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // ── Build staff lookup map (scoped to this union's company) ─
     // Using the union's own companyId ensures a rogue upload cannot
     // reference staff from a different company.
-    const allStaff = await (prisma as any).phedStaff.findMany({
-      where:  { companyId: union.companyId, isActive: true },
+    const allStaff = await forCompany(union.companyId).phedStaff.findMany({
+      where:  { isActive: true },
       select: { id: true, staffId: true },
     })
     const staffMap = new Map<string, string>(
@@ -61,7 +63,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     )
 
     // ── Fetch existing memberships to avoid duplicate errors ──
-    const existingMembers = await (prisma as any).phedStaffUnion.findMany({
+    const existingMembers = await prisma.phedStaffUnion.findMany({
       where:  { unionId: params.id },
       select: { staffId: true },
     })
@@ -92,7 +94,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         }
 
         try {
-          await (prisma as any).phedStaffUnion.create({
+          await prisma.phedStaffUnion.create({
             data: { staffId: dbId, unionId: params.id },
           })
           existingSet.add(dbId)   // prevent duplicate within the same upload
@@ -110,7 +112,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
 
     // ── Audit trail ───────────────────────────────────────────
-    await (prisma as any).phedBulkUpload.create({
+    await prisma.phedBulkUpload.create({
       data: {
         companyId:    union.companyId,
         type:         'UNION_MEMBERS',

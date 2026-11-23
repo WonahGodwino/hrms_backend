@@ -36,7 +36,7 @@ export async function PATCH(
     let user: any = null
     try {
       user = await requireModuleAccess(token, 'LEAVE', ['MANAGER', 'HR', 'ADMIN', 'SUPER_ADMIN'])
-    } catch (e) {
+    } catch (_e) {
       // Staff who are line managers carry the STAFF role; fall back to plain auth
       // and let the chain decide whether they may act.
       user = requireAuth(token)

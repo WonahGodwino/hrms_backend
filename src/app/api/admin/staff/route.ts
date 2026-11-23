@@ -8,6 +8,9 @@ import {
 import { getAccessibleCompanyIds } from '@/app/lib/access-control'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { readJsonBody } from '@/app/lib/validation/request-body'
+import { createStaffBodySchema } from '@/app/lib/validation/payroll-staff-schemas'
+import { PAGE_SIZE_LIMITS, parsePagination } from '@/app/lib/http/pagination'
 
 // Types
 interface CompanyInfo {
@@ -62,14 +65,10 @@ export async function GET(request: NextRequest) {
     const user = requireRole(token, ['ADMIN', 'HR', 'SUPER_ADMIN'])
 
     const { searchParams } = new URL(request.url)
-    searchParams.get('includeAll') === 'true';
-
     // --- New logic: Return staff list filtered by current companyId for HR/ADMIN ---
     // Query params
     const search = searchParams.get('search') || ''
-    const page = parseInt(searchParams.get('page') || '1', 10)
-    const limit = parseInt(searchParams.get('limit') || '20', 10)
-    const skip = (page - 1) * limit
+    const { page, pageSize: limit, skip } = parsePagination(searchParams, { sizeParam: 'limit', ...PAGE_SIZE_LIMITS.adminStaff })
 
     const allowedRoles = ['HR', 'ADMIN', 'SUPER_ADMIN']
     const where: any = { role: { in: allowedRoles } }
@@ -148,7 +147,9 @@ export async function POST(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = requireRole(token, ['ADMIN', 'HR', 'SUPER_ADMIN'])
 
-    const body = await request.json()
+    const parsedBody = await readJsonBody(request, createStaffBodySchema)
+    if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.message, 400), origin)
+    const body = parsedBody.data
     const { companyId } = body
 
     if (!companyId) {

@@ -1,10 +1,10 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -30,8 +30,8 @@ export async function GET(req: NextRequest) {
     if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
     const { companyId } = resolved
 
-    const directReports = await prisma.staffRecord.findMany({
-      where: { companyId, managerId: user.userId, isActive: true },
+    const directReports = await forCompany(companyId).staffRecord.findMany({
+      where: { managerId: user.userId, isActive: true },
       select: { id: true, staffId: true, firstName: true, lastName: true, email: true, department: true, position: true },
       orderBy: { firstName: 'asc' },
     })
@@ -44,12 +44,12 @@ export async function GET(req: NextRequest) {
     const now = new Date()
 
     const [progressRows, certRows] = await Promise.all([
-      prisma.participantProgress.findMany({
-        where: { companyId, employeeId: { in: employeeIds } },
+      forCompany(companyId).participantProgress.findMany({
+        where: { employeeId: { in: employeeIds } },
         select: { employeeId: true, trainingStatus: true, progressPct: true, dueDate: true, trainingProgram: { select: { programName: true } } },
       }),
-      prisma.certificationRecord.findMany({
-        where: { companyId, employeeId: { in: employeeIds }, status: { not: 'Archived' } },
+      forCompany(companyId).certificationRecord.findMany({
+        where: { employeeId: { in: employeeIds }, status: { not: 'Archived' } },
         select: { id: true, employeeId: true, status: true, expiryDate: true, certificationType: { select: { name: true } } },
       }),
     ])

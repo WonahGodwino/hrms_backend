@@ -2,12 +2,14 @@
 // Produces a clean, management-ready list of SHORTLISTED candidates for a job —
 // the document HR can hand to management before planning the assessment.
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveRecruitmentCompanyId } from '@/app/lib/recruitment/companyScope'
 import ExcelJS from 'exceljs'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
+import { forCompany } from '@/app/lib/data/tenant'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -17,6 +19,9 @@ const fmtDate = (d: Date | null | undefined) =>
   d ? new Date(d).toISOString().split('T')[0] : ''
 
 export async function GET(request: NextRequest) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(request)
+  if (deferred) return deferred
   const origin = request.headers.get('origin')
 
   try {
@@ -42,8 +47,8 @@ export async function GET(request: NextRequest) {
     }
     const companyId = scope.companyId as string
 
-    const job = await prisma.job.findFirst({
-      where: { id: jobId, companyId },
+    const job = await forCompany(companyId).job.findFirst({
+      where: { id: jobId },
       select: { id: true, title: true, department: true, position: true },
     })
     if (!job) {
@@ -53,10 +58,9 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const applications = await prisma.jobApplication.findMany({
+    const applications = await forCompany(companyId).jobApplication.findMany({
       where: {
         jobId,
-        companyId,
         status: 'SHORTLISTED',
         archived: 0,
       },
@@ -93,7 +97,7 @@ export async function GET(request: NextRequest) {
     }
     return generateExcel(rows, job, origin)
   } catch (error) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('[SHORTLIST_REPORT] Error:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }

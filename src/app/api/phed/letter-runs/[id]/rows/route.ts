@@ -9,7 +9,8 @@ import { resolveLetterCompany } from '@/app/lib/phed/letter-service'
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // GET — lightweight row list (excelRow, employeeId, status) for preview stepping.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
   if (rl) return withCors(rl, origin)
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireLetterOperatorAccess(token)
 
-    const run = await (prisma as any).phedLetterRun.findUnique({
+    const run = await prisma.phedLetterRun.findUnique({
       where: { id: params.id },
       select: { companyId: true, operatorId: true },
     })
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     if (!companyId || run.companyId !== companyId) return withCors(ApiResponse.notFound('Run not found'), origin)
     if (user.role === 'HR' && run.operatorId !== user.userId) return withCors(ApiResponse.notFound('Run not found'), origin)
 
-    const rows = await (prisma as any).phedLetterRunRow.findMany({
+    const rows = await prisma.phedLetterRunRow.findMany({
       where: { runId: params.id },
       orderBy: { excelRow: 'asc' },
       select: { excelRow: true, employeeId: true, status: true },

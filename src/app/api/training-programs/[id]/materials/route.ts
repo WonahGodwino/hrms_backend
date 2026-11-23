@@ -5,13 +5,15 @@ import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/reso
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { assertStorageQuota } from '@/app/lib/trial/guard'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
 }
 
 // POST /api/training-programs/:id/materials
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -21,9 +23,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
     const { companyId } = resolved
 
-    const program = await prisma.trainingProgram.findFirst({
+    const program = await forCompany(companyId).trainingProgram.findFirst({
       where: {
-        companyId,
         deletedAt: null,
         OR: [{ id: params.id }, { slug: params.id }],
       },

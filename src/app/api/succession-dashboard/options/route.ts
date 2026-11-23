@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { ok } from "@/app/lib/pip";
@@ -11,6 +11,7 @@ import {
   TIER_LABELS,
   dashCtx,
 } from "@/app/lib/succession-dashboard";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -27,8 +28,8 @@ export async function GET(request: NextRequest) {
     if (!c.ok) return c.response;
     const { companyId, staffId } = c.ctx;
     const [departments, recipients] = await Promise.all([
-      prisma.department.findMany({
-        where: { companyId, status: { equals: "Active", mode: "insensitive" } },
+      forCompany(companyId).department.findMany({
+        where: { status: { equals: "Active", mode: "insensitive" } },
         orderBy: { name: "asc" },
         select: { id: true, name: true },
       }),

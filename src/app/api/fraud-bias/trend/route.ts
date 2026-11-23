@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
 import { handleCorsOptions } from "@/app/lib/cors";
 import { fbRoute, EmptyReason } from "@/app/lib/fraud-bias";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -13,8 +13,7 @@ export async function GET(request: NextRequest) {
   return fbRoute(request, {}, async (ctx) => {
     const timeframe =
       new URL(request.url).searchParams.get("timeframe") || "LAST_12_MONTHS";
-    const rows = await prisma.fairnessMetricSnapshot.findMany({
-      where: { companyId: ctx.companyId },
+    const rows = await forCompany(ctx.companyId).fairnessMetricSnapshot.findMany({
       orderBy: { capturedOn: "asc" },
       select: {
         capturedOn: true,

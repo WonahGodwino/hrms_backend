@@ -8,7 +8,7 @@
 //   - businessUnit:   the display name kept for back-compat (null when none)
 // Blank / null input clears both. A name that matches no BusinessUnit is kept
 // as the legacy display name only, never rejected.
-import { prisma } from '@/app/lib/db'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export type BusinessUnitLink = { businessUnit: string | null; businessUnitId: string | null }
 
@@ -25,10 +25,8 @@ export async function resolveBusinessUnitLink(
   const raw = String((body.businessUnitId ?? body.businessUnit) ?? '').trim()
   if (!raw || raw.toLowerCase() === 'unassigned') return { businessUnit: null, businessUnitId: null }
 
-  const unit = await prisma.businessUnit.findFirst({
-    where: {
-      companyId,
-      OR: [{ archived: 0 }, { archived: null }],
+  const unit = await forCompany(companyId).businessUnit.findFirst({
+    where: { OR: [{ archived: 0 }, { archived: null }],
       AND: [{ OR: [{ id: raw }, { name: { equals: raw, mode: 'insensitive' } }] }],
     },
     select: { id: true, name: true },
@@ -48,8 +46,8 @@ export async function generateDepartmentCode(companyId: string, name: string): P
 
   const taken = new Set(
     (
-      await prisma.department.findMany({
-        where: { companyId, code: { startsWith: base, mode: 'insensitive' } },
+      await forCompany(companyId).department.findMany({
+        where: { code: { startsWith: base, mode: 'insensitive' } },
         select: { code: true },
       })
     ).map((d) => String(d.code || '').toUpperCase())

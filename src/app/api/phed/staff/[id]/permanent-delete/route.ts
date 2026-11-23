@@ -2,25 +2,27 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { deletePhedStaffRecord } from '@/app/lib/phed/staff-delete'
+import { canAccessCompany } from '@/app/lib/access/company-access'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // DELETE /api/phed/staff/[id]/permanent-delete
 // Generates a CSV history of the staff record + payroll data,
 // then permanently deletes the staff and all related records.
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     // ── Fetch staff base record (no relations to avoid missing-table errors) ──
-    const staff = await (prisma as any).phedStaff.findUnique({
+    const staff = await prisma.phedStaff.findUnique({
       where: { id: params.id },
       select: {
         id: true, companyId: true, staffId: true, firstName: true, lastName: true,
@@ -36,36 +38,31 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
         annualRent: true, hasLifeAssurance: true, lifeAssuranceAmount: true,
         voluntaryPension: true, insurance: true,
         isActive: true, createdBy: true, createdAt: true, updatedAt: true,
+        // used by the history file below (previously not selected, so always blank)
+        gradeId: true, regionId: true, feederId: true, payPointId: true,
+        jobTitle: true, level: true, resumptionDate: true, callCenter: true, nhfNumber: true,
+        cashAdvanced: true, loan: true, domesticLoan: true,
       },
     })
 
-    if (!staff) return withCors(ApiResponse.notFound('Staff not found'), origin)
+    // Same rule as the other PHED staff routes: another company's record is not found.
+    if (!staff || !(await canAccessCompany(user, staff.companyId))) return withCors(ApiResponse.notFound('Staff not found'), origin)
 
     // ── Fetch relations individually (each wrapped in try-catch for missing tables) ──
     const safeGet = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
       try { return await fn() } catch { return fallback }
     }
 
-    const [grade, region, feeder, payPoint, unions, cooperatives, payrolls, advances, validations, overtimes, deductionLiabs] = await Promise.all([
-      safeGet(() => (prisma as any).phedGrade.findUnique({ where: { id: staff.gradeId }, select: { code: true, name: true } }), null),
-      safeGet(() => (prisma as any).phedRegion.findUnique({ where: { id: staff.regionId }, select: { name: true } }), null),
-      safeGet(() => (prisma as any).phedFeeder.findUnique({ where: { id: staff.feederId }, select: { name: true } }), null),
-      safeGet(() => (prisma as any).phedPayPoint.findUnique({ where: { id: staff.payPointId }, select: { name: true } }), null),
-      safeGet(() => (prisma as any).phedStaffUnion.findMany({ where: { staffId: params.id }, select: { assignedAt: true, union: { select: { name: true } } } }), []),
-      safeGet(() => (prisma as any).phedStaffCooperative.findMany({ where: { staffId: params.id }, select: { contributionAmount: true, loanAmount: true, totalAmount: true, assignedAt: true, cooperative: { select: { name: true } } } }), []),
-      safeGet(() => (prisma as any).phedComputedPayroll.findMany({ where: { staffId: params.id }, orderBy: { createdAt: 'desc' }, take: 50, select: { payPeriodId: true, paymentStatus: true, grossSalary: true, netSalary: true, monthlyPAYE: true, pensionEmployee: true, createdAt: true } }), []),
-      safeGet(() => (prisma as any).phedStaffPeriodAdvance.findMany({ where: { staffId: params.id }, select: { cashAdvanced: true, loan: true, domesticLoan: true } }), []),
-      safeGet(() => (prisma as any).phedValidation.findMany({ where: { staffId: params.id }, select: { status: true, reason: true } }), []),
-      safeGet(() => (prisma as any).phedOvertimeEntry.findMany({ where: { staffId: params.id }, select: { overtimeHours: true, computedAmount: true } }), []),
-      safeGet(() => (prisma as any).phedStaffDeductionLiability.findMany({ where: { staffId: params.id }, select: { amount: true, deductionLiability: { select: { name: true } } } }), []),
+    const [grade, region, feeder, payPoint, unions, cooperatives, payrolls] = await Promise.all([
+      safeGet(() => (staff.gradeId ? prisma.phedGrade.findUnique({ where: { id: staff.gradeId }, select: { code: true, name: true } }) : Promise.resolve(null)), null),
+      safeGet(() => (staff.regionId ? prisma.phedRegion.findUnique({ where: { id: staff.regionId }, select: { name: true } }) : Promise.resolve(null)), null),
+      safeGet(() => (staff.feederId ? prisma.phedFeeder.findUnique({ where: { id: staff.feederId }, select: { name: true } }) : Promise.resolve(null)), null),
+      safeGet(() => (staff.payPointId ? prisma.phedPayPoint.findUnique({ where: { id: staff.payPointId }, select: { name: true } }) : Promise.resolve(null)), null),
+      safeGet(() => prisma.phedStaffUnion.findMany({ where: { staffId: params.id }, select: { assignedAt: true, union: { select: { name: true } } } }), []),
+      safeGet(() => prisma.phedStaffCooperative.findMany({ where: { staffId: params.id }, select: { contributionAmount: true, loanAmount: true, totalAmount: true, assignedAt: true, cooperative: { select: { name: true } } } }), []),
+      safeGet(() => prisma.phedComputedPayroll.findMany({ where: { staffId: params.id }, orderBy: { createdAt: 'desc' }, take: 50, select: { payPeriodId: true, paymentStatus: true, grossSalary: true, netSalary: true, monthlyPAYE: true, pensionEmployee: true, createdAt: true } }), []),
     ])
 
-    // Attach relations to staff object
-    staff.grade = grade; staff.region = region; staff.feeder = feeder; staff.payPoint = payPoint
-    staff.unions = unions; staff.cooperatives = cooperatives
-    staff.computedPayrolls = payrolls; staff.periodAdvances = advances
-    staff.validations = validations; staff.overtimeEntries = overtimes
-    staff.deductionLiabilities = deductionLiabs
 
     // ── Fetch login account ─────────────────────────────────
     const staffAccount = await prisma.staffRecord.findFirst({
@@ -74,7 +71,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     })
 
     // ── Build CSV history ───────────────────────────────────
-    const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
     const lines: string[] = []
 
     // Section 1: Personal & employment info
@@ -89,10 +86,10 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     lines.push(`Level,${esc(staff.level)}`)
     lines.push(`Department,${esc(staff.department)}`)
     lines.push(`Unit,${esc(staff.unit)}`)
-    lines.push(`Grade,${esc(staff.grade?.code)}`)
-    lines.push(`Region,${esc(staff.region?.name)}`)
-    lines.push(`Feeder,${esc(staff.feeder?.name)}`)
-    lines.push(`Pay Point,${esc(staff.payPoint?.name)}`)
+    lines.push(`Grade,${esc(grade?.code)}`)
+    lines.push(`Region,${esc(region?.name)}`)
+    lines.push(`Feeder,${esc(feeder?.name)}`)
+    lines.push(`Pay Point,${esc(payPoint?.name)}`)
     lines.push(`Resumption Date,${esc(staff.resumptionDate)}`)
     lines.push(`Created At,${esc(staff.createdAt)}`)
     lines.push(`Call Center,${esc(staff.callCenter)}`)
@@ -147,29 +144,29 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     lines.push('')
 
     // Section 5: Union & Cooperative memberships
-    if (staff.unions?.length > 0) {
+    if (unions.length > 0) {
       lines.push('=== UNION MEMBERSHIPS ===')
       lines.push('Union,Assigned At')
-      for (const su of staff.unions) {
+      for (const su of unions) {
         lines.push(`${esc(su.union?.name)},${esc(su.assignedAt)}`)
       }
       lines.push('')
     }
 
-    if (staff.cooperatives?.length > 0) {
+    if (cooperatives.length > 0) {
       lines.push('=== COOPERATIVE MEMBERSHIPS ===')
       lines.push('Cooperative,Contribution,Loan,Total,Assigned At')
-      for (const sc of staff.cooperatives) {
+      for (const sc of cooperatives) {
         lines.push(`${esc(sc.cooperative?.name)},${esc(sc.contributionAmount)},${esc(sc.loanAmount)},${esc(sc.totalAmount)},${esc(sc.assignedAt)}`)
       }
       lines.push('')
     }
 
     // Section 6: Payroll history
-    if (staff.computedPayrolls?.length > 0) {
+    if (payrolls.length > 0) {
       lines.push('=== PAYROLL HISTORY (last 50) ===')
       lines.push('Period,Status,Gross Pay,Net Pay,PAYE Tax,Pension,Date')
-      for (const cp of staff.computedPayrolls) {
+      for (const cp of payrolls) {
         lines.push(`${esc(cp.payPeriodId)},${esc(cp.paymentStatus)},${esc(cp.grossSalary)},${esc(cp.netSalary)},${esc(cp.monthlyPAYE)},${esc(cp.pensionEmployee)},${esc(cp.createdAt)}`)
       }
       lines.push('')
@@ -201,7 +198,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       headers: {
         'Content-Type': 'text/csv',
         'Content-Disposition': `attachment; filename="${fileName}"`,
-        'Access-Control-Allow-Origin': origin || '*',
+        ...getCorsHeaders(origin),
         'Access-Control-Expose-Headers': 'Content-Disposition,X-Delete-Message',
         'X-Delete-Message': encodeURIComponent(`Staff ${staff.staffId} permanently deleted. History saved as ${fileName}`),
       },

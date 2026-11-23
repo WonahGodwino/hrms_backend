@@ -9,12 +9,14 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { validateCompanyAccess } from '@/app/lib/departments/department-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -30,8 +32,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
     }
 
-    const jobs = await prisma.companyExportJob.findMany({
-      where: { companyId: params.id },
+    const jobs = await forCompany(params.id).companyExportJob.findMany({
       orderBy: { startedAt: 'desc' },
       take: 50
     })

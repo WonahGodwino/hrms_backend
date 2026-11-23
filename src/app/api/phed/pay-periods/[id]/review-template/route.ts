@@ -3,32 +3,34 @@ import ExcelJS from 'exceljs'
 import { prisma } from '@/app/lib/db'
 import { requirePhedReadAccess } from '@/app/lib/phed/access-role'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { withCors, handleCorsOptions } from '@/app/lib/cors'
+import { withCors, handleCorsOptions, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { computeTaxBandBreakdown } from '@/app/lib/phed/tax-engine'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'report')
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user  = await requirePhedReadAccess(token)
-    const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
+    const period = await prisma.phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && user.companyId && period.companyId !== user.companyId)
       return withCors(ApiResponse.notFound('Pay period not found'), origin)
     if (!['REVIEW', 'APPROVED', 'PAID'].includes(period.status))
       return withCors(ApiResponse.error('Template only available after computation', 400), origin)
     const [computedPayrolls, allStaff, cooperatives, unions, deductionLiabilities, periodAdvances] = await Promise.all([
-      (prisma as any).phedComputedPayroll.findMany({ where: { payPeriodId: params.id }, orderBy: { staffIdCode: 'asc' } }),
-      (prisma as any).phedStaff.findMany({ where: { companyId: period.companyId }, include: { grade: { select: { name: true, code: true } }, cooperatives: { include: { cooperative: true } }, unions: { include: { union: true } }, deductionLiabilities: { include: { deductionLiability: true } } } }),
-      (prisma as any).phedCooperative.findMany({ where: { companyId: period.companyId, isActive: true }, orderBy: { name: 'asc' } }),
-      (prisma as any).phedUnion.findMany({ where: { companyId: period.companyId, isActive: true }, orderBy: { name: 'asc' } }),
-      (prisma as any).phedDeductionLiability.findMany({ where: { companyId: period.companyId, isActive: true }, orderBy: { name: 'asc' } }),
-      (prisma as any).phedStaffPeriodAdvance.findMany({ where: { payPeriodId: params.id } }),
+      prisma.phedComputedPayroll.findMany({ where: { payPeriodId: params.id }, orderBy: { staffIdCode: 'asc' } }),
+      forCompany(period.companyId).phedStaff.findMany({ include: { grade: { select: { name: true, code: true } }, cooperatives: { include: { cooperative: true } }, unions: { include: { union: true } }, deductionLiabilities: { include: { deductionLiability: true } } } }),
+      forCompany(period.companyId).phedCooperative.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+      forCompany(period.companyId).phedUnion.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+      forCompany(period.companyId).phedDeductionLiability.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+      prisma.phedStaffPeriodAdvance.findMany({ where: { payPeriodId: params.id } }),
     ])
     const staffMap = new Map<string, any>(allStaff.map((s: any) => [s.id, s]))
     const advancesMap = new Map<string, any>(periodAdvances.map((a: any) => [a.staffId, a]))
@@ -98,7 +100,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     totRow.height = 20; allCols.forEach((_, i) => { const cell = totRow.getCell(i + 1); cell.fill = hFill; cell.font = boldW; cell.border = bdr; cell.alignment = ctr; cell.protection = { locked: false }; if (i >= identityCols.length) cell.numFmt = numFmt })
     sheet.views = [{ state: 'frozen', xSplit: identityCols.length, ySplit: 2, activeCell: 'F3' }]
     const buf = await wb.xlsx.writeBuffer(); const fileName = 'payroll-review-' + period.periodName.replace(/\s+/g, '-') + '.xlsx'
-    return new Response(buf as unknown as BodyInit, { status: 200, headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': 'attachment; filename="' + fileName + '"', 'Access-Control-Allow-Origin': origin ?? '*' } })
+    return new Response(buf as unknown as BodyInit, { status: 200, headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': 'attachment; filename="' + fileName + '"', ...getCorsHeaders(origin)} })
   } catch (e) { return withCors(handleApiError(e), req.headers.get('origin')) }
 }
 function r2(v: number): number { return Math.round(v * 100) / 100 }

@@ -3,6 +3,7 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -10,7 +11,8 @@ export async function OPTIONS(req: NextRequest) {
 
 // POST /api/certifications/[id]/renewal/assessment/start
 // Starts recertification assessment and returns attemptId and in-app route href
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -32,9 +34,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
 
     // Find active assessment matching certification type
-    const assessment = await prisma.assessment.findFirst({
+    const assessment = await forCompany(user.companyId!).assessment.findFirst({
       where: {
-        companyId: user.companyId!,
         status: 'ACTIVE',
         OR: [
           { category: { contains: record.certificationType.type, mode: 'insensitive' } },

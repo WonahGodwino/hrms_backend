@@ -3,11 +3,14 @@
 import { assertApplicantCapacity, trialErrorBody } from '@/app/lib/trial/guard'
 import { NextRequest } from "next/server";
 import { prisma } from "@/app/lib/db";
-import { ApiResponse, formatError } from "@/app/lib/utils";
+import { ApiResponse } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { fileTypeFromBuffer } from "file-type";
 import { extractCvText } from "@/app/lib/recruitment/cvText";
 import { mail, receivedMail } from "@/app/lib/candidate-portal/emails";
+import { notifyHrOfApplication } from "@/app/lib/candidate-portal/notify";
+import { publicErrorMessage } from "@/app/lib/errors/public-error";
+import { forCompany } from "@/app/lib/data/tenant";
 import { candidateFileKey, uploadDocumentObject } from "@/app/lib/storage/documents";
 
 export async function OPTIONS(request: NextRequest) {
@@ -193,10 +196,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if candidate already exists for this company (same email)
-    let candidate = await prisma.candidate.findFirst({
+    let candidate = await forCompany(job.companyId).candidate.findFirst({
       where: {
-        email: { equals: email, mode: "insensitive" },
-        companyId: job.companyId,
+        email: { equals: email, mode: "insensitive" }
       },
     });
 
@@ -266,11 +268,18 @@ export async function POST(request: NextRequest) {
       cvFile.name,
     );
 
+    // Trial capacity is checked before anything is written, so a full job
+    // leaves no stray files behind.
+    await assertApplicantCapacity(job.companyId, job.id)
+
     // Convert file buffer to Uint8Array for Prisma
     const cvUint8Array = new Uint8Array(cvFileBuffer);
 
+    // DB-002: the files, the application, their links and the first stage
+    // history row are written together or not at all. Emails go out after commit.
+    const application = await prisma.$transaction(async (tx) => {
     // Save the CV file into CandidateFile
-    const cvFileData = await prisma.candidateFile.create({
+    const cvFileData = await tx.candidateFile.create({
       data: {
         companyId: job.companyId,
         candidateId: candidate.id,
@@ -295,7 +304,7 @@ export async function POST(request: NextRequest) {
     let coverLetterFileDataId: string | null = null;
     if (coverLetterFileBuffer && coverLetterFile) {
       const coverLetterUint8Array = new Uint8Array(coverLetterFileBuffer);
-      coverLetterFileData = await prisma.candidateFile.create({
+      coverLetterFileData = await tx.candidateFile.create({
         data: {
           companyId: job.companyId,
           candidateId: candidate.id,
@@ -318,10 +327,8 @@ export async function POST(request: NextRequest) {
       ).catch(() => {});
     }
 
-    await assertApplicantCapacity(job.companyId, job.id)
-
     // Create the job application in the database
-    const application = await prisma.jobApplication.create({
+    const created = await tx.jobApplication.create({
       data: {
         companyId: job.companyId,
         jobId: job.id,
@@ -345,31 +352,34 @@ export async function POST(request: NextRequest) {
     });
 
     // Update the CandidateFile to link it to this application
-    await prisma.candidateFile.update({
+    await tx.candidateFile.update({
       where: { id: cvFileData.id },
       data: {
-        applicationId: application.id,
+        applicationId: created.id,
       },
     });
 
     // Update cover letter file if it exists
     if (coverLetterFileDataId) {
-      await prisma.candidateFile.update({
+      await tx.candidateFile.update({
         where: { id: coverLetterFileDataId },
         data: {
-          applicationId: application.id,
+          applicationId: created.id,
         },
       });
     }
 
     // Create initial stage history
-    await prisma.applicationStageHistory.create({
+    await tx.applicationStageHistory.create({
       data: {
-        applicationId: application.id,
+        applicationId: created.id,
         toStatus: "SUBMITTED",
         changedBy: createdBy,
       },
     });
+
+    return created;
+    }, { timeout: 30000 });
 
     const ref = application.referenceCode;
     void mail(
@@ -381,6 +391,16 @@ export async function POST(request: NextRequest) {
         `${ref.slice(0, 5)}-${ref.slice(5)}`,
       ),
     );
+
+    void notifyHrOfApplication({
+      companyId: job.companyId,
+      applicationId: application.id,
+      jobId: job.id,
+      jobTitle: job.title,
+      candidateName: `${firstName} ${lastName}`.trim(),
+      candidateEmail: email,
+      referenceCode: ref,
+    });
 
     return withCors(
       ApiResponse.success(
@@ -399,7 +419,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // A trial company's job is full: tell the applicant plainly, not the upgrade message.
     if (trialErrorBody(error)) return withCors(ApiResponse.error('This job is no longer accepting applications.', 409), origin);
-    const message = formatError(error);
+    const message = publicErrorMessage(error);
     console.error("Error in public job application:", error);
     return withCors(
       ApiResponse.error(

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import {
   Actor,
   BANDS,
@@ -20,6 +20,8 @@ import {
 } from "@/app/lib/self-appraisal";
 import { PRIVACY_MIN_PEOPLE, readCtx } from "@/app/lib/pip";
 import { bail } from "@/app/lib/pip-employee";
+import { forCompany } from '@/app/lib/data/tenant';
+import { csvCell } from '@/app/lib/automation';
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const avg = (xs: number[]) =>
@@ -368,8 +370,8 @@ export async function buildAnalytics(
   rows: TeamRow[],
 ) {
   // 1. Trend: average effective overall score by department across the last 6 cycles
-  const cycles = await prisma.appraisalCycle.findMany({
-    where: { companyId },
+  const cycles = await forCompany(companyId).appraisalCycle.findMany({
+    where: { },
     orderBy: { startDate: "desc" },
     take: 6,
     select: { id: true, name: true },
@@ -377,10 +379,8 @@ export async function buildAnalytics(
   cycles.reverse();
 
   const participants = cycles.length
-    ? await prisma.appraisalCycleParticipant.findMany({
-        where: {
-          companyId,
-          cycleId: { in: cycles.map((c) => c.id) },
+    ? await forCompany(companyId).appraisalCycleParticipant.findMany({
+        where: { cycleId: { in: cycles.map((c) => c.id) },
           ...scopeWhere(actor),
           departmentId: { not: null },
           managerReview: { is: { status: "SUBMITTED" } },
@@ -484,10 +484,8 @@ export async function buildAnalytics(
     }));
 
   // 3. Recent recognitions for the team (private ones are never shown)
-  const recs = await prisma.recognition.findMany({
-    where: {
-      companyId,
-      visibility: { not: "PRIVATE" },
+  const recs = await forCompany(companyId).recognition.findMany({
+    where: { visibility: { not: "PRIVATE" },
       ...(actor.companyWide
         ? {}
         : { recipient: { managerId: actor.staffRecordId } }),
@@ -522,12 +520,7 @@ export async function buildAnalytics(
 
 // ---------------------------------------------------------------------------
 // CSV export
-// ---------------------------------------------------------------------------
-const csvCell = (v: unknown) => {
-  let s = v === null || v === undefined ? "" : String(v);
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; // blocks spreadsheet formula injection
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
+
 const pctCell = (n: number | null) => (n === null ? "" : Math.round(n));
 
 export function buildCsv(cycleName: string, rows: DirectoryRow[]) {

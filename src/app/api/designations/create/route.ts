@@ -6,6 +6,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { logRecordChange } from '@/app/lib/core-setup/audit'
 import { normalizeFrequency } from '@/app/lib/designations/helpers'
+import { decimalOrNull } from '@/app/lib/prisma-utils'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req);
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const existing = await (prisma as any).designation.findFirst({
+    const existing = await prisma.designation.findFirst({
       where: { code, companyId },
     });
     if (existing)
@@ -68,7 +69,7 @@ export async function POST(req: NextRequest) {
       );
 
     await assertTrialCapacity(companyId, 'designations')
-    const designation = await (prisma as any).designation.create({
+    const designation = await prisma.designation.create({
       data: {
         companyId,
         title,
@@ -90,7 +91,7 @@ export async function POST(req: NextRequest) {
           id: designation.id,
           title: designation.title,
           code: designation.code,
-          basePay: designation.basePay ?? null,
+          basePay: decimalOrNull(designation.basePay),
           basePayFrequency: designation.basePayFrequency ?? null,
           benefits: designation.benefits ?? null,
           status: designation.status,

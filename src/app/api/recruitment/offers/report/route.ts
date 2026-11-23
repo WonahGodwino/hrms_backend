@@ -8,6 +8,8 @@ import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { attachmentDisposition, safeFileName } from '@/app/lib/excel/sheet-theme'
+import { fmtDate } from '@/app/lib/search/providers'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -24,10 +26,12 @@ const STATUS_LABEL: Record<string, string> = {
   WITHDRAWN: 'Withdrawn',
 }
 
-const fmtDate = (d: Date | null | undefined) =>
-  d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
+
 
 export async function GET(request: NextRequest) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(request)
+  if (deferred) return deferred
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null

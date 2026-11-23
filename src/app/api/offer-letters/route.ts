@@ -10,8 +10,10 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
-import { renderDocx, MissingOfferLetterVariableError } from '@/app/lib/offer-letters/docxTemplate'
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access'
+import { renderDocx, MissingOfferLetterVariableError } from '@/app/lib/offers/letters/docxTemplate'
+import { toMonthName } from '@/app/lib/payroll/utils/valueParsing'
+import { forCompany } from '@/app/lib/data/tenant'
 import { generatedOfferLetterKey, uploadDocumentObject } from '@/app/lib/storage/documents'
 
 export async function OPTIONS(request: NextRequest) {
@@ -112,7 +114,7 @@ export async function POST(request: NextRequest) {
       templateId,
       recipientName,
       recipientEmail,
-      month,
+      month: monthInput,
       year,
       variableValues,
     }: {
@@ -129,7 +131,10 @@ export async function POST(request: NextRequest) {
     if (!templateId) return withCors(ApiResponse.error('A template is required', 400), origin)
     if (!recipientName?.trim()) return withCors(ApiResponse.error('Recipient name is required', 400), origin)
     if (!recipientEmail?.trim()) return withCors(ApiResponse.error('Recipient email is required', 400), origin)
-    if (!month) return withCors(ApiResponse.error('Month is required', 400), origin)
+    if (!monthInput) return withCors(ApiResponse.error('Month is required', 400), origin)
+    // DB-004: stored as a month name ("October"); "10" or "Oct" are accepted.
+    const month = toMonthName(monthInput)
+    if (!month) return withCors(ApiResponse.error('Month must be a month name or number (e.g. October or 10)', 400), origin)
 
     const yearNumber = typeof year === 'string' ? parseInt(year, 10) : year
     if (!yearNumber || Number.isNaN(yearNumber)) {
@@ -141,8 +146,8 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
     }
 
-    const template = await prisma.offerLetterTemplate.findFirst({
-      where: { id: templateId, companyId },
+    const template = await forCompany(companyId).offerLetterTemplate.findFirst({
+      where: { id: templateId },
     })
     if (!template) {
       return withCors(ApiResponse.error('Template not found for this company', 404), origin)

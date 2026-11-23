@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
 
     // Merge with the persisted journey state (union of completed stages —
     // a stage stays checked off even if the module's records are deleted).
-    const persisted = await (prisma as any).guidedSetupState.findUnique({
+    const persisted = await prisma.guidedSetupState.findUnique({
       where: { companyId },
     })
     const persistedStages: string[] = Array.isArray(persisted?.completedStages)
@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
         progress,
         updatedBy: user.userId,
       }
-      await (prisma as any).guidedSetupState.upsert({
+      await prisma.guidedSetupState.upsert({
         where: { companyId },
         update: data,
         create: { companyId, ...data, exited: false },

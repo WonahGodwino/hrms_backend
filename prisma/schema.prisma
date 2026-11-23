@@ -718,6 +718,11 @@ model StaffRecord {
   @@unique([email, companyId])
   @@index([email])
   @@index([locationId])
+  // DB-003: company-scoped staff lists and department/manager/designation lookups
+  @@index([companyId, isActive])
+  @@index([departmentId])
+  @@index([managerId])
+  @@index([designationId])
   @@map("staff_records")
 }
 
@@ -1226,6 +1231,9 @@ model Meeting {
   recordingStatus       String?
   recordingRequested    Boolean   @default(false)
   recordingEgressId     String?
+  // Filled by the egress_ended webhook once the MP4 lands in object storage.
+  recordingDurationSeconds Int?
+  recordingSizeBytes       Int?
   lobbyEnabled          Boolean   @default(false)
   accessType            String    @default("STAFF_ONLY") // STAFF_ONLY | PUBLIC (anyone with the link can join)
   recurrence            Json? // recurring schedule: { frequency, daysOfWeek, interval, endDate, occurrences }
@@ -2354,8 +2362,8 @@ model CandidateDocument {
 model AISettings {
   id                     String   @id @default(cuid())
   companyId              String   @unique
-  monthlyBudget          Float    @default(100.00)
-  costPerReview          Float    @default(0.02)
+  monthlyBudget          Decimal  @default(100.00) @db.Decimal(18, 6)
+  costPerReview          Decimal  @default(0.02) @db.Decimal(18, 6)
   costAlertThreshold     Int      @default(80)
   enabled                Boolean  @default(true)
   defaultService         String   @default("openai")
@@ -2382,8 +2390,8 @@ model AIUsageLog {
   service       String
   model         String
   tokensUsed    Int
-  cost          Float
-  actualCost    Float    @default(0)
+  cost          Decimal  @db.Decimal(18, 6)
+  actualCost    Decimal  @default(0) @db.Decimal(18, 6)
   endpoint      String
   inputLength   Int
   outputLength  Int
@@ -2402,8 +2410,8 @@ model AIUsageLog {
 model TokenCostConfig {
   id                  String   @id @default(cuid())
   tokensPerUnit       Int      @default(1000)
-  costPerUnit         Float    @default(0.30)
-  providerCostPerUnit Float    @default(0.015)
+  costPerUnit         Decimal  @default(0.30) @db.Decimal(18, 6)
+  providerCostPerUnit Decimal  @default(0.015) @db.Decimal(18, 6)
   currency            String   @default("USD") @db.VarChar(3)
   label               String?
   defaultAiService    String?
@@ -2657,9 +2665,9 @@ model LeaveApprovalStep {
   id              String    @id @default(cuid())
   leaveRequestId  String
   level           Int
-  kind            String // LINE_MANAGER | HR
+  kind            LeaveApprovalStepKind
   approverStaffId String?
-  status          String    @default("PENDING") // PENDING | APPROVED | REJECTED | SKIPPED
+  status          LeaveApprovalStepStatus @default(PENDING)
   actedByStaffId  String?
   actedByUserId   String?
   actedAt         DateTime?
@@ -2673,6 +2681,19 @@ model LeaveApprovalStep {
   @@unique([leaveRequestId, level])
   @@index([approverStaffId, status])
   @@map("leave_approval_steps")
+}
+
+// DB-004 step 4: closed sets that were free-text columns before.
+enum LeaveApprovalStepKind {
+  LINE_MANAGER
+  HR
+}
+
+enum LeaveApprovalStepStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SKIPPED
 }
 
 model PublicHoliday {
@@ -5264,7 +5285,7 @@ model Designation {
   status       String                  @default("Active")
   staffCount   Int                     @default(0)
 
-  basePay          Float?
+  basePay          Decimal?          @db.Decimal(18, 2)
   basePayFrequency BasePayFrequency? @default(Monthly)
   benefits         Json?
   staffRecords     StaffRecord[]
@@ -10377,8 +10398,8 @@ model ScreeningUsageLog {
   service      String
   model        String
   tokensUsed   Int
-  cost         Float
-  actualCost   Float    @default(0)
+  cost         Decimal  @db.Decimal(18, 6)
+  actualCost   Decimal  @default(0) @db.Decimal(18, 6)
   endpoint     String
   inputLength  Int
   outputLength Int

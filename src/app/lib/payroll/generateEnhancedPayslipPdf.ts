@@ -136,7 +136,7 @@ export interface GeneratePayslipInput {
 		netPay: number;
 		daysInMonth: number;
 		daysWorked: number;
-		rawRow: any;
+		rawRow: unknown;
 		bonusKPI?: number;
 		deductions?: number;
 		position?: string;

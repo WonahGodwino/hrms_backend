@@ -5,15 +5,15 @@
 import { prisma } from '@/app/lib/db'
 
 export async function deletePhedStaffRecord(staffId: string): Promise<void> {
-  await (prisma as any).phedStaffCooperative.deleteMany({ where: { staffId } }).catch(() => {})
-  await (prisma as any).phedStaffUnion.deleteMany({ where: { staffId } }).catch(() => {})
-  await (prisma as any).phedValidation.deleteMany({ where: { staffId } }).catch(() => {})
-  await (prisma as any).phedOvertimeEntry.deleteMany({ where: { staffId } }).catch(() => {})
-  await (prisma as any).phedStaffPeriodAdvance.deleteMany({ where: { staffId } }).catch(() => {})
-  await (prisma as any).phedStaffDeductionLiability.deleteMany({ where: { staffId } }).catch(() => {})
-  await (prisma as any).phedComputedPayroll.deleteMany({ where: { staffId } }).catch(() => {})
+  await prisma.phedStaffCooperative.deleteMany({ where: { staffId } }).catch(() => {})
+  await prisma.phedStaffUnion.deleteMany({ where: { staffId } }).catch(() => {})
+  await prisma.phedValidation.deleteMany({ where: { staffId } }).catch(() => {})
+  await prisma.phedOvertimeEntry.deleteMany({ where: { staffId } }).catch(() => {})
+  await prisma.phedStaffPeriodAdvance.deleteMany({ where: { staffId } }).catch(() => {})
+  await prisma.phedStaffDeductionLiability.deleteMany({ where: { staffId } }).catch(() => {})
+  await prisma.phedComputedPayroll.deleteMany({ where: { staffId } }).catch(() => {})
 
-  const staff = await (prisma as any).phedStaff.findUnique({
+  const staff = await prisma.phedStaff.findUnique({
     where: { id: staffId },
     select: { staffId: true, companyId: true },
   })
@@ -23,5 +23,5 @@ export async function deletePhedStaffRecord(staffId: string): Promise<void> {
     }).catch(() => {})
   }
 
-  await (prisma as any).phedStaff.delete({ where: { id: staffId } })
+  await prisma.phedStaff.delete({ where: { id: staffId } })
 }

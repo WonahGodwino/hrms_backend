@@ -51,6 +51,7 @@ const MAX_COLUMNS = 8
 const MAX_ROWS = 50
 const MAX_CELL = 200
 
+// eslint-disable-next-line no-control-regex -- strips control characters on purpose
 const cell = (v: unknown) => redactSensitive(String(v ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim()).slice(0, MAX_CELL)
 
 // summarise lays out a result the assistant already has as a short report: a title, a table and a few notes. It reads no data of its own.

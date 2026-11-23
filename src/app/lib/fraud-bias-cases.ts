@@ -1,4 +1,4 @@
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import {
   FbCtx,
   ACTIVE_CASE,
@@ -152,7 +152,7 @@ export async function openCase(ctx: FbCtx, body: any) {
   const riskCategory =
     reqCat ?? (top ? (RULES[top.ruleKey]?.risk ?? "OTHER") : null);
   const summary = txt(body.summary, "summary");
-  let managerId =
+  const managerId =
     reqManager ??
     (signals.length &&
     signals.every((s) => s.managerId === signals[0].managerId)

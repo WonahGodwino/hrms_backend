@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { withTransaction } from "@/app/lib/data/transaction";
 import { handleCorsOptions } from "@/app/lib/cors";
 import { captureKpiSnapshot, logPip, ok } from "@/app/lib/pip";
 import {
@@ -29,7 +29,7 @@ export async function PATCH(
       return bail(403, "You can only mark a task as completed");
     const completionNote = text(body.completionNote, "completionNote", 1000);
 
-    const updated = await prisma.$transaction(async (tx) => {
+    const updated = await withTransaction(async (tx) => {
       await ownLivePip(tx, ctx, id);
       const m = await tx.pipMilestone.findFirst({
         where: { id: milestoneId, pipId: id, removedAt: null },

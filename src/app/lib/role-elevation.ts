@@ -48,7 +48,7 @@ export async function getActiveElevatedRole(
   if (!staffId || !companyId) return null
   try {
     const now = new Date()
-    const elevation = await (prisma as any).roleElevation.findFirst({
+    const elevation = await prisma.roleElevation.findFirst({
       where: {
         staffId,
         companyId,

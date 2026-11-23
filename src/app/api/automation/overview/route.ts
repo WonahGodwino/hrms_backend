@@ -3,6 +3,7 @@ import { handleCorsOptions } from "@/app/lib/cors";
 import { ok } from "@/app/lib/pip";
 import { guarded } from "@/app/lib/pip-employee";
 import { automationReadCtx, buildOverview } from "@/app/lib/automation";
+import { maybeSweep } from "@/app/lib/automation-scheduled";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -17,9 +18,8 @@ export async function GET(request: NextRequest) {
     );
     const data = await buildOverview(ctx.companyId);
     try {
-      const { maybeSweep } = require("@/app/lib/automation-scheduled");
       maybeSweep(ctx.companyId, "ACTIVITY").catch(() => {});
-    } catch {}
+    } catch { /* ignored: best-effort, failure is non-fatal */ }
     return ok(origin, data);
   });
 }

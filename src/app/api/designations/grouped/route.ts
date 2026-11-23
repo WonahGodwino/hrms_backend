@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
-import { prisma } from "@/app/lib/db";
 import { getUserFromToken } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { resolveScopedCompanyId } from "@/app/lib/company-scope";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req);
@@ -49,8 +49,8 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const designations = await (prisma as any).designation.findMany({
-      where: { companyId, status: "Active" },
+    const designations = await forCompany(companyId).designation.findMany({
+      where: { status: "Active" },
       select: {
         id: true,
         title: true,

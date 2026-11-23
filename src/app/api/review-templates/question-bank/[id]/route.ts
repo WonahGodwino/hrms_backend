@@ -9,6 +9,7 @@ import {
   normalizeQuestion,
   resolveQuestionLinks,
 } from "@/app/lib/review-templates/question-rules";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -16,10 +17,8 @@ export async function OPTIONS(request: NextRequest) {
 
 const ACTIVE_USE = { section: { version: { status: "ACTIVE" as const } } };
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -49,8 +48,8 @@ export async function GET(
         origin,
       );
 
-    const item = await prisma.questionBankItem.findFirst({
-      where: { id: params.id, companyId },
+    const item = await forCompany(companyId).questionBankItem.findFirst({
+      where: { id: params.id },
       include: {
         options: { orderBy: { displayOrder: "asc" } },
         competency: { select: { id: true, name: true } },
@@ -103,10 +102,8 @@ export async function GET(
 }
 
 // PATCH: update prompt/type/category/links/options (full options replace)
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -212,10 +209,8 @@ export async function PATCH(
 }
 
 // DELETE: soft delete via isActive, consistent with the codebase's never-hard-delete convention
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -245,8 +240,8 @@ export async function DELETE(
         origin,
       );
 
-    const existing = await prisma.questionBankItem.findFirst({
-      where: { id: params.id, companyId },
+    const existing = await forCompany(companyId).questionBankItem.findFirst({
+      where: { id: params.id },
     });
     if (!existing)
       return withCors(

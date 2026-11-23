@@ -77,13 +77,13 @@ export interface PayrollUploadCreateInput {
   emailAttempts?: number;
   emailFailures?: number;
   errors: string[];
-  errorDetails?: any;
+  errorDetails?: unknown;
   uploadedBy: string;
   // New optional fields
   templateType?: string;
   templateId?: string;
   sendEmails?: boolean;
-  metadata?: any;
+  metadata?: unknown;
 }
 
 export interface PayrollUploadSummary {

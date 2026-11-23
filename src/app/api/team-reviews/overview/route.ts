@@ -9,6 +9,7 @@ import {
   emptyOverview,
   openDashboard,
 } from "@/app/lib/team-dashboard";
+import { maybeSweep } from "@/app/lib/automation-scheduled";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -23,9 +24,8 @@ export async function GET(request: NextRequest) {
     const rows = await loadTeamRows(d.companyId, cycle, d.actor);
     const data = await buildOverview(d.companyId, cycle, d.actor, rows);
     try {
-      const { maybeSweep } = require("@/app/lib/automation-scheduled");
       maybeSweep(d.companyId, "ACTIVITY").catch(() => {});
-    } catch {}
+    } catch { /* ignored: best-effort, failure is non-fatal */ }
     return ok(origin, data, "Team overview retrieved successfully");
   });
 }

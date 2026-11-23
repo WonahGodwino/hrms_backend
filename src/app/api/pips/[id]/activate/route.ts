@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { RouteContext } from "@/app/lib/self-appraisal";
@@ -14,6 +14,8 @@ import {
   validateRange,
   writeCtx,
 } from "@/app/lib/pip";
+import { emitAutomationEvent, kickAutomation } from "@/app/lib/automation-events";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -32,8 +34,8 @@ export async function POST(
     if (!c.ok) return c.response;
     const { actor, staffId, companyId } = c.ctx;
 
-    const pip = await prisma.pip.findFirst({
-      where: { id, companyId },
+    const pip = await forCompany(companyId).pip.findFirst({
+      where: { id },
       select: {
         id: true,
         status: true,
@@ -77,7 +79,6 @@ export async function POST(
       });
 
       try {
-        const { emitAutomationEvent } = require("@/app/lib/automation-events");
         await emitAutomationEvent(tx, {
           companyId,
           trigger: "PIP_ACTIVATED",
@@ -87,7 +88,7 @@ export async function POST(
           subjectStaffRecordId: pip.staffRecordId,
           payload: { pipId: id },
         });
-      } catch {}
+      } catch { /* ignored: best-effort, failure is non-fatal */ }
 
       return true;
     });
@@ -100,9 +101,8 @@ export async function POST(
     await captureKpiSnapshot(id, "BASELINE", staffId);
 
     try {
-      const { kickAutomation } = require("@/app/lib/automation-events");
       kickAutomation(companyId);
-    } catch {}
+    } catch { /* ignored: best-effort, failure is non-fatal */ }
 
     return ok(origin, { id, status: "ACTIVE" }, "PIP activated");
   } catch (error) {

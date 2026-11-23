@@ -160,7 +160,7 @@ export async function GET(req: NextRequest) {
   const origin = req.headers.get("origin");
 
   try {
-    const { prisma } = await import("@/app/lib/prisma");
+    const { prisma } = await import("@/app/lib/db");
 
     const authHeader = req.headers.get("authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {

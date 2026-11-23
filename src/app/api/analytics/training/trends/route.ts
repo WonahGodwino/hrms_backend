@@ -1,9 +1,9 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -27,9 +27,8 @@ export async function GET(req: NextRequest) {
     const since = new Date()
     since.setDate(since.getDate() - days)
 
-    const progress = await prisma.participantProgress.findMany({
+    const progress = await forCompany(companyId).participantProgress.findMany({
       where: {
-        companyId,
         OR: [
           { updatedAt: { gte: since } },
           { completionDate: { gte: since } },

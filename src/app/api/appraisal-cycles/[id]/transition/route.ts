@@ -32,10 +32,8 @@ const DONE: Record<CycleAction, string> = {
   restore: "restored",
 };
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   const reject = (status: number, body: Record<string, unknown>) =>
     withCors(
@@ -90,7 +88,7 @@ export async function POST(
     }
 
     if (act === "activate" || act === "schedule") {
-      const blockers = await getActivationBlockers(prisma as any, cycle, act);
+      const blockers = await getActivationBlockers(prisma, cycle, act);
       if (blockers.length) {
         return reject(400, {
           message: `Can't ${act} yet: ${blockers[0]}${blockers.length > 1 ? ` (+${blockers.length - 1} more)` : ""}`,
@@ -100,7 +98,7 @@ export async function POST(
     }
 
     if (act === "archive" || act === "complete") {
-      const impact = await getTransitionImpact(prisma as any, cycle, act);
+      const impact = await getTransitionImpact(prisma, cycle, act);
       if (impact.requiresConfirmation && !confirmImpact) {
         return reject(409, {
           message: impact.message,

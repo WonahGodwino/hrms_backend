@@ -12,7 +12,7 @@ export async function OPTIONS(request: NextRequest) {
 }
 
 // Normalise the Json `locations` field into a readable label.
-const toLocationLabel = (locations: any, workplaceType?: string | null): string => {
+const toLocationLabel = (locations: unknown, workplaceType?: string | null): string => {
   const parts: string[] = [];
   let list = locations;
   if (typeof list === "string") {
@@ -29,7 +29,7 @@ const toLocationLabel = (locations: any, workplaceType?: string | null): string 
 };
 
 // Normalise the Json `benefits` field into a clean string array.
-const toBenefits = (benefits: any): string[] => {
+const toBenefits = (benefits: unknown): string[] => {
   let list = benefits;
   if (typeof list === "string") {
     try { list = JSON.parse(list); } catch { list = null; }

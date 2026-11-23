@@ -20,6 +20,7 @@
 // stored as-entered and may differ only in case from the uploaded value.
 
 import { prisma } from '@/app/lib/db'
+import { forCompany } from '@/app/lib/data/tenant'
 
 // Full scalar StaffRecord shape — matches what the previous per-row
 // findUnique/findFirst calls returned (all scalar columns, no relations).
@@ -51,8 +52,8 @@ export function normalizeStaffId(raw: unknown): string {
  * lookup maps. One DB query regardless of how many rows the upload has.
  */
 export async function buildStaffIndex(companyId: string): Promise<StaffIndex> {
-  const staff = await prisma.staffRecord.findMany({
-    where: { companyId, isActive: true },
+  const staff = await forCompany(companyId).staffRecord.findMany({
+    where: { isActive: true },
   })
 
   const byStaffId = new Map<string, IndexedStaff>()

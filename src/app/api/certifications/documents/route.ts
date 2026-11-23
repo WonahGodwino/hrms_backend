@@ -1,12 +1,13 @@
 import { NextRequest } from 'next/server';
-import path from 'path';
 
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { requireModuleAccess } from '@/app/lib/module-access';
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company';
 import { validateAndStoreFile } from '@/app/lib/uploadUtils';
+import { certificationUploadDir, isExternalDocumentUrl } from '@/app/lib/storage/private-files';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(req: NextRequest) {
 	return handleCorsOptions(req);
@@ -142,7 +143,7 @@ export async function POST(req: NextRequest) {
 
 			try {
 				const file = rawFile as unknown as File;
-				const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'certifications');
+				const uploadsDir = certificationUploadDir();
 				const stored = await validateAndStoreFile(file, uploadsDir);
 				fileName = stored.fileName;
 				fileType = stored.fileType;
@@ -153,6 +154,10 @@ export async function POST(req: NextRequest) {
 		} else {
 			const body = await req.json().catch(() => ({}));
 			certificationRecordId = body.certificationRecordId ?? body.certificationId;
+			// SEC-019: a link supplied by the client must be an external http(s) URL, never a server path.
+			if (body.fileUrl && !isExternalDocumentUrl(body.fileUrl)) {
+				return withCors(ApiResponse.error('Document link must be an http(s) URL', 400), origin);
+			}
 			fileUrl = body.fileUrl;
 			fileName = body.fileName || fileName;
 			fileType = body.fileType || fileType;
@@ -167,8 +172,8 @@ export async function POST(req: NextRequest) {
 			return withCors(ApiResponse.error('certificationRecordId is required', 400), origin);
 		}
 
-		const record = await prisma.certificationRecord.findFirst({
-			where: { id: certificationRecordId, companyId },
+		const record = await forCompany(companyId).certificationRecord.findFirst({
+			where: { id: certificationRecordId },
 		});
 
 		if (!record) {

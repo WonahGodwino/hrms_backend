@@ -10,6 +10,7 @@ import {
   VALID_CATEGORIES,
   VALID_STATUSES,
 } from "@/app/lib/competencies/competency-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -146,12 +147,12 @@ export async function GET(request: NextRequest) {
         where: { competencyId: { in: competencyIds } },
         select: { competencyId: true, designationId: true },
       }),
-      prisma.department.findMany({
-        where: { companyId, status: ACTIVE },
+      forCompany(companyId).department.findMany({
+        where: { status: ACTIVE },
         select: { id: true },
       }),
-      prisma.designation.findMany({
-        where: { companyId, status: ACTIVE },
+      forCompany(companyId).designation.findMany({
+        where: { status: ACTIVE },
         select: { id: true, departmentId: true },
       }),
     ]);

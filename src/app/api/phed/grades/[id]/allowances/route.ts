@@ -4,21 +4,27 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { canAccessCompany } from '@/app/lib/access/company-access'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
 }
 
 // GET /api/phed/grades/:id/allowances
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    // SEC-018: the grade must belong to a company the caller can access.
+    const grade = await prisma.phedGrade.findUnique({ where: { id: params.id }, select: { companyId: true } })
+    if (!grade || !(await canAccessCompany(user, grade.companyId)))
+      return withCors(ApiResponse.notFound('Grade not found'), origin)
 
-    const templates = await (prisma as any).phedAllowanceTemplate.findMany({
+    const templates = await prisma.phedAllowanceTemplate.findMany({
       where: { gradeId: params.id },
       orderBy: { allowanceType: 'asc' },
     })
@@ -30,13 +36,18 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
 // PUT /api/phed/grades/:id/allowances — upsert all templates at once
 // Body: { templates: [{ allowanceType, valueType, value }] }
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    // SEC-018: the grade must belong to a company the caller can access.
+    const grade = await prisma.phedGrade.findUnique({ where: { id: params.id }, select: { companyId: true } })
+    if (!grade || !(await canAccessCompany(user, grade.companyId)))
+      return withCors(ApiResponse.notFound('Grade not found'), origin)
 
     const body = await req.json()
     const allowances = body.allowances ?? body.templates
@@ -60,7 +71,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     const results = await Promise.all(
       allowances.map((t: any) =>
-        (prisma as any).phedAllowanceTemplate.upsert({
+        prisma.phedAllowanceTemplate.upsert({
           where: {
             gradeId_allowanceType: { gradeId: params.id, allowanceType: t.allowanceType },
           },

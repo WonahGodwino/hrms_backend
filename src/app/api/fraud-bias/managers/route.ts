@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
 import { handleCorsOptions } from "@/app/lib/cors";
 import {
   fbRoute,
@@ -13,6 +12,7 @@ import {
   EmptyReason,
 } from "@/app/lib/fraud-bias";
 import { getView } from "@/app/lib/fraud-bias-engine";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -44,9 +44,8 @@ export async function GET(request: NextRequest) {
 
     const cycleId = view.basis.id;
     const [sigs, reviews] = await Promise.all([
-      prisma.fairnessSignal.findMany({
+      forCompany(ctx.companyId).fairnessSignal.findMany({
         where: {
-          companyId: ctx.companyId,
           cycleId,
           status: { in: OPEN_SIGNAL as any },
           managerId: { not: null },
@@ -58,9 +57,8 @@ export async function GET(request: NextRequest) {
           title: true,
         },
       }),
-      prisma.managerReview.findMany({
+      forCompany(ctx.companyId).managerReview.findMany({
         where: {
-          companyId: ctx.companyId,
           cycleId,
           status: "SUBMITTED",
           reviewerId: { not: null },
@@ -80,8 +78,8 @@ export async function GET(request: NextRequest) {
     if (sp.get("includeClean") === "true")
       for (const [m, sc] of team) if (sc.length >= MIN_GROUP) ids.add(m);
 
-    const staff = await prisma.staffRecord.findMany({
-      where: { id: { in: [...ids] }, companyId: ctx.companyId },
+    const staff = await forCompany(ctx.companyId).staffRecord.findMany({
+      where: { id: { in: [...ids] } },
       select: {
         id: true,
         firstName: true,
@@ -90,9 +88,8 @@ export async function GET(request: NextRequest) {
         departments: { select: { name: true } },
       },
     });
-    const cases = await prisma.fairnessCase.findMany({
+    const cases = await forCompany(ctx.companyId).fairnessCase.findMany({
       where: {
-        companyId: ctx.companyId,
         managerId: { in: [...ids] },
         status: { in: ACTIVE_CASE as any },
       },

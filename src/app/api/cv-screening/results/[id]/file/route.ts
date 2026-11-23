@@ -2,11 +2,11 @@
 // GET - streams the original uploaded CV blob, mirroring the
 // recruitment/applicants/[applicationId]/cv download route's convention.
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveCvScreeningCompanyId } from '@/app/lib/cv-screening/companyScope'
+import { forCompany } from '@/app/lib/data/tenant'
 import { readDocumentObject } from '@/app/lib/storage/documents'
 
 export async function OPTIONS(request: NextRequest) {
@@ -33,8 +33,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const disposition = searchParams.get('disposition') === 'inline' ? 'inline' : 'attachment'
 
-    const result = await prisma.screeningCvResult.findFirst({
-      where: { id, companyId: scope.companyId as string },
+    const result = await forCompany(scope.companyId as string).screeningCvResult.findFirst({
+      where: { id },
       select: { fileName: true, mimeType: true, sizeBytes: true, data: true, s3Key: true },
     })
 

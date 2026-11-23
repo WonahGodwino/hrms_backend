@@ -1,13 +1,14 @@
 import { NextRequest } from "next/server";
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { RouteContext } from "@/app/lib/self-appraisal";
 import { readUploadFile } from "@/app/lib/storage/upload-files";
 import {
   logReportEvent,
   reportFilePath,
 } from "@/app/lib/performance-intelligence/intel-utils";
+import { getTrustedClientIp } from "@/app/lib/security/client-ip";
 
 // GET /api/performance-intelligence/shared/:token
 // Unauthenticated download of one frozen report. Every refusal looks the same (404)
@@ -26,7 +27,7 @@ export async function GET(
     });
     if (!share) return notFound();
     const ip =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
+      getTrustedClientIp(request.headers) || null;
     const now = new Date();
     const deny = async (reason: string) => {
       await logReportEvent({

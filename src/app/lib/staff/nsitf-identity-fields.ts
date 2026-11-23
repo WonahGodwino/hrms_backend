@@ -14,6 +14,8 @@
 // always hardcodes it to "NIN" wherever it's generated; NIN is the only
 // identification type this company uses.
 
+import { formatPersonName } from '@/app/lib/staff/nameFormat'
+
 export const GENDER_OPTIONS = ['Male', 'Female']
 export const MARITAL_STATUS_OPTIONS = ['Married', 'Single', 'Divorced', 'Others']
 
@@ -128,6 +130,10 @@ export function parseNsitfIdentityRow(
     }
     if (field === 'maritalStatus') {
       out[field] = normalizeEnum(raw, MARITAL_STATUS_OPTIONS)
+      continue
+    }
+    if (field === 'middleName') {
+      out[field] = formatPersonName(raw)
       continue
     }
     out[field] = raw

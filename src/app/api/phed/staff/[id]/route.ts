@@ -9,7 +9,8 @@ import { normalizeState } from '@/app/lib/phed/csv-parser'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
   if (rl) return withCors(rl, origin)
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     let staff: any
 
     try {
-      staff = await (prisma as any).phedStaff.findUnique({
+      staff = await prisma.phedStaff.findUnique({
         where: { id: params.id },
         include: {
           grade:    true,
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     } catch (_fullQueryError) {
       // Fallback: query without union/cooperative nested includes
       console.warn('[PHED staff/:id] Full include query failed, falling back to safe query:', _fullQueryError)
-      staff = await (prisma as any).phedStaff.findUnique({
+      staff = await prisma.phedStaff.findUnique({
         where: { id: params.id },
         include: {
           grade:    true,
@@ -45,11 +46,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       })
       if (staff) {
         const [unions, cooperatives] = await Promise.all([
-          (prisma as any).phedStaffUnion.findMany({
+          prisma.phedStaffUnion.findMany({
             where: { staffId: staff.id },
             include: { union: true },
           }).catch(() => []),
-          (prisma as any).phedStaffCooperative.findMany({
+          prisma.phedStaffCooperative.findMany({
             where: { staffId: staff.id },
             include: { cooperative: true },
           }).catch(() => []),
@@ -86,7 +87,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -142,7 +144,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     // Ownership check before update — select payroll-affecting fields too so
     // we can diff them against `data` for the IAD Changes tab (PRD 13.3).
-    const existing = await (prisma as any).phedStaff.findUnique({
+    const existing = await prisma.phedStaff.findUnique({
       where: { id: params.id },
       select: { companyId: true, staffId: true, ...Object.fromEntries([...PHED_PAYROLL_AFFECTING_FIELDS].map(f => [f, true])) },
     })
@@ -156,7 +158,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     if (stateRaw && !normalizedState)
       return withCors(ApiResponse.error('Invalid State of Residence — use Akwa Ibom, Bayelsa, Cross River or Rivers', 400), origin)
 
-    const staff = await (prisma as any).phedStaff.update({
+    const staff = await prisma.phedStaff.update({
       where: { id: params.id },
       data,
       include: { grade: true, region: true, feeder: true, payPoint: true },
@@ -196,18 +198,19 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user  = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
-    const existing = await (prisma as any).phedStaff.findUnique({ where: { id: params.id }, select: { companyId: true } })
+    const existing = await prisma.phedStaff.findUnique({ where: { id: params.id }, select: { companyId: true } })
     if (!existing) return withCors(ApiResponse.notFound('Staff not found'), origin)
     if (user.role !== 'SUPER_ADMIN' && user.companyId && existing.companyId !== user.companyId)
       return withCors(ApiResponse.notFound('Staff not found'), origin)
-    await (prisma as any).phedStaff.update({ where: { id: params.id }, data: { isActive: false } })
+    await prisma.phedStaff.update({ where: { id: params.id }, data: { isActive: false } })
     return withCors(ApiResponse.success(null, 'Staff deactivated'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }

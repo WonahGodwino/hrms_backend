@@ -2,18 +2,23 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requirePhedReadAccess } from '@/app/lib/phed/access-role'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import {
   exportPeriodSummaryToExcel,
   exportPeriodSummaryToPdf,
   type PeriodSummaryData,
 } from '@/app/lib/phed/report-export'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // GET /api/phed/pay-periods/:id/summary?format=json|xlsx|pdf
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req);
+  if (deferred) return deferred;
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
   if (rl) return withCors(rl, origin)
@@ -24,12 +29,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const format = new URL(req.url).searchParams.get('format') ?? 'json'
 
     const [period, payrolls, validationCounts] = await Promise.all([
-      (prisma as any).phedPayPeriod.findUnique({
+      prisma.phedPayPeriod.findUnique({
         where:  { id: params.id },
         include: { company: { select: { companyName: true } } },
       }),
-      (prisma as any).phedComputedPayroll.findMany({ where: { payPeriodId: params.id } }),
-      (prisma as any).phedValidation.groupBy({
+      prisma.phedComputedPayroll.findMany({ where: { payPeriodId: params.id } }),
+      prisma.phedValidation.groupBy({
         by: ['status'],
         where: { payPeriodId: params.id },
         _count: { status: true },
@@ -95,7 +100,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         headers: {
           'Content-Type':        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'Content-Disposition': `attachment; filename="period-summary-${safeName}.xlsx"`,
-          'Access-Control-Allow-Origin': origin ?? '*',
+          ...getCorsHeaders(origin),
         },
       })
     }
@@ -107,7 +112,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         headers: {
           'Content-Type':        'application/pdf',
           'Content-Disposition': `attachment; filename="period-summary-${safeName}.pdf"`,
-          'Access-Control-Allow-Origin': origin ?? '*',
+          ...getCorsHeaders(origin),
         },
       })
     }

@@ -12,7 +12,8 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -47,19 +48,22 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     const actor = user.userId || user.email || 'system'
 
-    await prisma.recruitmentCandidateAssessment.update({
+    // DB-002: status changes and the onboarding (with its tasks) are created
+    // together; a failure leaves the candidate where they were.
+    const onboardingId = await prisma.$transaction(async (tx) => {
+    await tx.recruitmentCandidateAssessment.update({
       where: { id: params.id }, data: { roundStatus: 'COMPLETED' },
     })
-    await prisma.jobApplication.update({
+    await tx.jobApplication.update({
       where: { id: assessment.applicationId }, data: { status: 'PRE_OFFER_ONBOARDING', updatedBy: actor },
     })
 
     // Idempotent — reuse the existing pre-offer onboarding for this
     // application if proceed-to-offer was already called once.
-    let onboardingId = assessment.application?.onboarding?.id || null
-    if (!onboardingId) {
+    let existingId = assessment.application?.onboarding?.id || null
+    if (!existingId) {
       const now = new Date()
-      const onboarding = await prisma.onboarding.create({
+      const onboarding = await tx.onboarding.create({
         data: {
           companyId,
           applicationId: assessment.applicationId,
@@ -70,10 +74,10 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         },
         select: { id: true },
       })
-      onboardingId = onboarding.id
+      existingId = onboarding.id
 
       if (template.tasks.length) {
-        await prisma.onboardingTask.createMany({
+        await tx.onboardingTask.createMany({
           data: template.tasks.map((t) => ({
             onboardingId: onboarding.id,
             title: t.title,
@@ -86,6 +90,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         })
       }
     }
+    return existingId
+    })
 
     return withCors(ApiResponse.success({
       candidateId: assessment.application?.candidateId,

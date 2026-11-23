@@ -3,21 +3,22 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
 }
 
 // GET /api/certifications/[id]/renewal/draft
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'TRAINING', ['STAFF', 'HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER'])
 
-    const draft = await prisma.trainingAuditLog.findFirst({
+    const draft = await forCompany(user.companyId!).trainingAuditLog.findFirst({
       where: {
-        companyId: user.companyId!,
         actorId: user.userId,
         entityType: 'certification_renewal_draft',
         entityId: params.id,
@@ -44,7 +45,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 }
 
 // POST /api/certifications/[id]/renewal/draft
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -52,9 +54,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     const body = await req.json().catch(() => ({}))
 
-    const existingDraft = await prisma.trainingAuditLog.findFirst({
+    const existingDraft = await forCompany(user.companyId!).trainingAuditLog.findFirst({
       where: {
-        companyId: user.companyId!,
         actorId: user.userId,
         entityType: 'certification_renewal_draft',
         entityId: params.id,
@@ -100,15 +101,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 }
 
 // DELETE /api/certifications/[id]/renewal/draft
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user = await requireModuleAccess(token, 'TRAINING', ['STAFF', 'HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER'])
 
-    await prisma.trainingAuditLog.deleteMany({
+    await forCompany(user.companyId!).trainingAuditLog.deleteMany({
       where: {
-        companyId: user.companyId!,
         actorId: user.userId,
         entityType: 'certification_renewal_draft',
         entityId: params.id,

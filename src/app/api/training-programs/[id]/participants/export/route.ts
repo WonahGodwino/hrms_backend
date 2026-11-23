@@ -3,14 +3,16 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
 }
 
 // GET /api/training-programs/:id/participants/export?format=csv|xlsx
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -22,9 +24,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const { companyId } = resolved
     const format = searchParams.get('format') ?? 'csv'
 
-    const program = await prisma.trainingProgram.findFirst({
+    const program = await forCompany(companyId).trainingProgram.findFirst({
       where: {
-        companyId,
         deletedAt: null,
         OR: [{ id: params.id }, { slug: params.id }],
       },
@@ -117,7 +118,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         headers: {
           'Content-Type': 'text/csv',
           'Content-Disposition': `attachment; filename="${filename}"`,
-          'Access-Control-Allow-Origin': origin ?? '*',
+          ...getCorsHeaders(origin),
         },
       })
     }

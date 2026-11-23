@@ -5,14 +5,13 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
 import { exportReportResponse, IAD_NEW_HIRED_COLS } from '@/app/lib/phed/report-export'
+import { forCompany } from '@/app/lib/data/tenant'
+import { toNum } from '@/app/lib/phed/currency-words'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-function toNum(v: unknown): number {
-  if (v === null || v === undefined) return 0
-  if (typeof v === 'object' && typeof (v as any).toNumber === 'function') return (v as any).toNumber()
-  return Number(v) || 0
-}
+
 
 // GET /api/phed/pay-periods/:id/reports/iad-new-hired — IAD Page, New Hired
 // tab (PRD 13.3). Staff newly onboarded into payroll this period, with
@@ -20,7 +19,11 @@ function toNum(v: unknown): number {
 // (Module 3.3) on a best-effort basis via the shared email — no FK exists
 // between PhedStaff and StaffRecord/Onboarding, so a missing match is
 // expected and not an error.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req);
+  if (deferred) return deferred;
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'report')
   if (rl) return withCors(rl, origin)
@@ -46,8 +49,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       orderBy: { staffIdCode: 'asc' },
     })
 
-    const prevPeriods = await prisma.phedPayPeriod.findMany({
-      where:  { companyId: period.companyId, id: { not: params.id } },
+    const prevPeriods = await forCompany(period.companyId).phedPayPeriod.findMany({
+      where:  { id: { not: params.id } },
       select: { id: true },
     })
     const prevStaffIds = new Set<string>()

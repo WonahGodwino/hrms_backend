@@ -136,7 +136,7 @@ export async function upsertPayrollAndPayslip(
   // Object storage (S3): best-effort upload after commit — never blocks or
   // fails the DB write; reads fall back to fileData while storage is off.
   try {
-    const fileData = (input.payslipData as any).fileData as Uint8Array | Buffer | null | undefined
+    const fileData = input.payslipData.fileData
     if (fileData) {
       await uploadPayslipToS3({
         payslipId: result.payslipId,

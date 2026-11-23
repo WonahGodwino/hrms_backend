@@ -308,6 +308,7 @@ function resolveMime(detected: string | undefined, ext: string): string | null {
 const safeName = (n: string) =>
   path
     .basename(n)
+    // eslint-disable-next-line no-control-regex -- strips control characters on purpose
     .replace(/[\u0000-\u001f\u007f\\/]/g, "_")
     .trim()
     .slice(0, 200) || "document";

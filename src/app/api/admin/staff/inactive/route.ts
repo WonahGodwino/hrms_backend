@@ -5,6 +5,7 @@ import { requireRole } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
@@ -162,10 +163,9 @@ export async function GET(request: NextRequest) {
 async function checkStaffAccess(currentUser: any, companyId: string): Promise<boolean> {
 	if (currentUser.role === 'SUPER_ADMIN') return true;
 
-	const userAssignments = await prisma.userCompany.findMany({
+	const userAssignments = await forCompany(companyId).userCompany.findMany({
 		where: {
-			userId: currentUser.userId,
-			companyId: companyId,
+			userId: currentUser.userId
 		},
 	});
 

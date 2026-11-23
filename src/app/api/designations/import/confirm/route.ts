@@ -38,13 +38,13 @@ export async function POST(req: NextRequest) {
       const code = obj.code || ''
       if (!title || !code) { skipped++; continue }
 
-      const existing = await (prisma as any).designation.findFirst({ where: { code, companyId: companyId || null } })
+      const existing = await prisma.designation.findFirst({ where: { code, companyId: companyId || null } })
       if (existing) { skipped++; continue }
 
       const basePay = obj.basepay || obj.salary || obj.basesalary;
 
       await assertTrialCapacity(companyId, 'designations')
-      await (prisma as any).designation.create({
+      await prisma.designation.create({
         data: {
           companyId,
           title,

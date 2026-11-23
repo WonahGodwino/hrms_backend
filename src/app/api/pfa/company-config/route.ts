@@ -14,6 +14,7 @@ import { findCompanyDisabledCodesInUse } from '@/app/lib/staff/pension-fields'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { logStaffActivity } from '@/app/lib/device/device-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 const ALLOWED_ROLES = ['HR', 'ADMIN', 'SUPER_ADMIN']
 
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
 
     const [pfas, disabledRows, inUse] = await Promise.all([
       prisma.pensionFundAdministrator.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
-      prisma.companyDisabledPfa.findMany({ where: { companyId: user.companyId }, select: { pfaCode: true } }),
+      forCompany(user.companyId).companyDisabledPfa.findMany({ select: { pfaCode: true } }),
       findCompanyDisabledCodesInUse(user.companyId),
     ])
 
@@ -73,7 +74,7 @@ export async function PATCH(req: NextRequest) {
         create: { companyId: user.companyId, pfaCode, disabledBy: user.userId },
       })
     } else {
-      await prisma.companyDisabledPfa.deleteMany({ where: { companyId: user.companyId, pfaCode } })
+      await forCompany(user.companyId).companyDisabledPfa.deleteMany({ where: { pfaCode } })
     }
 
     const staff = await prisma.staffRecord.findUnique({ where: { id: user.userId }, select: { firstName: true, lastName: true } })

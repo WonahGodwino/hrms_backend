@@ -16,10 +16,11 @@ import * as XLSX from 'xlsx'
 
 import { getCorsHeaders, handleCorsOptions, withCors } from '@/app/lib/cors'
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { validatePayrollVerifierCompanyAccess } from '@/app/lib/payroll-verifier/access'
-import { fetchBanks } from '@/app/lib/payroll-verifier/banks'
-import { processRow } from '@/app/lib/payroll-verifier/verify'
+import { validatePayrollVerifierCompanyAccess } from '@/app/lib/payroll/verifier/access'
+import { fetchBanks } from '@/app/lib/payroll/verifier/banks'
+import { processRow } from '@/app/lib/payroll/verifier/verify'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
 
 export const dynamic = 'force-dynamic'
 
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
 			return withCors(ApiResponse.error('Only .xlsx and .xls files are accepted.', 400), origin)
 		}
 
-		let rows: Record<string, any>[]
+		let rows: Record<string, unknown>[]
 		try {
 			const arrayBuffer = await file.arrayBuffer()
 			const workbook = XLSX.read(arrayBuffer, { type: 'array' })
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest) {
 			const sheet = workbook.Sheets[firstSheetName]
 			rows = XLSX.utils.sheet_to_json(sheet)
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err)
+			const message = publicErrorMessage(err)
 			return withCors(ApiResponse.error(`Could not parse Excel file: ${message}`, 422), origin)
 		}
 

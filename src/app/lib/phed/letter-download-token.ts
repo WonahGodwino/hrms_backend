@@ -4,13 +4,14 @@
 // JWT_SECRET so it cannot be forged; the download route verifies both.
 
 import { sign, verify } from 'jsonwebtoken'
+import { requireSecret } from '@/app/lib/config/secrets'
 
-const SECRET = process.env.JWT_SECRET || 'hrms_super_secure_jwt_secret_2024_min_32_chars_long!'
+const secret = () => requireSecret('JWT_SECRET')
 const KIND = 'phed-letter-download'
 const EXPIRES_IN_SECONDS = 15 * 60
 
 export function signLetterDownloadToken(runId: string, companyId: string): { token: string; expiresIn: number } {
-  const token = sign({ runId, companyId, kind: KIND }, SECRET, { expiresIn: EXPIRES_IN_SECONDS })
+  const token = sign({ runId, companyId, kind: KIND }, secret(), { expiresIn: EXPIRES_IN_SECONDS })
   return { token, expiresIn: EXPIRES_IN_SECONDS }
 }
 
@@ -18,7 +19,7 @@ export function verifyLetterDownloadToken(
   token: string,
 ): { runId: string; companyId: string } | null {
   try {
-    const payload = verify(token, SECRET) as any
+    const payload = verify(token, secret()) as any
     if (!payload || payload.kind !== KIND) return null
     if (typeof payload.runId !== 'string' || typeof payload.companyId !== 'string') return null
     return { runId: payload.runId, companyId: payload.companyId }

@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { RouteContext } from "@/app/lib/self-appraisal";
@@ -7,6 +6,7 @@ import { describeScore } from "@/app/lib/manager-review";
 import { notFound, ok } from "@/app/lib/pip";
 import { REC_INCLUDE, serializeRec } from "@/app/lib/promotion";
 import { dashCtx, estimateCompensation } from "@/app/lib/succession-dashboard";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -27,8 +27,8 @@ export async function GET(
     );
     if (!c.ok) return c.response;
     const { actor, companyId } = c.ctx;
-    const rec = await prisma.promotionRecommendation.findFirst({
-      where: { id, companyId },
+    const rec = await forCompany(companyId).promotionRecommendation.findFirst({
+      where: { id },
       include: REC_INCLUDE,
     });
     if (!rec) return notFound(origin, "Recommendation");

@@ -3,6 +3,7 @@ import {
   createNotification,
   NOTIFICATION_TYPES,
 } from "@/app/lib/notifications/helpers";
+import { fmtDate } from "@/app/lib/appraisal-cycles/cycle-notifications";
 
 const DUE_SOON_DAYS = 3; // reminder goes out this many days before the date
 const OVERDUE_REPEAT_DAYS = 7; // overdue reminders repeat weekly
@@ -14,13 +15,7 @@ export const startOfTodayUTC = () => {
   );
 };
 
-const fmtDate = (d: Date) =>
-  d.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  });
+
 
 type ReviewLite = {
   id: string;

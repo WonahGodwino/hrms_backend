@@ -9,6 +9,7 @@ import { actorFor, recordCoreSetupEvent, diffFields } from '@/app/lib/core-setup
 import { termsStatus } from '@/app/lib/ai/terms'
 import { estimateCost, isFailed, isRefused } from '@/app/lib/ai/monitoring'
 import { getModelInfo } from '@/app/lib/ai/models'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -69,7 +70,7 @@ export async function GET(request: NextRequest) {
 
     // This month's estimated cost (logged token counts x the model's rates) and number of replies, for the Usage section.
     const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1))
-    const logs = await prisma.aIUsageLog.findMany({ where: { companyId, service: 'assistant', createdAt: { gte: monthStart } }, select: { model: true, inputLength: true, outputLength: true, metadata: true } })
+    const logs = await forCompany(companyId).aIUsageLog.findMany({ where: { service: 'assistant', createdAt: { gte: monthStart } }, select: { model: true, inputLength: true, outputLength: true, metadata: true } })
     const answered = logs.filter((l) => !isRefused(l.metadata))
     const ok = answered.filter((l) => !isFailed(l.metadata))
     const usage = { monthEstimate: Number(estimateCost(ok).toFixed(4)), replies: ok.length, failed: answered.length - ok.length }

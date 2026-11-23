@@ -21,12 +21,16 @@ import {
   DAYS_WORKED_SYSTEM_FIELD,
   DAYS_WORKED_DISPLAY_NAME
 } from '@/app/lib/payroll/generation/field-resolver'
+import { forCompany } from '@/app/lib/data/tenant'
+import { readJsonBody } from '@/app/lib/validation/request-body'
+import { compensationBodySchema } from '@/app/lib/validation/payroll-staff-schemas'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -55,12 +59,11 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const requestedTemplateId = searchParams.get('templateId') || staffRecord.payrollProfile?.templateId || null
 
     const template = requestedTemplateId
-      ? await prisma.payrollTemplate.findFirst({
-          where: { id: requestedTemplateId, companyId: staffRecord.companyId },
+      ? await forCompany(staffRecord.companyId).payrollTemplate.findFirst({
+          where: { id: requestedTemplateId },
           include: { fields: { orderBy: { order: 'asc' } } }
         })
-      : await prisma.payrollTemplate.findFirst({
-          where: { companyId: staffRecord.companyId },
+      : await forCompany(staffRecord.companyId).payrollTemplate.findFirst({
           include: { fields: { orderBy: { order: 'asc' } } }
         })
 
@@ -140,7 +143,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -151,7 +155,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     const token = authHeader.replace('Bearer ', '')
     const user = await requireModuleAccess(token, 'PAYROLL', ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
-    const body = await request.json()
+    const parsedBody = await readJsonBody(request, compensationBodySchema)
+    if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.message, 400), origin)
+    const body = parsedBody.data
     const { templateId, values } = body as { templateId?: string; values?: Record<string, unknown> }
 
     if (!templateId) {
@@ -175,8 +181,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       return withCors(ApiResponse.error(`You do not have ${userRole} access for this company`, 403), origin)
     }
 
-    const template = await prisma.payrollTemplate.findFirst({
-      where: { id: templateId, companyId: staffRecord.companyId },
+    const template = await forCompany(staffRecord.companyId).payrollTemplate.findFirst({
+      where: { id: templateId },
       include: {
         fields: {
           where: {

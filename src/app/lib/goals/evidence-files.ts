@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
 import { withCors } from "@/app/lib/cors";
 import { HttpError } from "./goal-utils";
 import { isS3Configured, getS3Object, putS3Object } from "@/app/lib/storage/s3";
+import { detectFileType } from "@/app/lib/storage/private-files";
+import { log, serializeError } from "@/app/lib/observability/logger";
 
 export const UPLOAD_ROOT =
   process.env.GOAL_EVIDENCE_UPLOAD_DIR || "/var/app-uploads/goal-evidence";
@@ -26,6 +28,24 @@ export const CONTENT_TYPES: Record<string, string> = {
   ".csv": "text/csv",
   ".txt": "text/plain",
 };
+
+const ZIP = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+const OLE = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+const starts = (b: Buffer, sig: Buffer) => b.length >= sig.length && b.subarray(0, sig.length).equals(sig);
+
+/**
+ * Whether the bytes really are the type the extension claims (SEC-003). PDFs and images are judged by
+ * detectFileType; Office files by their container (ZIP for .docx/.xlsx/.pptx, OLE for .doc/.xls/.ppt).
+ * Plain-text types (.csv, .txt) have no signature and pass on the extension alone.
+ */
+export function evidenceBytesMatchExtension(ext: string, bytes: Buffer): boolean {
+  const mime = CONTENT_TYPES[ext];
+  if (!mime) return false;
+  if ([".docx", ".xlsx", ".pptx"].includes(ext)) return starts(bytes, ZIP);
+  if ([".doc", ".xls", ".ppt"].includes(ext)) return starts(bytes, OLE);
+  if (ext === ".csv" || ext === ".txt") return true;
+  return detectFileType(bytes, { [mime]: ext.slice(1) })?.mime === mime;
+}
 
 // exactly what POST /api/goals/uploads produces
 const URL_RE =
@@ -61,7 +81,7 @@ export async function uploadEvidenceToS3(
   try {
     await putS3Object(evidenceS3Key(fileUrl), new Uint8Array(bytes), mimeType || undefined);
   } catch (e) {
-    console.warn("[evidence] S3 upload skipped/failed", e);
+    log.warn("[evidence] S3 upload skipped/failed", { error: serializeError(e) });
   }
 }
 
@@ -98,6 +118,7 @@ export function sanitizeFileName(value: unknown): string {
     throw new HttpError(400, "fileName must be a string");
   const name = path
     .basename(value)
+    // eslint-disable-next-line no-control-regex -- strips control characters on purpose
     .replace(/[\u0000-\u001f\u007f\\/]/g, "_")
     .trim()
     .slice(0, 255);

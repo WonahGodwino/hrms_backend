@@ -7,6 +7,7 @@
 import { prisma } from '@/app/lib/db'
 import { sendEmail } from '@/app/lib/email'
 import { buildIcsAttachment } from '@/app/lib/calendar/ics'
+import { fmtWhen } from '@/app/lib/meetings/notify'
 
 const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk'
 
@@ -114,17 +115,17 @@ ${companyName} Talent Team`
 export async function notifyPlanInstance(
   instanceId: string,
 ): Promise<{ attempted: number; sent: number; failed: number }> {
-  const inst: any = await (prisma as any).assessmentPlanInstance.findUnique({ where: { id: instanceId } })
+  const inst: any = await prisma.assessmentPlanInstance.findUnique({ where: { id: instanceId } })
   if (!inst) return { attempted: 0, sent: 0, failed: 0 }
 
   const [plan, company, job, designation] = await Promise.all([
-    (prisma as any).recruitmentAssessmentPlan.findUnique({
+    prisma.recruitmentAssessmentPlan.findUnique({
       where: { id: inst.planId },
       include: { rounds: { orderBy: { order: 'asc' }, select: { id: true, order: true, title: true, interviewType: true, duration: true, gradingMetric: true, evaluationPlan: true } } },
     }),
     prisma.company.findUnique({ where: { id: inst.companyId }, select: { companyName: true } }),
     inst.jobId ? prisma.job.findUnique({ where: { id: inst.jobId }, select: { title: true, department: true } }) : Promise.resolve(null),
-    inst.designationId ? (prisma as any).designation.findUnique({ where: { id: inst.designationId }, select: { title: true } }) : Promise.resolve(null),
+    inst.designationId ? prisma.designation.findUnique({ where: { id: inst.designationId }, select: { title: true } }) : Promise.resolve(null),
   ])
   if (!plan) return { attempted: 0, sent: 0, failed: 0 }
 
@@ -236,15 +237,7 @@ ${companyName} Talent Team`
   return { attempted: targets.length, sent, failed }
 }
 
-// ------- Per-candidate interview scheduling notification -------
 
-function fmtWhen(d: Date | null): string {
-  if (!d || isNaN(d.getTime())) return 'To be confirmed'
-  return d.toLocaleString('en-GB', {
-    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
-}
 
 // Notify the assigned interviewers that a specific candidate's interview has been
 // scheduled — including the JOB they're interviewing for, the round and the time.
@@ -255,7 +248,7 @@ export async function notifyInterviewScheduled(
   const interviewerIds = (opts.interviewerIds || []).map(String).filter(Boolean)
   if (interviewerIds.length === 0) return { attempted: 0, sent: 0, failed: 0 }
 
-  const a: any = await (prisma as any).recruitmentCandidateAssessment.findUnique({
+  const a: any = await prisma.recruitmentCandidateAssessment.findUnique({
     where: { id: assessmentId },
     include: {
       company: { select: { companyName: true } },
@@ -492,7 +485,7 @@ export async function notifyCandidateInterviewScheduled(
   assessmentId: string,
   opts: { scheduledAt: Date | null; notes?: string | null; reschedule?: boolean; reminder?: boolean; meetingUrl?: string | null },
 ): Promise<{ success: boolean }> {
-  const a: any = await (prisma as any).recruitmentCandidateAssessment.findUnique({
+  const a: any = await prisma.recruitmentCandidateAssessment.findUnique({
     where: { id: assessmentId },
     include: {
       company: { select: { companyName: true } },

@@ -1,9 +1,9 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -24,16 +24,16 @@ export async function GET(req: NextRequest) {
     if (!companyId) return withCors(ApiResponse.error('companyId is required', 400), origin)
 
     // Find the PHED staff record for this user by email
-    const staffRecord = await (prisma as any).phedStaff.findFirst({
-      where: { companyId, email: { equals: user.email ?? '', mode: 'insensitive' }, isActive: true },
+    const staffRecord = await forCompany(companyId).phedStaff.findFirst({
+      where: { email: { equals: user.email ?? '', mode: 'insensitive' }, isActive: true },
       select: { id: true, staffId: true, firstName: true, lastName: true },
     })
 
     if (!staffRecord)
       return withCors(ApiResponse.error('No PHED staff record found for your account', 404), origin)
 
-    const payrolls = await (prisma as any).phedComputedPayroll.findMany({
-      where: { staffId: staffRecord.id, companyId },
+    const payrolls = await forCompany(companyId).phedComputedPayroll.findMany({
+      where: { staffId: staffRecord.id },
       include: {
         payPeriod: {
           select: { id: true, periodName: true, year: true, month: true, status: true, approvedAt: true },

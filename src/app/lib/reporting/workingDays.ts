@@ -10,6 +10,7 @@
 // on, so a company's actual work week and public holidays are respected
 // consistently everywhere they're used.
 import { prisma } from '@/app/lib/db'
+import { forCompany } from '@/app/lib/data/tenant'
 
 // ISO-style weekday numbering used by Company.workWeekPattern: 1=Monday ... 7=Sunday.
 export function parseWorkWeekPattern(pattern: string | null | undefined): number[] {
@@ -51,10 +52,8 @@ export async function loadCompanyCalendar(companyId: string, rangeStart?: Date, 
     select: { workWeekPattern: true }
   })
 
-  const holidays = await prisma.publicHoliday.findMany({
-    where: {
-      companyId,
-      OR: [...(rangeStart && rangeEnd ? [{ date: { gte: rangeStart, lte: rangeEnd } }] : []), { isRecurring: true }]
+  const holidays = await forCompany(companyId).publicHoliday.findMany({
+    where: { OR: [...(rangeStart && rangeEnd ? [{ date: { gte: rangeStart, lte: rangeEnd } }] : []), { isRecurring: true }]
     }
   })
 

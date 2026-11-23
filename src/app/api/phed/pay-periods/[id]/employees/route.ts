@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requirePhedReadAccess } from '@/app/lib/phed/access-role'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import {
   exportReportToExcel, exportReportToPdf, ReportColDef,
@@ -12,6 +12,8 @@ import {
   INDIV_COLS_DEDUCTIONS, INDIV_COL_TOTAL_DEDUCTIONS,
   INDIV_COLS_POST_NET, INDIV_COLS_BANKING, INDIV_COLS_TAX,
 } from '@/app/lib/phed/report-export'
+import { forCompany } from '@/app/lib/data/tenant'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -24,7 +26,11 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 //   category=REGULAR|CONTRACT
 //   paymentStatus=ACTIVE|WITHHELD
 //   page, limit           pagination (json only; xlsx/pdf always returns full list)
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req);
+  if (deferred) return deferred;
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'report')
   if (rl) return withCors(rl, origin)
@@ -40,7 +46,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const page          = Math.max(1, Number(p.get('page')  ?? 1))
     const limit         = Math.max(1, Number(p.get('limit') ?? 50))
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({
+    const period = await prisma.phedPayPeriod.findUnique({
       where:  { id: params.id },
       select: { id: true, periodName: true, companyId: true, status: true,
                 company: { select: { companyName: true } } },
@@ -65,8 +71,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     // ── JSON (paginated) ──────────────────────────────────────
     if (format === 'json') {
       const [total, records] = await Promise.all([
-        (prisma as any).phedComputedPayroll.count({ where }),
-        (prisma as any).phedComputedPayroll.findMany({
+        prisma.phedComputedPayroll.count({ where }),
+        prisma.phedComputedPayroll.findMany({
           where,
           orderBy: { staffName: 'asc' },
           skip:    (page - 1) * limit,
@@ -92,7 +98,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     }
 
     // ── xlsx / pdf — full list, no pagination ─────────────────
-    const allRecords = await (prisma as any).phedComputedPayroll.findMany({
+    const allRecords = await prisma.phedComputedPayroll.findMany({
       where,
       orderBy: { staffName: 'asc' },
     })
@@ -104,12 +110,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     // Load dynamic entity data for union / cooperative / deduction breakdowns
     const staffIds = allRecords.map((r: any) => r.staffId)
     const [allUnions, allCoops, allDeductions, staffUnions, staffCoops, staffDeductions] = await Promise.all([
-      (prisma as any).phedUnion.findMany({ where: { companyId: period.companyId, isActive: true }, orderBy: { name: 'asc' } }),
-      (prisma as any).phedCooperative.findMany({ where: { companyId: period.companyId, isActive: true }, orderBy: { name: 'asc' } }),
-      (prisma as any).phedDeductionLiability.findMany({ where: { companyId: period.companyId, isActive: true }, orderBy: { name: 'asc' } }),
-      (prisma as any).phedStaffUnion.findMany({ where: { staffId: { in: staffIds } } }),
-      (prisma as any).phedStaffCooperative.findMany({ where: { staffId: { in: staffIds } } }),
-      (prisma as any).phedStaffDeductionLiability.findMany({ where: { staffId: { in: staffIds } } }),
+      forCompany(period.companyId).phedUnion.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+      forCompany(period.companyId).phedCooperative.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+      forCompany(period.companyId).phedDeductionLiability.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+      prisma.phedStaffUnion.findMany({ where: { staffId: { in: staffIds } } }),
+      prisma.phedStaffCooperative.findMany({ where: { staffId: { in: staffIds } } }),
+      prisma.phedStaffDeductionLiability.findMany({ where: { staffId: { in: staffIds } } }),
     ])
 
     // Build membership/amount lookup maps keyed by staffId
@@ -175,7 +181,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         headers: {
           'Content-Type':        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'Content-Disposition': `attachment; filename="individual-summary-${safeName}.xlsx"`,
-          'Access-Control-Allow-Origin': origin ?? '*',
+          ...getCorsHeaders(origin),
         },
       })
     }
@@ -189,7 +195,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         headers: {
           'Content-Type':        'application/pdf',
           'Content-Disposition': `attachment; filename="individual-summary-${safeName}.pdf"`,
-          'Access-Control-Allow-Origin': origin ?? '*',
+          ...getCorsHeaders(origin),
         },
       })
     }

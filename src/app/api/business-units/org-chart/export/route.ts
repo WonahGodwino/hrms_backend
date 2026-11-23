@@ -3,16 +3,17 @@
 // (the frontend requests it as a blob). `format` is accepted for forward-compat;
 // CSV is currently produced regardless.
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { getUserFromToken } from '@/app/lib/auth'
 import { resolveBUCompanyId, staffName } from '@/app/lib/business-units/bu-utils'
+import { getCorsHeaders } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   const { handleCorsOptions } = await import('@/app/lib/cors')
   return handleCorsOptions(req)
 }
 
-function csvCell(v: any): string {
+function csvCell(v: unknown): string {
   const s = String(v ?? '')
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
   const json = (status: number, message: string) =>
     new Response(JSON.stringify({ success: false, message }), {
       status,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': origin || '*' },
+      headers: { 'Content-Type': 'application/json', ...getCorsHeaders(origin)},
     })
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -33,8 +34,8 @@ export async function GET(req: NextRequest) {
     if (scope.error) return json(scope.error.status, scope.error.message)
     const companyId = scope.companyId as string
 
-    const units = await (prisma as any).businessUnit.findMany({
-      where: { companyId, archived: 0 },
+    const units = await forCompany(companyId).businessUnit.findMany({
+      where: { archived: 0 },
       orderBy: { name: 'asc' },
       include: {
         head: { select: { firstName: true, lastName: true } },
@@ -62,7 +63,7 @@ export async function GET(req: NextRequest) {
       headers: {
         'Content-Type': 'text/csv',
         'Content-Disposition': 'attachment; filename="business_unit_org_chart.csv"',
-        'Access-Control-Allow-Origin': origin || '*',
+        ...getCorsHeaders(origin),
       },
     })
   } catch {

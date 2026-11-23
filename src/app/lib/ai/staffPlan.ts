@@ -31,7 +31,7 @@ export type StaffPlanResult =
     }
 
 const MAX_MANAGER_CHAIN = 25
-const fullName = (s: { firstName: string; lastName: string; email?: string }) => `${s.firstName} ${s.lastName}`.trim() || s.email || 'Staff member'
+export const fullName = (s: { firstName: string; lastName: string; email?: string }) => `${s.firstName} ${s.lastName}`.trim() || s.email || 'Staff member'
 const clean = (v: unknown) => String(v ?? '').trim()
 
 function nameList(names: string[]): string {

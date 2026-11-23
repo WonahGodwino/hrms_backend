@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { authorize } from "@/app/lib/development-plans/dev-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -17,8 +17,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const a = await authorize(request, searchParams.get("companyId"));
     if (!a.ok) return a.response;
-    const rows = await prisma.competency.findMany({
-      where: { companyId: a.auth.companyId, status: "ACTIVE" },
+    const rows = await forCompany(a.auth.companyId).competency.findMany({
+      where: { status: "ACTIVE" },
       orderBy: { name: "asc" },
       take: 300,
       select: { id: true, name: true, category: true },

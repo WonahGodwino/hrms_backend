@@ -8,10 +8,10 @@
 // Used by the scheduling modal so only users who can actually access the
 // interviewer dashboard and submit evaluations can be selected.
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -39,21 +39,20 @@ export async function GET(request: NextRequest) {
 
     const [memberships, superAdmins, elevatedStaff] = await Promise.all([
       // 1) Users with HR/ADMIN/ALL membership in this company
-      prisma.userCompany.findMany({
-        where: { companyId, role: { in: ['HR', 'ADMIN', 'ALL'] } },
+      forCompany(companyId).userCompany.findMany({
+        where: { role: { in: ['HR', 'ADMIN', 'ALL'] } },
         include: {
           user: { select: { id: true, firstName: true, lastName: true, email: true, position: true, isActive: true } },
         },
       }),
       // 2) SUPER_ADMIN staff registered in this company
-      prisma.staffRecord.findMany({
-        where: { companyId, role: 'SUPER_ADMIN', isActive: true },
+      forCompany(companyId).staffRecord.findMany({
+        where: { role: 'SUPER_ADMIN', isActive: true },
         select: { id: true, firstName: true, lastName: true, email: true, position: true },
       }),
       // 3) Staff with ACTIVE temporary role-elevation to ADMIN or HR
-      (prisma as any).roleElevation.findMany({
+      forCompany(companyId).roleElevation.findMany({
         where: {
-          companyId,
           status: 'ACTIVE',
           toRole: { in: ['ADMIN', 'HR'] },
           expiresAt: { gt: new Date() },

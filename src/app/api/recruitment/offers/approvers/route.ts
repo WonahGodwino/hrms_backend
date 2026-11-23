@@ -3,10 +3,10 @@
 // finance role; over-band exceptions are authorized by HR/ADMIN). Shaped for the
 // InternalApprovalDrawer's routing picker.
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -18,8 +18,8 @@ export async function GET(request: NextRequest) {
     const companyId = new URL(request.url).searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
 
-    const memberships = await prisma.userCompany.findMany({
-      where: { companyId, role: { in: ['HR', 'ADMIN', 'SUPER_ADMIN'] } },
+    const memberships = await forCompany(companyId).userCompany.findMany({
+      where: { role: { in: ['HR', 'ADMIN', 'SUPER_ADMIN'] } },
       include: {
         user: { select: { id: true, firstName: true, lastName: true, email: true, position: true, isActive: true } },
       },

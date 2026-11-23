@@ -6,6 +6,7 @@ import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { canManagePhedRolesForCompany, PHED_ACCESS_ROLES, requirePhedRoleManagementAccess } from '@/app/lib/phed/access-role'
 import { notifyPhedAccessRoleChange } from '@/app/lib/phed/access-role-notifications'
 import { seedDefaultPhedRoleAccessGrants } from '@/app/lib/phed/page-access'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -38,8 +39,7 @@ export async function GET(req: NextRequest) {
       return withCors(ApiResponse.forbidden('You are not assigned to manage PHED roles for this company'), origin)
     }
 
-    const assignments = await prisma.phedStaffAccessRole.findMany({
-      where: { companyId },
+    const assignments = await forCompany(companyId).phedStaffAccessRole.findMany({
       include: {
         staffRecord: {
           select: { id: true, staffId: true, firstName: true, lastName: true, email: true, position: true, department: true, isActive: true },
@@ -53,8 +53,7 @@ export async function GET(req: NextRequest) {
     // provisioned — the page still loads with role definitions and assignments.
     let history: any[] = []
     try {
-      history = await prisma.phedAccessRoleChange.findMany({
-        where: { companyId },
+      history = await forCompany(companyId).phedAccessRoleChange.findMany({
         include: { staffRecord: { select: { firstName: true, lastName: true, staffId: true } } },
         orderBy: { createdAt: 'desc' },
         take: 100,
@@ -112,8 +111,8 @@ export async function POST(req: NextRequest) {
     }
 
     const [target, actor] = await Promise.all([
-      prisma.staffRecord.findFirst({
-        where: { id: staffRecordId, companyId, isActive: true },
+      forCompany(companyId).staffRecord.findFirst({
+        where: { id: staffRecordId, isActive: true },
         select: { id: true, firstName: true, lastName: true, email: true, role: true },
       }),
       prisma.staffRecord.findUnique({ where: { id: user.userId }, select: { firstName: true, lastName: true } }),

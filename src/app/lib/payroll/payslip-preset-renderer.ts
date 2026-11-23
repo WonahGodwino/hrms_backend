@@ -23,7 +23,9 @@
 //   named value is non-empty — lets a layout hide rows whose field has no
 //   value (e.g. no PFA recorded) instead of printing a blank label.
 // Unknown tokens render as empty strings, never raw template code.
+import { existsSync } from 'fs'
 import puppeteer from 'puppeteer'
+import { createLimiter, envConcurrency } from '@/app/lib/concurrency/limiter'
 
 type Browser = Awaited<ReturnType<typeof puppeteer.launch>>
 
@@ -198,11 +200,11 @@ let browserPromise: Promise<Browser> | null = null
 // Chrome resolution: puppeteer's own resolution first (env var, download
 // cache), then common system installs as fallback — keeps rendering working
 // on hosts where `puppeteer browsers install` was never run.
-function resolveChromeExecutable(): string | undefined {
+async function resolveChromeExecutable(): Promise<string | undefined> {
   if (process.env.PUPPETEER_EXECUTABLE_PATH) return process.env.PUPPETEER_EXECUTABLE_PATH
   try {
-    const exe = puppeteer.executablePath()
-    if (exe && require('fs').existsSync(exe)) return exe
+    const exe = await puppeteer.executablePath()
+    if (exe && existsSync(exe)) return exe
   } catch {
     // fall through to system candidates
   }
@@ -223,23 +225,18 @@ function resolveChromeExecutable(): string | undefined {
   } else {
     candidates.push('/usr/bin/google-chrome', '/usr/bin/chromium-browser', '/usr/bin/chromium')
   }
-  try {
-    const fs = require('fs') as typeof import('fs')
-    return candidates.find((c) => fs.existsSync(c))
-  } catch {
-    return undefined
-  }
+  return candidates.find((c) => existsSync(c))
 }
 
 async function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
-    browserPromise = puppeteer
-      .launch({
+    browserPromise = resolveChromeExecutable()
+      .then((executablePath) => puppeteer.launch({
         headless: true,
-        executablePath: resolveChromeExecutable(),
+        executablePath,
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-      })
-      .catch((err: any) => {
+      }))
+      .catch((err: unknown) => {
         browserPromise = null
         throw err
       })
@@ -247,21 +244,27 @@ async function getBrowser(): Promise<Browser> {
   return browserPromise
 }
 
+// PERF-003: at most PDF_RENDER_CONCURRENCY (default 4) Chrome pages at once per
+// process; bulk payslip runs queue here instead of opening a page per staff member.
+const renderSlot = createLimiter(envConcurrency('PDF_RENDER_CONCURRENCY', 4))
+
 export async function renderPresetHtmlToPdf(html: string): Promise<Uint8Array> {
-  const browser = await getBrowser()
-  const page = await browser.newPage()
-  try {
-    await page.setContent(html, { waitUntil: 'load' })
-    await page.emulateMediaType('screen')
-    const pdf = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: { top: '0px', bottom: '0px', left: '0px', right: '0px' }
-    })
-    return new Uint8Array(pdf)
-  } finally {
-    await page.close()
-  }
+  return renderSlot(async () => {
+    const browser = await getBrowser()
+    const page = await browser.newPage()
+    try {
+      await page.setContent(html, { waitUntil: 'load' })
+      await page.emulateMediaType('screen')
+      const pdf = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        margin: { top: '0px', bottom: '0px', left: '0px', right: '0px' }
+      })
+      return new Uint8Array(pdf)
+    } finally {
+      await page.close()
+    }
+  })
 }
 
 export async function renderPresetPayslip(
@@ -282,7 +285,7 @@ export function validatePresetHtml(html: string): { ok: true } | { ok: false; re
   if (!html || typeof html !== 'string' || !html.trim()) return { ok: false, reason: 'HTML content is required' }
   if (!/<html|<body|<div/i.test(html)) return { ok: false, reason: 'Content does not look like an HTML document' }
   for (const token of REQUIRED_TOKENS) {
-    if (!new RegExp(`\{\{\s*${token}\s*\}\}`).test(html)) {
+    if (!new RegExp(`\\{\\{\\s*${token}\\s*\\}\\}`).test(html)) {
       return { ok: false, reason: `Missing required token {{${token}}}` }
     }
   }

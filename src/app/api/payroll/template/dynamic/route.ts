@@ -9,6 +9,9 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { RENT_PAID_BANDS_CALCULATOR, BASE_PERCENTAGE_CALCULATORS, CALC_BASE_OVERRIDES, NHF_CALCULATOR, NHF_BASES } from '@/app/lib/payroll/generation/field-resolver'
 import { MANUAL_PENSION_CAPTURE_FIELDS } from '@/app/lib/staff/pension-fields'
 import { ensureSystemPayrollTemplates } from '@/app/lib/payroll/seed-system-payroll-templates'
+import { forCompany } from '@/app/lib/data/tenant'
+import { readJsonBody } from '@/app/lib/validation/request-body'
+import { createTemplateBodySchema, updateTemplateBodySchema } from '@/app/lib/validation/payroll-staff-schemas'
 
 function normalizeTemplateSectionKey(sectionName: string): string {
   const normalized = sectionName
@@ -306,7 +309,9 @@ export async function POST(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = await await requireModuleAccess(token, 'PAYROLL', ['SUPER_ADMIN', 'HR', 'ADMIN'])
 
-    const body = await request.json()
+    const parsedBody = await readJsonBody(request, createTemplateBodySchema)
+    if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.message, 400), origin)
+    const body = parsedBody.data
     const {
       companyId,
       templateName,
@@ -507,7 +512,9 @@ export async function PUT(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = await await requireModuleAccess(token, 'PAYROLL', ['SUPER_ADMIN', 'HR', 'ADMIN'])
 
-    const body = await request.json()
+    const parsedBody = await readJsonBody(request, updateTemplateBodySchema)
+    if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.message, 400), origin)
+    const body = parsedBody.data
     const {
       templateId,
       templateName,
@@ -730,10 +737,9 @@ async function verifyCompanyAccess(user: any, companyId: string): Promise<boolea
   if (user.role === 'SUPER_ADMIN') return true
   
   try {
-    const userCompany = await prisma.userCompany.findFirst({
+    const userCompany = await forCompany(companyId).userCompany.findFirst({
       where: {
         userId: user.userId,
-        companyId: companyId,
         OR: [
           { role: user.role },
           { role: 'ALL' }

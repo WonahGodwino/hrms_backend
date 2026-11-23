@@ -4,23 +4,25 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '@/app/lib/db'
 
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { getPayslipDisplayFields, calculateTotals } from '@/app/lib/payroll/templates/utils'
 import type { CustomFieldValue } from '@/app/lib/payroll/templates/types'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
 import { getPayslipObject } from '@/app/lib/storage/payslip-storage'
 
 type RouteParams = {
-  params: {
+  params: Promise<{
     id: string
-  }
+  }>
 }
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function GET(request: NextRequest, { params }: RouteParams) {
+export async function GET(request: NextRequest, props: RouteParams) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -155,7 +157,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         }
         break
 
-      case 'HR':
+      case 'HR': {
         // HR can download any payslip within their assigned company
         const hrAssignments = await prisma.userCompany.findMany({
           where: {
@@ -182,7 +184,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         }
         break
 
-      case 'ADMIN':
+      }
+      case 'ADMIN': {
         // ADMIN can download payslips from companies they're assigned to
         const adminAssignments = await prisma.userCompany.findMany({
           where: {
@@ -209,6 +212,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         }
         break
 
+      }
       case 'SUPER_ADMIN':
         // SUPER_ADMIN can download any payslip from any company
         // No additional checks needed
@@ -311,6 +315,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Remove invisible Unicode characters (e.g., Word Joiner, Zero Width Space, etc.)
     const removeInvisible = (str: string) => str.replace(/[\u200B-\u200D\uFEFF\u2060\u00A0\u202F\u205F\u3000]/g, '');
     const cleanFileName = removeInvisible(payslip.fileName)
+      // eslint-disable-next-line no-control-regex -- strips control characters on purpose
       .replace(/[^\u0000-\u007F\w\s.-]/g, '_') // Remove non-ASCII and special chars
       .replace(/\s+/g, '_');
     // Also sanitize the original filename for Content-Disposition header
@@ -351,7 +356,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     return withCors(response, origin)
   } catch (error) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('Error downloading payslip:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }

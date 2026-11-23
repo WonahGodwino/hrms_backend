@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
         origin,
       );
 
-    const s = await getOrDefaultSettings(prisma as any, companyId);
+    const s = await getOrDefaultSettings(prisma, companyId);
 
     return withCors(
       ApiResponse.success(

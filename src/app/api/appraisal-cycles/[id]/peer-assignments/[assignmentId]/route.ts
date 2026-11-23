@@ -10,6 +10,7 @@ import {
   assertPeerEditable,
   lockPeerCycle,
 } from "@/app/lib/appraisal-cycles/peer-matrix";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -18,8 +19,9 @@ export async function OPTIONS(request: NextRequest) {
 // DELETE /api/appraisal-cycles/:id/peer-assignments/:assignmentId?companyId=...
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; assignmentId: string } },
+  props: { params: Promise<{ id: string; assignmentId: string }> }
 ) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   const reject = (status: number, message: string) =>
     withCors(
@@ -43,8 +45,8 @@ export async function DELETE(
     if (!(await verifyCompanyAccess(user, companyId)))
       return reject(403, "Forbidden: No access to this company");
 
-    const assignment = await prisma.appraisalPeerAssignment.findFirst({
-      where: { id: params.assignmentId, cycleId: params.id, companyId },
+    const assignment = await forCompany(companyId).appraisalPeerAssignment.findFirst({
+      where: { id: params.assignmentId, cycleId: params.id },
       include: {
         cycle: {
           select: {

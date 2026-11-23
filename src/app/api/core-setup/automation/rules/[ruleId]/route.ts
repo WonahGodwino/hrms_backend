@@ -12,7 +12,7 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { AUTOMATION_ADMIN_ROLES, cleanRuleOverrides, companyForRequest } from '@/app/lib/core-setup/automation'
-import { actorFor, recordCoreSetupEvent } from '@/app/lib/core-setup/audit'
+import { actorFor, changeSourceOf, recordCoreSetupEvent } from '@/app/lib/core-setup/audit'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -20,7 +20,8 @@ export async function OPTIONS(request: NextRequest) {
 
 const text = (v: unknown) => (v === undefined || v === null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v))
 
-export async function PATCH(request: NextRequest, { params }: { params: { ruleId: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ ruleId: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const authHeader = request.headers.get('authorization')
@@ -53,7 +54,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { ruleId
     const saved = await prisma.$transaction(async (tx) => {
       const existing = await tx.automationRuleSetting.findUnique({ where: { companyId_ruleId: { companyId, ruleId } } })
       const before = (existing?.overrides as Record<string, unknown> | null) ?? {}
-      const next = { ...before, ...patch }
+      const next: Record<string, unknown> = { ...before, ...patch }
+      // The "Set by AI" label stays only while the change in force came from an approved AI proposal; a person's own edit clears it.
+      if (patch.aiOrigin !== true) delete next.aiOrigin
 
       const row = await tx.automationRuleSetting.upsert({
         where: { companyId_ruleId: { companyId, ruleId } },
@@ -63,6 +66,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { ruleId
 
       // What actually changed, compared with the saved override or, for a first change, with what the screen showed.
       const changes = Object.entries(patch)
+        .filter(([k]) => k !== 'aiOrigin')
         .filter(([k, v]) => JSON.stringify(before[k] ?? previous[k]) !== JSON.stringify(v))
         .map(([k, v]) => ({ field: k, from: text(before[k] ?? previous[k]), to: text(v) }))
       const turned = patch.status !== undefined && patch.status !== (before.status ?? previous.status)
@@ -72,6 +76,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { ruleId
         companyId,
         actor,
         kind: 'rule',
+        via: changeSourceOf(request),
         action: turned ? (enabled ? 'Automation enabled' : 'Automation disabled') : 'Automation rule edited',
         object: ruleName,
         changeType: turned ? (enabled ? 'enabled' : 'disabled') : 'updated',

@@ -1,11 +1,12 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { buildTimeline } from "@/app/lib/appraisal-history";
 import type { Self } from "@/app/lib/feedback";
 import { isoDate, nameOf, notFound, ok, readCtx } from "@/app/lib/pip";
 import { loadScopedStaff } from "@/app/lib/promotion";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -50,8 +51,8 @@ export async function GET(request: NextRequest) {
     } as Self;
     const [base, recs, plans] = await Promise.all([
       buildTimeline(companyId, me, 200, 0),
-      prisma.promotionRecommendation.findMany({
-        where: { companyId, staffRecordId: staff.id, status: { not: "DRAFT" } },
+      forCompany(companyId).promotionRecommendation.findMany({
+        where: { staffRecordId: staff.id, status: { not: "DRAFT" } },
         select: {
           id: true,
           status: true,
@@ -62,9 +63,8 @@ export async function GET(request: NextRequest) {
           decisionNote: true,
         },
       }),
-      prisma.developmentPlan.findMany({
+      forCompany(companyId).developmentPlan.findMany({
         where: {
-          companyId,
           staffRecordId: staff.id,
           status: "COMPLETED",
           completedAt: { not: null },

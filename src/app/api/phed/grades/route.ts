@@ -4,6 +4,9 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { rejectForeignCompany } from '@/app/lib/phed/company-guard'
+import { PhedStaffCategory } from '@prisma/client'
+import { enumValueOrNull } from '@/app/lib/prisma-utils'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -28,10 +31,14 @@ export async function GET(req: NextRequest) {
     if (user.role !== 'SUPER_ADMIN' && user.companyId && companyId !== user.companyId)
       return withCors(ApiResponse.error('Access denied', 403), origin)
 
-    const grades = await (prisma as any).phedGrade.findMany({
+    // An unknown category used to fail inside Prisma (500); it is now a 400.
+    const categoryValue = enumValueOrNull(PhedStaffCategory, category)
+    if (category && !categoryValue) return withCors(ApiResponse.error('Invalid category', 400), origin)
+
+    const grades = await prisma.phedGrade.findMany({
       where: {
         companyId,
-        ...(category ? { category } : {}),
+        ...(categoryValue ? { category: categoryValue } : {}),
         isActive: true,
       },
       include: { allowanceTemplates: true },
@@ -51,10 +58,12 @@ export async function POST(req: NextRequest) {
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const body = await req.json()
     const { companyId, name, code, category, levelOrder, defaultBasicSalary } = body
+    const foreignCompany = await rejectForeignCompany(user, companyId, origin)
+    if (foreignCompany) return foreignCompany
 
     if (!companyId || !name || !code || !category || levelOrder === undefined)
       return withCors(ApiResponse.error('companyId, name, code, category, levelOrder are required', 400), origin)
@@ -73,7 +82,7 @@ export async function POST(req: NextRequest) {
     if (defaultBasicSalary !== undefined && Number(defaultBasicSalary) < 0)
       return withCors(ApiResponse.error('defaultBasicSalary cannot be negative', 400), origin)
 
-    const grade = await (prisma as any).phedGrade.create({
+    const grade = await prisma.phedGrade.create({
       data: {
         companyId,
         name,

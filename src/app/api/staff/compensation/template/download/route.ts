@@ -26,6 +26,7 @@ import {
 } from '@/app/lib/payroll/generation/field-resolver'
 import ExcelJS from 'exceljs'
 import { writeStyledTable, buildSubtitle, confidentialFooter, safeFileName, attachmentDisposition, XLSX_MIME } from '@/app/lib/excel/sheet-theme'
+import { forCompany } from '@/app/lib/data/tenant'
 
 type CompensationFieldLike = { systemField: string; displayName: string; dataType: string; required: boolean }
 
@@ -70,8 +71,8 @@ export async function GET(request: NextRequest) {
       return withCors(ApiResponse.error(`You do not have ${userRole} access for this company`, 403), origin)
     }
 
-    const template = await prisma.payrollTemplate.findFirst({
-      where: { id: templateId, companyId },
+    const template = await forCompany(companyId).payrollTemplate.findFirst({
+      where: { id: templateId },
       include: { fields: { orderBy: { order: 'asc' } } }
     })
     if (!template) {
@@ -93,8 +94,8 @@ export async function GET(request: NextRequest) {
 
     const company = await prisma.company.findUnique({ where: { id: companyId }, select: { companyName: true } })
 
-    const staff = await prisma.staffRecord.findMany({
-      where: { companyId, isActive: true },
+    const staff = await forCompany(companyId).staffRecord.findMany({
+      where: { isActive: true },
       select: {
         staffId: true,
         firstName: true,
@@ -130,10 +131,10 @@ export async function GET(request: NextRequest) {
       columns,
       rows: staff.map((s) => {
         const values = (s.payrollProfile?.values as Record<string, unknown>) || {}
-        const row: Record<string, any> = { staffId: s.staffId, name: `${s.firstName} ${s.lastName}` }
+        const row: Record<string, unknown> = { staffId: s.staffId, name: `${s.firstName} ${s.lastName}` }
         profileFields.forEach((f, i) => {
           const raw = values[f.systemField]
-          row[`f${i}`] = raw === undefined || raw === null ? '' : (raw as any)
+          row[`f${i}`] = raw === undefined || raw === null ? '' : (raw as unknown)
         })
         return row
       }),

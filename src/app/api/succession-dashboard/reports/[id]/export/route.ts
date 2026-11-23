@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { RouteContext } from "@/app/lib/self-appraisal";
 import { buildComparisonPdf } from "@/app/lib/comparison-export";
 import { fail, nameOf, notFound } from "@/app/lib/pip";
 import { dashWriteCtx, sectionsToCsv } from "@/app/lib/succession-dashboard";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export const runtime = "nodejs"; // pdfkit needs Node APIs
 
@@ -29,10 +30,9 @@ export async function GET(
     if (format !== "pdf" && format !== "csv")
       return fail(origin, "format must be pdf or csv");
 
-    const r = await prisma.successionReport.findFirst({
+    const r = await forCompany(companyId).successionReport.findFirst({
       where: {
         id,
-        companyId,
         status: { not: "ARCHIVED" },
         OR: [{ createdById: staffId }, { sharedWithIds: { has: staffId } }],
       },

@@ -1,9 +1,9 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -23,17 +23,17 @@ export async function GET(req: NextRequest) {
     const sevenDays = new Date(now.getTime() + 7 * 86_400_000)
 
     const [expired, criticalExpiring, overdueTraining, totalRiskItems] = await Promise.all([
-      prisma.certificationRecord.count({ where: { companyId, status: 'Expired' } }),
-      prisma.certificationRecord.count({ where: { companyId, expiryDate: { gte: now, lte: sevenDays } } }),
-      prisma.participantProgress.count({
-        where: { companyId, trainingStatus: { in: ['NOT STARTED', 'IN PROGRESS'] }, dueDate: { lt: now } },
+      forCompany(companyId).certificationRecord.count({ where: { status: 'Expired' } }),
+      forCompany(companyId).certificationRecord.count({ where: { expiryDate: { gte: now, lte: sevenDays } } }),
+      forCompany(companyId).participantProgress.count({
+        where: { trainingStatus: { in: ['NOT STARTED', 'IN PROGRESS'] }, dueDate: { lt: now } },
       }),
-      prisma.riskItem.count({ where: { companyId, status: 'Active' } }),
+      forCompany(companyId).riskItem.count({ where: { status: 'Active' } }),
     ])
 
     // Top expired cert types
-    const expiredRecords = await prisma.certificationRecord.findMany({
-      where: { companyId, status: 'Expired' },
+    const expiredRecords = await forCompany(companyId).certificationRecord.findMany({
+      where: { status: 'Expired' },
       include: { certificationType: { select: { name: true, type: true } }, employee: { select: { department: true } } },
       take: 20,
       orderBy: { expiryDate: 'asc' },

@@ -5,16 +5,11 @@
 // department-utils.ts's logDepartmentAction.
 import { NextRequest } from 'next/server'
 import { prisma } from '@/app/lib/db'
+import { getTrustedClientIp } from '@/app/lib/security/client-ip'
 
+// SEC-010: the address added by our own proxy, not the client-supplied one.
 export function getClientIp(request: NextRequest): string {
-  const xff = request.headers.get('x-forwarded-for')
-  if (xff) {
-    const first = xff.split(',')[0].trim()
-    if (first) return first
-  }
-  const realIp = request.headers.get('x-real-ip')
-  if (realIp) return realIp.trim()
-  return '127.0.0.1'
+  return getTrustedClientIp(request.headers)
 }
 
 export function parseUserAgent(userAgent: string | null): { deviceName: string; deviceType: string } {

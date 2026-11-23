@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import {
   authorizeSuper,
   getSettings,

@@ -1,10 +1,11 @@
 // src/app/lib/payroll/payslip-utils.ts
+import { readFile } from 'fs/promises'
+import path from 'path'
 import { prisma } from '@/app/lib/db'
 import type { CustomFieldValue, PayslipDisplayItem } from './templates/types'
+import { normalizeSection } from '@/app/lib/payroll/templates/utils'
 
-function normalizeSection(section?: string): string {
-  return (section || '').toUpperCase().replace(/[\s-]+/g, '_')
-}
+
 
 function isCustomFieldValue(value: unknown): value is CustomFieldValue {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
@@ -35,8 +36,8 @@ export async function getPayslipWithDetails(payslipId: string) {
   if (!payslip) return null
 
   // If it's a dynamic template, extract custom fields for display
-  let earnings: PayslipDisplayItem[] = []
-  let deductions: PayslipDisplayItem[] = []
+  const earnings: PayslipDisplayItem[] = []
+  const deductions: PayslipDisplayItem[] = []
   
   if (payslip.payroll.templateType === 'DYNAMIC' && payslip.payroll.customFields) {
     const rawCustomFields = payslip.payroll.customFields
@@ -108,10 +109,8 @@ export async function downloadPayslip(payslipId: string) {
   
   // If file is stored on disk
   if (payslip.filePath) {
-    const fs = require('fs').promises
-    const path = require('path')
     const fullPath = path.join(process.cwd(), payslip.filePath)
-    const fileData = await fs.readFile(fullPath)
+    const fileData = await readFile(fullPath)
     
     return {
       data: fileData,

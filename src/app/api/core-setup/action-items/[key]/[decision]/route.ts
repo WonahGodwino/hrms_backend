@@ -26,7 +26,11 @@ interface ChangeInput {
   to?: unknown
 }
 
-export async function POST(request: NextRequest, { params }: { params: { key: string; decision: string } }) {
+export async function POST(
+  request: NextRequest,
+  props: { params: Promise<{ key: string; decision: string }> }
+) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const authHeader = request.headers.get('authorization')

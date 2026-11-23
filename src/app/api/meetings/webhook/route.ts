@@ -22,21 +22,25 @@ export async function POST(req: NextRequest) {
       const egressId = info?.egressId
       if (!egressId) return NextResponse.json({ ok: true })
 
-      const meeting = await (prisma as any).meeting.findFirst({ where: { recordingEgressId: egressId } })
+      const meeting = await prisma.meeting.findFirst({ where: { recordingEgressId: egressId } })
       if (!meeting) return NextResponse.json({ ok: true }) // unrelated/unknown egress, ignore
 
       const status = String(info?.status || '')
       if (/COMPLETE/i.test(status)) {
         const fileResult = (info?.fileResults || [])[0]
-        await (prisma as any).meeting.update({
+        const duration = typeof fileResult?.duration === 'number' ? Math.round(fileResult.duration) : undefined
+        const size = typeof fileResult?.size === 'number' ? fileResult.size : undefined
+        await prisma.meeting.update({
           where: { id: meeting.id },
           data: {
             recordingStatus: 'READY',
             recordingKey: fileResult?.filename || meeting.recordingKey,
+            ...(duration !== undefined ? { recordingDurationSeconds: duration } : {}),
+            ...(size !== undefined ? { recordingSizeBytes: size } : {}),
           },
         })
       } else if (/FAILED|ABORT/i.test(status)) {
-        await (prisma as any).meeting.update({
+        await prisma.meeting.update({
           where: { id: meeting.id },
           data: { recordingStatus: 'FAILED' },
         })

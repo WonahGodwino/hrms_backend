@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import {
@@ -10,6 +9,7 @@ import {
   nameOf,
   resolveSubject,
 } from "@/app/lib/development-plans/dev-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -48,15 +48,14 @@ export async function GET(request: NextRequest) {
     if (!subjectId)
       return withCors(ApiResponse.notFound("Staff record not found"), origin);
 
-    const subject = await prisma.staffRecord.findFirst({
-      where: { id: subjectId, companyId },
+    const subject = await forCompany(companyId).staffRecord.findFirst({
+      where: { id: subjectId },
       select: { managerId: true },
     });
     const managerId = subject?.managerId ?? null;
 
-    const rows = await prisma.staffRecord.findMany({
+    const rows = await forCompany(companyId).staffRecord.findMany({
       where: {
-        companyId,
         isActive: true,
         id: { not: subjectId },
         AND: [

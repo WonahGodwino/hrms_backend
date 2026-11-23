@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -19,6 +19,7 @@ import {
 } from "@/app/lib/self-appraisal";
 // Shared helper: single home is manager-review.ts (also used by the manager-review submit route).
 import { completeParticipantPhase } from "@/app/lib/manager-review";
+import { emitAutomationEvent, kickAutomation } from "@/app/lib/automation-events";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -145,7 +146,6 @@ export async function POST(
       });
 
       try {
-        const { emitAutomationEvent } = require("@/app/lib/automation-events");
         await emitAutomationEvent(tx, {
           companyId,
           trigger: "APPRAISAL_SUBMITTED",
@@ -160,7 +160,7 @@ export async function POST(
             phaseType: "SELF_APPRAISAL",
           },
         });
-      } catch {}
+      } catch { /* ignored: best-effort, failure is non-fatal */ }
 
       return payload;
     });
@@ -172,9 +172,8 @@ export async function POST(
       );
 
     try {
-      const { kickAutomation } = require("@/app/lib/automation-events");
       kickAutomation(companyId);
-    } catch {}
+    } catch { /* ignored: best-effort, failure is non-fatal */ }
 
     return withCors(
       ApiResponse.success(result, "Self appraisal submitted successfully"),

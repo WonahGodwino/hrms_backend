@@ -8,6 +8,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { logBUAudit } from '@/app/lib/business-units/bu-utils'
 import { resolveScopedCompanyId } from '@/app/lib/company-scope'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -34,8 +35,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     let targetName: string | null = null
     if (targetId) {
-      const target = await (prisma as any).businessUnit.findFirst({
-        where: { id: targetId, companyId, archived: 0 },
+      const target = await forCompany(companyId).businessUnit.findFirst({
+        where: { id: targetId, archived: 0 },
         select: { id: true, name: true },
       })
       if (!target) return withCors(ApiResponse.error('Target business unit not found', 404), origin)

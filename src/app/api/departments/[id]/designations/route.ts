@@ -8,14 +8,16 @@ import {
     getDepartmentPositionCapacity, getDepartmentWithAccess, logDepartmentAction
 } from '@/app/lib/departments/department-utils';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
 }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
-	const origin = request.headers.get('origin');
-	try {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    const params = await props.params;
+    const origin = request.headers.get('origin');
+    try {
 		const authHeader = request.headers.get('authorization');
 		if (!authHeader) {
 			return withCors(ApiResponse.error('Authorization header missing', 401), origin);
@@ -48,9 +50,10 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 	}
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
-	const origin = request.headers.get('origin');
-	try {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    const params = await props.params;
+    const origin = request.headers.get('origin');
+    try {
 		const authHeader = request.headers.get('authorization');
 		if (!authHeader) {
 			return withCors(ApiResponse.error('Authorization header missing', 401), origin);
@@ -64,8 +67,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 			return withCors(ApiResponse.error('mappings array is required', 400), origin);
 		}
 		const designationIds = body.mappings.map((mapping: any) => mapping.designationId).filter(Boolean);
-		const designations = await prisma.designation.findMany({
-			where: { id: { in: designationIds }, companyId: department.companyId },
+		const designations = await forCompany(department.companyId).designation.findMany({
+			where: { id: { in: designationIds } },
 			select: { id: true },
 		});
 		const validDesignationIds = new Set(designations.map((designation) => designation.id));

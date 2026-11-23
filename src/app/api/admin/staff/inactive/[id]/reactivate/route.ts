@@ -5,23 +5,26 @@ import validator from 'validator';
 import { requireRole } from '@/app/lib/auth';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
-import { ApiResponse, formatError } from '@/app/lib/utils';
+import { ApiResponse } from '@/app/lib/utils';
 import { findIdentifierHolder } from '@/app/lib/staff/identifierCollision';
+import { publicErrorMessage } from '@/app/lib/errors/public-error';
+import { forCompany } from '@/app/lib/data/tenant';
 
 type RouteParams = {
-	params: {
+	params: Promise<{
 		id: string;
-	};
+	}>;
 };
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
 }
 
-export async function PATCH(request: NextRequest, { params }: RouteParams) {
-	const origin = request.headers.get('origin');
+export async function PATCH(request: NextRequest, props: RouteParams) {
+    const params = await props.params;
+    const origin = request.headers.get('origin');
 
-	try {
+    try {
 		const authHeader = request.headers.get('authorization');
 		if (!authHeader) {
 			return withCors(ApiResponse.error('Authorization header missing', 401), origin);
@@ -154,7 +157,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 			origin
 		);
 	} catch (error) {
-		const message = formatError(error);
+		const message = publicErrorMessage(error);
 		console.error('Error reactivating staff:', error);
 		return withCors(ApiResponse.error(message, 500), origin);
 	}
@@ -163,10 +166,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 async function checkStaffAccess(currentUser: any, companyId: string): Promise<boolean> {
 	if (currentUser.role === 'SUPER_ADMIN') return true;
 
-	const userAssignments = await prisma.userCompany.findMany({
+	const userAssignments = await forCompany(companyId).userCompany.findMany({
 		where: {
-			userId: currentUser.userId,
-			companyId: companyId,
+			userId: currentUser.userId
 		},
 	});
 

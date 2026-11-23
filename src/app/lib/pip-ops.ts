@@ -1,4 +1,4 @@
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { nameOf, pipLabel } from "@/app/lib/pip";
 
 const NAME = { select: { id: true, firstName: true, lastName: true } } as const;

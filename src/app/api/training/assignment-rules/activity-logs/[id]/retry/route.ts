@@ -5,13 +5,15 @@ import { mapActivityLog } from '@/app/lib/training/activity-log-map'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
 }
 
 // POST /api/training/assignment-rules/activity-logs/:id/retry
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -22,8 +24,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
     const { companyId } = resolved
 
-    const log = await prisma.trainingAuditLog.findFirst({
-      where: { id: params.id, companyId, entityType: 'assignment_rule' },
+    const log = await forCompany(companyId).trainingAuditLog.findFirst({
+      where: { id: params.id, entityType: 'assignment_rule' },
       include: { actor: { select: { firstName: true, lastName: true } } },
     })
 
@@ -50,8 +52,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       )
     }
 
-    const program = await prisma.trainingProgram.findFirst({
-      where: { id: trainingProgramId, companyId, deletedAt: null },
+    const program = await forCompany(companyId).trainingProgram.findFirst({
+      where: { id: trainingProgramId, deletedAt: null },
     })
 
     if (!program) {

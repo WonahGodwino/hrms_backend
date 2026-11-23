@@ -28,13 +28,14 @@ function isOriginAllowed(origin: string | null): boolean {
 export function getCorsHeaders(origin: string | null): Record<string, string> {
 	const headers: Record<string, string> = {
 		'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-		'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept, X-Requested-With, X-Device-Id',
+		// Prefer: respond-async asks report routes to prepare the file in the background (PERF-003).
+		'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept, X-Requested-With, X-Device-Id, Prefer',
 		'Access-Control-Allow-Credentials': 'true',
 		'Access-Control-Max-Age': '86400',
 		// Without this, the browser blocks JS from reading these headers on the
 		// response even though the body itself comes through fine — file-download
 		// routes rely on Content-Disposition to name the saved file correctly.
-		'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
+		'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length, X-Request-Id',
 		'Vary': 'Origin',
 	};
 

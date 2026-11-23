@@ -23,6 +23,7 @@ import {
   fillPeersForJoiners,
 } from "@/app/lib/appraisal-cycles/cycle-enrollment";
 import { notifyJoiners } from "@/app/lib/appraisal-cycles/cycle-notifications";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -56,10 +57,8 @@ const searchClauses = (search?: string): Prisma.StaffRecordWhereInput[] =>
 
 // GET /api/appraisal-cycles/:id/participants?companyId=&view=enrolled|excluded&search=&page=&limit=
 // Before activation, "enrolled" is a preview of who the rules will enrol.
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -95,8 +94,8 @@ export async function GET(
       );
     }
 
-    const cycle = await prisma.appraisalCycle.findFirst({
-      where: { id: params.id, companyId },
+    const cycle = await forCompany(companyId).appraisalCycle.findFirst({
+      where: { id: params.id },
       select: CYCLE_SELECT,
     });
     if (!cycle)
@@ -108,7 +107,7 @@ export async function GET(
     const hasParticipants =
       cycle.status !== "DRAFT" && cycle.status !== "SCHEDULED";
     const excludedStaffIds = await loadExcludedStaffIds(
-      prisma as any,
+      prisma,
       cycle.id,
     );
     const staffSearch = searchClauses(search);
@@ -121,8 +120,8 @@ export async function GET(
     const deptName = async (ids: (string | null)[]) => {
       const clean = [...new Set(ids.filter((x): x is string => !!x))];
       const rows = clean.length
-        ? await prisma.department.findMany({
-            where: { companyId, id: { in: clean } },
+        ? await forCompany(companyId).department.findMany({
+            where: { id: { in: clean } },
             select: { id: true, name: true },
           })
         : [];
@@ -132,8 +131,8 @@ export async function GET(
     if (view === "excluded") {
       let staffIdFilter: string[] | undefined;
       if (staffSearch.length) {
-        const found = await prisma.staffRecord.findMany({
-          where: { companyId, AND: staffSearch },
+        const found = await forCompany(companyId).staffRecord.findMany({
+          where: { AND: staffSearch },
           select: { id: true },
           take: 500,
         });
@@ -285,10 +284,8 @@ export async function GET(
 
 // POST /api/appraisal-cycles/:id/participants
 // body: { companyId, action: "exclude" | "restore" | "sync", staffRecordId?, note?, dryRun? }
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   const reject = (status: number, message: string) =>
     withCors(
@@ -338,7 +335,7 @@ export async function POST(
           409,
           "Employees are enrolled when the cycle is activated, so there's nothing to sync yet.",
         );
-      const preview = await previewSync(prisma as any, cycle);
+      const preview = await previewSync(prisma, cycle);
       const removable = preview.leavers.filter((l) => !l.started);
       if (body.dryRun) {
         return withCors(

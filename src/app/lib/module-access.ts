@@ -3,6 +3,7 @@ import { requireRole } from '@/app/lib/auth'
 import type { AuthUser } from '@/app/lib/auth'
 import type { ModuleKey } from '@/app/lib/modules'
 import { PLATFORM_MODULES, DEFAULT_NAV_SECTIONS } from '@/app/lib/modules'
+import { forCompany } from '@/app/lib/data/tenant'
 
 // Every platform role — for module routes that should not gate by role at all
 // (access is decided by module membership + per-route scoping instead).
@@ -13,7 +14,7 @@ export const ALL_ROLES: string[] = ['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER', 'ST
 // Returns true for SUPER_ADMIN (they manage the platform, not a single company).
 export async function hasModuleAccess(companyId: string | undefined, moduleKey: ModuleKey): Promise<boolean> {
   if (!companyId) return false
-  const row = await (prisma as any).companyModuleAccess.findFirst({
+  const row = await prisma.companyModuleAccess.findFirst({
     where: {
       companyId,
       enabled:  true,
@@ -51,7 +52,7 @@ export async function requireModuleAccess(
 // the sidebar can hard-hide archived modules regardless of company access
 // or role bypasses.
 export async function getArchivedModuleKeys(): Promise<string[]> {
-  const modules = await (prisma as any).platformModule.findMany({
+  const modules = await prisma.platformModule.findMany({
     where:  { archived: true },
     select: { key: true },
   })
@@ -63,13 +64,13 @@ export async function getArchivedModuleKeys(): Promise<string[]> {
 export async function getEnabledModules(companyId: string | undefined | null): Promise<string[]> {
   if (!companyId) {
     // SUPER_ADMIN or no company context — return all active (non-archived) keys
-    const modules = await (prisma as any).platformModule.findMany({
+    const modules = await prisma.platformModule.findMany({
       where:  { archived: false },
       select: { key: true },
     })
     return modules.map((m: { key: string }) => m.key)
   }
-  const rows = await (prisma as any).companyModuleAccess.findMany({
+  const rows = await prisma.companyModuleAccess.findMany({
     where:   { companyId, enabled: true, module: { archived: false } },
     include: { module: { select: { key: true } } },
   })
@@ -83,17 +84,17 @@ export async function getEnabledModules(companyId: string | undefined | null): P
 export async function seedModuleAccessForCompany(companyId: string, enableKeys?: readonly string[]): Promise<void> {
   // REPORTS is a baseline capability — new companies get it enabled by default.
   const AUTO_ENABLE_KEYS = new Set<string>(enableKeys ?? ['REPORTS'])
-  const modules = await (prisma as any).platformModule.findMany({
+  const modules = await prisma.platformModule.findMany({
     where:  { archived: false },
     select: { id: true, key: true },
   })
-  await (prisma as any).companyModuleAccess.createMany({
+  await prisma.companyModuleAccess.createMany({
     data:           modules.map((m: { id: string, key: string }) => ({ companyId, moduleId: m.id, enabled: AUTO_ENABLE_KEYS.has(m.key) })),
     skipDuplicates: true,
   })
   if (enableKeys) {
-    await (prisma as any).companyModuleAccess.updateMany({
-      where: { companyId, module: { key: { in: Array.from(AUTO_ENABLE_KEYS) } } },
+    await forCompany(companyId).companyModuleAccess.updateMany({
+      where: { module: { key: { in: Array.from(AUTO_ENABLE_KEYS) } } },
       data:  { enabled: true },
     })
   }
@@ -124,7 +125,7 @@ export async function seedNavPlacement(): Promise<{ sectionsSeeded: number; modu
   //    Also backfill name/description/navIcon from the registry so Module
   //    Setup mirrors the sidebar (registry icon as the default) — explicit
   //    overrides set by super admins are never overwritten.
-  const modules = await (prisma as any).platformModule.findMany({ select: { id: true, key: true, navSectionId: true, navOrder: true, navIcon: true, name: true, description: true } })
+  const modules = await prisma.platformModule.findMany({ select: { id: true, key: true, navSectionId: true, navOrder: true, navIcon: true, name: true, description: true } })
   let modulesAssigned = 0
   for (const m of modules) {
     const def = PLATFORM_MODULES.find((p) => p.key === m.key)
@@ -136,7 +137,7 @@ export async function seedNavPlacement(): Promise<{ sectionsSeeded: number; modu
     const needsDesc = m.description !== def.description
     if (needsSection || needsOrder || needsIcon || needsName || needsDesc) {
       const section = def.defaultSection ? byLabel.get(def.defaultSection) : null
-      await (prisma as any).platformModule.update({
+      await prisma.platformModule.update({
         where: { id: m.id },
         data: {
           ...(needsSection && section ? { navSectionId: (section as any).id } : {}),
@@ -158,10 +159,10 @@ export async function seedNavPlacement(): Promise<{ sectionsSeeded: number; modu
 export async function syncModuleAccess(): Promise<{ created: number }> {
   const [companies, modules] = await Promise.all([
     prisma.company.findMany({ where: { archived: 0 }, select: { id: true } }),
-    (prisma as any).platformModule.findMany({ where: { archived: false }, select: { id: true, key: true } }),
+    prisma.platformModule.findMany({ where: { archived: false }, select: { id: true, key: true } }),
   ])
 
-  const existing = await (prisma as any).companyModuleAccess.findMany({
+  const existing = await prisma.companyModuleAccess.findMany({
     select: { companyId: true, moduleId: true },
   })
   const existingSet = new Set(existing.map((r: any) => `${r.companyId}:${r.moduleId}`))
@@ -181,7 +182,7 @@ export async function syncModuleAccess(): Promise<{ created: number }> {
   }
 
   if (toCreate.length > 0) {
-    await (prisma as any).companyModuleAccess.createMany({ data: toCreate, skipDuplicates: true })
+    await prisma.companyModuleAccess.createMany({ data: toCreate, skipDuplicates: true })
   }
 
   return { created: toCreate.length }

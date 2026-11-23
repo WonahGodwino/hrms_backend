@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { withTransaction } from "@/app/lib/data/transaction";
 import { handleCorsOptions } from "@/app/lib/cors";
 import { logPip, ok } from "@/app/lib/pip";
 import {
@@ -38,7 +38,7 @@ export async function POST(
       { required: true },
     ) as string;
 
-    await prisma.$transaction(async (tx) => {
+    await withTransaction(async (tx) => {
       await ownLivePip(tx, ctx, id);
       const data = { employeeReflection: reflection, reflectionAt: new Date() };
       if (kind === "MILESTONE") {

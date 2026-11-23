@@ -18,14 +18,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { id } = await params
     const companyId = user.role === 'SUPER_ADMIN' ? undefined : user.companyId
 
-    const existing = await (prisma as any).designation.findUnique({ where: { id } })
+    const existing = await prisma.designation.findUnique({ where: { id } })
     if (!existing || (companyId && existing.companyId !== companyId)) return withCors(ApiResponse.error('Designation not found', 404), origin)
     if (existing.status === 'Active') return withCors(ApiResponse.error('Already active', 400), origin)
 
     const staffCount = await prisma.staffRecord.count({ where: { designationId: id } })
-    await (prisma as any).designation.update({ where: { id }, data: { status: 'Active', staffCount } })
+    await prisma.designation.update({ where: { id }, data: { status: 'Active', staffCount } })
 
-    await logRecordChange(req, user, { companyId: existing.companyId, noun: 'Designation', type: 'designation', before: { id, title: existing.title, status: existing.status }, after: { id, title: existing.title, status: 'Active' } })
+    // Global designations (no company) have no company audit trail.
+    if (existing.companyId) await logRecordChange(req, user, { companyId: existing.companyId, noun: 'Designation', type: 'designation', before: { id, title: existing.title, status: existing.status }, after: { id, title: existing.title, status: 'Active' } })
 
     return withCors(ApiResponse.success({ id, status: 'Active', staffCount }, 'Designation activated'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }

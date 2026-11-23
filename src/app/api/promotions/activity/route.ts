@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { DAY, isoDate, nameOf, ok, readCtx } from "@/app/lib/pip";
 import { ACTIVITY_DAYS, NAME_SEL, recScope } from "@/app/lib/promotion";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -48,9 +49,8 @@ export async function GET(request: NextRequest) {
     const canSucc = actor.companyWide || !!me;
 
     const [recs, pendingCount, devs, succ] = await Promise.all([
-      prisma.promotionRecommendation.findMany({
+      forCompany(companyId).promotionRecommendation.findMany({
         where: {
-          companyId,
           AND: [
             recScope(actor),
             {

@@ -4,6 +4,8 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
+import { forCompany } from '@/app/lib/data/tenant'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -11,7 +13,11 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 // tab (regular staff split). Exit records for the period's month where the
 // staff category is REGULAR. Complements iad-exited-contract so permanent and
 // fixed-term exits are reported separately (FE guide §10).
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req);
+  if (deferred) return deferred;
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'report')
   if (rl) return withCors(rl, origin)
@@ -31,9 +37,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const monthStart = new Date(Date.UTC(period.year, period.month - 1, 1))
     const monthEnd = new Date(Date.UTC(period.year, period.month, 1))
 
-    const exits = await prisma.phedStaffExit.findMany({
+    const exits = await forCompany(period.companyId).phedStaffExit.findMany({
       where: {
-        companyId: period.companyId,
         exitDate: { gte: monthStart, lt: monthEnd },
         staff: { category: 'REGULAR' },
       },

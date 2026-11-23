@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleCorsOptions } from "@/app/lib/cors";
 import { ok } from "@/app/lib/pip";
 import { bail, guarded, oneOf, readBody } from "@/app/lib/pip-employee";
@@ -15,6 +15,8 @@ import {
   serializeRule,
   toConditionJson,
 } from "@/app/lib/automation";
+import { maybeSweep } from "@/app/lib/automation-scheduled";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -28,8 +30,8 @@ export async function GET(request: NextRequest) {
       request,
       request.nextUrl.searchParams.get("companyId"),
     );
-    const rules = await prisma.automationRule.findMany({
-      where: { companyId: ctx.companyId, removedAt: null },
+    const rules = await forCompany(ctx.companyId).automationRule.findMany({
+      where: { removedAt: null },
       orderBy: { updatedAt: "desc" },
       take: AUTO_LIMITS.rules,
     });
@@ -44,9 +46,8 @@ export async function GET(request: NextRequest) {
       executor: await executorInfo(ctx.companyId),
     };
     try {
-      const { maybeSweep } = require("@/app/lib/automation-scheduled");
       maybeSweep(ctx.companyId, "ACTIVITY").catch(() => {});
-    } catch {}
+    } catch { /* ignored: best-effort, failure is non-fatal */ }
     return ok(origin, result);
   });
 }

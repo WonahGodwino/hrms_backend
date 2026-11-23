@@ -6,6 +6,7 @@ import { logRecordChange } from "@/app/lib/core-setup/audit";
 import { prisma } from "@/app/lib/db";
 import { normalizeFrequency } from "@/app/lib/designations/helpers";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
+import { decimalOrNull } from "@/app/lib/prisma-utils";
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req);
@@ -47,14 +48,14 @@ export async function PATCH(
       user.role === "SUPER_ADMIN"
         ? searchParams.get("companyId") || bodyCompanyId || undefined
         : user.companyId;
-    const existing = await (prisma as any).designation.findUnique({
+    const existing = await prisma.designation.findUnique({
       where: { id },
     });
     if (!existing || (companyId && existing.companyId !== companyId))
       return withCors(ApiResponse.error("Designation not found", 404), origin);
 
     if (code && code !== existing.code) {
-      const dup = await (prisma as any).designation.findFirst({
+      const dup = await prisma.designation.findFirst({
         where: { code, companyId: companyId || null, id: { not: id } },
       });
       if (dup)
@@ -81,7 +82,7 @@ export async function PATCH(
       data.basePayFrequency = normalizeFrequency(basePayFrequency);
     }
 
-    const updated = await (prisma as any).designation.update({
+    const updated = await prisma.designation.update({
       where: { id },
       data,
     });
@@ -91,11 +92,12 @@ export async function PATCH(
       title: d.title,
       code: d.code,
       description: d.description,
-      basePay: d.basePay,
+      basePay: decimalOrNull(d.basePay),
       basePayFrequency: d.basePayFrequency,
       status: d.status,
     });
-    await logRecordChange(req, user, {
+    // Global designations (no company) have no company audit trail.
+    if (existing.companyId) await logRecordChange(req, user, {
       companyId: existing.companyId,
       noun: "Designation",
       type: "designation",
@@ -105,7 +107,8 @@ export async function PATCH(
 
     if (title && title !== existing.title) {
       await prisma.staffRecord.updateMany({
-        where: { designationId: id, companyId: existing.companyId },
+        // a global designation is shared, so every holder's position follows it
+        where: { designationId: id, ...(existing.companyId ? { companyId: existing.companyId } : {}) },
         data: { position: updated.title },
       });
     }

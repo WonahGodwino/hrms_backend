@@ -2,8 +2,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { withCors } from '@/app/lib/cors'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
 
 export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin')
@@ -251,7 +252,7 @@ export async function GET(request: NextRequest) {
     )
 
   } catch (error) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('Error fetching company assignments:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }

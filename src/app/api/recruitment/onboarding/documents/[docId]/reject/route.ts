@@ -23,13 +23,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const reason = String(body.reason || '').trim()
     if (!reason) return withCors(ApiResponse.error('A rejection reason is required.', 400), origin)
 
-    const doc = await (prisma as any).candidateDocument.findFirst({
+    const doc = await prisma.candidateDocument.findFirst({
       where: { id: docId, companyId, archived: 0 },
     })
     if (!doc) return withCors(ApiResponse.error('Document not found', 404), origin)
 
     const now = new Date()
-    await (prisma as any).candidateDocument.update({
+    await prisma.candidateDocument.update({
       where: { id: docId },
       data: {
         reviewStatus: 'REJECTED',

@@ -14,7 +14,8 @@ export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const authHeader = request.headers.get('authorization')
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       orderBy: { createdAt: 'asc' },
     })
 
-    let projectedInstallments: any[] = []
+    let projectedInstallments: unknown[] = []
     if (!loan.installments || loan.installments.length === 0) {
       const principal = Number(loan.approvedAmount ?? loan.requestedAmount ?? 0)
       const annualRatePct = Number(loan.interestRatePercent ?? 0)

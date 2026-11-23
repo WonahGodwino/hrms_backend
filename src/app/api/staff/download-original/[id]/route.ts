@@ -2,19 +2,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import path from 'path'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
+import { forCompany } from '@/app/lib/data/tenant'
 import { readUploadFile } from '@/app/lib/storage/upload-files'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -51,10 +51,9 @@ export async function GET(
     }
 
     if (user.role === 'ADMIN') {
-      const hasAccess = await prisma.userCompany.findFirst({
+      const hasAccess = await forCompany(uploadRecord.companyId).userCompany.findFirst({
         where: {
           userId: user.userId,
-          companyId: uploadRecord.companyId,
           role: { in: ['ADMIN', 'ALL'] }
         }
       })
@@ -125,7 +124,7 @@ export async function GET(
       )
     }
 
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     return withCors(ApiResponse.error(message, 500), origin)
   }
 }

@@ -6,12 +6,9 @@
 import { prisma } from '@/app/lib/db'
 import { buildFinancePayrollSummary } from '@/app/lib/phed/reports'
 import { nairaToWords } from '@/app/lib/phed/currency-words'
+import { toNum } from '@/app/lib/phed/currency-words'
 
-function toNum(v: unknown): number {
-  if (v === null || v === undefined) return 0
-  if (typeof v === 'object' && typeof (v as any).toNumber === 'function') return (v as any).toNumber()
-  return Number(v) || 0
-}
+
 
 function round2(v: number): number {
   return Math.round(v * 100) / 100

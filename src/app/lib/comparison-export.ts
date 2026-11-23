@@ -9,6 +9,7 @@ export type PdfSection = {
 
 // Built-in Helvetica is Latin-1 only; anything else becomes "?"
 const safe = (s: unknown) =>
+  // eslint-disable-next-line no-control-regex -- strips control characters on purpose
   String(s ?? "-").replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, "?");
 
 export function buildComparisonPdf(d: {

@@ -12,6 +12,7 @@ import { resolveCvScreeningCompanyId } from '@/app/lib/cv-screening/companyScope
 import { startScreeningRun, processScreeningRunInBackground, RunValidationError, type IncomingCvFile } from '@/app/lib/cv-screening/runs'
 import { aiConfig, resolveDefaultAiFromDb, getDefaultAiService } from '@/app/lib/aiConfig'
 import rateLimit from '@/app/lib/rateLimiter'
+import { enqueueJob, JOB_QUEUES } from '@/app/lib/jobs/queue'
 
 // Lower than recruitment's 10/min, since each request here can carry up to
 // MAX_FILES_PER_RUN files, so the per-request cost/time footprint is larger.
@@ -100,7 +101,10 @@ export async function POST(request: NextRequest) {
 
     // Fire-and-forget: the route has already captured everything needed to
     // respond; the slow extraction/AI-scoring pass runs after we return.
-    processScreeningRunInBackground(runId).catch((err) =>
+    // REL-001: as a durable queued job when the job queue is running;
+    // otherwise in this process exactly as before.
+    const queued = await enqueueJob(JOB_QUEUES.CV_SCREENING_RUN, { runId })
+    if (!queued) processScreeningRunInBackground(runId).catch((err) =>
       console.error('[CV_SCREENING] Background run processing failed:', err)
     )
 

@@ -7,7 +7,7 @@ import { NextRequest } from 'next/server'
 
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { ApiResponse } from '@/app/lib/utils'
-import { fetchBanks, getBankList } from '@/app/lib/payroll-verifier/banks'
+import { fetchBanks, getBankList } from '@/app/lib/payroll/verifier/banks'
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request)

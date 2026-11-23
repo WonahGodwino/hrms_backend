@@ -34,6 +34,7 @@ import {
   buildGoalHierarchy,
   calculateHeroStats,
 } from "@/app/lib/team-goals/team-goal-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -84,13 +85,12 @@ export const GET = withGoalAuth(ALL_ROLES, async ({ request, user, ok }) => {
       },
       orderBy: { createdAt: "desc" },
     }),
-    prisma.department.findMany({
-      where: { companyId },
+    forCompany(companyId).department.findMany({
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),
-    prisma.orgObjective.findMany({
-      where: { companyId, isArchived: false },
+    forCompany(companyId).orgObjective.findMany({
+      where: { isArchived: false },
       select: { id: true, title: true, level: true, departmentId: true },
       orderBy: { createdAt: "desc" },
     }),

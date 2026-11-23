@@ -5,12 +5,14 @@ import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { logStaffDepartmentChange, logDepartmentAction } from '@/app/lib/departments/department-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const authHeader = request.headers.get('authorization')
@@ -89,10 +91,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 async function validateCompanyAccess(user: any, companyId: string): Promise<boolean> {
   if (user.role === 'SUPER_ADMIN') return true
   
-  const userCompany = await prisma.userCompany.findFirst({
+  const userCompany = await forCompany(companyId).userCompany.findFirst({
     where: {
       userId: user.userId,
-      companyId: companyId,
       role: { in: [user.role, 'ALL'] }
     }
   })

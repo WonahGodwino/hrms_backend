@@ -8,6 +8,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { startOfBusinessMonth, endOfBusinessMonth } from '@/app/lib/attendance/business-day'
 import { buildOnboardingReportWorkbook, type OnboardingReportRow, type OnboardingReportStage } from '@/app/lib/recruitment/onboarding-report'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -47,8 +48,8 @@ export async function GET(request: NextRequest) {
     const company = await prisma.company.findUnique({ where: { id: companyId }, select: { companyName: true } })
     if (!company) return withCors(ApiResponse.error('Company not found', 404), origin)
 
-    const rows = await prisma.onboarding.findMany({
-      where: { companyId, archived: 0, createdAt: { gte: monthStart, lte: monthEnd } },
+    const rows = await forCompany(companyId).onboarding.findMany({
+      where: { archived: 0, createdAt: { gte: monthStart, lte: monthEnd } },
       include: {
         application: {
           include: {
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest) {
     const REQUIRED_DOCS = ['MEANS_OF_ID', 'GUARANTOR_FORM', 'SIGNED_OFFER']
     const progressByStaff: Record<string, number> = {}
     if (staffIds.length) {
-      const docs = await (prisma as any).staffOnboardingDocument.findMany({
+      const docs = await prisma.staffOnboardingDocument.findMany({
         where: { staffId: { in: staffIds } },
         select: { staffId: true, category: true },
       })

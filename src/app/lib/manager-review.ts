@@ -7,7 +7,7 @@ import type {
   ParticipantPhaseStatus,
   ReviewPhaseType,
 } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import {
   resolveActorStaffId,
   UserContext,
@@ -18,6 +18,7 @@ import {
   resolveRatingBounds,
   resolveTemplateCompetencies,
 } from "@/app/lib/self-appraisal";
+import { forCompany } from '@/app/lib/data/tenant';
 
 export type Db = Prisma.TransactionClient | PrismaClient;
 
@@ -1064,8 +1065,8 @@ export async function resolveRatingScales(
       where: { id: { in: competencyIds }, companyId },
       select: { id: true, scale: { select: { levels: levelSelect } } },
     }),
-    prisma.proficiencyScale.findFirst({
-      where: { companyId, isDefault: true, isActive: true },
+    forCompany(companyId).proficiencyScale.findFirst({
+      where: { isDefault: true, isActive: true },
       select: { levels: levelSelect },
     }),
   ]);

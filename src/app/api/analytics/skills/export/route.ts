@@ -3,7 +3,7 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url)
     const resolved = await resolveRequestCompanyId(user, searchParams.get('companyId'))
-    if (isCompanyError(resolved)) return new Response(resolved.error.message, { status: resolved.error.status, headers: { "Access-Control-Allow-Origin": origin ?? "*" } })
+    if (isCompanyError(resolved)) return new Response(resolved.error.message, { status: resolved.error.status, headers: { ...getCorsHeaders(origin)} })
     const { companyId } = resolved
     const department = searchParams.get('department') || undefined
     const category = searchParams.get('category') || undefined
@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
       headers: {
         'Content-Type': 'text/csv',
         'Content-Disposition': 'attachment; filename="skill-analytics.csv"',
-        'Access-Control-Allow-Origin': origin ?? '*',
+        ...getCorsHeaders(origin),
       },
     })
   } catch (e) { return withCors(handleApiError(e), origin) }

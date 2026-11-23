@@ -1,4 +1,7 @@
 // src/app/lib/otp.ts
+import { randomInt } from 'crypto';
+
+/** 6-digit OTP from a cryptographically secure generator. */
 export function generateOtp() {
-  return Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
+  return randomInt(100000, 1000000).toString();
 }

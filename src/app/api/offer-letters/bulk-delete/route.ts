@@ -1,10 +1,10 @@
 // src/app/api/offer-letters/bulk-delete/route.ts
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -37,8 +37,8 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
     }
 
-    const result = await prisma.generatedOfferLetter.deleteMany({
-      where: { id: { in: ids }, companyId },
+    const result = await forCompany(companyId).generatedOfferLetter.deleteMany({
+      where: { id: { in: ids } },
     })
 
     return withCors(

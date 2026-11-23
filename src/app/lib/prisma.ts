@@ -6,7 +6,7 @@ import fs from 'fs'
 import path from 'path'
 
 declare global {
-  // eslint-disable-next-line no-var
+   
   var prisma: PrismaClient | undefined
   var pgPool: Pool | undefined
 }

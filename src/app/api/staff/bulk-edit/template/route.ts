@@ -16,6 +16,9 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { STAFF_PENSION_COLUMNS, addPfaDropdown } from '@/app/lib/staff/pension-fields'
 import { NSITF_IDENTITY_COLUMNS, STAFF_HIRE_DATE_COLUMN } from '@/app/lib/staff/nsitf-identity-fields'
 import { writeStyledTable, buildSubtitle, confidentialFooter, attachmentDisposition, safeFileName } from '@/app/lib/excel/sheet-theme'
+import { forCompany } from '@/app/lib/data/tenant'
+import { readJsonBodyOrEmpty } from '@/app/lib/validation/request-body'
+import { bulkEditTemplateBodySchema } from '@/app/lib/validation/payroll-staff-schemas'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -49,7 +52,7 @@ export async function POST(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const authUser = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
-    const body = await request.json().catch(() => ({}))
+    const body = await readJsonBodyOrEmpty(request, bulkEditTemplateBodySchema)
     const { companyId, staffIds } = body as { companyId?: string; staffIds?: string[] }
 
     if (!companyId) {
@@ -57,15 +60,15 @@ export async function POST(request: NextRequest) {
     }
 
     if (authUser.role === 'HR') {
-      const hasAccess = await prisma.userCompany.findFirst({
-        where: { userId: authUser.userId, companyId, role: { in: ['HR', 'ALL'] } },
+      const hasAccess = await forCompany(companyId).userCompany.findFirst({
+        where: { userId: authUser.userId, role: { in: ['HR', 'ALL'] } },
       })
       if (!hasAccess) {
         return withCors(ApiResponse.error('You do not have HR access for this company', 403), origin)
       }
     } else if (authUser.role === 'ADMIN') {
-      const hasAccess = await prisma.userCompany.findFirst({
-        where: { userId: authUser.userId, companyId, role: { in: ['ADMIN', 'ALL'] } },
+      const hasAccess = await forCompany(companyId).userCompany.findFirst({
+        where: { userId: authUser.userId, role: { in: ['ADMIN', 'ALL'] } },
       })
       if (!hasAccess) {
         return withCors(ApiResponse.error('You do not have access to this company', 403), origin)
@@ -81,8 +84,8 @@ export async function POST(request: NextRequest) {
       return withCors(ApiResponse.error('Company not found or is archived', 404), origin)
     }
 
-    const staff = await prisma.staffRecord.findMany({
-      where: { companyId, id: { in: staffIds }, isActive: true },
+    const staff = await forCompany(companyId).staffRecord.findMany({
+      where: { id: { in: staffIds }, isActive: true },
       select: { id: true, staffId: true, email: true },
       orderBy: { staffId: 'asc' },
     })

@@ -11,6 +11,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { hasModuleAccess } from '@/app/lib/module-access'
 import { AUTOMATION_DECIDER_ROLES, companyForRequest } from '@/app/lib/core-setup/automation'
+import { forCompany } from '@/app/lib/data/tenant'
 
 type Item = {
   key: string
@@ -66,8 +67,8 @@ export async function GET(request: NextRequest) {
 
     if (await enabled('STAFF_LOANS_BENEFITS')) {
       const [loans, benefits] = await Promise.all([
-        prisma.loanRequest.count({ where: { companyId, status: 'PENDING_APPROVAL' } }),
-        prisma.benefitRequest.count({ where: { companyId, status: 'PENDING_APPROVAL' } }),
+        forCompany(companyId).loanRequest.count({ where: { status: 'PENDING_APPROVAL' } }),
+        forCompany(companyId).benefitRequest.count({ where: { status: 'PENDING_APPROVAL' } }),
       ])
       add({ key: 'x-loans', module: 'STAFF_LOANS_BENEFITS', moduleLabel: 'Loans & Benefits', title: 'Loan and benefit requests awaiting approval', detail: `${loans} loan and ${benefits} benefit request(s) are pending.`, count: loans + benefits, priority: 'medium', openPath: '/staff-loans-benefits/approvals' })
     }
@@ -82,7 +83,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (await enabled('ONBOARDING')) {
-      const count = await prisma.onboarding.count({ where: { companyId, status: { in: ['NOT_STARTED', 'IN_PROGRESS'] }, archived: 0 } })
+      const count = await forCompany(companyId).onboarding.count({ where: { status: { in: ['NOT_STARTED', 'IN_PROGRESS'] }, archived: 0 } })
       add({ key: 'x-onboarding', module: 'ONBOARDING', moduleLabel: 'Onboarding', title: 'Onboardings in progress', detail: `${count} onboarding(s) are not yet complete.`, count, priority: 'low', openPath: '/onboarding-center' })
     }
 

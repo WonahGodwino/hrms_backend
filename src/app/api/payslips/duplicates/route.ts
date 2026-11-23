@@ -11,6 +11,8 @@ import { prisma } from '@/app/lib/db';
 import { staffIdsWithMultiplePayslips } from '@/app/lib/payroll/payslip-duplicate-prefilter';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 import { groupDuplicatePayslips, payslipDuplicateKey } from '@/app/lib/payroll/payslip-duplicates';
+import { readJsonBody } from '@/app/lib/validation/request-body';
+import { payslipIdsBodySchema } from '@/app/lib/validation/payroll-staff-schemas';
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -192,7 +194,9 @@ export async function DELETE(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '');
     const user = requireRole(token, ['ADMIN', 'HR', 'SUPER_ADMIN']);
 
-    const body = await request.json();
+    const parsedBody = await readJsonBody(request, payslipIdsBodySchema);
+    if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.message, 400), origin);
+    const body = parsedBody.data;
     const { payslipIds } = body;
 
     if (!payslipIds || !Array.isArray(payslipIds) || payslipIds.length === 0) {

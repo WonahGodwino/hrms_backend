@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { withTransaction } from "@/app/lib/data/transaction";
 import { handleCorsOptions } from "@/app/lib/cors";
 import { ok } from "@/app/lib/pip";
 import {
@@ -38,7 +38,7 @@ export async function PUT(
     );
     const files = parseFiles(body.evidence, ctx.companyId);
 
-    const draft = await prisma.$transaction(async (tx) => {
+    const draft = await withTransaction(async (tx) => {
       await ownLivePip(tx, ctx, id);
       const obj = await tx.pipImprovementObjective.findFirst({
         where: { id: objectiveId, pipId: id, removedAt: null },

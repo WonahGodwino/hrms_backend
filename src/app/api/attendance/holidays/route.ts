@@ -17,6 +17,7 @@ import { canManageAttendance } from '@/app/lib/attendance/access'
 import { businessDateKey } from '@/app/lib/attendance/business-day'
 import { ensureHolidayAttendance } from '@/app/lib/attendance/work-calendar'
 import { holidayView, parseHolidayInput } from './shared'
+import { forCompany } from '@/app/lib/data/tenant'
 
 const ROLES = ['HR', 'ADMIN', 'SUPER_ADMIN']
 
@@ -41,8 +42,8 @@ export async function GET(request: NextRequest) {
     const from = new Date(Date.UTC(year, 0, 1) - 60 * 60_000)
     const to = new Date(Date.UTC(year + 1, 0, 1) - 60 * 60_000 - 1)
 
-    const holidays = await prisma.publicHoliday.findMany({
-      where: { companyId, OR: [{ date: { gte: from, lte: to } }, { isRecurring: true }] },
+    const holidays = await forCompany(companyId).publicHoliday.findMany({
+      where: { OR: [{ date: { gte: from, lte: to } }, { isRecurring: true }] },
       orderBy: { date: 'asc' },
     })
     return withCors(ApiResponse.success({ year, holidays: holidays.map(holidayView) }), origin)

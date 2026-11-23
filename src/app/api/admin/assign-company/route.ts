@@ -3,8 +3,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { withCors } from '@/app/lib/cors'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   const origin = request.headers.get('origin')
@@ -151,7 +153,7 @@ export async function POST(request: NextRequest) {
     )
 
   } catch (error) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('Error assigning company:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }
@@ -215,7 +217,7 @@ export async function DELETE(request: NextRequest) {
     )
 
   } catch (error) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('Error removing company assignment:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }
@@ -340,8 +342,7 @@ export async function GET(request: NextRequest) {
         )
       }
 
-      const companyAssignments = await prisma.userCompany.findMany({
-        where: { companyId },
+      const companyAssignments = await forCompany(companyId).userCompany.findMany({
         include: {
           user: {
             select: {
@@ -426,7 +427,7 @@ export async function GET(request: NextRequest) {
     )
 
   } catch (error) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     console.error('Error retrieving company assignments:', error)
     return withCors(ApiResponse.error(message, 500), origin)
   }

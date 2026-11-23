@@ -1,17 +1,18 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { mapActivityLog } from '@/app/lib/training/activity-log-map'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
 }
 
 // GET /api/training/assignment-rules/activity-logs/:id/export?companyId=
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -20,8 +21,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const resolved = await resolveRequestCompanyId(user, new URL(req.url).searchParams.get('companyId'))
     if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
 
-    const log = await prisma.trainingAuditLog.findFirst({
-      where: { id: params.id, companyId: resolved.companyId, entityType: 'assignment_rule' },
+    const log = await forCompany(resolved.companyId).trainingAuditLog.findFirst({
+      where: { id: params.id, entityType: 'assignment_rule' },
       include: { actor: { select: { firstName: true, lastName: true } } },
     })
 
@@ -54,7 +55,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       headers: {
         'Content-Type': 'text/csv',
         'Content-Disposition': `attachment; filename="activity-log-${item.id}.csv"`,
-        'Access-Control-Allow-Origin': origin ?? '*',
+        ...getCorsHeaders(origin),
       },
     })
   } catch (e) {

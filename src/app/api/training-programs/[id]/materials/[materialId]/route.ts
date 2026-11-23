@@ -4,6 +4,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -12,8 +13,9 @@ export async function OPTIONS(req: NextRequest) {
 // DELETE /api/training-programs/:id/materials/:materialId
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string; materialId: string } }
+  props: { params: Promise<{ id: string; materialId: string }> }
 ) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
@@ -22,10 +24,9 @@ export async function DELETE(
     const resolved = await resolveRequestCompanyId(user, new URL(req.url).searchParams.get('companyId'))
     if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
 
-    const material = await prisma.trainingMaterial.findFirst({
+    const material = await forCompany(resolved.companyId).trainingMaterial.findFirst({
       where: {
-        id: params.materialId,
-        companyId: resolved.companyId,
+        id: params.materialId
       },
     })
 

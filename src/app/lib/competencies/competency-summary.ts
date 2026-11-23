@@ -1,5 +1,6 @@
 import { prisma } from "@/app/lib/db";
 import { toDisplayCategory } from "./competency-utils";
+import { forCompany } from '@/app/lib/data/tenant';
 
 const pct = (n: number, d: number) =>
   d > 0 ? Math.round((n / d) * 100) : null;
@@ -18,16 +19,16 @@ const CATEGORY_ORDER = [
 // (covered = own mapping or inherited from a department mapping), top 3 departments by size.
 async function getCoverageHeatmap(companyId: string) {
   const [competencies, departments, designations] = await Promise.all([
-    prisma.competency.findMany({
-      where: { companyId, status: "ACTIVE" },
+    forCompany(companyId).competency.findMany({
+      where: { status: "ACTIVE" },
       select: { id: true, category: true },
     }),
-    prisma.department.findMany({
-      where: { companyId, status: ACTIVE },
+    forCompany(companyId).department.findMany({
+      where: { status: ACTIVE },
       select: { id: true, name: true },
     }),
-    prisma.designation.findMany({
-      where: { companyId, status: ACTIVE },
+    forCompany(companyId).designation.findMany({
+      where: { status: ACTIVE },
       select: { id: true, departmentId: true },
     }),
   ]);
@@ -114,16 +115,16 @@ export async function getCompetencySummary(companyId: string) {
       where: { companyId, status: { not: "ARCHIVED" } },
       _count: { _all: true },
     }),
-    prisma.competency.findMany({
-      where: { companyId, status: "ACTIVE" },
+    forCompany(companyId).competency.findMany({
+      where: { status: "ACTIVE" },
       select: { id: true },
     }),
-    prisma.department.findMany({
-      where: { companyId, status: ACTIVE },
+    forCompany(companyId).department.findMany({
+      where: { status: ACTIVE },
       select: { id: true },
     }),
-    prisma.designation.findMany({
-      where: { companyId, status: ACTIVE },
+    forCompany(companyId).designation.findMany({
+      where: { status: ACTIVE },
       select: { id: true, departmentId: true },
     }),
   ]);

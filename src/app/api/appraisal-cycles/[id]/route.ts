@@ -24,6 +24,7 @@ import {
 import { CycleTransitionError } from "@/app/lib/appraisal-cycles/cycle-transitions";
 import { todayStart } from "@/app/lib/appraisal-cycles/cycle-dates";
 import { AUTOMATION_CAPABILITIES } from "@/app/lib/appraisal-cycles/workflow-settings-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -48,10 +49,8 @@ const SIMPLE_FIELDS = [
 ] as const;
 
 // GET /api/appraisal-cycles/:id?companyId=...
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -80,8 +79,8 @@ export async function GET(
       );
     }
 
-    const cycle = await prisma.appraisalCycle.findFirst({
-      where: { id: params.id, companyId },
+    const cycle = await forCompany(companyId).appraisalCycle.findFirst({
+      where: { id: params.id },
       include: {
         owner: { select: { id: true, firstName: true, lastName: true } },
         departmentScopes: {
@@ -168,10 +167,8 @@ export async function GET(
 // PATCH /api/appraisal-cycles/:id
 // DRAFT/SCHEDULED: full edit. ACTIVE/PAUSED/ESCALATED: name, end date, phase deadlines, reminder
 // and escalation settings only. COMPLETED/ARCHIVED: read-only.
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   const reject = (status: number, body: Record<string, unknown>) =>
     withCors(
@@ -314,7 +311,7 @@ export async function PATCH(
     // Templates that stop making sense after this edit are unassigned, but only after confirmation.
     let impact: Awaited<ReturnType<typeof getAssignmentImpact>> = [];
     if (caps.editMode === "full" && (scope.touched || p.phases)) {
-      impact = await getAssignmentImpact(prisma as any, existing.id, {
+      impact = await getAssignmentImpact(prisma, existing.id, {
         scopeType: scope.scopeType,
         departmentIds: scope.departmentIds,
         enabledPhases: nextPhases

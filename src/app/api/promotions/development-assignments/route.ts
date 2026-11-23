@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { CareerActionType, DevelopmentActivityType } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import {
@@ -14,6 +14,7 @@ import {
 } from "@/app/lib/pip";
 import { notifyCareerActionAssigned } from "@/app/lib/promotion-notify";
 import { PROMO_LIMITS, loadScopedStaff } from "@/app/lib/promotion";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -102,10 +103,9 @@ export async function POST(request: NextRequest) {
     // Title, program and mentor
     let program: { id: string; programName: string } | null = null;
     if (body.trainingProgramId) {
-      program = await prisma.trainingProgram.findFirst({
+      program = await forCompany(companyId).trainingProgram.findFirst({
         where: {
           id: String(body.trainingProgramId),
-          companyId,
           status: "ACTIVE",
           deletedAt: null,
         },
@@ -119,8 +119,8 @@ export async function POST(request: NextRequest) {
     if (actionType === "MENTORSHIP") {
       const mentor =
         typeof body.mentorId === "string" && body.mentorId !== staff.id
-          ? await prisma.staffRecord.findFirst({
-              where: { id: body.mentorId, companyId, isActive: true },
+          ? await forCompany(companyId).staffRecord.findFirst({
+              where: { id: body.mentorId, isActive: true },
               select: { id: true, firstName: true, lastName: true },
             })
           : null;
@@ -140,10 +140,9 @@ export async function POST(request: NextRequest) {
     }
     let competencyId: string | null = null;
     if (body.competencyId) {
-      const comp = await prisma.competency.findFirst({
+      const comp = await forCompany(companyId).competency.findFirst({
         where: {
           id: String(body.competencyId),
-          companyId,
           status: { not: "ARCHIVED" },
         },
         select: { id: true },

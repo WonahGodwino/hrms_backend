@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -13,6 +13,7 @@ import {
   MAX_POLICY_PARTICIPANTS,
   MUTABLE_CYCLE_STATUSES,
 } from "@/app/lib/performance-operations/ops-actions-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -67,8 +68,8 @@ export async function GET(
       return withCors(ApiResponse.error("Invalid entityId", 400), origin);
 
     // Cross-company checks: the cycle and department must belong to this company.
-    const cycle = await prisma.appraisalCycle.findFirst({
-      where: { id: parsed.cycleId, companyId },
+    const cycle = await forCompany(companyId).appraisalCycle.findFirst({
+      where: { id: parsed.cycleId },
       select: {
         id: true,
         name: true,
@@ -84,8 +85,8 @@ export async function GET(
 
     let label = "Unassigned";
     if (parsed.departmentId) {
-      const dept = await prisma.department.findFirst({
-        where: { id: parsed.departmentId, companyId },
+      const dept = await forCompany(companyId).department.findFirst({
+        where: { id: parsed.departmentId },
         select: { name: true },
       });
       if (!dept)

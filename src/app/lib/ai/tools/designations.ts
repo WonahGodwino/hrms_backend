@@ -1,5 +1,6 @@
 // [ai-assistant] Designation tool — list_designations (read-only).
 import type { ToolDefinition } from './types'
+import { decimalOrNull } from '@/app/lib/prisma-utils'
 
 export const listDesignations: ToolDefinition = {
   name: 'list_designations',
@@ -36,6 +37,7 @@ export const listDesignations: ToolDefinition = {
 
     const result = designations.map((d) => ({
       ...d,
+      ...(showPay ? { basePay: decimalOrNull(d.basePay) } : {}),
       ...(showPay ? {} : { basePay: '[hidden by company policy]', basePayFrequency: '[hidden by company policy]' }),
     }))
 

@@ -5,6 +5,7 @@ import { mapActivityLog } from '@/app/lib/training/activity-log-map'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -77,8 +78,8 @@ export async function GET(req: NextRequest) {
         take: limit,
         orderBy: { createdAt: 'desc' },
       }),
-      prisma.trainingAuditLog.findMany({
-        where: { companyId, entityType: 'assignment_rule' },
+      forCompany(companyId).trainingAuditLog.findMany({
+        where: { entityType: 'assignment_rule' },
         select: { metadata: true },
         take: 2000,
       }),

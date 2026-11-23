@@ -8,6 +8,7 @@ import { requirePhedApprovalAccess } from '@/app/lib/phed/access-role'
 import { buildApprovalMemoSections } from '@/app/lib/phed/approval-memo-data'
 import { PHED_APPROVAL_STAGES, getDisplayStatus } from '@/app/lib/phed/approval-stages'
 import { notifyAfterForward } from '@/app/lib/phed/approval-notifications'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -28,9 +29,8 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(100, Math.max(1, Number(p.get('limit') || 50)))
 
     const [total, memos] = await Promise.all([
-      prisma.phedApprovalMemo.count({ where: { companyId } }),
-      prisma.phedApprovalMemo.findMany({
-        where: { companyId },
+      forCompany(companyId).phedApprovalMemo.count(),
+      forCompany(companyId).phedApprovalMemo.findMany({
         include: { payPeriod: { select: { id: true, periodName: true, month: true, year: true } } },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,

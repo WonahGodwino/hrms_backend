@@ -15,6 +15,7 @@ import {
   type TrialMetric,
   type TrialStatus,
 } from './limits'
+import { forCompany } from '@/app/lib/data/tenant'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -103,7 +104,7 @@ export async function assertExportsAllowed(companyId: string | null | undefined)
 }
 
 export async function getTrialUsage(companyId: string, metric: TrialMetric): Promise<number> {
-  return prisma.trialUsageCounter.count({ where: { companyId, metric } })
+  return forCompany(companyId).trialUsageCounter.count({ where: { metric } })
 }
 
 // Reserves quota slots for the given subjects (e.g. staff ids). Subjects already
@@ -164,12 +165,12 @@ export async function reserveStaffEmailSlot(companyId: string | null | undefined
 // not counted.
 export async function getStorageUsedBytes(companyId: string): Promise<number> {
   const [cand, tmpl, onboarding, leave, recog, training] = await Promise.all([
-    prisma.candidateFile.aggregate({ where: { companyId }, _sum: { sizeBytes: true } }),
-    prisma.offerLetterTemplate.aggregate({ where: { companyId }, _sum: { fileSize: true } }),
-    prisma.staffOnboardingDocument.aggregate({ where: { companyId }, _sum: { sizeBytes: true } }),
-    prisma.leaveRequest.aggregate({ where: { companyId }, _sum: { attachmentSize: true } }),
-    prisma.recognition.aggregate({ where: { companyId }, _sum: { attachmentSize: true } }),
-    prisma.trainingMaterial.aggregate({ where: { companyId }, _sum: { fileSizeBytes: true } }),
+    forCompany(companyId).candidateFile.aggregate({ where: { }, _sum: { sizeBytes: true } }),
+    forCompany(companyId).offerLetterTemplate.aggregate({ where: { }, _sum: { fileSize: true } }),
+    forCompany(companyId).staffOnboardingDocument.aggregate({ where: { }, _sum: { sizeBytes: true } }),
+    forCompany(companyId).leaveRequest.aggregate({ where: { }, _sum: { attachmentSize: true } }),
+    forCompany(companyId).recognition.aggregate({ where: { }, _sum: { attachmentSize: true } }),
+    forCompany(companyId).trainingMaterial.aggregate({ where: { }, _sum: { fileSizeBytes: true } }),
   ])
   return (
     (cand._sum.sizeBytes ?? 0) +

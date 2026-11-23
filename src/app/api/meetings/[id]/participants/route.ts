@@ -7,6 +7,7 @@ import { prisma } from '@/app/lib/db';
 import { notifyMeetingParticipants } from '@/app/lib/meetings/notify';
 import { hasModuleAccess } from '@/app/lib/module-access';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(req: NextRequest) {
 	return handleCorsOptions(req);
@@ -17,7 +18,7 @@ const PRIVILEGED = ['HR', 'ADMIN', 'SUPER_ADMIN'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
 async function loadMeeting(id: string, user: any) {
-	const meeting = await (prisma as any).meeting.findUnique({
+	const meeting = await prisma.meeting.findUnique({
 		where: { id },
 		include: { participants: true },
 	});
@@ -58,8 +59,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 		let participantData: any;
 		let addedStaff: { firstName: string; lastName: string; email: string } | null = null;
 		if (staffId) {
-			const staff = await prisma.staffRecord.findFirst({
-				where: { id: staffId, companyId: loaded.meeting.companyId },
+			const staff = await forCompany(loaded.meeting.companyId).staffRecord.findFirst({
+				where: { id: staffId },
 				select: { id: true, firstName: true, lastName: true, email: true },
 			});
 			if (!staff) return withCors(ApiResponse.error('Staff member was not found in this company', 404), origin);
@@ -74,7 +75,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 		);
 		if (duplicate) return withCors(ApiResponse.error('This participant is already invited to the meeting', 409), origin);
 
-		const participant = await (prisma as any).meetingParticipant.create({
+		const participant = await prisma.meetingParticipant.create({
 			data: { meetingId: id, ...participantData },
 		});
 		const emailDelivery = await notifyMeetingParticipants(id, 'created', {

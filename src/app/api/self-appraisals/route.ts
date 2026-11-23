@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -19,6 +19,7 @@ import {
   syncDraftGoals,
   SELF_APPRAISAL_OPEN_STATUSES,
 } from "@/app/lib/self-appraisal";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -69,9 +70,8 @@ export async function GET(request: NextRequest) {
 
     // Resolve the cycle when the caller didn't specify one
     if (!cycleId) {
-      const eligible = await prisma.appraisalCycleParticipant.findMany({
+      const eligible = await forCompany(companyId).appraisalCycleParticipant.findMany({
         where: {
-          companyId,
           staffRecordId,
           cycle: {
             status: { in: [...SELF_APPRAISAL_OPEN_STATUSES] },

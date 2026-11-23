@@ -1,8 +1,9 @@
 // src/app/api/recruitment/jobs/template/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -111,7 +112,7 @@ export async function GET(request: NextRequest) {
     return corsResponse
     
   } catch (error) {
-    const message = formatError(error)
+    const message = publicErrorMessage(error)
     return withCors(
       ApiResponse.error(message || 'Error generating template', 500),
       origin

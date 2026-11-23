@@ -6,6 +6,7 @@ import { withCors, handleCorsOptions } from '@/app/lib/cors'
 import { prisma } from '@/app/lib/db'
 import { NOTIFICATION_TYPES } from '@/app/lib/notifications/helpers'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 const announcementSchema = z.object({
   title: z.string().min(3).max(200),
@@ -144,9 +145,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const staffRecipients = await prisma.staffRecord.findMany({
+    const staffRecipients = await forCompany(targetCompanyId as string).staffRecord.findMany({
       where: {
-        companyId: targetCompanyId as string,
         isActive: true,
         role: 'STAFF'
       },

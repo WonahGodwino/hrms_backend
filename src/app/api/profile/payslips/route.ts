@@ -8,6 +8,7 @@ import { ExtendedPayslipItem, StaffRecordInfo } from '@/app/lib/types/payslip';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 import { getPayslipDisplayFields, calculateTotals } from '@/app/lib/payroll/utils';
 import { parseMonthFromString } from '@/app/lib/payroll/utils/monthParser';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
@@ -259,10 +260,9 @@ export async function GET(request: NextRequest) {
 		// guaranteed to come from the same payslip), so earliest/latest are
 		// derived by sorting in app code instead.
 		const [summary, allPeriods] = await Promise.all([
-			prisma.payslip.aggregate({
+			forCompany(companyId).payslip.aggregate({
 				where: {
 					staffRecordId: user.userId,
-					companyId: companyId,
 					draft: false,
 				},
 				_sum: {
@@ -271,10 +271,9 @@ export async function GET(request: NextRequest) {
 				},
 				_count: true,
 			}),
-			prisma.payslip.findMany({
+			forCompany(companyId).payslip.findMany({
 				where: {
 					staffRecordId: user.userId,
-					companyId: companyId,
 					draft: false,
 				},
 				select: { year: true, month: true },
@@ -298,10 +297,9 @@ export async function GET(request: NextRequest) {
 		};
 
 		// Get available years for filtering
-		const availableYears = await prisma.payslip.findMany({
+		const availableYears = await forCompany(companyId).payslip.findMany({
 			where: {
 				staffRecordId: user.userId,
-				companyId: companyId,
 				draft: false,
 			},
 			select: {

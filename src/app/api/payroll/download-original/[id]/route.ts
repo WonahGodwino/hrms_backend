@@ -4,22 +4,30 @@ import { prisma } from '@/app/lib/db'
 
 import { requireRole } from '@/app/lib/auth'
 import { hasModuleAccess } from '@/app/lib/module-access'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import path from 'path'
 import { decompressFileBufferIfNeeded } from '@/app/lib/payroll/templates/shared/file-compression'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
+import { forCompany } from '@/app/lib/data/tenant'
 import { readUploadFile } from '@/app/lib/storage/upload-files'
 import { readDocumentObject } from '@/app/lib/storage/documents'
 
+
+// A raw file name in a header throws on non-Latin-1 characters and breaks on
+// a quote, so send an ASCII-safe fallback plus the RFC 5987 UTF-8 form.
+function contentDispositionFor(fileName: string): string {
+  const ascii = fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\;]/g, '_')
+  const utf8 = encodeURIComponent(fileName).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${utf8}`
+}
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -70,10 +78,9 @@ export async function GET(
     }
 
     if (user.role === 'ADMIN') {
-      const hasAccess = await prisma.userCompany.findFirst({
+      const hasAccess = await forCompany(uploadRecord.companyId).userCompany.findFirst({
         where: {
           userId: user.userId,
-          companyId: uploadRecord.companyId,
           role: { in: ['ADMIN', 'ALL'] }
         }
       })
@@ -118,7 +125,7 @@ export async function GET(
     }
     if (!fileBuffer) {
       return withCors(
-        ApiResponse.error('Original file not found', 404),
+        ApiResponse.error('The original file for this upload was not retained, so it cannot be downloaded.', 404),
         origin
       )
     }
@@ -139,7 +146,7 @@ export async function GET(
       status: 200,
       headers: {
         'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename="${uploadRecord.fileName}"`,
+        'Content-Disposition': contentDispositionFor(uploadRecord.fileName),
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache',
         'Expires': '0',
@@ -157,12 +164,12 @@ export async function GET(
   
   if (err.code === 'ENOENT') {
     return withCors(
-      ApiResponse.error('File not found on server', 404),
+      ApiResponse.error('The original file for this upload was not retained, so it cannot be downloaded.', 404),
       origin
     )
   }
 
-  const message = formatError(error)
+  const message = publicErrorMessage(error)
   return withCors(ApiResponse.error(message, 500), origin)
 }
 }

@@ -5,18 +5,20 @@ import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 type RouteParams = {
-  params: {
+  params: Promise<{
     id: string
-  }
+  }>
 }
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function GET(request: NextRequest, { params }: RouteParams) {
+export async function GET(request: NextRequest, props: RouteParams) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -76,10 +78,9 @@ async function verifyCompanyAccess(user: any, companyId: string): Promise<boolea
   if (user.role === 'SUPER_ADMIN') return true
   
   try {
-    const userCompany = await prisma.userCompany.findFirst({
+    const userCompany = await forCompany(companyId).userCompany.findFirst({
       where: {
         userId: user.userId,
-        companyId: companyId,
         OR: [
           { role: user.role },
           { role: 'ALL' }

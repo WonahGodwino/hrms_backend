@@ -25,6 +25,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}))
     const all = body.all === true
     const companyId = typeof body.companyId === 'string' ? body.companyId.trim() : ''
+    // eslint-disable-next-line no-control-regex -- strips control characters on purpose
     const reason = typeof body.reason === 'string' ? body.reason.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 300) : ''
     if (all === Boolean(companyId)) {
       return withCors(ApiResponse.error('Send either { "all": true } or { "companyId": "..." }', 400), origin)

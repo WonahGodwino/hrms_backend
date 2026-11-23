@@ -8,11 +8,10 @@
 // progress (shared with bulk-create jobs); no file is ever written to disk,
 // since nothing needs to survive a restart except the DB job row itself.
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access'
 import ExcelJS from 'exceljs'
 import { findHeaderRow } from '@/app/lib/excel/sheet-theme'
 import {
@@ -21,10 +20,11 @@ import {
   completeOfferLetterBulkJobRecord,
   failOfferLetterBulkJobRecord,
   type OfferLetterBulkJobResults,
-} from '@/app/lib/offer-letters/bulkJobStatus'
-import { processOfferLetterBulkEditRow } from '@/app/lib/offer-letters/bulkEditProcessing'
-import { cellToString } from '@/app/lib/offer-letters/excelCell'
-import { resolveHeaderLabelsToKeys, BASE_FIELD_KEYS } from '@/app/lib/offer-letters/variableLabels'
+} from '@/app/lib/offers/letters/bulkJobStatus'
+import { processOfferLetterBulkEditRow } from '@/app/lib/offers/letters/bulkEditProcessing'
+import { cellToString } from '@/app/lib/offers/letters/excelCell'
+import { resolveHeaderLabelsToKeys, BASE_FIELD_KEYS } from '@/app/lib/offers/letters/variableLabels'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -115,16 +115,16 @@ export async function POST(request: NextRequest) {
     // template, so every row in a legitimate sheet shares one — resolve it
     // from the first row's letterId.
     const firstLetterId = String(rawRows[0].letterId || '').trim()
-    const firstLetter = await prisma.generatedOfferLetter.findFirst({
-      where: { id: firstLetterId, companyId },
+    const firstLetter = await forCompany(companyId).generatedOfferLetter.findFirst({
+      where: { id: firstLetterId },
       select: { templateId: true },
     })
     if (!firstLetter?.templateId) {
       return withCors(ApiResponse.error('Could not determine which template this sheet belongs to.', 400), origin)
     }
 
-    const template = await prisma.offerLetterTemplate.findFirst({
-      where: { id: firstLetter.templateId, companyId },
+    const template = await forCompany(companyId).offerLetterTemplate.findFirst({
+      where: { id: firstLetter.templateId },
     })
     if (!template) {
       return withCors(ApiResponse.error('Template not found for this company', 404), origin)

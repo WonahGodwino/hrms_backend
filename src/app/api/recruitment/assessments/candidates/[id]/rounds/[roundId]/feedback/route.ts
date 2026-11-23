@@ -7,7 +7,11 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string; roundId: string } }) {
+export async function GET(
+  request: NextRequest,
+  props: { params: Promise<{ id: string; roundId: string }> }
+) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '') ?? null

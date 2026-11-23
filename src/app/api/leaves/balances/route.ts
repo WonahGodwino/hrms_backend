@@ -3,8 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { withCors, handleCorsOptions } from '@/app/lib/cors'
-import { ensureStaffLeaveBalances } from '@/app/lib/leaves/balance-engine'
+import { ensureStaffLeaveBalances } from '@/app/lib/leave/balance-engine'
 import { validateCompanyAccess } from '@/app/lib/departments/department-utils'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
 
 // ================ SIMPLIFIED, ROBUST PRISMA IMPORT ================
 // This is the most reliable approach - direct import with build-time safety
@@ -28,7 +29,7 @@ async function getPrismaClient() {
 
   try {
     // DIRECT IMPORT - 
-    const { prisma } = await import('@/app/lib/prisma')
+    const { prisma } = await import('@/app/lib/db')
     prismaInstance = prisma
     return prisma
   } catch (error) {
@@ -469,7 +470,7 @@ export async function GET(request: NextRequest) {
     // Handle different types of errors
     let statusCode = 500
     let errorMessage = 'Failed to fetch leave balances'
-    let errorDetails = process.env.NODE_ENV === 'development' ? error.message : undefined
+    const errorDetails = process.env.NODE_ENV === 'development' ? error.message : undefined
 
     if (error.message?.includes('Authorization') || error.message?.includes('token')) {
       statusCode = 401
@@ -656,7 +657,7 @@ export async function POST(request: NextRequest) {
       { 
         success: false,
         message: 'Failed to fetch year-specific leave balances',
-        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        details: process.env.NODE_ENV === 'development' ? publicErrorMessage(error) : undefined
       },
       { status: 500 }
     )

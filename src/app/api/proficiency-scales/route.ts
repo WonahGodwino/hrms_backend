@@ -4,6 +4,7 @@ import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { verifyCompanyAccess } from "@/app/lib/access-control";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -45,8 +46,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const scales = await prisma.proficiencyScale.findMany({
-      where: { companyId, isActive: true },
+    const scales = await forCompany(companyId).proficiencyScale.findMany({
+      where: { isActive: true },
       include: { levels: { orderBy: { displayOrder: "asc" } } },
       orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
     });

@@ -10,6 +10,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -29,7 +30,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
     const actor = user.userId || user.email || 'system'
 
-    const onboarding = await prisma.onboarding.findFirst({ where: { id, companyId } })
+    const onboarding = await forCompany(companyId).onboarding.findFirst({ where: { id } })
     if (!onboarding) return withCors(ApiResponse.error('Onboarding not found', 404), origin)
 
     const body = await request.json().catch(() => ({}))
@@ -45,16 +46,17 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     // If a manager id was supplied, ensure it points to a real staff record in this company.
     if (managerId) {
-      const mgr = await prisma.staffRecord.findFirst({ where: { id: managerId, companyId }, select: { id: true } })
+      const mgr = await forCompany(companyId).staffRecord.findFirst({ where: { id: managerId }, select: { id: true } })
       if (!mgr) return withCors(ApiResponse.error('Selected manager was not found for this company', 400), origin)
     }
 
+    // 1) and 2) are saved in one update (DB-002) so the start date and the
+    // handoff details never end up half-saved.
+    const onboardingData: Record<string, unknown> = {}
+
     // 1) Persist start date on the onboarding row (real column).
     if (startDate !== undefined) {
-      await prisma.onboarding.update({
-        where: { id },
-        data: { startDate: startDate ?? null, updatedBy: actor },
-      })
+      onboardingData.startDate = startDate ?? null
     }
 
     // 2) Merge the handoff overrides into the onboarding's own metadata blob.
@@ -73,9 +75,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           ? { appliedTemplateNames: [appliedTemplateName] }
           : {}),
       }
+      onboardingData.metadata = { ...existingMeta, handoff }
+    }
+
+    if (Object.keys(onboardingData).length > 0) {
       await prisma.onboarding.update({
         where: { id },
-        data: { metadata: { ...existingMeta, handoff } as any, updatedBy: actor },
+        data: { ...onboardingData, updatedBy: actor } as any,
       })
     }
 

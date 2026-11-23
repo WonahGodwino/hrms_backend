@@ -23,7 +23,10 @@ import {
   receivedMail,
   withdrawnMail,
 } from "@/app/lib/candidate-portal/emails";
-import { notifyHrOfWithdrawal } from "@/app/lib/candidate-portal/notify";
+import {
+  notifyHrOfWithdrawal,
+  notifyHrOfApplication,
+} from "@/app/lib/candidate-portal/notify";
 
 export async function listApplications(accountId: string, sp: URLSearchParams) {
   const base = { candidate: { accountId }, ...notArchived };
@@ -412,6 +415,15 @@ export async function applyWithProfile(account: Authed, body: any) {
         `${app.referenceCode.slice(0, 5)}-${app.referenceCode.slice(5)}`,
       ),
     );
+    void notifyHrOfApplication({
+      companyId: job.companyId,
+      applicationId: app.id,
+      jobId: job.id,
+      jobTitle: job.title,
+      candidateName: `${acc.firstName} ${acc.lastName}`.trim(),
+      candidateEmail: acc.email,
+      referenceCode: app.referenceCode,
+    });
     return {
       applicationId: app.id,
       referenceCode: app.referenceCode,

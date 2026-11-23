@@ -6,6 +6,7 @@ import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requireLetterAdminAccess } from '@/app/lib/phed/letter-access'
 import { auditLetterEvent, clientIp, resolveLetterCompany } from '@/app/lib/phed/letter-service'
 import { validateTemplateTokens, extractTokens } from '@/app/lib/phed/letter-engine/token-map'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -19,8 +20,7 @@ export async function GET(req: NextRequest) {
     const companyId = resolveLetterCompany(user, new URL(req.url).searchParams.get('companyId'))
     if (!companyId) return withCors(ApiResponse.forbidden('No company in scope'), origin)
 
-    const templates = await (prisma as any).phedLetterTemplate.findMany({
-      where: { companyId },
+    const templates = await forCompany(companyId).phedLetterTemplate.findMany({
       orderBy: { version: 'desc' },
       select: { id: true, type: true, version: true, signatoryName: true, signatoryTitle: true, body: true, letterhead: true, createdAt: true, createdById: true },
     })
@@ -57,14 +57,14 @@ export async function POST(req: NextRequest) {
       return withCors(ApiResponse.error(`Template contains unknown token(s): ${check.unknown.join(', ')}`, 400), origin)
     }
 
-    const latest = await (prisma as any).phedLetterTemplate.findFirst({
-      where: { companyId, type: 'SALARY_INCREASE' },
+    const latest = await forCompany(companyId).phedLetterTemplate.findFirst({
+      where: { type: 'SALARY_INCREASE' },
       orderBy: { version: 'desc' },
       select: { version: true },
     })
     const nextVersion = (latest?.version ?? 0) + 1
 
-    const created = await (prisma as any).phedLetterTemplate.create({
+    const created = await prisma.phedLetterTemplate.create({
       data: {
         companyId,
         type: 'SALARY_INCREASE',

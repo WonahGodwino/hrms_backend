@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { buildMultiPeriodAggregate } from '@/app/lib/phed/reports'
 import { exportMultiPeriodAggregateToExcel } from '@/app/lib/phed/report-export'
+import { rejectForeignCompany } from '@/app/lib/phed/company-guard'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -16,20 +18,22 @@ export async function GET(req: NextRequest) {
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
     const rl = phedRateLimit(req, 'report')
     if (rl) return withCors(rl, origin)
 
     const p         = new URL(req.url).searchParams
     const companyId = p.get('companyId')
+    const foreignCompany = await rejectForeignCompany(user, companyId, origin)
+    if (foreignCompany) return foreignCompany
     const format    = p.get('format') ?? 'json'
 
     if (!companyId) return withCors(ApiResponse.error('companyId is required', 400), origin)
 
     // All periods with computed payrolls, oldest first
-    const periods = await (prisma as any).phedPayPeriod.findMany({
-      where:   { companyId, computedPayrolls: { some: {} } },
+    const periods = await forCompany(companyId).phedPayPeriod.findMany({
+      where:   { computedPayrolls: { some: {} } },
       select:  { id: true, periodName: true, month: true, year: true },
       orderBy: [{ year: 'asc' }, { month: 'asc' }],
     })
@@ -40,7 +44,7 @@ export async function GET(req: NextRequest) {
     // Load all payrolls for all periods in parallel
     const payrollsByPeriod = await Promise.all(
       periods.map((pd: any) =>
-        (prisma as any).phedComputedPayroll.findMany({ where: { payPeriodId: pd.id } })
+        prisma.phedComputedPayroll.findMany({ where: { payPeriodId: pd.id } })
       )
     )
 
@@ -69,7 +73,7 @@ export async function GET(req: NextRequest) {
         headers: {
           'Content-Type':        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'Content-Disposition': `attachment; filename="iad-aggregate-all-${safeName}.xlsx"`,
-          'Access-Control-Allow-Origin': origin ?? '*',
+          ...getCorsHeaders(origin),
         },
       })
     }

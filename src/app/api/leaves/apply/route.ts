@@ -1,4 +1,4 @@
-// /src/app/api/leaves/apply/route.ts - PRIMARY APPLICATION ENDPOINT
+
 import { NextRequest, NextResponse } from 'next/server'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { decimalToNumber } from '@/app/lib/prisma-utils'
@@ -7,12 +7,16 @@ import { z } from 'zod'
 import { prisma } from '@/app/lib/db'
 import { sendLeaveNotificationEmail } from '@/app/lib/email'
 import { assertStorageQuota } from '@/app/lib/trial/guard'
-import { ensureStaffLeaveBalances } from '@/app/lib/leaves/balance-engine'
+import { ensureStaffLeaveBalances } from '@/app/lib/leave/balance-engine'
 import { startChain, notifyNextApprover } from '@/app/lib/leave/approval-chain'
 import { leaveAttachmentKey, uploadDocumentObject } from '@/app/lib/storage/documents'
 import { 
   createLeaveNotification, 
   NOTIFICATION_TYPES} from '@/app/lib/notifications/helpers'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
+import { forCompany } from '@/app/lib/data/tenant'
+import { parseWorkWeekPattern, calculateWorkingDays, getWorkWeekDescription, getSafeReferenceNumber, generateReferenceNumber } from '@/app/lib/leave/apply-helpers'
+import { leaveApplicationSchema, validateAgainstCompanyPolicy, getNextSteps } from '@/app/lib/leave/apply-policy'
 
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024 // 10MB
 const ALLOWED_ATTACHMENT_TYPES = new Set([
@@ -24,286 +28,34 @@ const ALLOWED_ATTACHMENT_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ])
 
-const cuidOrUuidSchema = z.union([z.string().cuid(), z.string().uuid()])
-const optionalIdSchema = z.preprocess(
-  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
-  cuidOrUuidSchema.optional()
-)
-const optionalNonEmptyStringSchema = z.preprocess(
-  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
-  z.string().optional()
-)
+
+
+
 
 // Validation schema for leave application
-const leaveApplicationSchema = z.object({
-  leaveTypeId: cuidOrUuidSchema,
-  startDate: z.string().refine((val) => !isNaN(Date.parse(val)), {
-    message: 'Invalid start date format. Use YYYY-MM-DD',
-  }),
-  endDate: z.string().refine((val) => !isNaN(Date.parse(val)), {
-    message: 'Invalid end date format. Use YYYY-MM-DD',
-  }),
-  reason: z.string().min(5).max(500),
-  emergencyContact: z.string().optional(),
-  contactPhone: z.string().optional(),
-  handoverTo: optionalNonEmptyStringSchema,
-  handoverNotes: z.string().optional(),
-  attachmentUrl: z.string().url().optional(),
-  fileName: z.string().optional(),
-  isHalfDay: z.boolean().optional().default(false),
-  halfDayPart: z.enum(['FIRST_HALF', 'SECOND_HALF']).optional(),
-  medicalCertificateNumber: z.string().optional(),
-  medicalCertificateDate: z.string().optional(),
-  medicalCertificateIssuer: z.string().optional(),
-  // Optional: for HR/Admin to apply on behalf of others
-  staffRecordId: optionalIdSchema
-})
 
-// Helper function to parse work week pattern
-function parseWorkWeekPattern(pattern: string | null): number[] {
-  const defaultPattern = [1, 2, 3, 4, 5]
-  if (!pattern) return defaultPattern
-  
-  try {
-    if (pattern.startsWith('[')) {
-      const parsed = JSON.parse(pattern)
-      if (Array.isArray(parsed) && parsed.every(d => typeof d === 'number')) {
-        return parsed
-      }
-    }
-    
-    if (/^[1-7]+$/.test(pattern)) {
-      return pattern.split('').map(d => parseInt(d))
-    }
-    
-    if (pattern.includes(',')) {
-      return pattern.split(',').map(d => parseInt(d.trim())).filter(d => !isNaN(d))
-    }
-    
-    return defaultPattern
-  } catch (error) {
-    console.warn('Invalid workWeekPattern format, using default:', pattern)
-    return defaultPattern
-  }
-}
 
-// Helper function to calculate working days
-async function calculateWorkingDays(
-  startDate: Date,
-  endDate: Date,
-  companyId: string,
-  isHalfDay: boolean = false
-): Promise<number> {
-  if (isHalfDay) return 0.5
-  
-  let count = 0
-  const current = new Date(startDate)
-  const end = new Date(endDate)
-  
-  const company = await prisma.company.findUnique({
-    where: { id: companyId },
-    select: { workWeekPattern: true }
-  })
-  
-  const workDays = parseWorkWeekPattern(company?.workWeekPattern || null)
-  
-  const holidays = await prisma.publicHoliday.findMany({
-    where: {
-      companyId,
-      OR: [
-        { date: { gte: startDate, lte: endDate } },
-        { isRecurring: true }
-      ]
-    }
-  })
-  
-  const holidaySet = new Set<string>()
-  holidays.forEach(holiday => {
-    if (holiday.isRecurring) {
-      holidaySet.add(`${holiday.date.getMonth() + 1}-${holiday.date.getDate()}`)
-    } else {
-      holidaySet.add(holiday.date.toISOString().split('T')[0])
-    }
-  })
-  
-  while (current <= end) {
-    const dayOfWeek = current.getDay()
-    const adjustedDay = dayOfWeek === 0 ? 7 : dayOfWeek
-    
-    if (workDays.includes(adjustedDay)) {
-      const dateString = current.toISOString().split('T')[0]
-      const monthDay = `${current.getMonth() + 1}-${current.getDate()}`
-      
-      if (!holidaySet.has(dateString) && !holidaySet.has(monthDay)) {
-        count++
-      }
-    }
-    
-    current.setDate(current.getDate() + 1)
-  }
-  
-  return count
-}
+
+
+
 
 // The date a staff member's employment is measured from for leave eligibility
 // and accrual. Prefer the actual hire date; fall back to the record's created
 // date only when no hire date was captured (e.g. older/imported records).
-function resolveEmploymentDate(staff: any): Date {
-  return staff.hireDate ? new Date(staff.hireDate) : new Date(staff.createdAt)
-}
 
-function formatEmploymentDate(date: Date): string {
-  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
-}
+
+
 
 // Validate against company's leave policy
-async function validateAgainstCompanyPolicy(
-  policy: any,
-  leaveType: any,
-  staff: any,
-  startDate: Date,
-  _endDate: Date,
-  requestedDays: number,
-  _isHalfDay: boolean,
-  medicalData: any
-): Promise<{ 
-  isValid: boolean; 
-  errors: string[];
-  warnings: string[];
-  policyDetails: any;
-}> {
-  const errors: string[] = []
-  const warnings: string[] = []
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
 
-  const policyDetails = {
-    name: policy.name,
-    maxDays: policy.maxDays,
-    noticePeriod: policy.noticePeriod,
-    minEmploymentMonths: policy.minEmploymentMonths,
-    requiresApproval: policy.requiresApproval,
-    approvalWorkflow: policy.approvalWorkflow,
-    isPaid: policy.isPaid,
-    documentationRequired: policy.documentationRequired,
-    carryOver: policy.carryOver,
-    accrualRate: policy.accrualRate
-  }
 
-  if (policy.maxDays && requestedDays > policy.maxDays) {
-    errors.push(
-      `Maximum ${policy.maxDays} days allowed for ${leaveType.name}. ` +
-      `You requested ${requestedDays} days.`
-    )
-  }
 
-  if (policy.noticePeriod > 0) {
-    const noticeDays = Math.ceil((startDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
-    if (noticeDays < policy.noticePeriod) {
-      errors.push(
-        `${policy.noticePeriod} days advance notice required for ${leaveType.name}. ` +
-        `You gave ${noticeDays} days notice.`
-      )
-    }
-  }
 
-  if (policy.minEmploymentMonths > 0) {
-    const employmentDate = resolveEmploymentDate(staff)
-    const monthsEmployed = (today.getFullYear() - employmentDate.getFullYear()) * 12 +
-                         (today.getMonth() - employmentDate.getMonth())
 
-    if (monthsEmployed < policy.minEmploymentMonths) {
-      errors.push(
-        `${policy.minEmploymentMonths} months of employment required for ${leaveType.name}. ` +
-        `You have ${monthsEmployed} months (employment date: ${formatEmploymentDate(employmentDate)}).`
-      )
-    }
-  }
 
-  if (policy.documentationRequired) {
-    const hasDocumentation = medicalData.medicalCertificateNumber &&
-                           medicalData.medicalCertificateDate &&
-                           medicalData.medicalCertificateIssuer
-
-    if (!hasDocumentation) {
-      // AFTER_LEAVE policies (e.g. sick leave): the document often doesn't
-      // exist yet at application time (you get the medical report after seeing
-      // a doctor), so don't block — apply now, submit the document later. Only
-      // AT_APPLICATION policies hard-require it upfront.
-      if (policy.documentationTiming === 'AFTER_LEAVE') {
-        warnings.push(
-          `${leaveType.name} requires supporting documentation. ` +
-          `You can apply now and submit it after your leave (e.g. a medical report).`
-        )
-      } else {
-        errors.push(
-          `${leaveType.name} requires supporting documentation. ` +
-          `Please provide medical certificate number, date, and issuer.`
-        )
-      }
-    }
-  }
-
-  if (policy.accrualRate && policy.accrualRate > 0) {
-    const employmentDate = resolveEmploymentDate(staff)
-    const totalMonths = (today.getFullYear() - employmentDate.getFullYear()) * 12 +
-                       (today.getMonth() - employmentDate.getMonth())
-    const accruedDays = totalMonths * policy.accrualRate
-    
-    if (requestedDays > accruedDays) {
-      warnings.push(
-        `Based on accrual rate of ${policy.accrualRate} days/month since ${formatEmploymentDate(employmentDate)}, ` +
-        `you have approximately ${accruedDays.toFixed(1)} accrued days.`
-      )
-    }
-  }
-
-  if (!policy.isPaid) {
-    warnings.push(`${leaveType.name} is unpaid leave according to company policy.`)
-  }
-
-  return { isValid: errors.length === 0, errors, warnings, policyDetails }
-}
-
-// Helper function to describe work week
-function getWorkWeekDescription(workDays: number[]): string {
-  const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-  const sortedDays = [...workDays].sort((a, b) => a - b)
-  const dayNamesList = sortedDays.map(day => dayNames[day - 1])
-  
-  if (dayNamesList.length === 0) return 'No work days defined'
-  if (dayNamesList.length === 1) return dayNamesList[0]
-  
-  const lastDay = dayNamesList.pop()
-  return `${dayNamesList.join(', ')} and ${lastDay}`
-}
 
 // Helper function for next steps
-function getNextSteps(status: string, currentStep: string, _policy: any): string[] {
-  const steps = []
-  
-  if (status === 'APPROVED') {
-    steps.push('✓ Leave automatically approved per company policy')
-    steps.push('• Balance updated: Pending → Used')
-    steps.push('• You may proceed with your leave plans')
-    return steps
-  }
-  
-  if (currentStep === 'MANAGER') {
-    steps.push('⏳ Waiting for your department line manager(s)')
-    steps.push('• Each line manager approves in order, then the request moves to HR')
-  }
-  
-  if (currentStep === 'HR') {
-    steps.push('⏳ Waiting for HR approval')
-    steps.push('• HR will review your request')
-  }
-  
-  steps.push('• You will be notified at each approval stage')
-  steps.push('• Pending days reserved in your balance')
-  
-  return steps
-}
+
 
 // Get important policy notes
 function getImportantNotes(policy: any): string[] {
@@ -319,18 +71,9 @@ function getImportantNotes(policy: any): string[] {
   return notes
 }
 
-// Safe reference number helper
-function getSafeReferenceNumber(refNumber: string | null): string | undefined {
-  return refNumber || undefined
-}
 
-// Generate reference number
-function generateReferenceNumber(companyId: string, leaveRequestId: string): string {
-  const companyPrefix = companyId.substring(0, 4).toUpperCase()
-  const leaveSuffix = leaveRequestId.substring(0, 8).toUpperCase()
-  const timestamp = Date.now().toString(36).toUpperCase().slice(-4)
-  return `LR-${companyPrefix}-${timestamp}-${leaveSuffix}`
-}
+
+
 
 // ================= API ENDPOINTS =================
 
@@ -418,7 +161,7 @@ export async function POST(request: NextRequest) {
     data = validationResult.data
 
     // Determine which staff record to use
-    let targetStaffId = data.staffRecordId || user.userId
+    const targetStaffId = data.staffRecordId || user.userId
     // Check permissions for applying on behalf of others
     if (data.staffRecordId && data.staffRecordId !== user.userId) {
       if (!['HR', 'SUPER_ADMIN', 'ADMIN'].includes(user.role)) {
@@ -675,9 +418,8 @@ export async function POST(request: NextRequest) {
         })
       }
 
-      const handoverCandidates = await prisma.staffRecord.findMany({
+      const handoverCandidates = await forCompany(staff.companyId).staffRecord.findMany({
         where: {
-          companyId: staff.companyId,
           isActive: true,
           OR: handoverFilters
         },
@@ -939,7 +681,7 @@ export async function POST(request: NextRequest) {
           workDays: parseWorkWeekPattern(company?.workWeekPattern || null),
           description: getWorkWeekDescription(parseWorkWeekPattern(company?.workWeekPattern || null))
         },
-        nextSteps: getNextSteps(result.leaveRequest.status, result.leaveRequest.currentStep, result.policy),
+        nextSteps: getNextSteps(result.leaveRequest.status, result.leaveRequest.currentStep),
         approvers: {
           manager: result.manager,
           hr: result.leaveRequest.status === 'PENDING' ? 'Final approval by HR' : null
@@ -974,7 +716,7 @@ export async function POST(request: NextRequest) {
     
     if (error instanceof z.ZodError) {
       const response = NextResponse.json(
-        { success: false, message: 'Validation error', details: error.errors },
+        { success: false, message: 'Validation error', details: error.issues },
         { status: 400 }
       )
       return withCors(response, origin)
@@ -1012,7 +754,7 @@ export async function POST(request: NextRequest) {
       { 
         success: false,
         message: 'Failed to process leave application',
-        details: error.message 
+        details: publicErrorMessage(error) 
       },
       { status: 500 }
     )

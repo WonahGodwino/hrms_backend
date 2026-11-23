@@ -6,10 +6,12 @@ import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { parseOvertimeCsv } from '@/app/lib/phed/csv-parser'
 import { getPayPeriodFreezeState } from '@/app/lib/phed/pay-period-lock'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'upload')
   if (rl) return withCors(rl, origin)
@@ -17,7 +19,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
     const user  = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
+    const period = await prisma.phedPayPeriod.findUnique({ where: { id: params.id } })
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     const freeze = await getPayPeriodFreezeState(params.id, period.status)
     if (freeze.frozen)
@@ -31,7 +33,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const buffer = Buffer.from(await file.arrayBuffer())
     const { rows, errors: parseErrors } = await parseOvertimeCsv(buffer, ext)
 
-    const staff    = await (prisma as any).phedStaff.findMany({ where: { companyId: period.companyId }, select: { id: true, staffId: true } })
+    const staff    = await forCompany(period.companyId).phedStaff.findMany({ select: { id: true, staffId: true } })
     const staffMap = new Map(staff.map((s: any) => [s.staffId.toLowerCase(), s.id]))
 
     let successful = 0
@@ -47,7 +49,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         if (!dbId) { failed++; errors.push(`Staff ID "${row.staffId}" not found`); return }
 
         try {
-          await (prisma as any).phedOvertimeEntry.upsert({
+          await prisma.phedOvertimeEntry.upsert({
             where: { payPeriodId_staffId: { payPeriodId: params.id, staffId: dbId } },
             create: {
               payPeriodId:   params.id,
@@ -65,7 +67,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       }))
     }
 
-    await (prisma as any).phedBulkUpload.create({
+    await prisma.phedBulkUpload.create({
       data: {
         companyId:    period.companyId,
         payPeriodId:  params.id,

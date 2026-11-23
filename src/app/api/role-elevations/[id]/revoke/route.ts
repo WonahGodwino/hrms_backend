@@ -21,7 +21,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const body = await req.json().catch(() => ({}))
 
     // Load the elevation, then verify the caller can access its company.
-    const elevation = await (prisma as any).roleElevation.findFirst({
+    const elevation = await prisma.roleElevation.findFirst({
       where: { id },
       include: { staff: { select: { firstName: true, lastName: true } } },
     })
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       select: { firstName: true, lastName: true },
     })
 
-    await (prisma as any).roleElevation.update({
+    await prisma.roleElevation.update({
       where: { id },
       data: {
         status: 'REVOKED',

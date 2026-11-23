@@ -12,12 +12,13 @@ import { NextRequest } from 'next/server';
 import { handleCorsOptions, withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
 import { requireModuleAccess } from '@/app/lib/module-access';
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access';
-import { invalidateOfferLetterMailConfigCache } from '@/app/lib/offer-letters/email/mailConfig';
-import { invalidateOfferLetterSentFolderCache } from '@/app/lib/offer-letters/email/mailbox';
-import { invalidateOfferLetterSmtpTransport } from '@/app/lib/offer-letters/email/transport';
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access';
+import { invalidateOfferLetterMailConfigCache } from '@/app/lib/offers/letters/email/mailConfig';
+import { invalidateOfferLetterSentFolderCache } from '@/app/lib/offers/letters/email/mailbox';
+import { invalidateOfferLetterSmtpTransport } from '@/app/lib/offers/letters/email/transport';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
 import { decryptMailSecret, encryptMailSecret } from '@/app/lib/crypto/mailSecret';
+import { publicErrorMessage } from '@/app/lib/errors/public-error';
 
 const DEFAULT_SMTP_HOST = 'smtp.hostinger.com';
 const DEFAULT_SMTP_PORT = 465;
@@ -136,7 +137,7 @@ export async function PUT(request: NextRequest) {
 		try {
 			await smtpTestTransport.verify();
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
+			const message = publicErrorMessage(err);
 			return withCors(ApiResponse.error(`Could not verify SMTP login for ${smtpUser.trim()}: ${message}`, 400), origin);
 		} finally {
 			smtpTestTransport.close();
@@ -161,7 +162,7 @@ export async function PUT(request: NextRequest) {
 			await imapTestClient.connect();
 			await imapTestClient.noop();
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
+			const message = publicErrorMessage(err);
 			return withCors(ApiResponse.error(`Could not verify IMAP login for ${resolvedImapUser}: ${message}`, 400), origin);
 		} finally {
 			try {

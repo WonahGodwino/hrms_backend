@@ -5,15 +5,14 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { aiGuard, isGuardError } from '@/app/lib/ai/guard'
 import { redactForHistory } from '@/app/lib/ai/redact'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -23,10 +22,9 @@ export async function GET(
     const guard = await aiGuard(request, companyId, prisma)
     if (isGuardError(guard)) return guard
 
-    const conversation = await prisma.aiConversation.findFirst({
+    const conversation = await forCompany(guard.companyId).aiConversation.findFirst({
       where: {
         id: params.id,
-        companyId: guard.companyId,
         userId: guard.user.userId,
         deletedAt: null,
       },
@@ -64,10 +62,8 @@ export async function GET(
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -77,10 +73,9 @@ export async function DELETE(
     const guard = await aiGuard(request, companyId, prisma)
     if (isGuardError(guard)) return guard
 
-    const conversation = await prisma.aiConversation.findFirst({
+    const conversation = await forCompany(guard.companyId).aiConversation.findFirst({
       where: {
         id: params.id,
-        companyId: guard.companyId,
         userId: guard.user.userId,
         deletedAt: null,
       },

@@ -1,17 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/app/lib/db'
 
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { ApiResponse, formatError } from '@/app/lib/utils'
+import { ApiResponse } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { calculateIndustryMatchScore } from '@/app/lib/keywordExtractor'
 import ExcelJS from 'exceljs'
+import { publicErrorMessage } from '@/app/lib/errors/public-error'
+import { forCompany } from '@/app/lib/data/tenant'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
 export async function GET(request: NextRequest) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(request)
+  if (deferred) return deferred
   const origin = request.headers.get('origin')
 
   try {
@@ -46,10 +51,9 @@ export async function GET(request: NextRequest) {
     }
 
     // Get job with applications
-    const job = await prisma.job.findFirst({
+    const job = await forCompany(user.companyId as string).job.findFirst({
       where: {
-        id: jobId,
-        companyId: user.companyId as string,
+        id: jobId
       },
       include: {
         applications: {
@@ -180,7 +184,7 @@ export async function GET(request: NextRequest) {
     // Generate CSV report
     return generateCSVReport(exportRows, job, origin);
   } catch (error: unknown) {
-    const message = formatError(error);
+    const message = publicErrorMessage(error);
     console.error('Error generating selection report:', error);
     return withCors(ApiResponse.error(message, 500), origin);
   }

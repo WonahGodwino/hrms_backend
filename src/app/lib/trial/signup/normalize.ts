@@ -1,6 +1,7 @@
 // Normalisation + hashing for identity signals. Raw values are never stored in
 // TrialSignal: only the keyed hash, so a leak of the table reveals nothing.
 import crypto from 'crypto'
+import { requireSecret } from '@/app/lib/config/secrets'
 
 export type SignalKind =
   | 'EMAIL_DOMAIN' | 'PHONE' | 'RC_NUMBER' | 'TAX_ID' | 'DEVICE' | 'IP' | 'COMPANY_NAME'
@@ -61,7 +62,7 @@ export function normalizeTaxId(tin: string): string {
 }
 
 function secret(): string {
-  return process.env.TRIAL_SIGNAL_SECRET || process.env.JWT_SECRET || 'dev-trial-signal-secret'
+  return requireSecret('TRIAL_SIGNAL_SECRET', 'JWT_SECRET')
 }
 
 export function hashSignal(kind: SignalKind, value: string): string {

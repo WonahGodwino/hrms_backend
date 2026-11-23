@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
@@ -8,6 +7,7 @@ import {
   HR_REVIEWER_ROLES,
   fullName,
 } from "@/app/lib/performance-operations/ops-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -48,8 +48,8 @@ export async function GET(request: NextRequest) {
         origin,
       );
 
-    const staff = await prisma.staffRecord.findMany({
-      where: { companyId, isActive: true, role: { in: HR_REVIEWER_ROLES } },
+    const staff = await forCompany(companyId).staffRecord.findMany({
+      where: { isActive: true, role: { in: HR_REVIEWER_ROLES } },
       select: {
         id: true,
         firstName: true,

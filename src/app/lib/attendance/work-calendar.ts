@@ -19,6 +19,7 @@
 import { prisma } from '@/app/lib/db'
 import { parseWorkWeekPattern } from '@/app/lib/reporting/workingDays'
 import { businessDateParts, startOfBusinessDay, endOfBusinessDay } from './business-day'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export const DEFAULT_START_TIME = '09:00'
 export const DEFAULT_END_TIME = '17:00'
@@ -91,15 +92,15 @@ export function checkClockOutWindow(settings: WorkSettings, now: Date): ClockOut
 export async function findHoliday(companyId: string, date: Date) {
   const from = startOfBusinessDay(date)
   const to = endOfBusinessDay(date)
-  const oneOff = await prisma.publicHoliday.findFirst({
-    where: { companyId, date: { gte: from, lte: to } },
+  const oneOff = await forCompany(companyId).publicHoliday.findFirst({
+    where: { date: { gte: from, lte: to } },
     orderBy: { createdAt: 'asc' },
   })
   if (oneOff) return oneOff
 
   // Recurring holidays repeat every year on the same Lagos month/day.
   const { month, day } = businessDateParts(date)
-  const recurring = await prisma.publicHoliday.findMany({ where: { companyId, isRecurring: true } })
+  const recurring = await forCompany(companyId).publicHoliday.findMany({ where: { isRecurring: true } })
   return (
     recurring.find((h) => {
       const p = businessDateParts(h.date)
@@ -132,9 +133,9 @@ export async function ensureHolidayAttendance(companyId: string, date: Date = ne
 
   const dayEnd = endOfBusinessDay(day)
   const [staff, onLeave] = await Promise.all([
-    prisma.staffRecord.findMany({ where: { companyId, isActive: true }, select: { id: true } }),
-    prisma.leaveRequest.findMany({
-      where: { companyId, status: 'APPROVED', startDate: { lte: dayEnd }, endDate: { gte: day } },
+    forCompany(companyId).staffRecord.findMany({ where: { isActive: true }, select: { id: true } }),
+    forCompany(companyId).leaveRequest.findMany({
+      where: { status: 'APPROVED', startDate: { lte: dayEnd }, endDate: { gte: day } },
       select: { staffRecordId: true },
     }),
   ])
@@ -166,8 +167,8 @@ export async function ensureHolidayAttendance(companyId: string, date: Date = ne
 // removed — anything a person has since edited stays.
 export async function removeHolidayAttendance(companyId: string, date: Date, holidayName: string): Promise<number> {
   const day = startOfBusinessDay(date)
-  const { count } = await prisma.attendance.deleteMany({
-    where: { companyId, date: day, method: HOLIDAY_METHOD, notes: `Holiday: ${holidayName}` },
+  const { count } = await forCompany(companyId).attendance.deleteMany({
+    where: { date: day, method: HOLIDAY_METHOD, notes: `Holiday: ${holidayName}` },
   })
   return count
 }

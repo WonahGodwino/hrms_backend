@@ -5,6 +5,7 @@ import { prisma } from '@/app/lib/db';
 import { requireModuleAccess } from '@/app/lib/module-access';
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(req: NextRequest) {
 	return handleCorsOptions(req);
@@ -65,8 +66,8 @@ export async function GET(req: NextRequest) {
 		]);
 
 		// Build filter options
-		const depts = await prisma.department.findMany({ where: { companyId }, select: { name: true }, take: 100 });
-		const certTypes = await prisma.certificationType.findMany({ where: { companyId }, select: { type: true }, distinct: ['type'] });
+		const depts = await forCompany(companyId).department.findMany({ select: { name: true }, take: 100 });
+		const certTypes = await forCompany(companyId).certificationType.findMany({ select: { type: true }, distinct: ['type'] });
 		const filterOptions = { departments: depts.map((d) => d.name), certTypes: certTypes.map((t) => t.type), riskLevels: ['Safe', 'Warning', 'Risk'] };
 
 		// Query items with proper certType handling (join filters)

@@ -7,10 +7,11 @@
 //     for the countdown banner and "4 of 6 sent" counters.
 import { NextRequest } from 'next/server'
 import { requireAuth } from '@/app/lib/auth'
-import { prisma } from '@/app/lib/db'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { getTrialState, getTrialUsage } from '@/app/lib/trial/guard'
+import { isTrialInternalKey } from '@/app/lib/trial/internal-key'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const internal = req.headers.get('x-trial-internal')
 
-    if (internal && process.env.JWT_SECRET && internal === process.env.JWT_SECRET) {
+    if (await isTrialInternalKey(internal)) {
       const state = await getTrialState(searchParams.get('companyId'))
       return withCors(ApiResponse.success({ status: state.status, readOnly: state.readOnly, restricted: state.restricted }), origin)
     }
@@ -39,7 +40,7 @@ export async function GET(req: NextRequest) {
     }
 
     const [staffLive, staffCounted, payslips, offerLetters, payrollRuns] = await Promise.all([
-      prisma.staffRecord.count({ where: { companyId } }),
+      forCompany(companyId).staffRecord.count(),
       getTrialUsage(companyId, 'staff'),
       getTrialUsage(companyId, 'payslips'),
       getTrialUsage(companyId, 'offerLetters'),

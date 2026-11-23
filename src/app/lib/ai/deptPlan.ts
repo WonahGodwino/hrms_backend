@@ -6,6 +6,7 @@
 import type { PrismaClient } from '@prisma/client'
 import { MAX_STEPS, buildPlan, type PlanAssumption, type PlanStep, type ProposalPlan } from './proposals'
 import type { Skipped } from './staffPlan'
+import { fullName } from '@/app/lib/ai/staffPlan'
 
 export type DepartmentChangeField = 'head' | 'businessUnit'
 export const DEPARTMENT_CHANGE_FIELDS: DepartmentChangeField[] = ['head', 'businessUnit']
@@ -22,7 +23,7 @@ export type DepartmentPlanResult =
 
 const clean = (v: unknown) => String(v ?? '').trim()
 const same = (a: unknown, b: unknown) => clean(a).toLowerCase() === clean(b).toLowerCase()
-const fullName = (s: { firstName: string; lastName: string; email?: string }) => `${s.firstName} ${s.lastName}`.trim() || s.email || 'Staff member'
+
 
 function nameList(names: string[]): string {
   const shown = names.slice(0, 20)

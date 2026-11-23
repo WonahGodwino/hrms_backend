@@ -1,6 +1,6 @@
 import { ComparisonReportType } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import type { Actor } from "@/app/lib/manager-review";
 import { DAY, nameOf } from "@/app/lib/pip";
 import {
@@ -30,6 +30,7 @@ import {
   resolveFocus,
 } from "@/app/lib/comparison";
 import type { Basis, Filters, Member } from "@/app/lib/comparison";
+import { forCompany } from '@/app/lib/data/tenant';
 
 const r1 = (n: number | null | undefined) =>
   n === null || n === undefined ? "-" : String(Math.round(n * 10) / 10);
@@ -386,14 +387,12 @@ export async function buildProfile(
 
   const [hist, training, recognitions] = await Promise.all([
     personCycles(companyId, [staffRecordId]),
-    prisma.participantProgress.findMany({
-      where: { companyId, employeeId: staffRecordId },
+    forCompany(companyId).participantProgress.findMany({
+      where: { employeeId: staffRecordId },
       select: { trainingStatus: true },
     }),
-    prisma.recognition.count({
-      where: {
-        companyId,
-        recipientId: staffRecordId,
+    forCompany(companyId).recognition.count({
+      where: { recipientId: staffRecordId,
         createdAt: { gte: new Date(Date.now() - 365 * DAY) },
         visibility: { not: "PRIVATE" },
       },

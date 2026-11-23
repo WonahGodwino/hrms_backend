@@ -8,7 +8,8 @@ import { notifyPhedAccessRoleChange } from '@/app/lib/phed/access-role-notificat
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-export async function DELETE(req: NextRequest, { params }: { params: { staffRecordId: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ staffRecordId: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -21,7 +22,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { staffReco
     const reason = typeof body?.reason === 'string' ? body.reason.trim() : ''
     const globalRole = typeof body?.globalRole === 'string' ? body.globalRole.trim().toUpperCase() : ''
 
-    if (!companyId || !await canManagePhedRolesForCompany(user, companyId)) {
+    if (!companyId || !(await canManagePhedRolesForCompany(user, companyId))) {
       return withCors(ApiResponse.forbidden('You are not assigned to manage PHED roles for this company'), origin)
     }
     if (!reason || reason.length > 1000) {

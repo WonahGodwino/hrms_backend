@@ -3,6 +3,7 @@
 // hashed (never stored in plaintext), short-lived, attempt-limited, and compared
 // in constant time to resist brute-force and timing attacks.
 import crypto from 'crypto'
+import { requireSecret } from '@/app/lib/config/secrets'
 
 interface OtpEntry {
   codeHash: Buffer
@@ -14,12 +15,11 @@ const store = new Map<string, OtpEntry>()
 const TTL_MS = 10 * 60 * 1000 // 10 minutes
 const MAX_ATTEMPTS = 5
 // A server-side pepper hardens the hash if process memory is ever inspected.
-const PEPPER =
-  process.env.OTP_PEPPER || process.env.JWT_SECRET || 'hr-application-status-otp'
+const pepper = () => requireSecret('OTP_PEPPER', 'JWT_SECRET')
 
 const keyFor = (email: string) => email.trim().toLowerCase()
 const hashCode = (code: string): Buffer =>
-  crypto.createHash('sha256').update(`${code}:${PEPPER}`).digest()
+  crypto.createHash('sha256').update(`${code}:${pepper()}`).digest()
 
 function cleanup() {
   const now = Date.now()

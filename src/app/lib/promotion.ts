@@ -4,12 +4,14 @@ import type {
   PromotionReadiness,
   SuccessionReadiness,
 } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { BANDS } from "@/app/lib/manager-review";
 import type { Actor, Db } from "@/app/lib/manager-review";
 import { resolveRatingBounds } from "@/app/lib/self-appraisal";
 import { toFive } from "@/app/lib/calibration";
+import { decimalOrNull } from "@/app/lib/prisma-utils";
 import { DAY, isoDate, nameOf, person, startOfUtcDay } from "@/app/lib/pip";
+import { forCompany } from '@/app/lib/data/tenant';
 
 // ---------------------------------------------------------------------------
 // Tunable rules, all in one place
@@ -205,8 +207,8 @@ export async function listBasisCycles(
   where: Prisma.AppraisalCycleParticipantWhereInput,
   rule: Prisma.AppraisalCycleParticipantWhereInput = RELEASED_WHERE,
 ) {
-  const rows = await prisma.appraisalCycle.findMany({
-    where: { companyId, participants: { some: { AND: [rule, where] } } },
+  const rows = await forCompany(companyId).appraisalCycle.findMany({
+    where: { participants: { some: { AND: [rule, where] } } },
     select: CYCLE_SELECT,
     orderBy: { createdAt: "desc" },
     take: 36,
@@ -321,10 +323,8 @@ export async function loadPotentials(
 ) {
   const out = new Map<string, PotentialLevel>();
   if (!ids.length) return out;
-  const rows = await prisma.calibrationRecord.findMany({
-    where: {
-      companyId,
-      staffRecordId: { in: ids },
+  const rows = await forCompany(companyId).calibrationRecord.findMany({
+    where: { staffRecordId: { in: ids },
       potential: { not: null },
       updatedAt: { gte: new Date(Date.now() - POTENTIAL_LOOKBACK_DAYS * DAY) },
     },
@@ -346,8 +346,8 @@ export async function loadAssessments(
   where: Prisma.AppraisalCycleParticipantWhereInput,
   take = 1000,
 ): Promise<Assessment[]> {
-  const parts = await prisma.appraisalCycleParticipant.findMany({
-    where: { companyId, cycleId: cycle.id, AND: [RELEASED_WHERE, where] },
+  const parts = await forCompany(companyId).appraisalCycleParticipant.findMany({
+    where: { cycleId: cycle.id, AND: [RELEASED_WHERE, where] },
     select: ASSESS_SELECT,
     take,
   });
@@ -481,10 +481,8 @@ export async function loadCardExtras(
   const ids = list.map((a) => a.staffRecordId);
   const cooldownStart = new Date(Date.now() - COOLDOWN_DAYS * DAY);
   const [recs, nominees, devs, scoreRows] = await Promise.all([
-    prisma.promotionRecommendation.findMany({
-      where: {
-        companyId,
-        staffRecordId: { in: ids },
+    forCompany(companyId).promotionRecommendation.findMany({
+      where: { staffRecordId: { in: ids },
         OR: [
           { openKey: { not: null } },
           { status: "APPROVED", decidedAt: { gte: cooldownStart } },
@@ -493,10 +491,8 @@ export async function loadCardExtras(
       orderBy: { createdAt: "desc" },
       select: { id: true, staffRecordId: true, status: true, decidedAt: true },
     }),
-    prisma.successionCandidate.findMany({
-      where: {
-        companyId,
-        staffRecordId: { in: ids },
+    forCompany(companyId).successionCandidate.findMany({
+      where: { staffRecordId: { in: ids },
         removedAt: null,
         readiness: "READY_NOW",
         criticalRole: { status: "ACTIVE" },
@@ -517,10 +513,8 @@ export async function loadCardExtras(
         plan: { select: { staffRecordId: true } },
       },
     }),
-    prisma.managerReview.findMany({
-      where: {
-        companyId,
-        cycleId,
+    forCompany(companyId).managerReview.findMany({
+      where: { cycleId,
         status: "SUBMITTED",
         participant: {
           phases: { some: {}, none: { status: { not: "COMPLETED" } } },
@@ -801,7 +795,8 @@ export async function validateTarget(
       status: 409,
     };
 
-  return { designation: d, targetGradeId: null };
+  // DB-004: basePay is a Decimal column; callers and responses use a number.
+  return { designation: { ...d, basePay: decimalOrNull(d.basePay) }, targetGradeId: null };
 }
 
 export function validateFiles(
@@ -866,8 +861,8 @@ export function roleRisk(
 }
 
 export async function loadSuccession(companyId: string, actor: Actor) {
-  const roles = await prisma.criticalRole.findMany({
-    where: { companyId, status: "ACTIVE" },
+  const roles = await forCompany(companyId).criticalRole.findMany({
+    where: { status: "ACTIVE" },
     orderBy: { createdAt: "asc" },
     select: {
       id: true,

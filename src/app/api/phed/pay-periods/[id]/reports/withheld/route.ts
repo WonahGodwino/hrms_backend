@@ -2,32 +2,42 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { requirePhedReadAccess } from '@/app/lib/phed/access-role'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
-import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { handleCorsOptions, withCors, getCorsHeaders } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
+import { findAccessiblePayPeriod } from '@/app/lib/phed/pay-period-access'
 import { buildWithheldReport } from '@/app/lib/phed/reports'
 import { exportReportToPdf, exportWorkbook, WITHHELD_COLS } from '@/app/lib/phed/report-export'
 import { buildWithheldSheet } from '@/app/lib/phed/payroll-sheets'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // GET /api/phed/pay-periods/:id/reports/withheld?format=json|xlsx|pdf
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req);
+  if (deferred) return deferred;
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token  = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requirePhedReadAccess(token)
+    const user = await requirePhedReadAccess(token)
 
     const rl = phedRateLimit(req, 'report')
     if (rl) return withCors(rl, origin)
 
+    // SEC-018: the pay period must belong to a company the caller can access.
+    if (!(await findAccessiblePayPeriod(user, params.id)))
+      return withCors(ApiResponse.notFound('Pay period not found'), origin)
+
     const format = new URL(req.url).searchParams.get('format') ?? 'json'
 
     const [payrolls, validations] = await Promise.all([
-      (prisma as any).phedComputedPayroll.findMany({
+      prisma.phedComputedPayroll.findMany({
         where:   { payPeriodId: params.id },
         orderBy: { staffName: 'asc' },
       }),
-      (prisma as any).phedValidation.findMany({
+      prisma.phedValidation.findMany({
         where:  { payPeriodId: params.id, status: 'NO_FOR_PAYMENT' },
         select: { staffId: true, reason: true },
       }),
@@ -40,7 +50,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     if (format === 'json') return withCors(ApiResponse.success(data), origin)
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({
+    const period = await prisma.phedPayPeriod.findUnique({
       where: { id: params.id },
       select: { periodName: true, month: true, year: true, company: { select: { companyName: true } } },
     })
@@ -56,7 +66,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         headers: {
           'Content-Type':        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'Content-Disposition': `attachment; filename="withheld-${safeName}.xlsx"`,
-          'Access-Control-Allow-Origin': origin ?? '*',
+          ...getCorsHeaders(origin),
         },
       })
     }
@@ -68,7 +78,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         headers: {
           'Content-Type':        'application/pdf',
           'Content-Disposition': `attachment; filename="withheld-${safeName}.pdf"`,
-          'Access-Control-Allow-Origin': origin ?? '*',
+          ...getCorsHeaders(origin),
         },
       })
     }

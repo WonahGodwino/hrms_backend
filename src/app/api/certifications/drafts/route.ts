@@ -4,6 +4,7 @@ import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -21,9 +22,8 @@ export async function GET(req: NextRequest) {
     if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
     const { companyId } = resolved
 
-    const draft = await prisma.trainingAuditLog.findFirst({
+    const draft = await forCompany(companyId).trainingAuditLog.findFirst({
       where: {
-        companyId,
         actorId: user.userId,
         entityType: 'certification_issuance_draft',
       },
@@ -65,9 +65,8 @@ export async function POST(req: NextRequest) {
     const payloadToSave = draftState ?? { step, employeeIds, certification }
 
     // Upsert draft record in TrainingAuditLog
-    const existingDraft = await prisma.trainingAuditLog.findFirst({
+    const existingDraft = await forCompany(cid).trainingAuditLog.findFirst({
       where: {
-        companyId: cid,
         actorId: user.userId,
         entityType: 'certification_issuance_draft',
       },
@@ -123,9 +122,8 @@ export async function DELETE(req: NextRequest) {
     if (isCompanyError(resolved)) return withCors(ApiResponse.error(resolved.error.message, resolved.error.status), origin)
     const { companyId } = resolved
 
-    await prisma.trainingAuditLog.deleteMany({
+    await forCompany(companyId).trainingAuditLog.deleteMany({
       where: {
-        companyId,
         actorId: user.userId,
         entityType: 'certification_issuance_draft',
       },

@@ -8,7 +8,8 @@ import { forwardApprovalStage } from '@/app/lib/phed/approval-actions'
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
 // PATCH /api/phed/approvals/memos/:id/finalapprove — Stage 5: MD/CEO
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)

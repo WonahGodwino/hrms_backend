@@ -2,7 +2,7 @@
 // Returns the CSV template for bulk-importing Business Units.
 import { NextRequest } from 'next/server'
 import { getUserFromToken } from '@/app/lib/auth'
-import { handleCorsOptions } from '@/app/lib/cors'
+import { handleCorsOptions, getCorsHeaders } from '@/app/lib/cors'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
     if (!user || !['ADMIN', 'HR', 'SUPER_ADMIN'].includes(user.role)) {
       return new Response(JSON.stringify({ success: false, message: 'Unauthorized' }), {
         status: 401,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': origin || '*' },
+        headers: { 'Content-Type': 'application/json', ...getCorsHeaders(origin)},
       })
     }
 
@@ -29,13 +29,13 @@ export async function GET(req: NextRequest) {
       headers: {
         'Content-Type': 'text/csv',
         'Content-Disposition': 'attachment; filename="business_unit_template.csv"',
-        'Access-Control-Allow-Origin': origin || '*',
+        ...getCorsHeaders(origin),
       },
     })
   } catch {
     return new Response(JSON.stringify({ success: false, message: 'Internal server error' }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': origin || '*' },
+      headers: { 'Content-Type': 'application/json', ...getCorsHeaders(origin)},
     })
   }
 }

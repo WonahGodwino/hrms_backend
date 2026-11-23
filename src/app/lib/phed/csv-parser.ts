@@ -47,7 +47,7 @@ function rowToMap(headers: string[], row: (string | number | null | undefined)[]
   return map
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 async function parseBuffer(
   buffer: any,
   fileExt: string,

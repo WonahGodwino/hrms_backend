@@ -23,10 +23,10 @@ export async function GET(req: NextRequest) {
     const whereCompany = companyId ? { companyId } : {}
 
     const [totalActive, lastMonth, orphanedCount] = await Promise.all([
-      (prisma as any).designation.count({ where: { ...whereCompany, status: 'Active' } }),
-      (prisma as any).designation.count({ where: { ...whereCompany, ...(companyId ? { companyId } : {}), createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } } }),
-      (prisma as any).designation.count({ where: { ...whereCompany, status: 'Active', staffRecords: { none: {} } } }),
-      (prisma as any).designation.count({ where: { ...whereCompany, status: 'Active', staffRecords: { some: {} } } }),
+      prisma.designation.count({ where: { ...whereCompany, status: 'Active' } }),
+      prisma.designation.count({ where: { ...whereCompany, ...(companyId ? { companyId } : {}), createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } } }),
+      prisma.designation.count({ where: { ...whereCompany, status: 'Active', staffRecords: { none: {} } } }),
+      prisma.designation.count({ where: { ...whereCompany, status: 'Active', staffRecords: { some: {} } } }),
     ])
 
     return withCors(ApiResponse.success({

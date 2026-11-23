@@ -12,6 +12,7 @@ import {
   notifyReviewCancelled,
   notifyReviewCompleted,
 } from "./competency-review-notifications";
+import { forCompany } from '@/app/lib/data/tenant';
 
 export const DUE_SOON_WINDOW_DAYS = 7;
 const REVIEWER_ROLES = ["HR", "ADMIN", "SUPER_ADMIN"]; // same roles that can open the governance screens
@@ -137,10 +138,8 @@ export async function getReviewCounts(companyId: string) {
     prisma.competencyReview.count({
       where: { ...open, scheduledFor: { gte: soon } },
     }),
-    prisma.competency.count({
-      where: {
-        companyId,
-        status: "ACTIVE",
+    forCompany(companyId).competency.count({
+      where: { status: "ACTIVE",
         ...outdatedWhere(monthsAgoCutoff()),
         reviews: { none: { status: "SCHEDULED" } },
       },
@@ -163,25 +162,21 @@ export async function getReviewBoard(companyId: string) {
   const cutoff = monthsAgoCutoff();
 
   const [open, completed, candidates, assignees] = await Promise.all([
-    prisma.competencyReview.findMany({
-      where: {
-        companyId,
-        status: "SCHEDULED",
+    forCompany(companyId).competencyReview.findMany({
+      where: { status: "SCHEDULED",
         competency: { status: "ACTIVE" },
       },
       orderBy: { scheduledFor: "asc" },
       select: reviewSelect,
     }),
-    prisma.competencyReview.findMany({
-      where: { companyId, status: "COMPLETED" },
+    forCompany(companyId).competencyReview.findMany({
+      where: { status: "COMPLETED" },
       orderBy: { completedAt: "desc" },
       take: 20,
       select: reviewSelect,
     }),
-    prisma.competency.findMany({
-      where: {
-        companyId,
-        status: "ACTIVE",
+    forCompany(companyId).competency.findMany({
+      where: { status: "ACTIVE",
         ...outdatedWhere(cutoff),
         reviews: { none: { status: "SCHEDULED" } },
       },
@@ -195,8 +190,8 @@ export async function getReviewBoard(companyId: string) {
         owner: { select: { firstName: true, lastName: true } },
       },
     }),
-    prisma.staffRecord.findMany({
-      where: { companyId, isActive: true, role: { in: REVIEWER_ROLES } },
+    forCompany(companyId).staffRecord.findMany({
+      where: { isActive: true, role: { in: REVIEWER_ROLES } },
       select: { id: true, firstName: true, lastName: true, role: true },
       orderBy: { firstName: "asc" },
     }),

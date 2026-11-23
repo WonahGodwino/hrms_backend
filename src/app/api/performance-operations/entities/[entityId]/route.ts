@@ -14,6 +14,7 @@ import {
   computeCycleEntityStats,
   toProgress,
 } from "@/app/lib/performance-operations/ops-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -74,8 +75,8 @@ export async function GET(
       );
 
     const department = departmentId
-      ? await prisma.department.findFirst({
-          where: { id: departmentId, companyId },
+      ? await forCompany(companyId).department.findFirst({
+          where: { id: departmentId },
           select: {
             id: true,
             name: true,

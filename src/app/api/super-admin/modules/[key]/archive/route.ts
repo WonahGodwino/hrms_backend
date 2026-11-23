@@ -27,7 +27,7 @@ export async function POST(
     requireRole(token, ['SUPER_ADMIN'])
 
     const { key } = await params
-    const mod = await (prisma as any).platformModule.findUnique({ where: { key } })
+    const mod = await prisma.platformModule.findUnique({ where: { key } })
     if (!mod) {
       return withCors(ApiResponse.error(`Module with key "${key}" not found`, 404), origin)
     }
@@ -35,7 +35,7 @@ export async function POST(
       return withCors(ApiResponse.error(`Module "${mod.name}" is already archived`, 409), origin)
     }
 
-    const updated = await (prisma as any).platformModule.update({
+    const updated = await prisma.platformModule.update({
       where: { key },
       data: { archived: true },
     })
@@ -57,7 +57,7 @@ export async function DELETE(
     requireRole(token, ['SUPER_ADMIN'])
 
     const { key } = await params
-    const mod = await (prisma as any).platformModule.findUnique({ where: { key } })
+    const mod = await prisma.platformModule.findUnique({ where: { key } })
     if (!mod) {
       return withCors(ApiResponse.error(`Module with key "${key}" not found`, 404), origin)
     }
@@ -65,7 +65,7 @@ export async function DELETE(
       return withCors(ApiResponse.error(`Module "${mod.name}" is not archived`, 409), origin)
     }
 
-    const updated = await (prisma as any).platformModule.update({
+    const updated = await prisma.platformModule.update({
       where: { key },
       data: { archived: false },
     })

@@ -20,12 +20,12 @@ export async function GET(req: NextRequest) {
 		requireRole(token, ['SUPER_ADMIN']);
 
 		const [modules, totalCompanies, accessCounts] = await Promise.all([
-			(prisma as any).platformModule.findMany({
+			prisma.platformModule.findMany({
 				where: { archived: false },
 				select: { id: true, key: true, name: true },
 			}),
 			prisma.company.count({ where: { archived: 0 } }),
-			(prisma as any).companyModuleAccess.groupBy({
+			prisma.companyModuleAccess.groupBy({
 				by: ['moduleId'],
 				where: { enabled: true },
 				_count: { _all: true },

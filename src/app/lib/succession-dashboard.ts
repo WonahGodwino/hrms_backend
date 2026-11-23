@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { Prisma, CriticalRoleTier } from "@prisma/client";
 import type { PotentialLevel, SuccessionReadiness } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { BANDS } from "@/app/lib/manager-review";
 import type { Actor } from "@/app/lib/manager-review";
 import { toFive } from "@/app/lib/calibration";
@@ -30,6 +30,8 @@ import {
 } from "@/app/lib/promotion";
 import type { Assessment, Risk } from "@/app/lib/promotion";
 import type { PdfSection } from "@/app/lib/comparison-export";
+import { forCompany } from '@/app/lib/data/tenant';
+import { csvCell } from '@/app/lib/automation';
 
 // ---------------------------------------------------------------------------
 // Tunable rules, all in one place
@@ -331,8 +333,8 @@ export async function loadRoleModel(
   companyId: string,
   scores: Map<string, number | null>,
 ): Promise<RoleModel[]> {
-  const roles = await prisma.criticalRole.findMany({
-    where: { companyId, status: "ACTIVE" },
+  const roles = await forCompany(companyId).criticalRole.findMany({
+    where: { status: "ACTIVE" },
     orderBy: { createdAt: "asc" },
     take: LIMITS.roles,
     select: {
@@ -368,8 +370,8 @@ export async function loadRoleModel(
   });
   const ids = [...new Set(roles.map((r) => r.designationId))];
   const holders = ids.length
-    ? await prisma.staffRecord.findMany({
-        where: { companyId, isActive: true, designationId: { in: ids } },
+    ? await forCompany(companyId).staffRecord.findMany({
+        where: { isActive: true, designationId: { in: ids } },
         select: {
           id: true,
           firstName: true,
@@ -647,10 +649,8 @@ export async function implementedIds(
         .filter(Boolean),
     ),
   ];
-  const rows = await prisma.staffCareerHistory.findMany({
-    where: {
-      companyId,
-      staffId: { in: [...new Set(rs.map((r) => r.staffRecordId))] },
+  const rows = await forCompany(companyId).staffCareerHistory.findMany({
+    where: { staffId: { in: [...new Set(rs.map((r) => r.staffRecordId))] },
       newDesignationId: { in: targetDesIds },
     },
     select: { staffId: true, newDesignationId: true, effectiveDate: true },
@@ -681,19 +681,17 @@ export async function buildSummary(companyId: string, cycleId: string | null) {
   const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
   const [pending, approvedYear, rejectedYear, approvedRecs, mob, prev] =
     await Promise.all([
-      prisma.promotionRecommendation.count({
-        where: { companyId, status: "SUBMITTED" },
+      forCompany(companyId).promotionRecommendation.count({
+        where: { status: "SUBMITTED" },
       }),
-      prisma.promotionRecommendation.count({
-        where: { companyId, status: "APPROVED", decidedAt: { gte: yearStart } },
+      forCompany(companyId).promotionRecommendation.count({
+        where: { status: "APPROVED", decidedAt: { gte: yearStart } },
       }),
-      prisma.promotionRecommendation.count({
-        where: { companyId, status: "REJECTED", decidedAt: { gte: yearStart } },
+      forCompany(companyId).promotionRecommendation.count({
+        where: { status: "REJECTED", decidedAt: { gte: yearStart } },
       }),
-      prisma.promotionRecommendation.findMany({
-        where: {
-          companyId,
-          status: "APPROVED",
+      forCompany(companyId).promotionRecommendation.findMany({
+        where: { status: "APPROVED",
           decidedAt: { gte: new Date(now.getTime() - 365 * DAY) },
         },
         select: {
@@ -708,10 +706,8 @@ export async function buildSummary(companyId: string, cycleId: string | null) {
         from: new Date(now.getTime() - 365 * DAY),
         to: now,
       }),
-      prisma.successionMetricSnapshot.findFirst({
-        where: {
-          companyId,
-          capturedOn: {
+      forCompany(companyId).successionMetricSnapshot.findFirst({
+        where: { capturedOn: {
             lte: new Date(
               startOfUtcDay(now).getTime() - SNAPSHOT_MIN_AGE_DAYS * DAY,
             ),
@@ -819,8 +815,8 @@ export async function buildHealth(
     ? new Date(Date.UTC(year + 1, 0, 1))
     : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
   const [snaps, first] = await Promise.all([
-    prisma.successionMetricSnapshot.findMany({
-      where: { companyId, capturedOn: { gte: from, lt: to } },
+    forCompany(companyId).successionMetricSnapshot.findMany({
+      where: { capturedOn: { gte: from, lt: to } },
       orderBy: { capturedOn: "asc" },
       take: 800,
       select: {
@@ -830,8 +826,8 @@ export async function buildHealth(
         coveredRoles: true,
       },
     }),
-    prisma.successionMetricSnapshot.aggregate({
-      where: { companyId },
+    forCompany(companyId).successionMetricSnapshot.aggregate({
+      where: { },
       _min: { capturedOn: true },
     }),
   ]);
@@ -895,8 +891,8 @@ export async function buildReadiness(
   const d = await loadDash(companyId, cycleId);
   if ("error" in d) return d;
   const [pendingRows, pendingTotal, openRecs, nominees] = await Promise.all([
-    prisma.promotionRecommendation.findMany({
-      where: { companyId, status: "SUBMITTED" },
+    forCompany(companyId).promotionRecommendation.findMany({
+      where: { status: "SUBMITTED" },
       orderBy: { submittedAt: "asc" },
       take: LIMITS.pending,
       select: {
@@ -913,18 +909,16 @@ export async function buildReadiness(
         },
       },
     }),
-    prisma.promotionRecommendation.count({
-      where: { companyId, status: "SUBMITTED" },
+    forCompany(companyId).promotionRecommendation.count({
+      where: { status: "SUBMITTED" },
     }),
-    prisma.promotionRecommendation.findMany({
-      where: { companyId, openKey: { not: null } },
+    forCompany(companyId).promotionRecommendation.findMany({
+      where: { openKey: { not: null } },
       select: { staffRecordId: true },
       take: 5000,
     }),
-    prisma.successionCandidate.findMany({
-      where: {
-        companyId,
-        removedAt: null,
+    forCompany(companyId).successionCandidate.findMany({
+      where: { removedAt: null,
         readiness: "READY_NOW",
         criticalRole: { status: "ACTIVE" },
       },
@@ -998,8 +992,8 @@ export async function estimateCompensation(
 ) {
   if (!targetDesignationId) return null;
   const [cur, desig] = await Promise.all([
-    prisma.employeeSalary.findFirst({
-      where: { companyId, staffId: staffRecordId, isActive: true },
+    forCompany(companyId).employeeSalary.findFirst({
+      where: { staffId: staffRecordId, isActive: true },
       orderBy: { createdAt: "desc" },
       select: { basicSalary: true },
     }),
@@ -1035,8 +1029,8 @@ export async function buildEmployee(
   const [assessed, model, assignments, rec] = await Promise.all([
     assessOne(companyId, staffRecordId, cycleId),
     loadRoleModel(companyId, scoreMapOf(d.all)),
-    prisma.careerDevelopmentAssignment.findMany({
-      where: { companyId, staffRecordId },
+    forCompany(companyId).careerDevelopmentAssignment.findMany({
+      where: { staffRecordId },
       orderBy: { createdAt: "desc" },
       take: LIMITS.drawerList,
       select: {
@@ -1053,8 +1047,8 @@ export async function buildEmployee(
         },
       },
     }),
-    prisma.promotionRecommendation.findFirst({
-      where: { companyId, staffRecordId },
+    forCompany(companyId).promotionRecommendation.findFirst({
+      where: { staffRecordId },
       orderBy: { createdAt: "desc" },
       include: REC_INCLUDE,
     }),
@@ -1169,10 +1163,8 @@ const qKey = (x: Date) =>
 async function loadMovements(companyId: string, w: Win) {
   const range = { gte: w.from, lte: w.to };
   const [careers, transfers, exits] = await Promise.all([
-    prisma.staffCareerHistory.findMany({
-      where: {
-        companyId,
-        effectiveDate: range,
+    forCompany(companyId).staffCareerHistory.findMany({
+      where: { effectiveDate: range,
         previousDesignationId: { not: null },
         // A career move counts as a promotion when it came from an approved recommendation.
         promotionRecId: { not: null },
@@ -1182,13 +1174,13 @@ async function loadMovements(companyId: string, w: Win) {
       },
       take: 20000,
     }),
-    prisma.departmentStaffHistory.findMany({
-      where: { companyId, action: "TRANSFERRED", effectiveDate: range },
+    forCompany(companyId).departmentStaffHistory.findMany({
+      where: { action: "TRANSFERRED", effectiveDate: range },
       select: { effectiveDate: true },
       take: 20000,
     }),
-    prisma.offboarding.findMany({
-      where: { companyId, status: "COMPLETED", completedAt: range },
+    forCompany(companyId).offboarding.findMany({
+      where: { status: "COMPLETED", completedAt: range },
       select: { completedAt: true, type: true },
       take: 20000,
     }),
@@ -1206,13 +1198,13 @@ async function loadMovements(companyId: string, w: Win) {
 // Inactive staff with no completed offboarding have no known end date, so they are left out.
 async function averageHeadcount(companyId: string, w: Win) {
   const [staff, offs] = await Promise.all([
-    prisma.staffRecord.findMany({
-      where: { companyId },
+    forCompany(companyId).staffRecord.findMany({
+      where: { },
       select: { id: true, hireDate: true, isActive: true },
       take: 50000,
     }),
-    prisma.offboarding.findMany({
-      where: { companyId, status: "COMPLETED", completedAt: { not: null } },
+    forCompany(companyId).offboarding.findMany({
+      where: { status: "COMPLETED", completedAt: { not: null } },
       select: { staffId: true, completedAt: true },
       take: 50000,
     }),
@@ -1318,16 +1310,16 @@ export async function buildMobility(companyId: string, range: string) {
   };
   const [m, g, t, o] = await Promise.all([
     mobilityRates(companyId, w),
-    prisma.staffCareerHistory.aggregate({
-      where: { companyId },
+    forCompany(companyId).staffCareerHistory.aggregate({
+      where: { },
       _min: { effectiveDate: true },
     }),
-    prisma.departmentStaffHistory.aggregate({
-      where: { companyId },
+    forCompany(companyId).departmentStaffHistory.aggregate({
+      where: { },
       _min: { effectiveDate: true },
     }),
-    prisma.offboarding.aggregate({
-      where: { companyId },
+    forCompany(companyId).offboarding.aggregate({
+      where: { },
       _min: { completedAt: true },
     }),
   ]);
@@ -1561,11 +1553,7 @@ export async function buildReportSnapshot(companyId: string, cfg: ReportCfg) {
   };
 }
 
-const csvCell = (v: unknown) => {
-  let s = v === null || v === undefined ? "" : String(v);
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; // neutralise spreadsheet formulas
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
+
 export function sectionsToCsv(title: string, sections: PdfSection[]) {
   const out = [csvCell(title)];
   for (const s of sections) {

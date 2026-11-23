@@ -1,4 +1,5 @@
 import { prisma } from '@/app/lib/db'
+import { forCompany } from '@/app/lib/data/tenant'
 
 // Shared helper for the standalone Question Bank.
 //
@@ -9,8 +10,8 @@ import { prisma } from '@/app/lib/db'
 export const QUESTION_BANK_SENTINEL = '__QUESTION_BANK__'
 
 export async function getOrCreateQuestionBankAssessment(companyId: string) {
-  const existing = await prisma.assessment.findFirst({
-    where: { companyId, name: QUESTION_BANK_SENTINEL, deletedAt: null },
+  const existing = await forCompany(companyId).assessment.findFirst({
+    where: { name: QUESTION_BANK_SENTINEL, deletedAt: null },
     select: { id: true },
   })
   if (existing) return existing.id

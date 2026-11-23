@@ -18,6 +18,7 @@
 import fs from 'fs'
 import path from 'path'
 import { prisma } from '@/app/lib/db'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export const DEFAULT_PAYSLIP_PRESET_NAME = 'Payslip Preset 1'
 
@@ -29,8 +30,8 @@ function readBundledPresetHtml(): string {
 export async function seedDefaultPayslipPreset(companyId: string, actor = 'SYSTEM_SEED') {
   // Matched by isSeed rather than name so a renamed/retranslated default
   // preset doesn't get recreated as a duplicate.
-  const existing = await prisma.payslipPreset.findFirst({
-    where: { companyId, isSeed: true },
+  const existing = await forCompany(companyId).payslipPreset.findFirst({
+    where: { isSeed: true },
     select: { id: true },
   })
   if (existing) return existing

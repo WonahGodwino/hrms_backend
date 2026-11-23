@@ -1,4 +1,4 @@
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import {
   createNotification,
   NOTIFICATION_TYPES,

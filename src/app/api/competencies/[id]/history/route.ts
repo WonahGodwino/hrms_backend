@@ -14,10 +14,8 @@ export async function OPTIONS(request: NextRequest) {
 }
 
 // GET /api/competencies/:id/history?limit=20&cursor=<historyId>
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");

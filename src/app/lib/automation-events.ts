@@ -3,22 +3,10 @@ import { Db } from "@/app/lib/manager-review";
 import { isExecutorEnabled } from "@/app/lib/automation-config";
 import { KICK_DEBOUNCE_MS, RUN_BUDGET_MS, drainAutomationEvents } from "@/app/lib/automation-executor";
 import { maybeSweep } from "@/app/lib/automation-scheduled";
+import { after } from "next/server";
 
 const lastKickByCompany = new Map<string, number>();
 
-// Inspect if next/server exports after or unstable_after
-let afterFn: ((fn: () => void | Promise<void>) => void) | undefined;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const nextServer = require("next/server");
-  if (typeof nextServer.after === "function") {
-    afterFn = nextServer.after;
-  } else if (typeof nextServer.unstable_after === "function") {
-    afterFn = nextServer.unstable_after;
-  }
-} catch {
-  // Not available in this Next.js version
-}
 
 /**
  * Inserts an event into the outbox. Safe inside caller transactions.
@@ -86,13 +74,13 @@ export function kickAutomation(companyId: string): void {
     }
   };
 
-  if (afterFn) {
-    try {
-      afterFn(runBg);
-      return;
-    } catch {
-      // Fallback to promise if after() fails
-    }
+  // after() (stable since Next 15) runs the work once the response is sent.
+  // It throws outside a request (tests, the job worker): run it as a promise then.
+  try {
+    after(runBg);
+    return;
+  } catch {
+    // Fall back to a detached promise below.
   }
 
   runBg().catch((err) => {

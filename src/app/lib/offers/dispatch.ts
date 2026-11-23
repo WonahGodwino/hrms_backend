@@ -65,7 +65,7 @@ export async function dispatchOfferLetter(
 
   const now = new Date()
   // Per-company response window (multi-tenant), falling back to the default.
-  const companyCfg = await (prisma as any).company
+  const companyCfg = await prisma.company
       .findUnique({ where: { id: letter.offer.companyId }, select: { offerResponseDays: true } })
       .catch(() => null)
   const days = companyCfg?.offerResponseDays && companyCfg.offerResponseDays > 0

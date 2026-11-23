@@ -1,14 +1,14 @@
 // src/app/api/departments/[id]/org-chart/route.ts
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { withCors } from '@/app/lib/cors'
 import { getDepartmentWithAccess } from '@/app/lib/departments/department-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 async function buildOrgChart(departmentId: string, companyId: string) {
-  const department = await prisma.department.findFirst({
-    where: { id: departmentId, companyId },
+  const department = await forCompany(companyId).department.findFirst({
+    where: { id: departmentId },
     include: {
       head: {
         include: {
@@ -85,7 +85,8 @@ async function buildOrgChart(departmentId: string, companyId: string) {
   return { nodes, edges }
 }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
   try {
     const authHeader = request.headers.get('authorization')

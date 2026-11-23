@@ -8,7 +8,7 @@ import { normalizeDynamicHeader } from './parse'
 export interface IdentityTemplateField {
   displayName?: string | null
   systemField?: string | null
-  [key: string]: any
+  [key: string]: unknown
 }
 
 export interface DynamicIdentityFields<F extends IdentityTemplateField> {

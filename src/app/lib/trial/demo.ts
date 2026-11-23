@@ -7,6 +7,7 @@ import crypto from 'crypto'
 import { prisma } from '@/app/lib/db'
 
 import { assertStaffCapacity, recordStaffCreatedMany, TrialRestrictionError } from './guard'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export const DEMO_STAFF_COUNT = 5
 
@@ -19,7 +20,7 @@ const SAMPLES = [
 ]
 
 export async function addDemoStaff(companyId: string, createdBy: string) {
-  const existing = await prisma.staffRecord.count({ where: { companyId, isDemo: true } })
+  const existing = await forCompany(companyId).staffRecord.count({ where: { isDemo: true } })
   if (existing > 0) throw new TrialRestrictionError('Demo staff have already been added.', 'TRIAL_DEMO_EXISTS', 409)
 
   // Throws (402) if the trial cap leaves no room; demo records are counted like any others.
@@ -58,6 +59,6 @@ export async function addDemoStaff(companyId: string, createdBy: string) {
 // Called when a company subscribes. Counted slots are not refunded by the trial counters, but the
 // company is no longer restricted at that point.
 export async function removeDemoStaff(companyId: string) {
-  const res = await prisma.staffRecord.deleteMany({ where: { companyId, isDemo: true } })
+  const res = await forCompany(companyId).staffRecord.deleteMany({ where: { isDemo: true } })
   return { removed: res.count }
 }

@@ -21,20 +21,13 @@ export async function GET(request: NextRequest) {
     
     try {
       // Use dynamic import with correct path
-      const prismaModule = await import('@/app/lib/prisma')
-      prismaClient = prismaModule.prisma || prismaModule.default
-    } catch (importError) {
-      console.warn('Health check: Prisma import failed, trying fallback...')
-      
-      // Try CommonJS require as fallback
-      try {
-        const prismaModule = require('@/app/lib/prisma')
-        prismaClient = prismaModule.prisma || prismaModule.default
-      } catch (requireError) {
-        services.database = { 
-          status: 'disconnected', 
-          details: 'Prisma client not available during build or import failed' 
-        }
+      const prismaModule = await import('@/app/lib/db')
+      prismaClient = prismaModule.prisma
+    } catch (_importError) {
+      // A require() of the same module would fail the same way, so report it.
+      services.database = { 
+        status: 'disconnected', 
+        details: 'Prisma client not available during build or import failed' 
       }
     }
     

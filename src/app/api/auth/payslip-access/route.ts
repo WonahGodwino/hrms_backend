@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { verify } from 'jsonwebtoken'
+import { signRegistrationToken } from '@/app/lib/auth/registration-token'
 
 const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk'
 
@@ -168,6 +169,12 @@ export async function GET(request: NextRequest) {
     registrationUrl.searchParams.set('staffId', staff.staffId)
     registrationUrl.searchParams.set('companyId', staff.companyId)
     registrationUrl.searchParams.set('token', token)
+    // Registration invite (SEC-002): the payslip link was sent to this staff
+    // member's e-mail, which proves mailbox ownership for registration.
+    registrationUrl.searchParams.set(
+      'invite',
+      signRegistrationToken({ staffRecordId: staff.id, email: staff.email, companyId: staff.companyId }),
+    )
     
     if (payslipId) {
       registrationUrl.searchParams.set('payslipId', payslipId)

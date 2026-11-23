@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/app/lib/db";
-import { verifyCompanyAccess } from "@/app/lib/access-control";
 import { handleCorsOptions } from "@/app/lib/cors";
 import {
   ALL_ROLES,
@@ -10,7 +9,6 @@ import {
   findStaffInCompany,
   loadGoal,
   requireActorId,
-  resolveGoalActor,
   withGoalAuth,
 } from "@/app/lib/goals/goal-access";
 import {
@@ -19,23 +17,13 @@ import {
   logGoalAction,
   parseKpiFields,
 } from "@/app/lib/goals/goal-utils";
+import { actorForGoal } from "@/app/lib/team-goals/route-helpers";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
 }
 
-async function actorForGoal(
-  user: Parameters<typeof resolveGoalActor>[0],
-  goalId: string,
-) {
-  const base = await prisma.goal.findUnique({
-    where: { id: goalId },
-    select: { companyId: true },
-  });
-  if (!base || !(await verifyCompanyAccess(user, base.companyId)))
-    throw new HttpError(404, "Goal not found");
-  return resolveGoalActor(user, base.companyId);
-}
+
 
 // GET /api/team-goals/:id/kpis
 export const GET = withGoalAuth<{ id: string }>(

@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
     const staffIds = rows.map((o) => o.staffRecordId).filter(Boolean) as string[]
     const progressByStaff: Record<string, number> = {}
     if (staffIds.length) {
-      const docs = await (prisma as any).staffOnboardingDocument.findMany({
+      const docs = await prisma.staffOnboardingDocument.findMany({
         where: { staffId: { in: staffIds } },
         select: { staffId: true, category: true },
       })
@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
       .filter(Boolean) as string[]
     const candDocsByCandidate: Record<string, any[]> = {}
     if (candidateIds.length) {
-      const cds = await (prisma as any).candidateDocument.findMany({
+      const cds = await prisma.candidateDocument.findMany({
         where: { candidateId: { in: candidateIds }, category: { in: REQUIRED_CATEGORIES }, archived: 0 },
         select: { id: true, candidateId: true, category: true, fileName: true, filePath: true, reviewStatus: true, rejectionReason: true, createdAt: true },
         orderBy: { createdAt: 'desc' },

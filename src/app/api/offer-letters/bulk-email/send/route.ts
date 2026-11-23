@@ -12,19 +12,19 @@
 import { NextRequest } from 'next/server'
 
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access'
 import {
   completeOfferLetterBulkJobRecord,
   createPendingOfferLetterBulkJob,
   failOfferLetterBulkJobRecord,
   getActiveOfferLetterBulkJob,
   type OfferLetterBulkJobResults,
-} from '@/app/lib/offer-letters/bulkJobStatus'
-import { sendOfferLetterEmail } from '@/app/lib/offer-letters/email/sendEmail'
+} from '@/app/lib/offers/letters/bulkJobStatus'
+import { sendOfferLetterEmail } from '@/app/lib/offers/letters/email/sendEmail'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { consumeTrialQuota } from '@/app/lib/trial/guard'
+import { forCompany } from '@/app/lib/data/tenant'
 
 // Politeness delay between sends on the one pooled SMTP connection for this
 // company's mailbox — sending dozens of emails back-to-back with zero gap
@@ -71,8 +71,8 @@ export async function POST(request: NextRequest) {
     // Only letters that actually belong to this company and actually exist —
     // silently drop the rest rather than failing the whole batch over a
     // stale selection (e.g. a letter deleted after the picker loaded).
-    const letters = await prisma.generatedOfferLetter.findMany({
-      where: { id: { in: letterIds }, companyId },
+    const letters = await forCompany(companyId).generatedOfferLetter.findMany({
+      where: { id: { in: letterIds } },
       select: { id: true, recipientEmail: true },
     })
     if (letters.length === 0) {
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (emailTemplateId) {
-      const template = await prisma.offerLetterEmailTemplate.findFirst({ where: { id: emailTemplateId, companyId, isActive: true } })
+      const template = await forCompany(companyId).offerLetterEmailTemplate.findFirst({ where: { id: emailTemplateId, isActive: true } })
       if (!template) return withCors(ApiResponse.error('Selected email template not found for this company', 404), origin)
     }
 

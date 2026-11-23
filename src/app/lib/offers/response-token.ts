@@ -4,14 +4,11 @@
 // token is a bearer capability: acceptance is additionally gated by the offer's
 // own state (it can only be responded to once, while still pending).
 import jwt from 'jsonwebtoken'
+import { getSecret } from '@/app/lib/business-units/import-token'
 
 const PURPOSE = 'offer-response'
 
-function getSecret(): string {
-  const secret = process.env.JWT_SECRET
-  if (!secret) throw new Error('JWT_SECRET environment variable is not set')
-  return secret
-}
+
 
 export function signOfferResponseToken(
   offerId: string,

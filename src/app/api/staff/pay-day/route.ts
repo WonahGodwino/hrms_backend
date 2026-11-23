@@ -4,6 +4,9 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
+import { readJsonBody } from '@/app/lib/validation/request-body'
+import { createPayDatesBodySchema, updatePayDateBodySchema } from '@/app/lib/validation/payroll-staff-schemas'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -51,9 +54,8 @@ export async function GET(request: NextRequest) {
     today.setHours(0, 0, 0, 0)
 
     // Get all active pay dates for the company
-    const allPayDates = await prisma.companyPayDate.findMany({
+    const allPayDates = await forCompany(companyId).companyPayDate.findMany({
       where: {
-        companyId,
         isActive: true
       },
       orderBy: {
@@ -141,7 +143,9 @@ export async function POST(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const body = await request.json()
+    const parsedBody = await readJsonBody(request, createPayDatesBodySchema)
+    if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.issues[0]?.message ?? parsedBody.message, 400), origin)
+    const body = parsedBody.data
     const { companyId: bodyCompanyId, payDates } = body
 
     const userCompanyIds = user.companyIds || (user.companyId ? [user.companyId] : [])
@@ -171,6 +175,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate each pay date
+    const validPayDates = []
     for (const payDate of payDates) {
       if (!payDate.paymentDate) {
         return withCors(ApiResponse.error('Payment date is required for each entry', 400), origin)
@@ -181,9 +186,11 @@ export async function POST(request: NextRequest) {
         return withCors(ApiResponse.error('Invalid payment date format', 400), origin)
       }
 
-      if (!payDate.paymentCycle || !['WEEKLY', 'BI_WEEKLY', 'MONTHLY'].includes(payDate.paymentCycle)) {
+      // The body schema already limits the cycle to WEEKLY / BI_WEEKLY / MONTHLY.
+      if (!payDate.paymentCycle) {
         return withCors(ApiResponse.error('Invalid payment cycle. Must be WEEKLY, BI_WEEKLY, or MONTHLY', 400), origin)
       }
+      validPayDates.push({ paymentDate, paymentCycle: payDate.paymentCycle, description: payDate.description })
     }
 
     // Additive: each incoming date is upserted on the (companyId, paymentDate)
@@ -192,8 +199,8 @@ export async function POST(request: NextRequest) {
     // reactivates it with the newly submitted cycle/description instead of
     // erroring on the unique constraint or silently doing nothing.
     const createdPayDates = []
-    for (const payDate of payDates) {
-      const paymentDate = new Date(payDate.paymentDate)
+    for (const payDate of validPayDates) {
+      const { paymentDate } = payDate
       const upserted = await prisma.companyPayDate.upsert({
         where: { companyId_paymentDate: { companyId, paymentDate } },
         create: {
@@ -303,7 +310,9 @@ export async function PATCH(request: NextRequest) {
     const token = authHeader.replace('Bearer ', '')
     const user = await requireRoleAsync(token, ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const body = await request.json()
+    const parsedBody = await readJsonBody(request, updatePayDateBodySchema)
+    if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.issues[0]?.message ?? parsedBody.message, 400), origin)
+    const body = parsedBody.data
     const { id, paymentDate, paymentCycle, description } = body
 
     if (!id) {
@@ -342,8 +351,8 @@ export async function PATCH(request: NextRequest) {
       if (isNaN(parsedDate.getTime())) {
         return withCors(ApiResponse.error('Invalid payment date format', 400), origin)
       }
-      const clash = await prisma.companyPayDate.findFirst({
-        where: { companyId: existing.companyId, paymentDate: parsedDate, NOT: { id } }
+      const clash = await forCompany(existing.companyId).companyPayDate.findFirst({
+        where: { paymentDate: parsedDate, NOT: { id } }
       })
       if (clash) {
         return withCors(ApiResponse.error('A pay date already exists for this date', 400), origin)

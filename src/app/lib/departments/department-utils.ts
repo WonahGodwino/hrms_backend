@@ -147,7 +147,7 @@ export async function getDepartmentPositionCapacity(departmentId: string): Promi
 	return capacities.sort((a, b) => a.title.localeCompare(b.title));
 }
 
-export async function logDepartmentAction(departmentId: string, companyId: string, action: string, userId: string, userName: string, type: string, details?: any) {
+export async function logDepartmentAction(departmentId: string, companyId: string, action: string, userId: string, userName: string, type: string, details?: unknown) {
 	return prisma.departmentAuditLog.create({
 		data: {
 			departmentId,
@@ -198,6 +198,35 @@ export async function logStaffDepartmentChange(
 			effectiveDate: new Date(),
 		},
 	});
+}
+
+/**
+ * Bulk version of logStaffDepartmentChange for moving many staff between two
+ * departments of one company (PERF-001). Writes the same history rows as
+ * calling logStaffDepartmentChange once per staff member, in one query.
+ */
+export function buildStaffTransferHistory(
+	staff: { id: string; position: string | null }[],
+	fromDepartmentId: string,
+	toDepartmentId: string,
+	companyId: string,
+	performedBy: string,
+	reason?: string
+) {
+	const effectiveDate = new Date();
+	return staff.map((s) => ({
+		staffId: s.id,
+		departmentId: toDepartmentId,
+		companyId,
+		action: 'TRANSFERRED',
+		fromDepartmentId,
+		toDepartmentId,
+		oldPosition: s.position,
+		newPosition: s.position,
+		reason,
+		performedBy,
+		effectiveDate,
+	}));
 }
 
 /**

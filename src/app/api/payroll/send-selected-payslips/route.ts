@@ -9,6 +9,9 @@ import { sendPayrollNotificationEmail } from '@/app/lib/email'
 import { consumeTrialQuota } from '@/app/lib/trial/guard'
 import { createRateLimiter, mapWithConcurrency } from '@/app/lib/payroll/concurrency'
 import { markPayslipEmailResult } from '@/app/lib/payroll/payslip-email-status'
+import { forCompany } from '@/app/lib/data/tenant'
+import { readJsonBody } from '@/app/lib/validation/request-body'
+import { payslipIdsBodySchema } from '@/app/lib/validation/payroll-staff-schemas'
 
 // Sends run a few at a time under a global rate cap: ~6x faster than one by
 // one, while staying gentle on the mail provider. Very large selections (a
@@ -37,7 +40,9 @@ export async function POST(request: NextRequest) {
     const user = await requireModuleAccess(token, 'PAYROLL', ['HR', 'SUPER_ADMIN', 'ADMIN'])
 
     // Parse request body
-    const body = await request.json()
+    const parsedBody = await readJsonBody(request, payslipIdsBodySchema)
+    if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.message, 400), origin)
+    const body = parsedBody.data
     const { payslipIds, companyId: requestCompanyId } = body
 
     // Validate input
@@ -71,10 +76,9 @@ export async function POST(request: NextRequest) {
 
       // Verify admin has access to this company
       if (user.role === 'ADMIN') {
-        const hasAccess = await prisma.userCompany.findFirst({
+        const hasAccess = await forCompany(companyId).userCompany.findFirst({
           where: {
             userId: user.userId,
-            companyId: companyId,
             role: { in: ['ADMIN', 'ALL'] }
           }
         })
@@ -110,10 +114,9 @@ export async function POST(request: NextRequest) {
     }
 
     // FIX: First fetch the payslips with staff information only
-    const payslips = await prisma.payslip.findMany({
+    const payslips = await forCompany(companyId).payslip.findMany({
       where: {
-        id: { in: payslipIds },
-        companyId: companyId
+        id: { in: payslipIds }
       },
       include: {
         // Only the fields the email needs (whole staff rows carry bank details etc.)

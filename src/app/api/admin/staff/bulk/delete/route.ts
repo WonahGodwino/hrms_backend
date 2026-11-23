@@ -5,13 +5,14 @@ import validator from 'validator';
 import { requireRole } from '@/app/lib/auth';
 import { withCors } from '@/app/lib/cors';
 import { prisma } from '@/app/lib/db';
-import { ApiResponse, formatError } from '@/app/lib/utils';
+import { ApiResponse } from '@/app/lib/utils';
+import { publicErrorMessage } from '@/app/lib/errors/public-error';
+import { forCompany } from '@/app/lib/data/tenant';
+import { sanitizeString } from '@/app/lib/admin/route-helpers';
+import { readJsonBody } from '@/app/lib/validation/request-body';
+import { bulkDeleteStaffBodySchema } from '@/app/lib/validation/payroll-staff-schemas';
 
-// Reuse the same sanitization helpers from your [id] route
-function sanitizeString(input: string | null): string | null {
-	if (!input) return null;
-	return validator.escape(validator.stripLow(input.trim()));
-}
+
 
 // Reuse the same access check helper
 async function checkStaffAccess(currentUser: any, staffCompanyId: string): Promise<boolean> {
@@ -19,10 +20,9 @@ async function checkStaffAccess(currentUser: any, staffCompanyId: string): Promi
 		return true;
 	}
 
-	const userAssignments = await prisma.userCompany.findMany({
+	const userAssignments = await forCompany(staffCompanyId).userCompany.findMany({
 		where: {
-			userId: currentUser.userId,
-			companyId: staffCompanyId,
+			userId: currentUser.userId
 		},
 	});
 
@@ -47,12 +47,9 @@ export async function DELETE(request: NextRequest) {
 		const currentUser = requireRole(token, ['SUPER_ADMIN', 'ADMIN', 'HR']);
 
 		// Parse request body to get IDs array
-		let body;
-		try {
-			body = await request.json();
-		} catch (error) {
-			return withCors(ApiResponse.error('Invalid JSON payload', 400), origin);
-		}
+		const parsedBody = await readJsonBody(request, bulkDeleteStaffBodySchema);
+		if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.issues.length ? parsedBody.message : 'Invalid JSON payload', 400), origin);
+		const body = parsedBody.data;
 
 		const { ids } = body;
 
@@ -173,7 +170,7 @@ export async function DELETE(request: NextRequest) {
 			origin
 		);
 	} catch (error) {
-		const message = formatError(error);
+		const message = publicErrorMessage(error);
 		console.error('Error bulk deactivating staff records:', error);
 		return withCors(ApiResponse.error(message, 500), origin);
 	}

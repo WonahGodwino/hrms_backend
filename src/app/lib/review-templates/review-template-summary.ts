@@ -1,6 +1,7 @@
 import { prisma } from "@/app/lib/db";
 import { isClosedCycleStatus } from "./review-template-utils";
 import { daysUntilDate } from "../appraisal-cycles/cycle-dates";
+import { forCompany } from '@/app/lib/data/tenant';
 
 export const REVIEW_AFTER_MONTHS = 12;
 export const ENDING_SOON_DAYS = 30;
@@ -43,8 +44,8 @@ export async function getTemplateSummary(companyId: string) {
     competencies,
     questionsRaw,
   ] = await Promise.all([
-    prisma.reviewTemplate.findMany({
-      where: { companyId },
+    forCompany(companyId).reviewTemplate.findMany({
+      where: { },
       select: {
         id: true,
         name: true,
@@ -84,12 +85,12 @@ export async function getTemplateSummary(companyId: string) {
         departmentScopes: { select: { departmentId: true } },
       },
     }),
-    prisma.department.findMany({
-      where: { companyId, status: ACTIVE },
+    forCompany(companyId).department.findMany({
+      where: { status: ACTIVE },
       select: { id: true },
     }),
-    prisma.competency.findMany({
-      where: { companyId, status: "ACTIVE" },
+    forCompany(companyId).competency.findMany({
+      where: { status: "ACTIVE" },
       select: { id: true },
     }),
     prisma.templateQuestion.findMany({

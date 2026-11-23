@@ -1,3 +1,4 @@
+import { fetchWithTimeout, TIMEOUTS } from '@/app/lib/http/fetch-with-timeout'
 const FALLBACK_CURRENCIES = [
   'AED', 'ARS', 'AUD', 'BDT', 'BRL', 'BWP', 'CAD', 'CHF', 'CLP', 'CNY', 'COP', 'CZK', 'DKK',
   'EGP', 'ETB', 'EUR', 'GBP', 'GHS', 'HKD', 'HUF', 'IDR', 'ILS', 'INR', 'JPY', 'KES', 'KRW',
@@ -131,7 +132,7 @@ export async function fetchLiveRate(baseCurrency: string, quoteCurrency: string)
   const quote = normalizeCurrencyCode(quoteCurrency)
 
   const endpoint = `https://open.er-api.com/v6/latest/${base}`
-  const response = await fetch(endpoint, { method: 'GET', cache: 'no-store' })
+  const response = await fetchWithTimeout(endpoint, { method: 'GET', cache: 'no-store' }, TIMEOUTS.lookup)
 
   if (!response.ok) {
     throw new Error(`Unable to fetch live exchange rate (${response.status})`)

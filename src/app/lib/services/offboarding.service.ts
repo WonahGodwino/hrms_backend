@@ -20,7 +20,7 @@ export class OffboardingService {
 
 	static async createResignation(staffId: string, companyId: string, data: { resignationLetter: string; resignationComment?: string }) {
 		// Check if staff already has active offboarding
-		const existing = await (prisma as any).offboarding.findFirst({
+		const existing = await prisma.offboarding.findFirst({
 			where: {
 				staffId,
 				companyId,
@@ -52,7 +52,7 @@ export class OffboardingService {
 			throw new Error('Staff record not found');
 		}
 
-		return (prisma as any).offboarding.create({
+		return prisma.offboarding.create({
 			data: {
 				companyId,
 				staffId,
@@ -105,7 +105,7 @@ export class OffboardingService {
 		}
 
 		// Check if staff already has active offboarding
-		const existing = await (prisma as any).offboarding.findFirst({
+		const existing = await prisma.offboarding.findFirst({
 			where: {
 				staffId: data.staffId,
 				companyId,
@@ -131,7 +131,7 @@ export class OffboardingService {
 			});
 		}
 
-		return (prisma as any).offboarding.create({
+		return prisma.offboarding.create({
 			data: {
 				companyId,
 				staffId: data.staffId,
@@ -194,7 +194,7 @@ export class OffboardingService {
 		}
 
 		const [offboardings, total] = await Promise.all([
-			(prisma as any).offboarding.findMany({
+			prisma.offboarding.findMany({
 				where,
 				orderBy: { createdAt: 'desc' },
 				skip,
@@ -222,7 +222,7 @@ export class OffboardingService {
 					},
 				},
 			}),
-			(prisma as any).offboarding.count({ where }),
+			prisma.offboarding.count({ where }),
 		]);
 
 		return {
@@ -237,7 +237,7 @@ export class OffboardingService {
 	}
 
 	static async getStaffOffboardings(staffId: string, companyId: string) {
-		return (prisma as any).offboarding.findMany({
+		return prisma.offboarding.findMany({
 			where: {
 				staffId,
 				companyId,
@@ -247,7 +247,7 @@ export class OffboardingService {
 	}
 
 	static async getOffboardingById(id: string, companyId: string) {
-		const offboarding = await (prisma as any).offboarding.findFirst({
+		const offboarding = await prisma.offboarding.findFirst({
 			where: { id, companyId },
 			include: {
 				staff: {
@@ -284,7 +284,7 @@ export class OffboardingService {
 	// ============================
 
 	static async reviewResignation(offboardingId: string, companyId: string, reviewerId: string, action: 'APPROVE' | 'REQUEST_HANDOVER' | 'REJECT', comment?: string) {
-		const offboarding = await (prisma as any).offboarding.findFirst({
+		const offboarding = await prisma.offboarding.findFirst({
 			where: { id: offboardingId, companyId },
 			select: {
 				status: true,
@@ -340,7 +340,7 @@ export class OffboardingService {
 				throw new Error('Invalid action');
 		}
 
-		return (prisma as any).offboarding.update({
+		return prisma.offboarding.update({
 			where: { id: offboardingId },
 			data: {
 				...updates,
@@ -360,7 +360,7 @@ export class OffboardingService {
 	}
 
 	static async uploadHandover(offboardingId: string, companyId: string, staffId: string, handoverDocument: string) {
-		const offboarding = await (prisma as any).offboarding.findFirst({
+		const offboarding = await prisma.offboarding.findFirst({
 			where: { id: offboardingId, companyId, staffId },
 			select: { status: true },
 		});
@@ -373,7 +373,7 @@ export class OffboardingService {
 			throw new Error(`Cannot upload handover in ${offboarding.status} status`);
 		}
 
-		return (prisma as any).offboarding.update({
+		return prisma.offboarding.update({
 			where: { id: offboardingId },
 			data: {
 				handoverDocument,
@@ -384,7 +384,7 @@ export class OffboardingService {
 	}
 
 	static async approveOffboarding(offboardingId: string, companyId: string, reviewerId: string, comment?: string) {
-		const offboarding = await (prisma as any).offboarding.findFirst({
+		const offboarding = await prisma.offboarding.findFirst({
 			where: { id: offboardingId, companyId },
 			select: { status: true, staffId: true },
 		});
@@ -403,7 +403,7 @@ export class OffboardingService {
 			data: { isActive: false },
 		});
 
-		return (prisma as any).offboarding.update({
+		return prisma.offboarding.update({
 			where: { id: offboardingId },
 			data: {
 				status: 'COMPLETED',
@@ -422,7 +422,7 @@ export class OffboardingService {
 	static async canAccessOffboarding(offboardingId: string, userId: string, userRole: string, companyId: string): Promise<boolean> {
 		if (userRole === 'SUPER_ADMIN') return true;
 
-		const offboarding = await (prisma as any).offboarding.findFirst({
+		const offboarding = await prisma.offboarding.findFirst({
 			where: {
 				id: offboardingId,
 				companyId,
@@ -440,7 +440,7 @@ export class OffboardingService {
 
 	// Check if staff has active offboarding
 	static async hasActiveOffboarding(staffId: string, companyId: string): Promise<boolean> {
-		const count = await (prisma as any).offboarding.count({
+		const count = await prisma.offboarding.count({
 			where: {
 				staffId,
 				companyId,

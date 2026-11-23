@@ -14,12 +14,15 @@ import {
   getActivePayrollUpload,
   createPendingPayrollUpload,
   validatePayrollCompanyAccess,
+  touchUploadHeartbeat,
 } from '@/app/lib/payroll/templates/utils'
+import { enqueueJob, JOB_QUEUES } from '@/app/lib/jobs/queue'
 import { findCompanyDisabledCodesInUse } from '@/app/lib/staff/pension-fields'
 import { compressFileBuffer, decompressFileBufferIfNeeded } from '@/app/lib/payroll/templates/shared/file-compression'
 import { MAX_PAYROLL_UPLOAD_BYTES } from '@/app/lib/payroll/upload/parse'
 import { hashUpload, parseAndValidatePayroll, parseExpectedPeriod } from '@/app/lib/payroll/upload/run'
-import { getRelativePath, ensureUploadDirectories, processPayrollUploadInBackground } from '@/app/lib/payroll/upload/background'
+import { ensureUploadDirectories, processPayrollUploadInBackground } from '@/app/lib/payroll/upload/background'
+import { getRelativePath } from '@/app/lib/storage/relative-path'
 import { uploadFileToS3, uploadFileS3Key } from '@/app/lib/storage/upload-files'
 
 export async function OPTIONS(request: NextRequest) {
@@ -295,10 +298,18 @@ export async function POST(request: NextRequest) {
     }).catch(() => {})
 
     // Respond immediately; actual row-by-row processing (DB writes, PDF
-    // generation, emails) continues after the response is sent. This process
-    // is a long-running Node server (not a serverless function), so the
-    // event loop keeps running this work after the request completes.
-    processPayrollUploadInBackground({
+    // generation, emails) continues after the response is sent. REL-001: it
+    // runs as a durable queued job when the job queue is running (the file is
+    // already stored durably above); otherwise it runs in this process exactly
+    // as before.
+    const queued = await enqueueJob(JOB_QUEUES.PAYROLL_UPLOAD, {
+      uploadId: uploadRecord.id,
+      userId: user.userId,
+      expectedPeriod: expectedPeriod ?? null,
+    })
+    if (queued) {
+      touchUploadHeartbeat(uploadRecord.id)
+    } else processPayrollUploadInBackground({
       uploadId: uploadRecord.id,
       templateType,
       templateId,

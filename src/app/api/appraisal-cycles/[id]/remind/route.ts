@@ -14,10 +14,8 @@ export async function OPTIONS(request: NextRequest) {
 // POST /api/appraisal-cycles/:id/remind   body: { companyId }
 // Notifies everyone who still owes a self-appraisal or manager review in a running cycle.
 // Returns { remindersSent, recipients }. Limited to once an hour per cycle.
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   const reject = (status: number, message: string) =>
     withCors(
@@ -65,7 +63,7 @@ export async function POST(
     }
 
     if (result.remindersSent > 0) {
-      await logCycleAction(prisma as any, {
+      await logCycleAction(prisma, {
         cycleId: cycle.id,
         companyId,
         action: "REMINDER_SENT",

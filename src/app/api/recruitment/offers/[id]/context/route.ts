@@ -7,10 +7,9 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
-
-(n: number) => `₦${Math.round(n).toLocaleString('en-NG')}`;
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const origin = req.headers.get('origin')
@@ -21,8 +20,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const companyId = new URL(req.url).searchParams.get('companyId') || user.companyId
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
 
-    const offer = await prisma.offer.findFirst({
-      where: { id, companyId },
+    const offer = await forCompany(companyId).offer.findFirst({
+      where: { id },
       include: {
         candidate: { select: { id: true, firstName: true, lastName: true, email: true, locationState: true } },
         application: { select: { job: { select: { id: true, title: true, department: true, description: true } } } },
@@ -45,7 +44,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const offerJobId = (offer as any).jobId || job?.id || null
     const benefitWhere: any = { companyId, isActive: true, OR: [{ jobId: null }] }
     if (offerJobId) benefitWhere.OR.push({ jobId: offerJobId })
-    const policies = await (prisma as any).benefitPolicy.findMany({
+    const policies = await prisma.benefitPolicy.findMany({
       where: benefitWhere,
       select: { id: true, name: true, category: true, jobId: true },
       orderBy: { name: 'asc' },

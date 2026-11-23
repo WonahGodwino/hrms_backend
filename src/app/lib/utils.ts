@@ -1,5 +1,8 @@
 // src/app/lib/utils.ts
 import { NextResponse } from 'next/server'
+import { GENERIC_ERROR_MESSAGE, publicErrorMessage } from '@/app/lib/errors/public-error'
+import { log } from '@/app/lib/observability/logger'
+import { requestIdOf } from '@/app/lib/observability/request-id'
 
 export class ApiResponse {
   static success(data: any, message: string = 'Success', status: number = 200) {
@@ -56,8 +59,11 @@ export function formatError(error: unknown): string {
   }
 }
 
-export const handleApiError = (error: any) => {
-  console.error('API Error:', error)
+// `request` is optional: when given, the request id is logged and shown in the
+// generic message so a user's report can be matched to the log line.
+export const handleApiError = (error: any, request?: { headers: Headers }) => {
+  const requestId = requestIdOf(request?.headers)
+  log.error('API error', { requestId, error })
 
   const message = formatError(error)
 
@@ -87,7 +93,9 @@ export const handleApiError = (error: any) => {
     return ApiResponse.error('That request could not be completed due to a data conflict. Please try again.', 400)
   }
 
-  return ApiResponse.error(message, 500)
+  // SEC-015: messages our code writes are kept; runtime, database and network
+  // detail is replaced by a generic message (the full error is in the log).
+  return ApiResponse.error(publicErrorMessage(error, GENERIC_ERROR_MESSAGE, requestId), 500)
 }
 
 export const validateEmail = (email: string): boolean => {

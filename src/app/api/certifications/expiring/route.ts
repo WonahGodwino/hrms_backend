@@ -1,10 +1,10 @@
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { isCompanyError, resolveRequestCompanyId } from '@/app/lib/training/resolve-company'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -26,9 +26,8 @@ export async function GET(req: NextRequest) {
     const threshold = new Date(now.getTime() + daysThreshold * 86_400_000)
     const critical  = new Date(now.getTime() + 7 * 86_400_000)
 
-    const records = await prisma.certificationRecord.findMany({
+    const records = await forCompany(companyId).certificationRecord.findMany({
       where: {
-        companyId,
         expiryDate: {
           gte: now,
           lte: criticalOnly ? critical : threshold,

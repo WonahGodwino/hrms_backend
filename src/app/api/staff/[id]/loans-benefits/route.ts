@@ -11,12 +11,14 @@ import { requireRole } from '@/app/lib/auth'
 import { validateCompanyAccess } from '@/app/lib/departments/department-utils'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
 }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get('origin')
 
   try {
@@ -41,16 +43,16 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     }
 
     const [loans, benefits, claims] = await Promise.all([
-      prisma.loanRequest.findMany({
-        where: { staffId: staffRecord.id, companyId: staffRecord.companyId },
+      forCompany(staffRecord.companyId).loanRequest.findMany({
+        where: { staffId: staffRecord.id },
         orderBy: { createdAt: 'desc' }
       }),
-      prisma.benefitAllocation.findMany({
-        where: { staffId: staffRecord.id, companyId: staffRecord.companyId },
+      forCompany(staffRecord.companyId).benefitAllocation.findMany({
+        where: { staffId: staffRecord.id },
         orderBy: { createdAt: 'desc' }
       }),
-      prisma.benefitClaim.findMany({
-        where: { staffId: staffRecord.id, companyId: staffRecord.companyId },
+      forCompany(staffRecord.companyId).benefitClaim.findMany({
+        where: { staffId: staffRecord.id },
         orderBy: { createdAt: 'desc' }
       })
     ])

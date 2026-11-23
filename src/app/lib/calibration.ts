@@ -5,7 +5,7 @@ import {
   PotentialLevel,
 } from "@prisma/client";
 import type { CalibrationStatus, ReviewPhaseType } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { UserContext } from "@/app/lib/access-control";
 import { MAX_LONG_TEXT, resolveRatingBounds } from "@/app/lib/self-appraisal";
 import {
@@ -14,6 +14,7 @@ import {
   OPEN_CYCLE_STATUSES,
   resolveActor,
 } from "@/app/lib/manager-review";
+import { forCompany } from '@/app/lib/data/tenant';
 
 type Db = Prisma.TransactionClient;
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -162,10 +163,8 @@ export async function resolveCalibrationCycle(
       };
     return { cycle };
   }
-  const cycles = await prisma.appraisalCycle.findMany({
-    where: {
-      companyId,
-      status: { in: [...OPEN_CYCLE_STATUSES] },
+  const cycles = await forCompany(companyId).appraisalCycle.findMany({
+    where: { status: { in: [...OPEN_CYCLE_STATUSES] },
       phases: { some: { phaseType: "LEADERSHIP_CALIBRATION", enabled: true } },
     },
     select: CYCLE_SELECT,
@@ -230,10 +229,8 @@ export async function ensureCalibrationRecords(
   companyId: string,
   cycleId: string,
 ) {
-  const missing = await prisma.managerReview.findMany({
-    where: {
-      companyId,
-      cycleId,
+  const missing = await forCompany(companyId).managerReview.findMany({
+    where: { cycleId,
       status: "SUBMITTED",
       participant: { calibrationRecord: { is: null } },
     },
@@ -660,8 +657,8 @@ export async function buildCalibrationSummary(
   companyId: string,
   cycle: CycleInfo,
 ) {
-  const rows = await prisma.calibrationRecord.findMany({
-    where: { companyId, cycleId: cycle.id },
+  const rows = await forCompany(companyId).calibrationRecord.findMany({
+    where: { cycleId: cycle.id },
     select: {
       id: true,
       status: true,

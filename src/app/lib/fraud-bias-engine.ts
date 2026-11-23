@@ -1,4 +1,4 @@
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import {
   MIN_GROUP,
   SCAN_THROTTLE_MS,
@@ -19,6 +19,7 @@ import {
   EmptyReason,
   noReviews,
 } from "@/app/lib/fraud-bias";
+import { forCompany } from '@/app/lib/data/tenant';
 
 // ---------------------------------------------------------------- base data
 export type RV = {
@@ -70,8 +71,8 @@ export async function loadBase(
   cycleId: string,
 ): Promise<Base> {
   const [reviews, calib, recs, noms] = await Promise.all([
-    prisma.managerReview.findMany({
-      where: { companyId, cycleId, status: "SUBMITTED" },
+    forCompany(companyId).managerReview.findMany({
+      where: { cycleId, status: "SUBMITTED" },
       select: {
         id: true,
         reviewerId: true,
@@ -84,18 +85,16 @@ export async function loadBase(
         staffRecord: { select: { gender: true } },
       },
     }),
-    prisma.calibrationRecord.findMany({
-      where: { companyId, cycleId },
+    forCompany(companyId).calibrationRecord.findMany({
+      where: { cycleId },
       select: {
         originalRating: true,
         proposedRating: true,
         participant: { select: { departmentId: true } },
       },
     }),
-    prisma.promotionRecommendation.findMany({
-      where: {
-        companyId,
-        cycleId,
+    forCompany(companyId).promotionRecommendation.findMany({
+      where: { cycleId,
         status: { in: ["SUBMITTED", "APPROVED", "REJECTED"] },
       },
       select: {
@@ -106,8 +105,8 @@ export async function loadBase(
         overallScore: true,
       },
     }),
-    prisma.successionCandidate.findMany({
-      where: { companyId, removedAt: null },
+    forCompany(companyId).successionCandidate.findMany({
+      where: { removedAt: null },
       select: {
         id: true,
         staffRecordId: true,
@@ -874,10 +873,8 @@ export function signalEmpty(
 }
 
 export async function reviewedByDept(companyId: string, cycleId: string) {
-  const rows = await prisma.managerReview.findMany({
-    where: {
-      companyId,
-      cycleId,
+  const rows = await forCompany(companyId).managerReview.findMany({
+    where: { cycleId,
       status: "SUBMITTED",
       overallScore: { not: null },
     },
@@ -940,15 +937,13 @@ export async function buildSummary(companyId: string, view: View) {
       where: { companyId },
       _count: { _all: true },
     }),
-    prisma.fairnessCase.count({
-      where: {
-        companyId,
-        status: "RESOLVED",
+    forCompany(companyId).fairnessCase.count({
+      where: { status: "RESOLVED",
         resolvedAt: { gte: new Date(now.getTime() - 90 * 864e5) },
       },
     }),
-    prisma.performanceAuditEvent.count({
-      where: { companyId, flagged: true, resolvedAt: null },
+    forCompany(companyId).performanceAuditEvent.count({
+      where: { flagged: true, resolvedAt: null },
     }),
   ]);
   const cc = (s: string) =>
@@ -1016,8 +1011,8 @@ export async function buildSummary(companyId: string, view: View) {
 
   const cycleId = view.basis.id;
   const [sigs, base] = await Promise.all([
-    prisma.fairnessSignal.findMany({
-      where: { companyId, cycleId, status: { in: OPEN_SIGNAL as any } },
+    forCompany(companyId).fairnessSignal.findMany({
+      where: { cycleId, status: { in: OPEN_SIGNAL as any } },
       select: {
         ruleKey: true,
         category: true,
@@ -1044,10 +1039,8 @@ export async function buildSummary(companyId: string, view: View) {
     ...new Set(sigs.map((s) => s.managerId).filter(Boolean) as string[]),
   ];
   const prior = atRisk.length
-    ? await prisma.fairnessSignal.findMany({
-        where: {
-          companyId,
-          cycleId: { not: cycleId },
+    ? await forCompany(companyId).fairnessSignal.findMany({
+        where: { cycleId: { not: cycleId },
           managerId: { in: atRisk },
           status: { not: "DISMISSED" },
         },
@@ -1081,10 +1074,8 @@ export async function buildSummary(companyId: string, view: View) {
   } catch (e) {
     if (!isUnique(e)) throw e;
   }
-  const prev = await prisma.fairnessMetricSnapshot.findFirst({
-    where: {
-      companyId,
-      capturedOn: { lte: new Date(today.getTime() - 28 * 864e5) },
+  const prev = await forCompany(companyId).fairnessMetricSnapshot.findFirst({
+    where: { capturedOn: { lte: new Date(today.getTime() - 28 * 864e5) },
     },
     orderBy: { capturedOn: "desc" },
   });

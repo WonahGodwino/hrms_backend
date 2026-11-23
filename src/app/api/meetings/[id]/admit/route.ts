@@ -25,7 +25,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const admit = body.admit !== false // default to admit unless explicitly false
     if (!identity) return withCors(ApiResponse.error('identity is required', 400), origin)
 
-    const meeting: any = await (prisma as any).meeting.findUnique({
+    const meeting: any = await prisma.meeting.findUnique({
       where: { id }, include: { participants: true },
     })
     if (!meeting) return withCors(ApiResponse.error('Meeting not found', 404), origin)

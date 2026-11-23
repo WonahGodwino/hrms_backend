@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
 			},
 		});
 
-		let total = records.length;
+		const total = records.length;
 		let compliant = 0;
 		let expired = 0;
 		let expiringSoon = 0;

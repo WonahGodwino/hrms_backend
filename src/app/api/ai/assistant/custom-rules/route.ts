@@ -11,6 +11,7 @@ import {
   MAX_RULES_PER_COMPANY, RECORD_TYPES, builderCategories, describeBuildingBlocks, describeConditions, loadRows, selectMatches, serializeRule, validateRuleInput,
   type Condition, type RecordTypeKey, type RuleRow,
 } from '@/app/lib/core-setup/custom-rules'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest) {
     const guard = await aiGuard(request, searchParams.get('companyId'), prisma, { requireConnected: false })
     if (isGuardError(guard)) return guard
 
-    const rules = await prisma.customAutomationRule.findMany({ where: { companyId: guard.companyId }, orderBy: { createdAt: 'asc' } })
+    const rules = await forCompany(guard.companyId).customAutomationRule.findMany({ orderBy: { createdAt: 'asc' } })
     const now = new Date()
     // Each record type is read once, however many rules use it.
     const rows = new Map<string, RuleRow[]>()
@@ -75,9 +76,9 @@ export async function POST(request: NextRequest) {
     // approved custom-rule proposal that this person approved, so the label and names cannot be claimed by an ordinary request.
     let origin_: { requesterId: string; requesterName: string; proposalId: string } | null = null
     if (typeof body.proposalId === 'string' && body.proposalId) {
-      const proposal = await prisma.aiProposal.findFirst({ where: { id: body.proposalId, companyId: guard.companyId, type: 'custom_rule', status: 'approved', decidedById: guard.user.userId } })
+      const proposal = await forCompany(guard.companyId).aiProposal.findFirst({ where: { id: body.proposalId, type: 'custom_rule', status: 'approved', decidedById: guard.user.userId } })
       if (proposal) {
-        const requester = await prisma.staffRecord.findFirst({ where: { id: proposal.createdById, companyId: guard.companyId }, select: { firstName: true, lastName: true, email: true } })
+        const requester = await forCompany(guard.companyId).staffRecord.findFirst({ where: { id: proposal.createdById }, select: { firstName: true, lastName: true, email: true } })
         origin_ = { requesterId: proposal.createdById, requesterName: requester ? `${requester.firstName} ${requester.lastName}`.trim() || requester.email : 'Former staff member', proposalId: proposal.id }
       }
     }

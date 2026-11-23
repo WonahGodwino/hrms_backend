@@ -6,6 +6,8 @@ import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { requirePhedPageAccess } from '@/app/lib/phed/access-role'
 import { buildFinancePayrollSummary } from '@/app/lib/phed/reports'
 import { exportReportResponse, LIABILITIES_COLS } from '@/app/lib/phed/report-export'
+import { forCompany } from '@/app/lib/data/tenant'
+import { deferExport } from '@/app/lib/exports/defer'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -13,7 +15,11 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 // PRD 13.4 — Treasury's "Liabilities to PHED" page: staff liabilities owed
 // back to the company, deducted at source. Reuses the same Finance Summary
 // aggregation already used elsewhere — no new computation.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  // PERF-003: build the file in the background when the client asks (Prefer: respond-async).
+  const deferred = await deferExport(req);
+  if (deferred) return deferred;
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'report')
   if (rl) return withCors(rl, origin)
@@ -34,7 +40,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const staffIds = payrolls.map(r => r.staffId)
 
     const [allDeductions, staffDedLiabilities] = await Promise.all([
-      prisma.phedDeductionLiability.findMany({ where: { companyId: period.companyId, isActive: true }, orderBy: { name: 'asc' } }),
+      forCompany(period.companyId).phedDeductionLiability.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
       prisma.phedStaffDeductionLiability.findMany({ where: { staffId: { in: staffIds } } }),
     ])
 

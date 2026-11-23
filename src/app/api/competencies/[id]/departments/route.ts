@@ -9,16 +9,15 @@ import {
   resolveScaleForCompetency,
   normalizeLevelMappings,
 } from "@/app/lib/competencies/competency-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
 }
 
 // GET /api/competencies/:id/departments
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -57,9 +56,8 @@ export async function GET(
     const mappedIds = mappings.map((m) => m.departmentId);
 
     const [departments, scale] = await Promise.all([
-      prisma.department.findMany({
+      forCompany(competency.companyId).department.findMany({
         where: {
-          companyId: competency.companyId,
           OR: [
             { status: { equals: "Active", mode: "insensitive" } },
             // keep already-mapped departments visible even if they were deactivated since
@@ -106,10 +104,8 @@ export async function GET(
 // POST /api/competencies/:id/departments
 // Replaces the full set of department mappings.
 // Body: { mappings: [{ departmentId: string, requiredLevel?: number | null }] }
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = request.headers.get("origin");
   try {
     const authHeader = request.headers.get("authorization");
@@ -173,8 +169,8 @@ export async function POST(
       const ids = normalized.map((n) => n.departmentId);
 
       const [found, existingMappings] = await Promise.all([
-        prisma.department.findMany({
-          where: { id: { in: ids }, companyId: competency.companyId },
+        forCompany(competency.companyId).department.findMany({
+          where: { id: { in: ids } },
           select: { id: true, status: true },
         }),
         prisma.competencyDepartmentMapping.findMany({

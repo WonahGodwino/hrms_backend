@@ -8,15 +8,17 @@ import { prisma } from '@/app/lib/db';
 import { getDepartmentWithAccess } from '@/app/lib/departments/department-utils';
 import { reconcileStaffDesignationLink } from '@/app/lib/designations/designation-sync';
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
 }
 
 // GET available staff — all active staff NOT in this department
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
-	const origin = request.headers.get('origin');
-	try {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    const params = await props.params;
+    const origin = request.headers.get('origin');
+    try {
 		const authHeader = request.headers.get('authorization');
 		if (!authHeader) return withCors(ApiResponse.error('Authorization header missing', 401), origin);
 
@@ -24,9 +26,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 		const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'ADMIN', 'MANAGER']);
 		const department = await getDepartmentWithAccess(user, params.id);
 
-		const staff = await prisma.staffRecord.findMany({
+		const staff = await forCompany(department.companyId).staffRecord.findMany({
 			where: {
-				companyId: department.companyId,
 				isActive: true,
 				departmentId: { not: params.id },
 			},
@@ -49,9 +50,10 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 }
 
 // POST assign staff to this department
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
-	const origin = request.headers.get('origin');
-	try {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    const params = await props.params;
+    const origin = request.headers.get('origin');
+    try {
 		const authHeader = request.headers.get('authorization');
 		if (!authHeader) return withCors(ApiResponse.error('Authorization header missing', 401), origin);
 
@@ -63,8 +65,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 		const staffId = body.staffId;
 		if (!staffId) return withCors(ApiResponse.error('staffId is required', 400), origin);
 
-		const staff = await prisma.staffRecord.findFirst({
-			where: { id: staffId, companyId: department.companyId, isActive: true },
+		const staff = await forCompany(department.companyId).staffRecord.findFirst({
+			where: { id: staffId, isActive: true },
 		});
 		if (!staff) return withCors(ApiResponse.error('Staff not found', 404), origin);
 

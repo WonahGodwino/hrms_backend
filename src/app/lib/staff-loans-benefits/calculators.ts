@@ -132,7 +132,7 @@ export function computeProcessingFee(principal: number, processingFeePercent: nu
 
 // Resolves the effective monthly rate for a tenure: the policy may define a
 // per-duration matrix (interestByDuration) that overrides the flat rate.
-export function resolveInterestRate(policy: { interestRatePercent: unknown; interestByDuration?: any }, months: number): number {
+export function resolveInterestRate(policy: { interestRatePercent: unknown; interestByDuration?: unknown }, months: number): number {
   const matrix = policy.interestByDuration as Record<string, number> | null | undefined
   if (matrix && matrix[String(months)] != null) {
     return Number(matrix[String(months)])

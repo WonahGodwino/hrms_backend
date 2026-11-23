@@ -9,6 +9,7 @@ import {
   getStaffRecordIdFromEmail,
 } from "@/app/lib/access-control";
 import { buildMonthBuckets, average } from "@/app/lib/goals/analytics-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -80,8 +81,8 @@ export async function GET(request: NextRequest) {
         origin,
       );
 
-    const staff = await prisma.staffRecord.findFirst({
-      where: { id: staffRecordId, companyId },
+    const staff = await forCompany(companyId).staffRecord.findFirst({
+      where: { id: staffRecordId },
       select: { id: true, departmentId: true },
     });
     if (!staff)
@@ -100,9 +101,8 @@ export async function GET(request: NextRequest) {
         select: { progress: true, createdAt: true },
       }),
       staff.departmentId
-        ? prisma.staffRecord.findMany({
+        ? forCompany(companyId).staffRecord.findMany({
             where: {
-              companyId,
               departmentId: staff.departmentId,
               id: { not: staff.id },
             },

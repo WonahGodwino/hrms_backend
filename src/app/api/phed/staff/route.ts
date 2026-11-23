@@ -9,6 +9,7 @@ import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { sendPhedWelcomeEmail } from '@/app/lib/phed/email'
 import { NOTIFICATION_TYPES, createNotification } from '@/app/lib/notifications/helpers'
 import { normalizeState } from '@/app/lib/phed/csv-parser'
+import { rejectForeignCompany } from '@/app/lib/phed/company-guard'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -19,10 +20,12 @@ export async function GET(req: NextRequest) {
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requirePhedPayrollReadAccess(token)
+    const user = await requirePhedPayrollReadAccess(token)
 
     const p              = new URL(req.url).searchParams
     const companyId      = p.get('companyId')
+    const foreignCompany = await rejectForeignCompany(user, companyId, origin)
+    if (foreignCompany) return foreignCompany
     const category       = p.get('category')
     const search         = p.get('search') || ''
     const page           = Math.max(1, Number(p.get('page') || 1))
@@ -60,8 +63,8 @@ export async function GET(req: NextRequest) {
 
     try {
       ;[total, staff] = await Promise.all([
-        (prisma as any).phedStaff.count({ where }),
-        (prisma as any).phedStaff.findMany({
+        prisma.phedStaff.count({ where }),
+        prisma.phedStaff.findMany({
           ...baseQuery,
           include: {
             grade:    true,
@@ -76,8 +79,8 @@ export async function GET(req: NextRequest) {
     } catch (_fullQueryError) {
       console.warn('[PHED staff] Full include query failed, falling back to safe query:', _fullQueryError)
       ;[total, staff] = await Promise.all([
-        (prisma as any).phedStaff.count({ where }),
-        (prisma as any).phedStaff.findMany({
+        prisma.phedStaff.count({ where }),
+        prisma.phedStaff.findMany({
           ...baseQuery,
           include: { grade: true, region: true, feeder: true, payPoint: true },
         }),
@@ -85,8 +88,8 @@ export async function GET(req: NextRequest) {
       const staffIds = staff.map((s: any) => s.id)
       if (staffIds.length > 0) {
         const [allUnions, allCooperatives] = await Promise.all([
-          (prisma as any).phedStaffUnion.findMany({ where: { staffId: { in: staffIds } }, include: { union: true } }).catch(() => []),
-          (prisma as any).phedStaffCooperative.findMany({ where: { staffId: { in: staffIds } }, include: { cooperative: true } }).catch(() => []),
+          prisma.phedStaffUnion.findMany({ where: { staffId: { in: staffIds } }, include: { union: true } }).catch(() => []),
+          prisma.phedStaffCooperative.findMany({ where: { staffId: { in: staffIds } }, include: { cooperative: true } }).catch(() => []),
         ])
         const unionMap = new Map<string, any[]>()
         const coopMap  = new Map<string, any[]>()
@@ -149,7 +152,7 @@ export async function POST(req: NextRequest) {
     const cleanEmail = email.toLowerCase().trim()
 
     // ── Check for duplicates before attempting insert ─────
-    const existing = await (prisma as any).phedStaff.findFirst({
+    const existing = await prisma.phedStaff.findFirst({
       where: {
         companyId,
         OR: [
@@ -181,7 +184,7 @@ export async function POST(req: NextRequest) {
     // ── Atomic: create phedStaff + upsert staffRecord ─────
     // Both writes are in a transaction — if either fails nothing is persisted.
     const [staff, staffRecord] = await prisma.$transaction([
-      (prisma as any).phedStaff.create({
+      prisma.phedStaff.create({
         data: {
           companyId, staffId, firstName, lastName,
           email:    cleanEmail,

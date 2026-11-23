@@ -24,6 +24,7 @@ import {
   releaseKeys,
 } from "./cycle-notifications";
 import { kickAutomation } from "@/app/lib/automation-events";
+import { forCompany } from '@/app/lib/data/tenant';
 
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
@@ -91,8 +92,8 @@ async function notifyStartBlocked(
 }
 
 async function autoStartDueCycles(companyId: string) {
-  const due = await prisma.appraisalCycle.findMany({
-    where: { companyId, status: "SCHEDULED", startDate: { lte: todayStart() } },
+  const due = await forCompany(companyId).appraisalCycle.findMany({
+    where: { status: "SCHEDULED", startDate: { lte: todayStart() } },
     include: {
       phases: true,
       departmentScopes: { select: { departmentId: true } },
@@ -102,7 +103,7 @@ async function autoStartDueCycles(companyId: string) {
   for (const cycle of due) {
     try {
       const blockers = await getActivationBlockers(
-        prisma as any,
+        prisma,
         cycle,
         "activate",
       );

@@ -99,7 +99,7 @@ export function summarizeAttendance(rows: AttendanceExportRow[]): AttendanceSumm
   return { total, present, late, partial, absent, rate, byDepartment }
 }
 
-function genLabel(d?: Date): string {
+export function genLabel(d?: Date): string {
   return (d || new Date()).toLocaleString('en-GB', {
     day: '2-digit',
     month: 'short',
@@ -120,7 +120,7 @@ function setLocationCell(cell: ExcelJS.Cell, loc: ExportLocation, rowIndex: numb
   cell.fill = fill(rowIndex % 2 === 1 ? ZEBRA : 'FFFFFF')
   cell.font = { size: 10, color: { argb: `FF${loc ? BRAND_DEEP : INK}` }, underline: Boolean(loc) }
 }
-const border = (argb: string): Partial<ExcelJS.Borders> => ({
+export const border = (argb: string): Partial<ExcelJS.Borders> => ({
   top: { style: 'thin', color: { argb: `FF${argb}` } },
   bottom: { style: 'thin', color: { argb: `FF${argb}` } },
   left: { style: 'thin', color: { argb: `FF${argb}` } },

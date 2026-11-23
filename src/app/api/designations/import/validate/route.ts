@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
       if (!code) errors.push('Missing code')
 
       if (errors.length === 0 && code) {
-        const existing = await (prisma as any).designation.findFirst({ where: { code, companyId: companyId || null } })
+        const existing = await prisma.designation.findFirst({ where: { code, companyId: companyId || null } })
         if (existing) errors.push(`Code "${code}" already exists`)
       }
 

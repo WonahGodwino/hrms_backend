@@ -15,7 +15,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!user) return withCors(ApiResponse.error('Invalid token', 401), origin)
 
     const { id } = await params
-    const designation = await (prisma as any).designation.findUnique({ where: { id } })
+    const designation = await prisma.designation.findUnique({ where: { id } })
     if (!designation) return withCors(ApiResponse.error('Designation not found', 404), origin)
 
     // Multi-tenant guard: only SUPER_ADMIN may read another company's designation.

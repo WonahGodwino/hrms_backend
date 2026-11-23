@@ -8,6 +8,7 @@
 // as a PERCENTAGE formula base once payroll is generated.
 import { prisma } from '@/app/lib/db';
 import { GROSS_SYSTEM_FIELD } from '@/app/lib/payroll/generation/field-resolver';
+import { forCompany } from '@/app/lib/data/tenant';
 
 export async function saveInitialGrossCompensation(params: { staffId: string; companyId: string; gross: unknown; updatedBy: string }): Promise<void> {
 	const { staffId, companyId, gross, updatedBy } = params;
@@ -18,8 +19,8 @@ export async function saveInitialGrossCompensation(params: { staffId: string; co
 	// payroll templates (required FK) — without one yet configured, there's
 	// nowhere to attach Gross to, so it's silently skipped rather than
 	// blocking registration/onboarding.
-	const template = await prisma.payrollTemplate.findFirst({
-		where: { companyId },
+	const template = await forCompany(companyId).payrollTemplate.findFirst({
+		where: { },
 		select: { id: true },
 	});
 	if (!template) return;
@@ -59,7 +60,7 @@ export async function saveInitialGrossCompensationMany(params: {
 		.filter((r) => !(r.raw === undefined || r.raw === null || r.raw === '' || !Number.isFinite(r.gross)));
 	if (rows.length === 0) return;
 
-	const template = await prisma.payrollTemplate.findFirst({ where: { companyId }, select: { id: true } });
+	const template = await forCompany(companyId).payrollTemplate.findFirst({ where: { }, select: { id: true } });
 	if (!template) return;
 
 	const existing = await prisma.staffPayrollProfile.findMany({
@@ -83,7 +84,7 @@ export async function saveInitialGrossCompensationMany(params: {
 	}
 	// A profile that already exists keeps its other values and only gets the Gross merged in.
 	for (const r of rows.filter((x) => existingById.has(x.staffId))) {
-		// eslint-disable-next-line no-await-in-loop
+		 
 		await prisma.staffPayrollProfile.update({
 			where: { staffId: r.staffId },
 			data: { values: { ...(existingById.get(r.staffId) || {}), [GROSS_SYSTEM_FIELD]: r.gross }, updatedBy },

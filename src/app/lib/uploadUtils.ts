@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { CERTIFICATE_TYPES, detectFileType } from '@/app/lib/storage/private-files';
 import { uploadFileToS3 } from '@/app/lib/storage/upload-files';
 
 const DEFAULT_MAX_BYTES = parseInt(process.env.MAX_UPLOAD_BYTES || '') || 5 * 1024 * 1024; // 5 MB
@@ -25,30 +26,29 @@ export async function validateAndStoreFile(rawFile: any, uploadsDir: string, opt
 		throw new Error(`File too large (${Math.round(size / 1024)} KB). Max allowed is ${Math.round(max / 1024)} KB`);
 	}
 
-	const mime = (rawFile.type || '').toLowerCase();
+	// SEC-019: the type is decided from the file's bytes, not the client-supplied
+	// MIME type or name, and the stored file gets a server-chosen extension.
 	const allowed = opts?.allowedMime ?? DEFAULT_ALLOWED_MIME;
-	const ext = path.extname(rawFile.name || '').toLowerCase();
-
-	// basic mime check or extension fallback
-	const mimeAllowed = allowed.includes(mime) || (mime === '' && /\.(pdf|png|jpe?g|gif|doc|docx)$/.test(ext));
-	if (!mimeAllowed) {
-		throw new Error(`Unsupported file type: ${mime || ext}`);
+	const detected = detectFileType(buffer, CERTIFICATE_TYPES);
+	if (!detected || !allowed.includes(detected.mime)) {
+		const ext = path.extname(rawFile.name || '').toLowerCase();
+		throw new Error(`Unsupported file type: ${(rawFile.type || '').toLowerCase() || ext || 'unknown'}`);
 	}
 
 	if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
 	const timestamp = Date.now();
-	const sanitizedName = String(rawFile.name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_');
-	const storedFileName = `${timestamp}_${sanitizedName}`;
+	const baseName = String(rawFile.name || 'file').replace(/\.[^.]*$/, '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80) || 'file';
+	const storedFileName = `${timestamp}_${baseName}.${detected.ext}`;
 	const filePath = path.join(uploadsDir, storedFileName);
 
 	fs.writeFileSync(filePath, buffer);
 	await uploadFileToS3(`uploads/certifications/${storedFileName}`, buffer, rawFile.type || 'application/octet-stream');
 
 	return {
-		fileName: rawFile.name || sanitizedName,
+		fileName: rawFile.name || storedFileName,
 		fileUrl: `/uploads/certifications/${storedFileName}`,
-		fileType: rawFile.type || 'application/octet-stream',
+		fileType: detected.mime,
 		size,
 	};
 }

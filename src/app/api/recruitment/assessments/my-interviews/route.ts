@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
       const payload = verifyPanelToken(panelAccessToken)
       if (!payload) return withCors(ApiResponse.error('Invalid or expired interview link', 401), origin)
 
-      const assessment = await (prisma as any).recruitmentCandidateAssessment.findUnique({
+      const assessment = await prisma.recruitmentCandidateAssessment.findUnique({
         where: { id: payload.assessmentId },
         include: {
           company: { select: { companyName: true } },
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
                 select: {
                   id: true, order: true, title: true, duration: true,
                   interviewType: true, gradingMetric: true, requiredInterviewers: true,
-                  evaluationPlan: true,
+                  evaluationPlan: true, evaluationDeadlineHours: true,
                 },
                 orderBy: { order: 'asc' },
               },
@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
     if (!companyId) return withCors(ApiResponse.error('Company context missing', 400), origin)
 
     // Only show interviews where the user is an actual panelist.
-    const assessments = await (prisma as any).recruitmentCandidateAssessment.findMany({
+    const assessments = await prisma.recruitmentCandidateAssessment.findMany({
       where: {
         companyId,
         roundStatus: { in: ['SCHEDULED', 'PENDING_FEEDBACK'] },

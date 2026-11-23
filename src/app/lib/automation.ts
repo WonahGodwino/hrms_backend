@@ -10,7 +10,7 @@ import {
   AutomationTrigger,
 } from "@prisma/client";
 import type { AutomationRule } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { requireRole } from "@/app/lib/auth";
 import { verifyCompanyAccess, UserContext } from "@/app/lib/access-control";
 import { Actor, Db, resolveActor } from "@/app/lib/manager-review";
@@ -733,10 +733,8 @@ export async function buildOverview(companyId: string) {
     ok30(["SEND_REMINDER"]),
     ok30(["ASSIGN_MANAGER"]),
     ok30(["ESCALATE_APPROVAL", "CREATE_PIP", "NOTIFY_HR"]),
-    prisma.automationRule.count({
-      where: {
-        companyId,
-        removedAt: null,
+    forCompany(companyId).automationRule.count({
+      where: { removedAt: null,
         status: "ACTIVE",
         runs: { none: { mode: "LIVE" } },
       },
@@ -830,6 +828,7 @@ import {
   loadRuleContext,
 } from "@/app/lib/automation-eval";
 import { planAction, performAction } from "@/app/lib/automation-actions";
+import { forCompany } from '@/app/lib/data/tenant';
 
 export { evaluateRule, loadRuleContext, planAction, performAction };
 export const loadSampleContext = loadRuleContext;
@@ -841,16 +840,16 @@ export async function evaluateDryRun(
 ) {
   let id = staffRecordId;
   if (!id) {
-    const rev = await prisma.managerReview.findFirst({
-      where: { companyId, status: "SUBMITTED" },
+    const rev = await forCompany(companyId).managerReview.findFirst({
+      where: { status: "SUBMITTED" },
       orderBy: { submittedAt: "desc" },
       select: { staffRecordId: true },
     });
     id =
       rev?.staffRecordId ??
       (
-        await prisma.staffRecord.findFirst({
-          where: { companyId, isActive: true },
+        await forCompany(companyId).staffRecord.findFirst({
+          where: { isActive: true },
           orderBy: { firstName: "asc" },
           select: { id: true },
         })
@@ -953,7 +952,7 @@ export async function assertUniqueNotificationName(
 // ---------------------------------------------------------------------------
 // CSV export
 // ---------------------------------------------------------------------------
-const csvCell = (v: unknown) => {
+export const csvCell = (v: unknown) => {
   let s = v === null || v === undefined ? "" : String(v);
   if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; // blocks spreadsheet formula injection
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;

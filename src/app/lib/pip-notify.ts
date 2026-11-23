@@ -1,10 +1,11 @@
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import {
   createNotification,
   NOTIFICATION_TYPES,
 } from "@/app/lib/notifications/helpers";
 import { HR_REVIEWER_ROLES } from "@/app/lib/performance-operations/ops-utils";
 import { nameOf, pipLabel } from "@/app/lib/pip";
+import { forCompany } from '@/app/lib/data/tenant';
 
 const NAME = { select: { firstName: true, lastName: true } } as const;
 const ESC_SELECT = {
@@ -17,10 +18,8 @@ const ESC_SELECT = {
 } as const;
 
 async function hrPool(companyId: string, exclude: string[]) {
-  const rows = await prisma.staffRecord.findMany({
-    where: {
-      companyId,
-      isActive: true,
+  const rows = await forCompany(companyId).staffRecord.findMany({
+    where: { isActive: true,
       role: { in: HR_REVIEWER_ROLES },
       id: { notIn: exclude },
     },

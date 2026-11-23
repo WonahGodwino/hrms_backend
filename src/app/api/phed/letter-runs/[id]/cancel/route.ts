@@ -8,7 +8,8 @@ import { auditLetterEvent, clientIp, resolveLetterCompany, retentionExpiry } fro
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const user = await requireLetterOperatorAccess(token)
 
     const body = await req.json().catch(() => ({}))
-    const run = await (prisma as any).phedLetterRun.findUnique({ where: { id: params.id } })
+    const run = await prisma.phedLetterRun.findUnique({ where: { id: params.id } })
     if (!run) return withCors(ApiResponse.notFound('Run not found'), origin)
 
     const companyId = resolveLetterCompany(user, body?.companyId)
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return withCors(ApiResponse.error('Run is not currently generating.', 409), origin)
     }
 
-    await (prisma as any).phedLetterRun.update({ where: { id: params.id }, data: { status: 'CANCELLED', completedAt: new Date(), filesExpireAt: retentionExpiry() } })
+    await prisma.phedLetterRun.update({ where: { id: params.id }, data: { status: 'CANCELLED', completedAt: new Date(), filesExpireAt: retentionExpiry() } })
     await auditLetterEvent(companyId, user.userId, 'CANCEL', params.id, 'Run cancelled; already-generated letters are kept', clientIp(req.headers))
 
     return withCors(ApiResponse.success({ runId: params.id, status: 'CANCELLED' }, 'Run cancelled'), origin)

@@ -6,7 +6,7 @@ import {
   AutomationRule,
   PipIssueCategory,
 } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { Db } from "@/app/lib/manager-review";
 import {
   DAY,

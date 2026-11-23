@@ -8,6 +8,7 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import rateLimit from '@/app/lib/rateLimiter'
 import { verifyCode } from '@/app/lib/recruitment/statusOtp'
+import { clientIp } from '@/app/lib/recruitment/route-helpers'
 
 const ipLimiter = rateLimit({ interval: 60 * 1000, uniqueTokenPerInterval: 5000 })
 
@@ -25,10 +26,7 @@ const STATUS_LABEL: Record<string, string> = {
   WITHDRAWN: 'Withdrawn',
 }
 
-const clientIp = (request: NextRequest) =>
-  request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-  request.headers.get('x-real-ip') ||
-  'unknown'
+
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 

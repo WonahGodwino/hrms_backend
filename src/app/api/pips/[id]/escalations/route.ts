@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { EscalationSeverity } from "@prisma/client";
-import prisma from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/db";
 import { handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import { RouteContext } from "@/app/lib/self-appraisal";
@@ -20,6 +20,7 @@ import {
 } from "@/app/lib/pip";
 import { notifyPipEscalated } from "@/app/lib/pip-notify";
 import { readUploadedBuffer } from "@/app/lib/goals/evidence-files";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -83,8 +84,8 @@ export async function POST(
     const f = validateFiles(body.attachments, companyId);
     if ("error" in f) return fail(origin, f.error);
 
-    const pip = await prisma.pip.findFirst({
-      where: { id, companyId },
+    const pip = await forCompany(companyId).pip.findFirst({
+      where: { id },
       select: { id: true, status: true, managerId: true, createdById: true },
     });
     const allowed =
@@ -107,8 +108,8 @@ export async function POST(
     // Raised by HR/Admin: they are the reviewer. Raised by a manager: left unassigned for HR to pick up.
     const selfIsReviewer =
       actor.companyWide &&
-      !!(await prisma.staffRecord.findFirst({
-        where: { id: staffId, companyId, role: { in: HR_REVIEWER_ROLES } },
+      !!(await forCompany(companyId).staffRecord.findFirst({
+        where: { id: staffId, role: { in: HR_REVIEWER_ROLES } },
         select: { id: true },
       }));
 

@@ -15,6 +15,7 @@ import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { verifyGoogleIdToken, verifyMicrosoftIdToken } from '@/app/lib/auth/sso'
 import { issueSession } from '@/app/lib/auth/session'
 import { logStaffActivity } from '@/app/lib/device/device-utils'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) {
   return handleCorsOptions(req)
@@ -49,8 +50,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     }
 
     const candidates = companyId
-      ? await prisma.staffRecord.findMany({
-          where: { email, companyId, isActive: true },
+      ? await forCompany(companyId).staffRecord.findMany({
+          where: { email, isActive: true },
           include: { designation: { select: { id: true, title: true, code: true } } },
         })
       : await prisma.staffRecord.findMany({
@@ -126,6 +127,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
       ApiResponse.success(
         {
           token: session.token,
+          refreshToken: session.refreshToken,
           user: session.user,
           company: session.company,
           enabledModules: session.enabledModules,

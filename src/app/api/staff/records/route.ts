@@ -9,6 +9,8 @@ import { cleanStaffText, PLACEHOLDER_TEXT_VALUES } from '@/app/lib/staff/placeho
 // Department values that count as "unassigned" in the summary counts.
 const PLACEHOLDER_DEPARTMENT_VALUES = ['', ' ', ...PLACEHOLDER_TEXT_VALUES];
 import { ApiResponse, handleApiError } from '@/app/lib/utils';
+import { forCompany } from '@/app/lib/data/tenant';
+import { PAGE_SIZE_LIMITS, parsePagination } from '@/app/lib/http/pagination';
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
@@ -27,8 +29,7 @@ export async function GET(request: NextRequest) {
 		const user = requireRole(token, ['HR', 'SUPER_ADMIN', 'MANAGER', 'ADMIN']);
 
 		const { searchParams } = new URL(request.url);
-		const page = parseInt(searchParams.get('page') || '1', 10);
-		const limit = parseInt(searchParams.get('limit') || '50', 10);
+		const { page, pageSize: limit, skip } = parsePagination(searchParams, { sizeParam: 'limit', ...PAGE_SIZE_LIMITS.staffRecords });
 		const department = searchParams.get('department');
 		const search = searchParams.get('search');
 		const includeInactive = searchParams.get('includeInactive') === 'true';
@@ -40,8 +41,6 @@ export async function GET(request: NextRequest) {
 
 		// ✅ CHANGE THIS: Get companyId from query param instead of token
 		const companyId = searchParams.get('companyId');
-
-		const skip = (page - 1) * limit;
 
 		// Base where clause. The query MUST always be scoped to a single company so
 		// staff from other companies (that an ADMIN/SUPER_ADMIN can otherwise access)
@@ -65,8 +64,8 @@ export async function GET(request: NextRequest) {
 			}
 		} else {
 			if (user.role !== 'SUPER_ADMIN') {
-				const hasAccess = await prisma.userCompany.findFirst({
-					where: { userId: user.userId, companyId },
+				const hasAccess = await forCompany(companyId).userCompany.findFirst({
+					where: { userId: user.userId },
 					select: { id: true },
 				});
 				// Fall back to the token company rather than leaking a company they
@@ -107,14 +106,29 @@ export async function GET(request: NextRequest) {
 		if (accessStatus === 'blocked') where.isBlocked = true;
 		if (accessStatus === 'enabled') where.isBlocked = false;
 
-		// Search functionality
+		// Search functionality. A staff's middle name can live in firstName,
+		// middleName or lastName depending on how the record was onboarded, so a
+		// single "contains" check against one column misses a full-name search
+		// (e.g. "Olushola Bright Timileyen" against firstName="Olushola Bright").
+		// Splitting the query into words and requiring each word to match some
+		// name/staffId/email column finds the staff regardless of which column
+		// holds which part of the name, without needing a second round trip.
 		if (search) {
-			where.OR = [
-				{ firstName: { contains: search, mode: 'insensitive' } },
-				{ lastName: { contains: search, mode: 'insensitive' } },
-				{ staffId: { contains: search, mode: 'insensitive' } },
-				{ email: { contains: search, mode: 'insensitive' } },
-			];
+			const searchTerms = search.trim().split(/\s+/).filter(Boolean).slice(0, 6);
+			if (searchTerms.length > 0) {
+				where.AND = [
+					...((where.AND as any[]) || []),
+					...searchTerms.map((term) => ({
+						OR: [
+							{ firstName: { contains: term, mode: 'insensitive' } },
+							{ middleName: { contains: term, mode: 'insensitive' } },
+							{ lastName: { contains: term, mode: 'insensitive' } },
+							{ staffId: { contains: term, mode: 'insensitive' } },
+							{ email: { contains: term, mode: 'insensitive' } },
+						],
+					})),
+				];
+			}
 		}
 
 		// Fetch staff records and total count as before
@@ -166,9 +180,8 @@ export async function GET(request: NextRequest) {
 		// Get all staffIds that are referenced as managerId in the same company
 		let managerStaffIds: string[] = [];
 		if (staffIds.length > 0 && companyId) {
-			const managers = await prisma.staffRecord.findMany({
+			const managers = await forCompany(companyId).staffRecord.findMany({
 				where: {
-					companyId,
 					managerId: { in: staffIds },
 				},
 				select: { managerId: true },

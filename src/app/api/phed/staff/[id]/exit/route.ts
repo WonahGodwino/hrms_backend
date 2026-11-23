@@ -14,7 +14,8 @@ const VALID_REASONS: PhedExitReason[] = ['RESIGNATION', 'TERMINATION', 'RETIREME
 // tab) and deactivates the staff member. Additive: the existing
 // DELETE /api/phed/staff/:id (plain deactivation, no exit detail) is
 // untouched for callers that don't need this richer record.
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)

@@ -10,6 +10,7 @@
 import type { NextRequest } from 'next/server'
 import { Prisma, PrismaClient } from '@prisma/client'
 import { prisma } from '@/app/lib/db'
+import { forCompany } from '@/app/lib/data/tenant'
 
 type Db = PrismaClient | Prisma.TransactionClient
 
@@ -252,14 +253,14 @@ export function serializeAuditEvent(row: AuditRow) {
 // the Activity Log shows them next to everything else without rewriting those routes.
 export async function legacyOrgEvents(companyId: string, take = 200) {
   const [departments, businessUnits] = await Promise.all([
-    prisma.departmentAuditLog.findMany({
-      where: { companyId },
+    forCompany(companyId).departmentAuditLog.findMany({
+      where: { },
       orderBy: { timestamp: 'desc' },
       take,
       include: { department: { select: { name: true } } },
     }),
-    prisma.businessUnitAuditLog.findMany({
-      where: { companyId },
+    forCompany(companyId).businessUnitAuditLog.findMany({
+      where: { },
       orderBy: { createdAt: 'desc' },
       take,
       include: { businessUnit: { select: { name: true } } },

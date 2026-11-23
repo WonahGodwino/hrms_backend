@@ -22,6 +22,8 @@ import {
 	previewBulkStaffTransfer,
 	previewStaffTransfer
 } from '@/app/lib/staff/transferStaffCompany';
+import { readJsonBody } from '@/app/lib/validation/request-body';
+import { staffTransferBodySchema } from '@/app/lib/validation/payroll-staff-schemas';
 
 export async function OPTIONS(request: NextRequest) {
 	return handleCorsOptions(request);
@@ -39,7 +41,9 @@ export async function POST(request: NextRequest) {
 		const token = authHeader.replace('Bearer ', '');
 		const user = requireRole(token, ['ADMIN', 'SUPER_ADMIN']);
 
-		const body = await request.json();
+		const parsedBody = await readJsonBody(request, staffTransferBodySchema);
+		if (!parsedBody.ok) return withCors(ApiResponse.error(parsedBody.message, 400), origin);
+		const body = parsedBody.data;
 		const { staffRecordId, staffRecordIds, toCompanyId, newDepartmentId, newDesignationId, newLocationId, reason, dryRun } = body;
 
 		if (!toCompanyId) {
@@ -57,6 +61,9 @@ export async function POST(request: NextRequest) {
 			return withCors(ApiResponse.success(result, dryRun ? 'Bulk transfer preview generated' : 'Bulk transfer completed'), origin);
 		}
 
+		if (!staffRecordId) {
+			return withCors(ApiResponse.error('staffRecordId or staffRecordIds is required', 400), origin);
+		}
 		const input = { staffRecordId, toCompanyId, newDepartmentId, newDesignationId, newLocationId, reason };
 
 		if (dryRun) {

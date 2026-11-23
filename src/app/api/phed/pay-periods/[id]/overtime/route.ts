@@ -6,25 +6,29 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { getPayPeriodFreezeState } from '@/app/lib/phed/pay-period-lock'
+import { findAccessiblePayPeriod } from '@/app/lib/phed/pay-period-access'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'read')
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    if (!(await findAccessiblePayPeriod(user, params.id)))
+      return withCors(ApiResponse.notFound('Pay period not found'), origin)
 
     const [entries, salaryRecords] = await Promise.all([
-      (prisma as any).phedOvertimeEntry.findMany({
+      prisma.phedOvertimeEntry.findMany({
         where:   { payPeriodId: params.id },
         include: { staff: { select: { id: true, staffId: true, firstName: true, lastName: true, department: true } } },
         orderBy: { staff: { lastName: 'asc' } },
       }),
       // Salary inputs stored by upload-template (used to derive gross for OT calc)
-      (prisma as any).phedComputedPayroll.findMany({
+      prisma.phedComputedPayroll.findMany({
         where:  { payPeriodId: params.id },
         select: {
           staffId: true,
@@ -67,19 +71,20 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
+    const period = await findAccessiblePayPeriod(user, params.id)
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     const freeze = await getPayPeriodFreezeState(params.id, period.status)
     if (freeze.frozen)
       return withCors(ApiResponse.error(freeze.reason || 'Pay period is locked', 409), origin)
 
-    const { count } = await (prisma as any).phedOvertimeEntry.deleteMany({ where: { payPeriodId: params.id } })
+    const { count } = await prisma.phedOvertimeEntry.deleteMany({ where: { payPeriodId: params.id } })
     return withCors(ApiResponse.success({ deleted: count }, 'Overtime entries cleared'), origin)
   } catch (e) { return withCors(handleApiError(e), origin) }
 }
@@ -88,15 +93,16 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 // more entries after upload. Body: { entryId, overtimeHours } or
 // { updates: [{ entryId, overtimeHours }] }. computedAmount is cleared so the
 // next Compute re-derives the amount from the new hours.
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const origin = req.headers.get('origin')
   const rl = phedRateLimit(req, 'write')
   if (rl) return withCors(rl, origin)
   try {
     const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null
-    await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
+    const user = await requireModuleAccess(token, 'PHED', ['HR', 'ADMIN', 'SUPER_ADMIN'])
 
-    const period = await (prisma as any).phedPayPeriod.findUnique({ where: { id: params.id } })
+    const period = await findAccessiblePayPeriod(user, params.id)
     if (!period) return withCors(ApiResponse.notFound('Pay period not found'), origin)
     const freeze = await getPayPeriodFreezeState(params.id, period.status)
     if (freeze.frozen)
@@ -117,12 +123,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         failed.push('Invalid overtime entry'); continue
       }
 
-      const entry = await (prisma as any).phedOvertimeEntry.findFirst({
+      const entry = await prisma.phedOvertimeEntry.findFirst({
         where: { id: entryId, payPeriodId: params.id },
       })
       if (!entry) { failed.push('Overtime entry not found for this period'); continue }
 
-      await (prisma as any).phedOvertimeEntry.update({
+      await prisma.phedOvertimeEntry.update({
         where: { id: entryId },
         data: { overtimeHours: hours, computedAmount: null },
       })

@@ -7,11 +7,10 @@
 // fails validation or rendering simply isn't created; it's recorded in the
 // job's failure list instead. Poll GET /offer-letters/bulk-jobs/status/[id].
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireModuleAccess } from '@/app/lib/module-access'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { validateOfferLetterCompanyAccess } from '@/app/lib/offer-letters/access'
+import { validateOfferLetterCompanyAccess } from '@/app/lib/offers/letters/access'
 import ExcelJS from 'exceljs'
 import { findHeaderRow } from '@/app/lib/excel/sheet-theme'
 import {
@@ -20,10 +19,11 @@ import {
   completeOfferLetterBulkJobRecord,
   failOfferLetterBulkJobRecord,
   type OfferLetterBulkJobResults,
-} from '@/app/lib/offer-letters/bulkJobStatus'
-import { processOfferLetterBulkCreateRow } from '@/app/lib/offer-letters/bulkCreateProcessing'
-import { cellToString } from '@/app/lib/offer-letters/excelCell'
-import { resolveHeaderLabelsToKeys, buildOfferLetterFieldLabels, BASE_FIELD_KEYS } from '@/app/lib/offer-letters/variableLabels'
+} from '@/app/lib/offers/letters/bulkJobStatus'
+import { processOfferLetterBulkCreateRow } from '@/app/lib/offers/letters/bulkCreateProcessing'
+import { cellToString } from '@/app/lib/offers/letters/excelCell'
+import { resolveHeaderLabelsToKeys, buildOfferLetterFieldLabels, BASE_FIELD_KEYS } from '@/app/lib/offers/letters/variableLabels'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const template = await prisma.offerLetterTemplate.findFirst({ where: { id: templateId, companyId } })
+    const template = await forCompany(companyId).offerLetterTemplate.findFirst({ where: { id: templateId } })
     if (!template) {
       return withCors(ApiResponse.error('Template not found for this company', 404), origin)
     }

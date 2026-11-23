@@ -27,7 +27,7 @@ export async function getPayPeriodFreezeState(
   payPeriodId: string,
   knownStatus?: string | null,
 ): Promise<PayPeriodFreezeState> {
-  const period = await (prisma as any).phedPayPeriod.findUnique({
+  const period = await prisma.phedPayPeriod.findUnique({
     where: { id: payPeriodId },
     select: { status: true },
   })
@@ -41,7 +41,7 @@ export async function getPayPeriodFreezeState(
     }
   }
 
-  const memo = await (prisma as any).phedApprovalMemo.findUnique({
+  const memo = await prisma.phedApprovalMemo.findUnique({
     where: { payPeriodId },
     select: { status: true },
   })

@@ -3,12 +3,12 @@
 // session and returns a preview. Returns: { sessionId, totalRows, validCount,
 // errorCount, preview: [{ name, code, costCenter, status, type }] }
 import { NextRequest } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { resolveBUCompanyId } from '@/app/lib/business-units/bu-utils'
 import { signImportToken, PendingBURow } from '@/app/lib/business-units/import-token'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -65,8 +65,8 @@ export async function POST(req: NextRequest) {
     if (idx.name === -1) return withCors(ApiResponse.error('CSV must include a "Name" column', 400), origin)
 
     // Existing names/codes for duplicate detection.
-    const existing = await (prisma as any).businessUnit.findMany({
-      where: { companyId, archived: 0 },
+    const existing = await forCompany(companyId).businessUnit.findMany({
+      where: { archived: 0 },
       select: { name: true, code: true },
     })
     const existingNames = new Set(existing.map((e: any) => (e.name || '').toLowerCase()))

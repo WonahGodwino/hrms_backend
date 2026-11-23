@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import prisma from "@/app/lib/prisma";
 import { ApiResponse, handleApiError } from "@/app/lib/utils";
 import { handleCorsOptions, withCors } from "@/app/lib/cors";
 import {
@@ -10,6 +9,7 @@ import {
   pickName,
   resolveSubject,
 } from "@/app/lib/development-plans/dev-utils";
+import { forCompany } from "@/app/lib/data/tenant";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request);
@@ -66,9 +66,8 @@ export async function GET(request: NextRequest) {
     const since = new Date(Date.now() - LOOKBACK_DAYS * DAY_MS);
 
     const [plans, coaching, trainings, certs] = await Promise.all([
-      prisma.developmentPlan.findMany({
+      forCompany(companyId).developmentPlan.findMany({
         where: {
-          companyId,
           staffRecordId: subjectId,
           status: { not: "ARCHIVED" },
         },
@@ -85,9 +84,8 @@ export async function GET(request: NextRequest) {
           },
         },
       }),
-      prisma.developmentCoachingRequest.findMany({
+      forCompany(companyId).developmentCoachingRequest.findMany({
         where: {
-          companyId,
           requesterId: subjectId,
           status: { in: ["ACCEPTED", "COMPLETED"] },
           respondedAt: { not: null },
@@ -102,9 +100,8 @@ export async function GET(request: NextRequest) {
           focusCompetency: { select: { name: true } },
         },
       }),
-      prisma.participantProgress.findMany({
+      forCompany(companyId).participantProgress.findMany({
         where: {
-          companyId,
           employeeId: subjectId,
           trainingStatus: "COMPLETED",
           completionDate: { not: null, gte: since },
@@ -113,8 +110,8 @@ export async function GET(request: NextRequest) {
         orderBy: { completionDate: "desc" },
         take: 100,
       }),
-      prisma.certificationRecord.findMany({
-        where: { companyId, employeeId: subjectId, issueDate: { gte: since } },
+      forCompany(companyId).certificationRecord.findMany({
+        where: { employeeId: subjectId, issueDate: { gte: since } },
         include: { certificationType: true },
         orderBy: { issueDate: "desc" },
         take: 100,

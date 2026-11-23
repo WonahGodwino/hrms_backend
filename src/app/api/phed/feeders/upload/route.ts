@@ -5,6 +5,8 @@ import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { phedRateLimit } from '@/app/lib/phed/rate-limit'
 import { parseConfigCsv } from '@/app/lib/phed/csv-parser'
+import { rejectForeignCompany } from '@/app/lib/phed/company-guard'
+import { forCompany } from '@/app/lib/data/tenant'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
 
@@ -22,6 +24,8 @@ export async function POST(req: NextRequest) {
     const formData  = await req.formData()
     const file      = formData.get('file') as File | null
     const companyId = formData.get('companyId') as string | null
+    const foreignCompany = await rejectForeignCompany(user, companyId, origin)
+    if (foreignCompany) return foreignCompany
     if (!file)      return withCors(ApiResponse.error('file is required', 400), origin)
     if (!companyId) return withCors(ApiResponse.error('companyId is required', 400), origin)
 
@@ -35,8 +39,8 @@ export async function POST(req: NextRequest) {
     if (rows.length === 0)
       return withCors(ApiResponse.error('No rows found in file — ensure data starts at row 3', 400), origin)
 
-    const regions = await (prisma as any).phedRegion.findMany({
-      where: { companyId, isActive: true },
+    const regions = await forCompany(companyId).phedRegion.findMany({
+      where: { isActive: true },
       select: { id: true, name: true },
     })
     const regionMap = new Map<string, string>(
@@ -58,17 +62,17 @@ export async function POST(req: NextRequest) {
       if (!regionId) { failed++; errors.push(`Feeder "${name}": region "${region}" not found in the system`); continue }
 
       try {
-        const existing = await (prisma as any).phedFeeder.findFirst({
-          where: { companyId, name: { equals: name, mode: 'insensitive' } },
+        const existing = await forCompany(companyId).phedFeeder.findFirst({
+          where: { name: { equals: name, mode: 'insensitive' } },
         })
         if (existing) {
-          await (prisma as any).phedFeeder.update({
+          await prisma.phedFeeder.update({
             where: { id: existing.id },
             data: { regionId, ...(code ? { code } : {}) },
           })
           updated++
         } else {
-          await (prisma as any).phedFeeder.create({ data: { companyId, regionId, name, code } })
+          await prisma.phedFeeder.create({ data: { companyId, regionId, name, code } })
           created++
         }
       } catch (e: any) {
@@ -77,7 +81,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    await (prisma as any).phedBulkUpload.create({
+    await prisma.phedBulkUpload.create({
       data: {
         companyId,
         type:         'FEEDERS',

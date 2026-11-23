@@ -106,10 +106,10 @@ function parseImportDate(value: unknown): string | null {
   if (!s) return null
 
   // DD/MM/YYYY or MM/DD/YYYY (disambiguate: day > 12 => the other order).
-  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/)
+  const m = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/)
   if (m) {
-    let a = parseInt(m[1], 10)
-    let b = parseInt(m[2], 10)
+    const a = parseInt(m[1], 10)
+    const b = parseInt(m[2], 10)
     let year = parseInt(m[3], 10)
     if (year < 100) year += 2000
     // Default to DD/MM/YYYY (matches the shipped template); swap if impossible.

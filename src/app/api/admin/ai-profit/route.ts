@@ -4,6 +4,7 @@ import { prisma } from '@/app/lib/db'
 import { getUserFromToken } from '@/app/lib/auth'
 import { ApiResponse, formatError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { asNumber } from '@/app/lib/prisma-utils'
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request)
@@ -69,8 +70,8 @@ export async function GET(request: NextRequest) {
 
     const byCompany = grouped
       .map((g) => {
-        const revenue    = g._sum.cost       ?? 0
-        const actualCost = g._sum.actualCost ?? 0
+        const revenue    = asNumber(g._sum.cost)       ?? 0
+        const actualCost = asNumber(g._sum.actualCost) ?? 0
         const tokens     = g._sum.tokensUsed ?? 0
         const profit     = revenue - actualCost
         return {
@@ -92,7 +93,7 @@ export async function GET(request: NextRequest) {
         acc.totalTokens  += c.totalTokens
         acc.totalReviews += c.totalReviews
         acc.revenue      += c.revenue
-        acc.actualCost   += c.actualCost
+        acc.actualCost   += asNumber(c.actualCost)
         acc.profit       += c.profit
         return acc
       },
@@ -106,7 +107,7 @@ export async function GET(request: NextRequest) {
         totalReviews:   totals.totalReviews,
         totalTokens:    totals.totalTokens,
         revenue:        parseFloat(totals.revenue.toFixed(6)),
-        actualCost:     parseFloat(totals.actualCost.toFixed(6)),
+        actualCost:     parseFloat(asNumber(totals.actualCost).toFixed(6)),
         profit:         parseFloat(totals.profit.toFixed(6)),
         margin:         totals.revenue > 0
           ? parseFloat(((totals.profit / totals.revenue) * 100).toFixed(2))
