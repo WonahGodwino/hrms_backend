@@ -12,12 +12,14 @@ import path from 'node:path'
 import { z, type ZodType } from 'zod'
 import * as authSchemas from '@/app/lib/validation/auth-schemas'
 import * as payrollStaffSchemas from '@/app/lib/validation/payroll-staff-schemas'
+import * as onboardingPublicSchemas from '@/app/lib/validation/onboarding-public-schemas'
 import * as s3MigrationSchemas from '@/app/lib/validation/s3-migration-schemas'
 
 // Every module under lib/validation/ that holds body schemas. Add new ones here.
 const SCHEMA_MODULES: Record<string, Record<string, unknown>> = {
   'auth-schemas': authSchemas,
   'payroll-staff-schemas': payrollStaffSchemas,
+  'onboarding-public-schemas': onboardingPublicSchemas,
   's3-migration-schemas': s3MigrationSchemas,
 }
 

@@ -13,9 +13,7 @@ const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.u
 
 const INTERVIEW_TYPE_LABEL: Record<string, string> = {
   VIDEO: 'Video call',
-  ON_SCREEN: 'Phone / screen',
   ON_SITE: 'On-site',
-  TAKE_HOME: 'Take-home assignment',
 }
 
 const METRIC_LABEL: Record<string, string> = {
@@ -33,8 +31,8 @@ interface PanelRound {
 }
 
 function roundRow(r: PanelRound): string {
-  const type = INTERVIEW_TYPE_LABEL[r.interviewType] || r.interviewType || '—'
-  const metric = r.gradingMetric ? (METRIC_LABEL[r.gradingMetric] || r.gradingMetric) : '—'
+  const type = INTERVIEW_TYPE_LABEL[r.interviewType] || r.interviewType || 'N/A'
+  const metric = r.gradingMetric ? (METRIC_LABEL[r.gradingMetric] || r.gradingMetric) : 'N/A'
   return `
     <tr>
       <td style="padding:10px 12px;border:1px solid #e2e8f0;font-weight:700;color:#0f172a">Round ${r.order}</td>
@@ -88,8 +86,8 @@ function buildText(name: string, companyName: string, planName: string, rounds: 
   const lines = rounds
     .sort((a, b) => a.order - b.order)
     .map((r) => {
-      const type = INTERVIEW_TYPE_LABEL[r.interviewType] || r.interviewType || '—'
-      return `  Round ${r.order}: ${r.title || 'Interview round'} — ${type}, ${r.duration || 0} mins`
+      const type = INTERVIEW_TYPE_LABEL[r.interviewType] || r.interviewType || 'N/A'
+      return `  Round ${r.order}: ${r.title || 'Interview round'} (${type}, ${r.duration || 0} mins)`
     })
     .join('\n')
   return `Dear ${name || 'Colleague'},
@@ -174,8 +172,8 @@ export async function notifyPlanInstance(
   if (targets.length === 0) return { attempted: 0, sent: 0, failed: 0 }
 
   const roundRowFull = (r: any): string => {
-    const type = INTERVIEW_TYPE_LABEL[r.interviewType] || r.interviewType || '—'
-    const metric = r.gradingMetric ? (METRIC_LABEL[r.gradingMetric] || r.gradingMetric) : '—'
+    const type = INTERVIEW_TYPE_LABEL[r.interviewType] || r.interviewType || 'N/A'
+    const metric = r.gradingMetric ? (METRIC_LABEL[r.gradingMetric] || r.gradingMetric) : 'N/A'
     const evalRow = r.evaluationPlan
       ? `<div style="margin-top:6px;padding:10px 12px;background:#f0f9ff;border-left:3px solid #137fec;border-radius:4px;color:#334155;font-size:13px">
           <strong style="color:#137fec">📋 Evaluation Plan:</strong><br/>${r.evaluationPlan.replace(/\[Evaluation Guide: (.+?)\]\((.+?)\)/g, `<a href="$2" style="color:#137fec;text-decoration:underline">📎 $1</a>`)}
@@ -220,7 +218,7 @@ Your round(s):
 ${t.rounds.sort((a, b) => a.order - b.order).map((r) => {
   const type = INTERVIEW_TYPE_LABEL[r.interviewType] || r.interviewType
   const ev = r.evaluationPlan ? `\n    Evaluation plan: ${r.evaluationPlan}` : ''
-  return `  Round ${r.order}: ${r.title} — ${type}, ${r.duration || 0} mins${ev}`
+  return `  Round ${r.order}: ${r.title} (${type}, ${r.duration || 0} mins)${ev}`
 }).join('\n')}
 
 Interviewer Dashboard: ${FRONTEND_URL.replace(/\/$/, '')}/interviews
@@ -229,7 +227,7 @@ Please review the evaluation criteria before the session and submit your scoreca
 
 Kind regards,
 ${companyName} Talent Team`
-      return sendEmail({ to: t.email as string, subject: `Interview Panel Assignment — ${roleLabel}`, html, text })
+      return sendEmail({ to: t.email as string, subject: `Interview Panel Assignment: ${roleLabel}`, html, text })
     }),
   )
   let sent = 0, failed = 0
@@ -274,7 +272,7 @@ export async function notifyInterviewScheduled(
   const jobDept = a.application?.job?.department || ''
   const round = (a.plan?.rounds || []).find((r: any) => r.order === a.currentRoundOrder) || null
   const roundLabel = round
-    ? `Round ${round.order}: ${round.title || 'Interview'} — ${INTERVIEW_TYPE_LABEL[round.interviewType] || round.interviewType}, ${round.duration || 0} mins`
+    ? `Round ${round.order}: ${round.title || 'Interview'} (${INTERVIEW_TYPE_LABEL[round.interviewType] || round.interviewType}, ${round.duration || 0} mins)`
     : 'Interview round'
   const evaluationPlan = round?.evaluationPlan || null
   const whenText = fmtWhen(opts.scheduledAt)
@@ -290,8 +288,8 @@ export async function notifyInterviewScheduled(
   const joinRowHtml = isVirtual
     ? (meetingUrl
         ? `<tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Join link</td><td style="padding:10px 14px;border:1px solid #e2e8f0"><a href="${meetingUrl}" style="color:#137fec;font-weight:700">${meetingUrl}</a>${platform ? ` <span style="color:#64748b">(${platform})</span>` : ''}</td></tr>`
-        : `<tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Format</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#334155">Virtual${platform ? ` — ${platform}` : ''} (link to follow)</td></tr>`)
-    : `<tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Location</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#334155">${location || 'On-site — details to follow'}</td></tr>`
+        : `<tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Format</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#334155">Virtual${platform ? ` (${platform})` : ''} (link to follow)</td></tr>`)
+    : `<tr><td style="padding:10px 14px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:600;color:#475569">Location</td><td style="padding:10px 14px;border:1px solid #e2e8f0;color:#334155">${location || 'On-site, details to follow'}</td></tr>`
   const joinRowText = isVirtual ? `Join:              ${meetingUrl || 'link to follow'}${platform ? ` (${platform})` : ''}` : `Location:          ${location || 'to follow'}`
 
   const interviewers = await prisma.staffRecord.findMany({
@@ -303,8 +301,8 @@ export async function notifyInterviewScheduled(
 
   const verb = opts.reminder ? 'is scheduled' : opts.reschedule ? 'has been rescheduled' : 'has been scheduled'
   const subject = opts.reminder
-    ? `Reminder: your interview with ${candidateName} — ${jobTitle}`
-    : `${opts.reschedule ? 'Interview rescheduled' : 'Interview scheduled'}: ${candidateName} — ${jobTitle}`
+    ? `Reminder: your interview with ${candidateName} for ${jobTitle}`
+    : `${opts.reschedule ? 'Interview rescheduled' : 'Interview scheduled'}: ${candidateName} for ${jobTitle}`
   const leadIn = opts.reminder
     ? `This is a <strong>reminder</strong> about an interview you are scheduled to conduct for <strong>${companyName}</strong>. Please review the details below.`
     : `An interview you have been assigned to ${verb} for <strong>${companyName}</strong>. Please review the details below.`
@@ -354,7 +352,7 @@ Please review the candidate's CV beforehand and submit your scorecard after the 
 Kind regards,
 ${companyName} Talent Team`
 
-  const icsLocation = isVirtual ? (meetingUrl || (platform ? `Virtual — ${platform}` : 'Virtual')) : (location || 'On-site')
+  const icsLocation = isVirtual ? (meetingUrl || (platform ? `Virtual (${platform})` : 'Virtual')) : (location || 'On-site')
   const icsDescription = [
     `Candidate: ${candidateName}`,
     `Position: ${jobTitle}${jobDept ? ` · ${jobDept}` : ''}`,
@@ -370,7 +368,7 @@ ${companyName} Talent Team`
       const attachment = buildIcsAttachment(
         {
           uid: `interview-${assessmentId}-panel-${s.id}@247hr`,
-          title: `Interview with ${candidateName} — ${jobTitle}`,
+          title: `Interview with ${candidateName} for ${jobTitle}`,
           description: icsDescription,
           location: icsLocation,
           url: isVirtual ? meetingUrl : null,
@@ -461,7 +459,7 @@ export async function notifyAssessmentPanel(
     targets.map((t) =>
       sendEmail({
         to: t.email as string,
-        subject: `You're on the interview panel — ${plan.name}`,
+        subject: `You're on the interview panel: ${plan.name}`,
         html: buildHtml(t.name, companyName, plan.name, t.rounds),
         text: buildText(t.name, companyName, plan.name, t.rounds),
       }),
@@ -531,16 +529,16 @@ export async function notifyCandidateInterviewScheduled(
     ? `This is a <strong>friendly reminder</strong> about your upcoming interview for <strong>${jobTitle}</strong>${jobDept ? ` (${jobDept})` : ''} at <strong>${companyName}</strong>.`
     : opts.reschedule
       ? `Your interview for <strong>${jobTitle}</strong>${jobDept ? ` (${jobDept})` : ''} at <strong>${companyName}</strong> has been rescheduled. Please review the updated details below.`
-      : `Congratulations — your application for <strong>${jobTitle}</strong>${jobDept ? ` (${jobDept})` : ''} at <strong>${companyName}</strong> has progressed to the interview stage.`
+      : `Congratulations, your application for <strong>${jobTitle}</strong>${jobDept ? ` (${jobDept})` : ''} at <strong>${companyName}</strong> has progressed to the interview stage.`
   const subject = opts.reminder
-    ? `Reminder: your interview with ${companyName} — ${jobTitle}`
-    : `${opts.reschedule ? 'Interview rescheduled' : 'Interview invitation'}: ${jobTitle} — ${companyName}`
+    ? `Reminder: your interview with ${companyName} for ${jobTitle}`
+    : `${opts.reschedule ? 'Interview rescheduled' : 'Interview invitation'}: ${jobTitle} at ${companyName}`
 
   const joinRow = isVirtual
     ? (meetingUrl
         ? `<tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Meeting Link</td><td style="padding:8px 12px;border:1px solid #e2e8f0"><a href="${meetingUrl}" style="color:#137fec;text-decoration:underline">${meetingUrl}</a>${platform ? ` (${platform})` : ''}</td></tr>`
-        : `<tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Format</td><td style="padding:8px 12px;border:1px solid #e2e8f0">Virtual${platform ? ` — ${platform}` : ''} (joining link to follow)</td></tr>`)
-    : `<tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Location</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${location || 'On-site — details to follow'}</td></tr>`
+        : `<tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Format</td><td style="padding:8px 12px;border:1px solid #e2e8f0">Virtual${platform ? ` (${platform})` : ''} (joining link to follow)</td></tr>`)
+    : `<tr><td style="padding:8px 12px;border:1px solid #e2e8f0;background:#f8fafc;font-weight:700">Location</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${location || 'On-site, details to follow'}</td></tr>`
 
   const html = `
     <p>Dear ${candidateName},</p>
@@ -555,7 +553,7 @@ export async function notifyCandidateInterviewScheduled(
     ${isVirtual && meetingUrl ? `<p style="margin:16px 0"><a href="${meetingUrl}" style="background:#137fec;color:#fff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:8px;display:inline-block">Join the interview</a></p>` : ''}
     <p style="color:#475569;font-size:13px">Please join a few minutes early${isVirtual ? ' and check your camera and microphone beforehand' : ''}. If you have any questions, reach out to the hiring team.</p>
     <p>We look forward to speaking with you.</p>
-    <p>Best regards,<br/>${companyName} — Talent Team</p>`
+    <p>Best regards,<br/>${companyName} Talent Team</p>`
 
   const text = `Dear ${candidateName},
 
@@ -563,7 +561,7 @@ ${opts.reminder
     ? `This is a friendly reminder about your upcoming interview for ${jobTitle}${jobDept ? ` (${jobDept})` : ''} at ${companyName}.`
     : opts.reschedule
       ? `Your interview for ${jobTitle}${jobDept ? ` (${jobDept})` : ''} at ${companyName} has been rescheduled. Please review the updated details below.`
-      : `Congratulations — your application for ${jobTitle}${jobDept ? ` (${jobDept})` : ''} at ${companyName} has progressed to the interview stage.`}
+      : `Congratulations, your application for ${jobTitle}${jobDept ? ` (${jobDept})` : ''} at ${companyName} has progressed to the interview stage.`}
 
 Position:     ${jobTitle}${jobDept ? ` · ${jobDept}` : ''}
 Round:        ${roundLabel}
@@ -575,9 +573,9 @@ Please ensure you have a stable internet connection and a quiet environment. Con
 We look forward to speaking with you.
 
 Best regards,
-${companyName} — Talent Team`
+${companyName} Talent Team`
 
-  const icsLocation = isVirtual ? (meetingUrl || (platform ? `Virtual — ${platform}` : 'Virtual')) : (location || 'On-site')
+  const icsLocation = isVirtual ? (meetingUrl || (platform ? `Virtual (${platform})` : 'Virtual')) : (location || 'On-site')
   const icsDescription = [
     `Interview for ${jobTitle}${jobDept ? ` · ${jobDept}` : ''} at ${companyName}`,
     roundLabel,
@@ -587,7 +585,7 @@ ${companyName} — Talent Team`
   const attachment = buildIcsAttachment(
     {
       uid: `interview-${assessmentId}-candidate@247hr`,
-      title: `Interview: ${jobTitle} — ${companyName}`,
+      title: `Interview: ${jobTitle} at ${companyName}`,
       description: icsDescription,
       location: icsLocation,
       url: isVirtual ? meetingUrl : null,

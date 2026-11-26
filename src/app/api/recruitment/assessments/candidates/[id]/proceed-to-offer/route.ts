@@ -9,6 +9,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { sendOnboardingWelcomeEmail } from '@/app/lib/onboarding/welcome-email'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
     // DB-002: status changes and the onboarding (with its tasks) are created
     // together; a failure leaves the candidate where they were.
-    const onboardingId = await prisma.$transaction(async (tx) => {
+    const { onboardingId, isNew } = await prisma.$transaction(async (tx) => {
     await tx.recruitmentCandidateAssessment.update({
       where: { id: params.id }, data: { roundStatus: 'COMPLETED' },
     })
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
       where: { id: assessment.applicationId }, data: { status: 'PRE_OFFER_ONBOARDING', updatedBy: actor },
     })
 
-    // Idempotent — reuse the existing pre-offer onboarding for this
+    // Idempotent: reuse the existing pre-offer onboarding for this
     // application if proceed-to-offer was already called once.
     let existingId = assessment.application?.onboarding?.id || null
     if (!existingId) {
@@ -89,9 +90,33 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
           })),
         })
       }
+      return { onboardingId: existingId, isNew: true }
     }
-    return existingId
+    return { onboardingId: existingId, isNew: false }
     })
+
+    // Fire-and-forget: the candidate gets their onboarding link right away,
+    // without making HR wait on (or separately remember to trigger) the send.
+    // Only on first creation, so a retried/duplicate call never re-sends it.
+    if (isNew) {
+      const [candidate, company] = await Promise.all([
+        prisma.candidate.findUnique({
+          where: { id: assessment.application!.candidateId },
+          select: { id: true, firstName: true, email: true },
+        }),
+        prisma.company.findUnique({ where: { id: companyId }, select: { companyName: true, tradingName: true } }),
+      ])
+      if (candidate) {
+        sendOnboardingWelcomeEmail({
+          onboardingId,
+          companyId,
+          candidate,
+          companyName: company?.tradingName || company?.companyName || 'the company',
+          hasOffer: false,
+          sentBy: actor,
+        }).catch((err) => console.error('Failed to send onboarding welcome email (non-critical):', err))
+      }
+    }
 
     return withCors(ApiResponse.success({
       candidateId: assessment.application?.candidateId,

@@ -7,6 +7,11 @@
 // the PlatformModule row — navLabel / navIcon / navSectionId / navOrder).
 // `defaultSection` is the sidebar section label the module lands in when the
 // nav_sections table hasn't assigned it one.
+// Modules that were removed from the platform. Their database rows stay (company access history) but the module
+// sync archives them, which hides them from the sidebar and treats them as disabled everywhere.
+// ONBOARDING (2026-11-24): onboarding is part of the Recruitment module now.
+export const RETIRED_MODULE_KEYS: readonly string[] = ['ONBOARDING']
+
 export const PLATFORM_MODULES = [
   {
     key:         'CORE_SETUP',
@@ -31,14 +36,6 @@ export const PLATFORM_MODULES = [
     icon:        'Video',
     defaultSection: 'More',
     defaultOrder: 2,
-  },
-  {
-    key:         'ONBOARDING',
-    name:        'Onboarding',
-    description: 'New hire onboarding workflows, checklists and command centre',
-    icon:        'UserCheck',
-    defaultSection: 'More',
-    defaultOrder: 3,
   },
   {
     key:         'TASK_MANAGEMENT',

@@ -861,7 +861,7 @@ export async function sendGuarantorRequestEmail(params: {
 <body>
   <div class="wrapper"><div class="card">
     <div class="header">
-      <h1>247HR — Guarantor Request</h1>
+      <h1>247HR: Guarantor Request</h1>
       <p>You have been requested to guarantee a loan application</p>
     </div>
     <div class="body">
@@ -899,7 +899,7 @@ export async function sendGuarantorRequestEmail(params: {
 
   return sendEmail({
     to: guarantorEmail,
-    subject: `Guarantor Request: ${applicantName} — ${loanType} (${currency} ${fmt(amount)})`,
+    subject: `Guarantor Request: ${applicantName}, ${loanType} (${currency} ${fmt(amount)})`,
     html,
     text,
   })
@@ -975,7 +975,7 @@ export async function sendGuarantorResponseEmail(params: {
 
   return sendEmail({
     to: applicantEmail,
-    subject: `Guarantor ${isAccepted ? 'Accepted' : 'Declined'}: ${guarantorName} — ${loanType} Application`,
+    subject: `Guarantor ${isAccepted ? 'Accepted' : 'Declined'}: ${guarantorName}, ${loanType} Application`,
     html,
     text,
   })

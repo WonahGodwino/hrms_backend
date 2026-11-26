@@ -29,7 +29,7 @@ export function getCorsHeaders(origin: string | null): Record<string, string> {
 	const headers: Record<string, string> = {
 		'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
 		// Prefer: respond-async asks report routes to prepare the file in the background (PERF-003).
-		'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept, X-Requested-With, X-Device-Id, Prefer',
+		'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept, X-Requested-With, X-Device-Id, Prefer, X-Onboarding-Session',
 		'Access-Control-Allow-Credentials': 'true',
 		'Access-Control-Max-Age': '86400',
 		// Without this, the browser blocks JS from reading these headers on the

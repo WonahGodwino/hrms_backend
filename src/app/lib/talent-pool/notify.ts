@@ -87,7 +87,7 @@ ${job.title}${meta ? `\n${meta}` : ''}
 
 View & apply: ${applyLink}
 
-—
+---
 You are receiving this because you previously applied to a role at ${companyName}.
 Unsubscribe from future job alerts: ${unsubscribeLink}`
 }

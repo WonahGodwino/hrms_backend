@@ -3,6 +3,7 @@
 // the additive migration is applied (it simply returns/persists no note yet),
 // and needs no Prisma client regeneration once the column exists.
 import { prisma } from '@/app/lib/db'
+import { DOCUMENTS_SECTION, taskKindOf } from '@/app/lib/recruitment/onboarding-documents'
 
 export interface ScopedOnboarding {
   id: string
@@ -57,15 +58,19 @@ export function parseDueDate(raw: unknown): Date | null {
 export function shapeTask(t: any, note: string | undefined, candidateName: string) {
   const assignee = t.assigneeId || 'Unassigned'
   const lower = assignee.toLowerCase()
+  const kind = taskKindOf(t)
   const assigneeType =
-    lower === 'candidate' || (candidateName && lower === candidateName.toLowerCase())
+    kind.byCandidate || (candidateName && lower === candidateName.toLowerCase())
       ? 'candidate'
       : 'internal'
   return {
     id: t.id,
     title: t.title,
     description: t.description || '',
-    category: t.department || 'General',
+    // Document upload tasks (category DOCUMENT:<KEY>) are listed together under "Documents".
+    category: kind.documentKey ? DOCUMENTS_SECTION : t.department || 'General',
+    kind: kind.kind,
+    documentKey: kind.documentKey,
     assignee,
     assigneeType,
     dueDate: t.dueDate ? new Date(t.dueDate).toISOString().slice(0, 10) : '',

@@ -3,7 +3,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRole } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
-import { PLATFORM_MODULES } from '@/app/lib/modules'
+import { PLATFORM_MODULES, RETIRED_MODULE_KEYS } from '@/app/lib/modules'
 import { syncModuleAccess, seedNavPlacement } from '@/app/lib/module-access'
 
 export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) }
@@ -31,6 +31,9 @@ export async function POST(req: NextRequest) {
         create: { key: mod.key, name: mod.name, description: mod.description },
       })
     }
+
+    // Retired modules stay registered but archived, so no company sees them.
+    await prisma.platformModule.updateMany({ where: { key: { in: [...RETIRED_MODULE_KEYS] } }, data: { archived: true } })
 
     // Step 2: Create missing (company × module) access rows
     const { created } = await syncModuleAccess()

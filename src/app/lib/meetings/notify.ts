@@ -140,7 +140,7 @@ export async function notifyMeetingParticipants(
 				.filter(Boolean)
 				.join('\n');
 
-			const calendarTitle = `${meeting.title} — ${companyName}`;
+			const calendarTitle = `${meeting.title} at ${companyName}`;
 			const gCal = meeting.scheduledAt
 				? googleCalendarLink({
 						title: calendarTitle,

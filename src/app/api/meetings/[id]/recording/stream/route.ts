@@ -8,10 +8,10 @@
 //      cannot attach an Authorization header, so it uses the tokenized URL.
 //   2. Authorization: Bearer <jwt> — host/privileged staff (e.g. downloads).
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { handleCorsOptions, getCorsHeaders } from '@/app/lib/cors'
 import { verifyRecordingStreamToken } from '@/app/lib/meetings/meeting-token'
+import { findMeetingForRecordingAccess, loadReadyRecording, parseRange } from '@/app/lib/meetings/recording-stream'
 import { hasModuleAccess } from '@/app/lib/module-access'
 import { headS3Object, openS3Object } from '@/app/lib/storage/s3'
 
@@ -20,38 +20,10 @@ export async function OPTIONS(req: NextRequest) { return handleCorsOptions(req) 
 const ROLES = ['HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER', 'STAFF']
 const PRIVILEGED = ['HR', 'ADMIN', 'SUPER_ADMIN']
 
-function parseRange(header: string | null, size: number): { start: number; end: number } | null {
-  if (!header || size <= 0) return null
-  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim())
-  if (!m) return null
-  let start: number
-  let end: number
-  if (m[1] === '') {
-    const n = parseInt(m[2], 10) // suffix form: bytes=-N
-    if (isNaN(n) || n <= 0) return null
-    start = Math.max(0, size - n)
-    end = size - 1
-  } else {
-    start = parseInt(m[1], 10)
-    end = m[2] === '' ? size - 1 : Math.min(parseInt(m[2], 10), size - 1)
-    if (isNaN(start) || start > end || start >= size) return null
-  }
-  return { start, end }
-}
-
 function streamResponse(body: ReadableStream<Uint8Array>, headers: Record<string, string>, status: number) {
   const res = new NextResponse(body, { status })
   for (const [k, v] of Object.entries(headers)) res.headers.set(k, v)
   return res
-}
-
-async function loadReadyRecording(id: string) {
-  const meeting = await prisma.meeting.findUnique({
-    where: { id },
-    select: { id: true, companyId: true, recordingKey: true, recordingStatus: true, recordingSizeBytes: true },
-  })
-  if (!meeting || meeting.recordingStatus !== 'READY' || !meeting.recordingKey) return null
-  return meeting
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -71,17 +43,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!token) return NextResponse.json({ error: 'Authorization required' }, { status: 401 })
     try {
       const user = await requireRoleAsync(token, ROLES)
-      const meeting = await prisma.meeting.findUnique({ where: { id }, include: { participants: true } })
+      const meeting = await findMeetingForRecordingAccess(id)
       if (!meeting) return NextResponse.json({ error: 'Meeting not found' }, { status: 404 })
       const canUseMeetings = await hasModuleAccess(meeting.companyId, 'MEETINGS')
       if (!canUseMeetings) return NextResponse.json({ error: 'This module is not available for your organisation' }, { status: 403 })
-      const isHost = meeting.participants.some((p: any) => p.staffId === user.userId && p.role === 'HOST')
+      const isHost = meeting.participants.some((p) => p.staffId === user.userId && p.role === 'HOST')
       const isPrivileged = PRIVILEGED.includes(user.role) &&
         (user.companyId === meeting.companyId || (user.companyIds || []).includes(meeting.companyId))
       if (!isHost && !isPrivileged && meeting.createdBy !== user.userId) {
         return NextResponse.json({ error: 'Only the host can access the recording' }, { status: 403 })
       }
-    } catch (e) {
+    } catch (_e) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
   }

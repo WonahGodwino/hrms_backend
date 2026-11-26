@@ -32,7 +32,9 @@
 // Never throws: returns null on any failure (timeout, rate limit, no result),
 // and callers fall back to showing the coordinates.
 
-const CONTACT = process.env.NOMINATIM_CONTACT_EMAIL || 'support@isurfglobal.com'
+import { SUPPORT_EMAIL } from '@/app/lib/contact'
+
+const CONTACT = process.env.NOMINATIM_CONTACT_EMAIL || SUPPORT_EMAIL
 const USER_AGENT = `247HR-attendance/1.0 (${CONTACT})`
 const TIMEOUT_MS = 5000
 const CACHE_MAX = 2000

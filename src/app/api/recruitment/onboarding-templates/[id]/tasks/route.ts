@@ -5,6 +5,7 @@ import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { forCompany } from '@/app/lib/data/tenant'
+import { normalizeTemplateTaskFields } from '@/app/lib/recruitment/onboarding-documents'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -24,6 +25,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const body = await request.json()
     const { title, description, category, assignee, dueOffsetDays } = body
     if (!title?.trim()) return withCors(ApiResponse.error('Title is required', 400), origin)
+    // A "document upload" task (category DOCUMENT:<KEY>) is always done by the new hire.
+    const fields = normalizeTemplateTaskFields(category, assignee)
+    if ('error' in fields) return withCors(ApiResponse.error(fields.error, 400), origin)
 
     const maxOrder = await prisma.onboardingTemplateTask.findFirst({
       where: { templateId: id },
@@ -37,8 +41,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         templateId: id, order: nextOrder,
         title: title.trim(),
         description: description?.trim() || null,
-        category: category?.trim() || null,
-        assignee: assignee?.trim() || null,
+        category: fields.category,
+        assignee: fields.assignee,
         dueOffsetDays: dueOffsetDays != null ? Number(dueOffsetDays) : 0,
       },
     })

@@ -38,3 +38,30 @@ export function verifyOnboardingResponseToken(
 		return null
 	}
 }
+
+// After the new hire proves they control the candidate's email (6-digit code), the page gets this short session.
+// The link token above only says which onboarding; this one says the person in front of it was verified.
+const SESSION_PURPOSE = 'onboarding-session'
+export const ONBOARDING_SESSION_TTL_S = 2 * 3600
+export const ONBOARDING_SESSION_HEADER = 'x-onboarding-session'
+
+export interface OnboardingSession {
+	onboardingId: string
+	candidateId: string
+	email: string
+}
+
+export function signOnboardingSession(s: OnboardingSession): string {
+	return jwt.sign({ ...s, email: s.email.toLowerCase(), purpose: SESSION_PURPOSE }, getSecret(), { expiresIn: ONBOARDING_SESSION_TTL_S })
+}
+
+export function readOnboardingSession(token: string | null | undefined): OnboardingSession | null {
+	if (!token) return null
+	try {
+		const d = jwt.verify(token, getSecret()) as Partial<OnboardingSession> & { purpose?: string }
+		if (d?.purpose !== SESSION_PURPOSE || !d.onboardingId || !d.candidateId || !d.email) return null
+		return { onboardingId: String(d.onboardingId), candidateId: String(d.candidateId), email: String(d.email) }
+	} catch (_e) {
+		return null
+	}
+}

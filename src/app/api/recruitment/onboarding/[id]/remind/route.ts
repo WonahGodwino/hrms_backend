@@ -6,6 +6,7 @@ import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { sendEmail } from '@/app/lib/email'
+import { renderSystemEmailHtml, renderSystemEmailText } from '@/app/lib/email/systemTemplate'
 import { signOnboardingResponseToken } from '@/app/lib/onboarding/response-token'
 import { forCompany } from '@/app/lib/data/tenant'
 
@@ -36,27 +37,28 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const custom = typeof body.message === 'string' && body.message.trim() ? body.message.trim() : ''
     const frontendUrl = (process.env.NEXT_PUBLIC_FRONTEND_URL || process.env.APP_URL || '').replace(/\/$/, '')
 
-    let html: string
-    let text: string
+    const subject = `Reminder: complete your onboarding at ${companyName}`
+    let bodyHtml: string
+    let bodyText: string
+    let actionUrl: string | undefined
+    let actionText: string | undefined
     if (custom) {
-      html = `<p>Hi ${firstName},</p><p>${custom}</p><p>Best regards,<br/>${companyName}</p>`
-      text = `Hi ${firstName},\n\n${custom}\n\nBest regards,\n${companyName}`
+      bodyHtml = `<p>Hi ${firstName},</p><p>${custom}</p>`
+      bodyText = `Hi ${firstName},\n\n${custom}`
     } else if (!onboarding.offerId) {
       const responseToken = signOnboardingResponseToken(onboarding.id, candidate.id)
-      const link = frontendUrl ? `${frontendUrl}/onboarding/respond?token=${encodeURIComponent(responseToken)}` : ''
-      html = `<p>Hi ${firstName},</p>
-         <p>This is a friendly reminder to complete your onboarding steps at ${companyName} — the company handbook and your final agreement — so we can send your offer.</p>
-         ${link ? `<p><a href="${link}">Continue onboarding</a></p>` : ''}
-         <p>Best regards,<br/>${companyName}</p>`
-      text = `Hi ${firstName},\n\nThis is a friendly reminder to complete your onboarding steps at ${companyName} — the company handbook and your final agreement — so we can send your offer.${link ? `\n\n${link}` : ''}\n\nBest regards,\n${companyName}`
+      actionUrl = frontendUrl ? `${frontendUrl}/onboarding/respond?token=${encodeURIComponent(responseToken)}` : undefined
+      actionText = 'Continue onboarding'
+      bodyHtml = `<p>Hi ${firstName},</p><p>This is a friendly reminder to complete your onboarding steps at ${companyName}: the company handbook and your final agreement, so we can send your offer.</p>`
+      bodyText = `Hi ${firstName},\n\nThis is a friendly reminder to complete your onboarding steps at ${companyName}: the company handbook and your final agreement, so we can send your offer.`
     } else {
-      html = `<p>Hi ${firstName},</p>
-         <p>This is a friendly reminder to complete your onboarding at ${companyName} by uploading your outstanding documents (means of identification, guarantor form, and signed offer letter).</p>
-         <p>Best regards,<br/>${companyName}</p>`
-      text = `Hi ${firstName},\n\nThis is a friendly reminder to complete your onboarding at ${companyName} by uploading your outstanding documents.\n\nBest regards,\n${companyName}`
+      bodyHtml = `<p>Hi ${firstName},</p><p>This is a friendly reminder to complete your onboarding at ${companyName} by uploading your outstanding documents: means of identification, guarantor form, and signed offer letter.</p>`
+      bodyText = `Hi ${firstName},\n\nThis is a friendly reminder to complete your onboarding at ${companyName} by uploading your outstanding documents: means of identification, guarantor form, and signed offer letter.`
     }
 
-    const result = await sendEmail({ to, subject: `Reminder: complete your onboarding at ${companyName}`, html, text })
+    const html = renderSystemEmailHtml({ companyName, subject, bodyHtml, actionUrl, actionText })
+    const text = renderSystemEmailText({ companyName, bodyText, actionUrl })
+    const result = await sendEmail({ to, subject, html, text })
 
     try {
       await prisma.emailLog.create({

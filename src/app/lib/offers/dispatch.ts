@@ -53,7 +53,7 @@ export async function dispatchOfferLetter(
   const companyName = letter.company?.companyName || 'the company'
   const subject = (typeof opts.subject === 'string' && opts.subject.trim())
       ? opts.subject.trim()
-      : `Letter of Employment — ${companyName}`
+      : `Letter of Employment: ${companyName}`
 
   // Generate the PDF attachment (must succeed before we email/log).
   let pdf: Buffer
@@ -104,7 +104,7 @@ export async function dispatchOfferLetter(
     </p>
     <div style="margin:22px 0;padding:14px 16px;border:2px solid #dc2626;border-radius:8px;background:#fef2f2">
       <p style="margin:0;color:#991b1b;font-size:15px;font-weight:800;text-transform:uppercase;letter-spacing:0.02em">
-        ⏰ Important — respond within ${days} days
+        ⏰ Important: respond within ${days} days
       </p>
       <p style="margin:8px 0 0;color:#7f1d1d;font-size:14px;font-weight:600">
         You must accept and upload your signed offer letter by
@@ -115,7 +115,7 @@ export async function dispatchOfferLetter(
     </div>`
 
   const emailHtml = `${introMessage}${responseCta}<p>Best regards,<br/>${companyName}</p>`
-  const emailText = `Dear ${candidateName || 'Candidate'},\n\nCongratulations! Please find attached your Letter of Employment from ${companyName}. Kindly review the attached letter.\n\nTo accept or decline this offer online, and (if you accept) upload your signed offer letter, visit:\n${responseLink}\n\n*** IMPORTANT — RESPOND WITHIN ${days} DAYS ***\nYou must accept and upload your signed offer letter by ${deadlineText}. If we do not receive your signed acceptance by this date, this offer will be WITHDRAWN and may be extended to another candidate.\n\nBest regards,\n${companyName}`
+  const emailText = `Dear ${candidateName || 'Candidate'},\n\nCongratulations! Please find attached your Letter of Employment from ${companyName}. Kindly review the attached letter.\n\nTo accept or decline this offer online, and (if you accept) upload your signed offer letter, visit:\n${responseLink}\n\n*** IMPORTANT: RESPOND WITHIN ${days} DAYS ***\nYou must accept and upload your signed offer letter by ${deadlineText}. If we do not receive your signed acceptance by this date, this offer will be WITHDRAWN and may be extended to another candidate.\n\nBest regards,\n${companyName}`
 
   const result = await sendEmail({
     to,

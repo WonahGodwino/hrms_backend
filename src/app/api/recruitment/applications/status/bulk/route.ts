@@ -271,7 +271,7 @@ export async function PATCH(request: NextRequest) {
             `${a.candidate.firstName} ${a.candidate.lastName}`.trim();
           return sendEmail({
             to: a.candidate.email,
-            subject: `Congratulations — You've Been Shortlisted!`,
+            subject: `Congratulations, You've Been Shortlisted!`,
             html: `
               <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px;">
                 <div style="text-align: center; padding: 24px 0 16px; border-bottom: 2px solid #137fec;">

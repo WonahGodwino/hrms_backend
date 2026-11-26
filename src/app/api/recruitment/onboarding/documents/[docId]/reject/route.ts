@@ -7,6 +7,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { applyDocumentReview } from '@/app/lib/recruitment/onboarding-documents'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -28,16 +29,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     })
     if (!doc) return withCors(ApiResponse.error('Document not found', 404), origin)
 
-    const now = new Date()
-    await prisma.candidateDocument.update({
-      where: { id: docId },
-      data: {
-        reviewStatus: 'REJECTED',
-        reviewedBy: user.userId,
-        reviewedAt: now,
-        rejectionReason: reason,
-      },
-    })
+    // Rejecting sends the matching "document upload" task back to the new hire.
+    await prisma.$transaction((tx) => applyDocumentReview(tx, doc, { status: 'REJECTED', reviewedBy: user.userId, reason }))
 
     return withCors(ApiResponse.success(
       { id: docId, reviewStatus: 'REJECTED', rejectionReason: reason },

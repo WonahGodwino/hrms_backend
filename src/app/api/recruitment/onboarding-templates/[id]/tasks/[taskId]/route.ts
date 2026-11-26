@@ -5,6 +5,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { normalizeTemplateTaskFields } from '@/app/lib/recruitment/onboarding-documents'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -22,8 +23,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const update: any = {}
     if (body.title !== undefined) update.title = String(body.title).trim()
     if (body.description !== undefined) update.description = body.description ? String(body.description).trim() : null
-    if (body.category !== undefined) update.category = body.category ? String(body.category).trim() : null
-    if (body.assignee !== undefined) update.assignee = body.assignee ? String(body.assignee).trim() : null
+    if (body.category !== undefined || body.assignee !== undefined) {
+      // A "document upload" task (category DOCUMENT:<KEY>) is always done by the new hire.
+      const fields = normalizeTemplateTaskFields(
+        body.category !== undefined ? body.category : task.category,
+        body.assignee !== undefined ? body.assignee : task.assignee,
+      )
+      if ('error' in fields) return withCors(ApiResponse.error(fields.error, 400), origin)
+      update.category = fields.category
+      update.assignee = fields.assignee
+    }
     if (body.dueOffsetDays !== undefined) update.dueOffsetDays = body.dueOffsetDays != null ? Number(body.dueOffsetDays) : 0
 
     const updated = await prisma.onboardingTemplateTask.update({ where: { id: taskId }, data: update })

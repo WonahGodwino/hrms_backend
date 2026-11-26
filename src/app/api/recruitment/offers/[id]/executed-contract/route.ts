@@ -102,10 +102,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     let staffRecordId: string | null = null
     let staffId: string | null = null
     if (promoteToStaff) {
-      const onboarding = await prisma.onboarding.findUnique({ where: { offerId: offer.id } })
-      if (!onboarding) {
-        return withCors(ApiResponse.error('No pre-offer onboarding record found for this offer — cannot complete hire.', 409), origin)
-      }
+      // Offers raised outside the interview pipeline (Add Individual Offer) have
+      // no pre-offer record, so create one now, the same way the ad-hoc execute
+      // route does, instead of failing after the offer is already marked accepted.
+      const onboarding = await prisma.onboarding.upsert({
+        where: { offerId: offer.id },
+        update: {},
+        create: { companyId: effectiveCompanyId, applicationId: offer.applicationId, offerId: offer.id, status: 'IN_PROGRESS', createdBy: actor },
+      })
       try {
         const result = await promoteCandidateToStaff({ onboardingId: onboarding.id, companyId: effectiveCompanyId, actor })
         staffRecordId = result.staffRecordId

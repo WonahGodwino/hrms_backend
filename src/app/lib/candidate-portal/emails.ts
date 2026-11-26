@@ -51,6 +51,14 @@ export const statusCodeMail = (c: string): Mail => ({
   ),
   text: `Your application status code is ${c}. It expires in 10 minutes.`,
 });
+export const onboardingCodeMail = (c: string, company: string): Mail => ({
+  subject: `Your onboarding verification code`,
+  html: layout(
+    "Onboarding verification code",
+    `<p>Use this code to open your onboarding page at ${esc(company)}:</p>${code(c)}<p>It expires in 10 minutes. If you did not request it, ignore this email.</p>`,
+  ),
+  text: `Your onboarding verification code for ${company} is ${c}. It expires in 10 minutes.`,
+});
 export const receivedMail = (
   name: string,
   job: string,

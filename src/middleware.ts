@@ -65,7 +65,6 @@ const MODULE_ROUTE_MAP: Record<string, string> = {
   '/api/core-setup/automation/rules':    'CORE_SETUP',
   '/api/core-setup/automation/runs':     'CORE_SETUP',
   // Uncomment when these modules get backend routes:
-  // '/api/onboarding':            'ONBOARDING',
   // '/api/tasks':                 'TASK_MANAGEMENT',
   // '/api/offboarding':           'OFFBOARDING',
 }
@@ -74,6 +73,7 @@ const MODULE_ROUTE_MAP: Record<string, string> = {
 const PUBLIC_PATHS = [
   '/api/recruitment/jobs/public',
   '/api/recruitment/offers/public',
+  '/api/recruitment/onboarding/public',
 ]
 
 function resolveModuleKey(pathname: string): string | null {

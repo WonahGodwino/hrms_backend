@@ -13,6 +13,7 @@ import { describeIdentifierCollision, findIdentifierHolder } from '@/app/lib/sta
 import { assertStaffCapacity, recordStaffCreated } from '@/app/lib/trial/guard';
 import { buildRegistrationUrl } from '@/app/lib/auth/registration-token';
 import { forCompany } from '@/app/lib/data/tenant';
+import { dateOfBirthFromOnboarding, hireDateForPromotion } from '@/app/lib/staff/promotion-dates';
 
 const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://247hr.co.uk';
 
@@ -119,6 +120,7 @@ export async function promoteCandidateToStaff(
 	if (!candidate) throw new PromoteCandidateError('Onboarding has no candidate to promote', 400);
 
 	const email = candidate.email;
+	const dateOfBirth = dateOfBirthFromOnboarding(onboarding.metadata);
 	const job = application?.job;
 
 	// Guard against promoting someone who is already staff in this company.
@@ -163,9 +165,10 @@ export async function promoteCandidateToStaff(
 				isActive: true,
 				isRegistered: false,
 				requirePasswordChange: true,
-				// The moment of promotion is the most accurate "hired" timestamp
-				// available for a candidate converting to staff.
-				hireDate: new Date(),
+				// The offer's start date when there is one (drives work anniversaries), else the onboarding start, else today.
+				hireDate: hireDateForPromotion({ offerStartDate: offer?.proposedStartDate, onboardingStartDate: onboarding.startDate }),
+				// Given by the new hire with their birth certificate during onboarding.
+				...(dateOfBirth ? { dateOfBirth } : {}),
 				...(designationId ? { designationId } : {}),
 			} as any,
 		});
@@ -298,7 +301,7 @@ The ${companyName} Team`;
 	// Fire-and-forget email send — never block the caller's response.
 	sendEmail({
 		to: email,
-		subject: `🎉 Welcome to ${companyName} — Set Up Your Profile`,
+		subject: `🎉 Welcome to ${companyName}: Set Up Your Profile`,
 		html: welcomeHtml,
 		text: welcomeText,
 	})

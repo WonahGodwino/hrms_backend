@@ -71,12 +71,13 @@ export const bulkSendBodySchema = z.object({ companyId: text, month: text, year:
 export const resendEmailBodySchema = z.object({ staffEmail: text, newEmail: text, month: text, year: z.coerce.number().int().optional(), companyId: text })
 export const payslipIdsBodySchema = z.object({ payslipIds: ids, companyId: text })
 export const uploadIdBodySchema = z.object({ uploadId: text })
-const templateSection = z.record(z.string(), z.unknown())
+// Template sections are keyed by section name (STAFF_DETAILS, EARNINGS, ...), each holding a list of fields.
+const templateSections = z.record(z.string(), z.array(z.unknown())).optional()
 export const createTemplateBodySchema = z.object({
-  companyId: text, templateName: text, sections: z.array(templateSection).optional(), isSystem: flag,
+  companyId: text, templateName: text, sections: templateSections, isSystem: flag,
   payslipCompanyName: nullableText, payslipPresetId: nullableText,
 })
 export const updateTemplateBodySchema = z.object({
-  templateId: text, templateName: text, sections: z.array(templateSection).optional(),
+  templateId: text, templateName: text, sections: templateSections,
   payslipCompanyName: nullableText, payslipPresetId: nullableText,
 })

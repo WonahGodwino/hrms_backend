@@ -82,9 +82,10 @@ export async function GET(request: NextRequest) {
       add({ key: 'x-offers', module: 'RECRUITMENT', moduleLabel: 'Recruitment', title: 'Offer approvals pending', detail: `${count} offer approval(s) are waiting on an approver.`, count, priority: 'medium', openPath: '/recruitment/offers', oldest: oldest?.createdAt })
     }
 
-    if (await enabled('ONBOARDING')) {
+    // Onboarding is part of Recruitment (the separate Onboarding module was retired on 2026-11-24).
+    if (await enabled('RECRUITMENT')) {
       const count = await forCompany(companyId).onboarding.count({ where: { status: { in: ['NOT_STARTED', 'IN_PROGRESS'] }, archived: 0 } })
-      add({ key: 'x-onboarding', module: 'ONBOARDING', moduleLabel: 'Onboarding', title: 'Onboardings in progress', detail: `${count} onboarding(s) are not yet complete.`, count, priority: 'low', openPath: '/onboarding-center' })
+      add({ key: 'x-onboarding', module: 'RECRUITMENT', moduleLabel: 'Recruitment', title: 'Onboardings in progress', detail: `${count} onboarding(s) are not yet complete.`, count, priority: 'low', openPath: '/recruitment/onboarding' })
     }
 
     return withCors(ApiResponse.success({ items }), origin)

@@ -8,16 +8,11 @@ import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
 import { assertStorageQuota } from '@/app/lib/trial/guard'
-import { staffOnboardingDocumentKey, uploadDocumentObject } from '@/app/lib/storage/documents'
+import { staffOnboardingDocumentKey, uploadDocumentObject, warnObjectNotStored } from '@/app/lib/storage/documents'
+import { buildStaffDocumentProgress, isStaffDocumentCategory, STAFF_DOCUMENT_CATEGORIES, STAFF_DOCUMENT_LABELS } from '@/app/lib/staff/staff-documents'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
-const REQUIRED_CATEGORIES = ['MEANS_OF_ID', 'GUARANTOR_FORM', 'SIGNED_OFFER'] as const
-const CATEGORY_LABELS: Record<string, string> = {
-  MEANS_OF_ID: 'Means of Identification',
-  GUARANTOR_FORM: 'Guarantor Form',
-  SIGNED_OFFER: 'Signed Offer Letter',
-}
 const MAX_BYTES = 10 * 1024 * 1024
 
 // Resolves the staff record for the current user (their own).
@@ -27,30 +22,6 @@ async function resolveOwnStaff(user: any) {
     staff = await prisma.staffRecord.findFirst({ where: { email: user.email, companyId: user.companyId }, select: { id: true, companyId: true } })
   }
   return staff
-}
-
-function buildProgress(docs: any[]) {
-  new Set(docs.map((d) => d.category));
-  const items = REQUIRED_CATEGORIES.map((cat) => {
-    const doc = docs.find((d) => d.category === cat)
-    return {
-      category: cat,
-      label: CATEGORY_LABELS[cat],
-      uploaded: !!doc,
-      documentId: doc?.id || null,
-      fileName: doc?.fileName || null,
-      sizeBytes: doc?.sizeBytes || null,
-      uploadedAt: doc?.updatedAt ? doc.updatedAt.toISOString() : null,
-    }
-  })
-  const uploaded = items.filter((i) => i.uploaded).length
-  return {
-    items,
-    uploaded,
-    required: REQUIRED_CATEGORIES.length,
-    percent: Math.round((uploaded / REQUIRED_CATEGORIES.length) * 100),
-    complete: uploaded === REQUIRED_CATEGORIES.length,
-  }
 }
 
 export async function GET(request: NextRequest) {
@@ -80,7 +51,7 @@ export async function GET(request: NextRequest) {
       select: { id: true, category: true, fileName: true, sizeBytes: true, mimeType: true, updatedAt: true },
     })
 
-    return withCors(ApiResponse.success({ staffId, progress: buildProgress(docs) }), origin)
+    return withCors(ApiResponse.success({ staffId, progress: buildStaffDocumentProgress(docs) }), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }
 }
 
@@ -97,8 +68,8 @@ export async function POST(request: NextRequest) {
     const category = String(formData.get('category') || '').trim().toUpperCase()
     const file = formData.get('file') as File | null
 
-    if (!REQUIRED_CATEGORIES.includes(category as any)) {
-      return withCors(ApiResponse.error(`category must be one of: ${REQUIRED_CATEGORIES.join(', ')}`, 400), origin)
+    if (!isStaffDocumentCategory(category)) {
+      return withCors(ApiResponse.error(`category must be one of: ${STAFF_DOCUMENT_CATEGORIES.join(', ')}`, 400), origin)
     }
     if (!file) return withCors(ApiResponse.error('file is required', 400), origin)
     if (file.size > MAX_BYTES) return withCors(ApiResponse.error('File exceeds the 10MB limit', 413), origin)
@@ -134,16 +105,18 @@ export async function POST(request: NextRequest) {
       buffer,
       (key) => prisma.staffOnboardingDocument.update({ where: { id: saved.id }, data: { s3Key: key } }),
       file.type || 'application/octet-stream',
-    ).catch(() => {})
+    ).catch(warnObjectNotStored('staff document', saved.id))
 
+    // Progress for this staff member only.
     const docs = await prisma.staffOnboardingDocument.findMany({
+      where: { staffId: staff.id },
       select: { id: true, category: true, fileName: true, sizeBytes: true, mimeType: true, updatedAt: true },
     })
 
     return withCors(ApiResponse.success({
       documentId: saved.id,
       category,
-      progress: buildProgress(docs),
-    }, `${CATEGORY_LABELS[category]} uploaded successfully.`, 201), origin)
+      progress: buildStaffDocumentProgress(docs),
+    }, `${STAFF_DOCUMENT_LABELS[category]} uploaded successfully.`, 201), origin)
   } catch (error) { return withCors(handleApiError(error), origin) }
 }

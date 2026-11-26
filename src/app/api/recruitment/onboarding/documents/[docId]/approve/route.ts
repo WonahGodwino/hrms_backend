@@ -8,6 +8,7 @@ import { prisma } from '@/app/lib/db'
 import { requireRoleAsync } from '@/app/lib/auth'
 import { ApiResponse, handleApiError } from '@/app/lib/utils'
 import { handleCorsOptions, withCors } from '@/app/lib/cors'
+import { applyDocumentReview } from '@/app/lib/recruitment/onboarding-documents'
 
 export async function OPTIONS(request: NextRequest) { return handleCorsOptions(request) }
 
@@ -29,16 +30,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return withCors(ApiResponse.success({ id: docId, reviewStatus: 'APPROVED' }, 'Document was already approved.'), origin)
     }
 
-    const now = new Date()
-    await prisma.candidateDocument.update({
-      where: { id: docId },
-      data: {
-        reviewStatus: 'APPROVED',
-        reviewedBy: user.userId,
-        reviewedAt: now,
-        rejectionReason: null,
-      },
-    })
+    // Approving a document from an onboarding checklist also ticks its "document upload" task.
+    const now = await prisma.$transaction((tx) => applyDocumentReview(tx, doc, { status: 'APPROVED', reviewedBy: user.userId }))
 
     return withCors(ApiResponse.success(
       { id: docId, reviewStatus: 'APPROVED', reviewedBy: user.userId, reviewedAt: now.toISOString() },
